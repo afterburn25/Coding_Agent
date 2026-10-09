@@ -21,7 +21,7 @@ from ..fsutil import atomic_write_text
 from typing import Any, Callable
 
 OPEN_STATES = {"running", "waiting"}
-TERMINAL_STATES = {"completed", "failed", "interrupted", "skipped"}
+TERMINAL_STATES = {"completed", "failed", "interrupted", "skipped", "limited"}
 
 # Live output chunks repersist/republish a whole row; throttle to keep SSE and
 # disk I/O sane while stdout streams.

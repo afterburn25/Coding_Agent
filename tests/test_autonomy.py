@@ -1815,6 +1815,31 @@ class NotificationTests(unittest.TestCase):
             self.assertEqual(failed[-1]["state"], "failed")
             sup.stop()
 
+    def test_node_activity_step_limit_marks_limited_not_failed(self):
+        # A bounded step_limit stop is attention-needed, not an error —
+        # the timeline must not render it failure-red.
+        from localcodeagent.workflow.activity import ActivityStore
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td, activities=ActivityStore(Path(td) / "data"))
+            mission = {"id": "m-1", "title": "M"}
+            node = {"id": "n-1", "title": "Work", "kind": "agent"}
+            sup._node_activity_open(mission, node)
+            sup._node_activity_close(
+                "m-1", "n-1",
+                {"ok": False, "task_status": "step_limit",
+                 "output": "Agent stopped after reaching the step limit."})
+            rows = sup.activities.for_task("mission:m-1")
+            self.assertEqual(rows[-1]["state"], "limited")
+            self.assertIn("step limit", rows[-1]["summary"])
+            # Real failures still render as failures.
+            node2 = {"id": "n-2", "title": "Work2", "kind": "agent"}
+            sup._node_activity_open(mission, node2)
+            sup._node_activity_close(
+                "m-1", "n-2", {"ok": False, "output": "boom"})
+            rows = sup.activities.for_task("mission:m-1")
+            self.assertEqual(rows[-1]["state"], "failed")
+            sup.stop()
+
 
 class SchedulerTests(unittest.TestCase):
     def test_once_fires_and_disables(self):

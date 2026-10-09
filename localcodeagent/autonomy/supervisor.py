@@ -1486,6 +1486,19 @@ class AutonomousSupervisor:
             elif result.get("ok"):
                 store.update(task_id, row_id, state="completed",
                              summary=str(result.get("output") or "")[:200])
+            elif str(result.get("task_status") or "") == "step_limit":
+                # Bounded stop, not a failure — the node ran out of steps and
+                # the supervisor will retry/replan. Render as attention-needed
+                # (amber) instead of error red.
+                store.update(
+                    task_id, row_id, state="limited",
+                    summary="Stopped at step limit — "
+                            + str(result.get("output") or "review and continue")[:180])
+            elif str(result.get("task_status") or "") in {"cancelled", "interrupted"}:
+                store.update(
+                    task_id, row_id, state="interrupted",
+                    summary=str(result.get("output") or result.get("task_status")
+                                or "interrupted")[:200])
             else:
                 store.update(task_id, row_id, state="failed",
                              summary=str(result.get("output") or result.get("error") or "failed")[:200])

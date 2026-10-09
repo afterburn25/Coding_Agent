@@ -248,7 +248,7 @@ body {
   border-color:#23704e;
 }
 
-.state.loading,.task-status.waiting_approval,.task-status.verifying,.task-status.reviewing,.task-status.interrupted {
+.state.loading,.task-status.waiting_approval,.task-status.verifying,.task-status.reviewing,.task-status.interrupted,.task-status.step_limit {
   color:#ffd987;
   border-color:#725822;
 }
@@ -2689,11 +2689,11 @@ body[data-gesture="look_away"] .nexus-presence > img {
   color:#ff9aab;
 }
 
-.tl-row.waiting {
+.tl-row.waiting,.tl-row.limited {
   border-color:#4d3d14;
 }
 
-.tl-row.waiting>.tl-head .tl-icon {
+.tl-row.waiting>.tl-head .tl-icon,.tl-row.limited>.tl-head .tl-icon {
   color:#ffc76b;
 }
 

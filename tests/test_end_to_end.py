@@ -418,6 +418,52 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertEqual(
                 state.tasks.get(user_task.id).status, "running")
 
+    def test_preempt_for_chat_finds_mission_beyond_current_row(self):
+        # current() returns the newest row regardless of status — a newer
+        # terminal row must not shield a mission task still holding the lane.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, "http://127.0.0.1:9")
+            mission_task = state.tasks.create("mission node work", "auto")
+            state.tasks.update(mission_task.id, mission_id="m-abc")
+            newer = state.tasks.create("finished user turn", "auto")
+            state.tasks.update(newer.id, status="completed", phase="done")
+            self.assertTrue(state._preempt_for_chat(newer))
+            self.assertEqual(
+                state.tasks.get(mission_task.id).status, "cancelled")
+
+    def test_preempt_for_chat_cancel_survives_running_restamp(self):
+        # Mid-drive stamps (verify/review/repair) write 'running'
+        # unconditionally — a preempt must stay cancelled through them or
+        # the drive silently runs to step_limit (observed live: the
+        # preempted mission task ended 'step_limit', never 'cancelled').
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, "http://127.0.0.1:9")
+            mission_task = state.tasks.create("mission node work", "auto")
+            state.tasks.update(mission_task.id, mission_id="m-abc")
+            state._preempt_for_chat(mission_task)
+            state.tasks.update(
+                mission_task.id, status="running", phase="researching_failure")
+            self.assertTrue(state.agent._task_cancelled(
+                SimpleNamespace(task_id=mission_task.id)))
+
+    def test_request_cancel_signals_inflight_command(self):
+        # The per-command kill flag must be SET (not popped) so a running
+        # subprocess aborts instead of running to completion.
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, "http://127.0.0.1:9")
+            task = state.tasks.create("long command", "auto")
+            flag = threading.Event()
+            state.agent.tools.context.setdefault(
+                "command_cancel", {})[task.id] = flag
+            state.agent.request_cancel(task.id, reason="test")
+            self.assertTrue(flag.is_set())
+            self.assertEqual(
+                state.tasks.get(task.id).status, "cancelled")
+            self.assertTrue(state.agent._task_cancelled(
+                SimpleNamespace(task_id=task.id)))
+
     def test_queue_item_completed_carries_response_content(self):
         # The chat placeholder swap depends on a terminal bus event carrying
         # the queue item and the response content.

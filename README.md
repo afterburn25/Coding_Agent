@@ -474,7 +474,7 @@ http://127.0.0.1:8765/image.html
 python -m unittest discover -s tests -v
 ```
 
-Current expected result: **2929 tests passing** (3 environment-dependent skips).
+Current expected result: **2933 tests passing** (3 environment-dependent skips).
 
 ## API highlights
 

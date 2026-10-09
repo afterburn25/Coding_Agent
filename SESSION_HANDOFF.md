@@ -34,7 +34,7 @@
   `test_finish_publishes_sealed_zero_for_unspoken`,
   `test_cancelled_job_publishes_skipped`.
 
-Checkpoint: **2929 tests** (2929 passed + 3 env skips).
+Checkpoint: **2933 tests** (2933 passed + 3 env skips).
 
 ## Follow-up — Mission/task approval reconciliation
 
@@ -84,7 +84,50 @@ have re-run the whole node.
 - Tests: +`test_same_owner_lock_reacquire_does_not_deadlock`,
   +`test_lease_reclaim_releases_node_lock`. Checkpoint **2929**.
 
-Checkpoint: **2929 tests** (2929 passed + 3 env skips).
+## Follow-up — Chat preemption stickiness + step_limit presentation
+
+Reported live: a queued chat request sat ~40 min behind an autonomous
+mission task even though chat is the primary lane — the mission task
+ended `step_limit`, never `cancelled`. Root causes:
+
+- `_preempt_for_chat` stamped `cancelled` in the ledger, but mid-drive
+  re-stamps (`verifying`/`reviewing`/`researching_failure` write
+  `status="running"` unconditionally) could overwrite it — the drive's
+  `_task_cancelled` checks then never saw the cancel again and ran to
+  step_limit. `orchestrator._cancelled_ids` is now a sticky in-memory
+  set written by `request_cancel()` and OR'd into `_task_cancelled`;
+  `_close_session` clears it when the drive exits. The three mid-drive
+  status stamps are guarded, and `_finalize`/verification early-exit on
+  cancel.
+- `_preempt_for_chat` previously called `agent._close_session`, which
+  popped `cancel_checks`/`command_cancel` — disabling the kill switches
+  a live subprocess polls, so an in-flight command ran to completion.
+  `request_cancel` now SETS `command_cancel` (abort the subprocess) and
+  leaves session/cancel-check state for the drive to observe.
+- Preempt targeted only `tasks.current()` — the newest row, which can
+  be a terminal row while another mission task drives. It now cancels
+  every live (`running`/`verifying`/`reviewing`) mission/autonomy-
+  attributed task plus `current`.
+- Mission node completion now drains the prompt queue immediately
+  (`executor_draining` wrapper calls `_dequeue_next`) instead of
+  waiting up to a 30s watchdog tick.
+- `/api/jobs/cancel` and `_command_stop` route through `request_cancel`
+  for the same sticky semantics; session cleanup only when no live
+  driver.
+
+step_limit UI: `_mission_node_out` now carries `task_status`;
+`_node_activity_close` maps `step_limit` → new terminal activity state
+`"limited"` (amber — attention, not red error) and `cancelled`/
+`interrupted` → `"interrupted"`. `.task-status.step_limit` and
+`.tl-row.limited` styled in the warning palette; `limited` rows
+auto-open so the "review and continue" note is visible.
+
+- Tests: `test_preempt_for_chat_finds_mission_beyond_current_row`,
+  `test_preempt_for_chat_cancel_survives_running_restamp`,
+  `test_request_cancel_signals_inflight_command`,
+  `test_node_activity_step_limit_marks_limited_not_failed`.
+
+Checkpoint: **2933 tests** (2933 passed + 3 env skips).
 
 ## Follow-up — Actions-artifact dogfood + deploy script
 
@@ -3248,7 +3291,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2929 tests` passing (3 environment skips).
+Expected at this checkpoint: `2933 tests` passing (3 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

@@ -513,6 +513,13 @@ class AgentOrchestrator:
             caps.add("tools")
         self.governor = IntelligenceGovernor(capabilities=caps)
         self._sessions: dict[str, _AgentSession] = {}
+        # task_ids with a requested cancellation. Sticky by design: a
+        # mid-drive status re-stamp (verify/review/repair writes 'running'
+        # unconditionally) can erase a 'cancelled' ledger row, so the
+        # ledger alone cannot carry a cancel — a preempted drive would
+        # silently resume and run to step_limit. Cleared by _close_session
+        # when the drive actually exits.
+        self._cancelled_ids: set[str] = set()
         # task_id -> thread currently executing a synchronous drive for that
         # task. Registered for the whole drive (including tool/verification
         # execution inside resume) so the watchdog can tell a live drive from
@@ -1042,9 +1049,8 @@ class AgentOrchestrator:
                 if str(t.get("id") or "") == str(exclude_task_id):
                     continue
                 pending = t.get("pending_approval") or {}
-                self.tasks.update(
-                    t["id"], status="cancelled", phase="done",
-                    summary="Cancelled by user.", pending_approval=None)
+                self.request_cancel(
+                    str(t["id"]), reason="Cancelled by user.")
                 if pending.get("id"):
                     self._emit_approval_resolution(
                         t["id"], pending, "cancelled")
@@ -4541,6 +4547,8 @@ class AgentOrchestrator:
             session.verification_done = True
             return None
 
+        if self._task_cancelled(session):
+            return self._cancel_result(session)
         verifying_task = self.tasks.update(session.task_id, status="verifying", phase="verifying")
         self._emit(session, "task", task=verifying_task.as_dict())
         if session.verification_index == 0:
@@ -4627,6 +4635,9 @@ class AgentOrchestrator:
             session.review_done = True
             return
 
+        if self._task_cancelled(session):
+            session.review_done = True
+            return
         reviewing_task = self.tasks.update(session.task_id, status="reviewing", phase="reviewing")
         self._emit(session, "task", task=reviewing_task.as_dict())
         review_act = self._act(
@@ -4699,6 +4710,8 @@ class AgentOrchestrator:
         self.tasks.update(session.task_id, review=session.review_content)
 
     def _finalize(self, session: _AgentSession) -> AgentResult | None:
+        if self._task_cancelled(session):
+            return self._cancel_result(session)
         pending = self._run_verification(session)
         if pending:
             return pending
@@ -4744,6 +4757,8 @@ class AgentOrchestrator:
             session.verification_index = 0
             session.review_done = False
             session.main_content = ""
+            if self._task_cancelled(session):
+                return self._cancel_result(session)
             repair_task = self.tasks.update(session.task_id, status="running", phase="researching_failure")
             self._emit(session, "task", task=repair_task.as_dict())
             act = self._act(
@@ -4864,8 +4879,39 @@ class AgentOrchestrator:
         self._close_session(session.task_id)
         return self._result(session)
 
+    def request_cancel(self, task_id: str, *, reason: str = "") -> bool:
+        """Cooperatively cancel a live or parked task.
+
+        Sets the sticky in-memory flag (survives mid-drive status
+        re-stamps), marks the ledger row cancelled, and signals the
+        per-command kill flag so an in-flight subprocess aborts instead of
+        running to completion. Does NOT pop session/cancel-check state —
+        a live driver still needs them to observe the cancel at its next
+        boundary; cleanup happens in _close_session when the drive exits.
+        """
+        task_id = str(task_id)
+        if not task_id:
+            return False
+        self._cancelled_ids.add(task_id)
+        try:
+            self.tasks.update(
+                task_id, status="cancelled", phase="done",
+                summary=reason or "Cancelled.", pending_approval=None)
+        except Exception:
+            pass
+        try:
+            flags = self.tools.context.get("command_cancel") or {}
+            flag = flags.get(task_id)
+            if flag is not None:
+                flag.set()
+        except Exception:
+            pass
+        return True
+
     def _task_cancelled(self, session: _AgentSession) -> bool:
         try:
+            if str(session.task_id) in self._cancelled_ids:
+                return True
             return str(self.tasks.get(session.task_id).status or "") == "cancelled"
         except Exception:
             return False
@@ -4940,6 +4986,7 @@ class AgentOrchestrator:
 
     def _close_session(self, task_id: str) -> None:
         self._sessions.pop(task_id, None)
+        self._cancelled_ids.discard(str(task_id))
         self._mission_by_task.pop(task_id, None)
         sinks = self.tools.context.get("stream_sinks")
         if sinks is not None:

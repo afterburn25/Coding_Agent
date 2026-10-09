@@ -2909,6 +2909,7 @@ class AppState:
                 "ok": _task_status_succeeded(status),
                 "output": result.content or str(task.get("error") or ""),
                 "task_id": str(task.get("id") or ""),
+                "task_status": status,
                 "artifacts": list(task.get("files_changed") or [])[:20],
             }
             if result.pending_approval or status == "waiting_approval":
@@ -3034,12 +3035,25 @@ class AppState:
 
         from .autonomy.metrics import MetricRegistry
         registry = MetricRegistry()
+
+        def executor_draining(mission: dict, node: dict, emit_cb) -> dict:
+            # The node's drive ends when executor returns — free the lane
+            # for queued interactive work immediately instead of waiting up
+            # to a watchdog interval (30s) for the next drain.
+            try:
+                return executor(mission, node, emit_cb)
+            finally:
+                try:
+                    self._dequeue_next()
+                except Exception:
+                    pass
+
         sup = AutonomousSupervisor(
             workspace=self.workspace,
             store_root=runtime_root / "data" / "autonomy",
             emit=emit,
             bus=self.events,
-            executor=executor,
+            executor=executor_draining,
             job_runner=self._mission_job,
             research_runner=self._mission_research,
             lane_free=lane_free,
@@ -3652,38 +3666,69 @@ class AppState:
             pass
 
     def _preempt_for_chat(self, current) -> bool:
-        """User chat outranks background missions: when a mission-attributed
-        task holds the agent lane, cooperatively cancel it so the queued chat
+        """User chat outranks background missions: when mission-attributed
+        work holds the agent lane, cooperatively cancel it so the queued chat
         runs at the next drive boundary instead of waiting for the whole node.
         The mission supervisor observes the cancelled node and retries it
         through its normal bounded-retry/replan path — the work is not lost.
-        Foreground (non-mission) tasks are never preempted."""
+
+        Targets EVERY live mission/autonomy drive, not just ``current`` —
+        the newest ledger row is not always the running one (terminal rows
+        can be newer). Cancel goes through agent.request_cancel so the
+        in-memory flag survives mid-drive status re-stamps and in-flight
+        commands abort; the task row alone can be overwritten back to
+        'running' by the verify/review/repair stamps. Foreground
+        (non-mission) tasks are never preempted."""
         try:
-            mission = str(getattr(current, "mission_id", "") or "")
-            mode = str(getattr(current, "mode", "") or "")
-            if not (mission or mode in {"autonomy", "self_repair"}):
-                return False
-            task = self.tasks.update(
-                str(current.id), status="cancelled", phase="done",
-                summary="Preempted by an interactive chat request.",
-                pending_approval=None)
+            candidates: dict[str, dict] = {}
             try:
+                for row in self.tasks.by_status(
+                        "running", "verifying", "reviewing"):
+                    rid = str(row.get("id") or "")
+                    if rid:
+                        candidates[rid] = row
+            except Exception:
+                pass
+            if current is not None:
+                row = (current.as_dict() if hasattr(current, "as_dict")
+                       else dict(current))
+                rid = str(row.get("id") or "")
+                if rid:
+                    candidates.setdefault(rid, row)
+            preempted = False
+            for row in candidates.values():
+                mission = str(row.get("mission_id") or "")
+                mode = str(row.get("mode") or "")
+                if not (mission or mode in {"autonomy", "self_repair"}):
+                    continue
+                task_id = str(row.get("id") or "")
                 agent = getattr(self, "agent", None)
-                if agent is not None:
-                    agent._close_session(str(current.id))
-            except Exception:
-                pass
-            try:
-                self.events.publish("task", {
-                    "task": task.as_dict(), "event": "cancelled",
-                    "reason": "preempted_by_chat"})
-            except Exception:
-                pass
-            try:
-                self._dequeue_next()
-            except Exception:
-                pass
-            return True
+                try:
+                    if agent is not None and hasattr(agent, "request_cancel"):
+                        agent.request_cancel(
+                            task_id,
+                            reason="Preempted by an interactive chat request.")
+                    else:
+                        self.tasks.update(
+                            task_id, status="cancelled", phase="done",
+                            summary="Preempted by an interactive chat request.",
+                            pending_approval=None)
+                except Exception:
+                    continue
+                task = self.tasks.get(task_id)
+                try:
+                    self.events.publish("task", {
+                        "task": task.as_dict(), "event": "cancelled",
+                        "reason": "preempted_by_chat"})
+                except Exception:
+                    pass
+                preempted = True
+            if preempted:
+                try:
+                    self._dequeue_next()
+                except Exception:
+                    pass
+            return preempted
         except Exception:
             return False
 
@@ -12582,11 +12627,17 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         _t = self.state.tasks.get(task_id)
                         _pending = getattr(_t, "pending_approval", None)
-                        task = self.state.tasks.update(
-                            task_id, status="cancelled", phase="done",
-                            summary="Cancelled by user.",
-                            pending_approval=None,
-                        )
+                        agent = getattr(self.state, "agent", None)
+                        if agent is not None and hasattr(agent, "request_cancel"):
+                            agent.request_cancel(
+                                task_id, reason="Cancelled by user.")
+                            task = self.state.tasks.get(task_id)
+                        else:
+                            task = self.state.tasks.update(
+                                task_id, status="cancelled", phase="done",
+                                summary="Cancelled by user.",
+                                pending_approval=None,
+                            )
                     except KeyError:
                         self._json({"error": "agent task not found"}, 404)
                         return
@@ -12624,9 +12675,11 @@ class Handler(BaseHTTPRequestHandler):
                             pass
                     # A parked task has no live drive to notice the cancel —
                     # drop its session so it can't hold memory or be resumed.
+                    # A live drive must keep its session/cancel-checks so it
+                    # can observe the sticky cancel at its next boundary.
                     try:
                         agent = getattr(self.state, "agent", None)
-                        if agent is not None:
+                        if agent is not None and not agent.has_live_driver(task_id):
                             agent._close_session(task_id)
                     except Exception:
                         pass

@@ -574,7 +574,7 @@ function upsertActivityRow(row){
   const stoppable=row.state==='running'&&row.category==='command'&&row.task_id&&row.task_id!=='system';
   stop.style.display=stoppable?'':'none';
   if(stoppable)stop.onclick=(ev)=>{ev.stopPropagation();cancelCommand(row.task_id);};
-  const open=(rec.manual!=null)?rec.manual:['running','failed','waiting'].includes(row.state);
+  const open=(rec.manual!=null)?rec.manual:['running','failed','waiting','limited'].includes(row.state);
   el.classList.toggle('open',open);
   el.querySelector('.tl-summary').textContent=row.summary||'';
   const det=row.details||{};
