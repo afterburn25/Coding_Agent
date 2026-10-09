@@ -156,6 +156,82 @@ class SocialService:
                 return name
         return None
 
+    # Verbs that mean "use the service", not "create an account" —
+    # 'browse/post/respond on moltbook', 'check my moltbook feed'.
+    _READ_VERB_RE = re.compile(
+        r"\b(?:browse|read(?:ing)?|check(?:ing)?|scroll|skim|"
+        r"look\s+(?:at|through)|catch\s+up\s+on|see|view|"
+        r"notifications?|feed|posts)\b", re.IGNORECASE)
+    _WRITE_VERB_RE = re.compile(
+        r"\b(?:post(?!s\b)|publish|write|respond(?:ing)?|repl(?:y|ies)|"
+        r"comment(?:ing)?|engage|participate|interact|answer)\b",
+        re.IGNORECASE)
+    _USE_ANY_RE = re.compile(
+        r"\b(?:browse|read|check|scroll|skim|look|catch\s+up|see|view|"
+        r"post|publish|write|respond|repl(?:y|ies)|comment|engage|"
+        r"participate|interact|answer|use|notifications?|feed)\b",
+        re.IGNORECASE)
+
+    def resolve_use(self, text: str) -> dict[str, Any] | None:
+        """'browse/post/respond on moltbook' → {service, read, write,
+        content, notify}. Only claims the turn when a registered
+        connector name appears AND a use verb is present — a bare
+        service mention stays with the model lane."""
+        t = str(text or "")
+        if not t or self._connectors is None or \
+                not self._USE_ANY_RE.search(t):
+            return None
+        name = None
+        for row in (self._connectors.status() or []):
+            cand = str(row.get("name") or "")
+            if not cand:
+                continue
+            conn = (self._connectors.connectors.get(cand) or {}
+                    ).get("conn")
+            if conn is None or "feed" not in getattr(
+                    conn, "capabilities", ()):
+                continue
+            if re.search(rf"\b{re.escape(cand)}\b", t, re.IGNORECASE):
+                name = cand
+                break
+        if name is None:
+            return None
+        content = ""
+        m = re.search(r"[\"'](.+?)[\"']", t)
+        if m:
+            content = m.group(1).strip()
+        if not content:
+            m = re.search(
+                r"\b(?:post|publish|write|respond|reply|comment|say)"
+                r"(?:\s+something)?\s+(?:about|saying|that)\s+(.+)$",
+                t, re.IGNORECASE)
+            if m:
+                content = m.group(1).strip().rstrip(".!?")
+        return {"service": name,
+                "read": bool(self._READ_VERB_RE.search(t)),
+                "write": bool(self._WRITE_VERB_RE.search(t)),
+                "content": content,
+                "notify": bool(re.search(
+                    r"\bnotifications?\b", t, re.IGNORECASE))}
+
+    def call_capability(self, service: str, capability: str, *,
+                        approved: bool = False,
+                        **params: Any) -> dict[str, Any]:
+        """One gated connector call for the chat lane — the connector's
+        per-capability permission check still applies unless ``approved``
+        carries a granted user approval."""
+        conn = self.connector(service)
+        if conn is None:
+            return {"ok": False, "error": f"no connector for '{service}'"}
+        out = conn.call(capability, _approved=approved, **params)
+        if out.get("ok"):
+            self.drive.record(capability, ref=service, score=1.0,
+                              reason="user-requested")
+            self._event("social", {"event": "capability",
+                                   "service": service,
+                                   "capability": capability})
+        return out
+
     def join(self, service: str = "moltbook", *,
              name: str = "", description: str = "",
              approved: bool = False) -> dict[str, Any]:

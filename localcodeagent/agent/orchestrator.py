@@ -4764,6 +4764,14 @@ class AgentOrchestrator:
             service = svc.resolve_service(user_text)
         except Exception:
             return None
+        use = None
+        if service is None:
+            try:
+                use = svc.resolve_use(user_text)
+            except Exception:
+                use = None
+            if use is not None:
+                service = use["service"]
         if service is None:
             return None
         frame = getattr(env, "semantic", None) if env is not None else None
@@ -4790,8 +4798,20 @@ class AgentOrchestrator:
             return AgentResult(content=text, routing=decision,
                                model_events=[builtin_event], steps=0,
                                task=done.as_dict())
-        # Command/request — this is an external account operation and
-        # runs through the permission gate like any write.
+        if use is not None:
+            return self._run_social_use(
+                svc, service, use, task_id, decision, builtin_event,
+                event_callback)
+        return self._gate_social_onboard(
+            svc, service, task_id, decision, builtin_event,
+            event_callback)
+
+    def _gate_social_onboard(self, svc, service: str, task_id: str,
+                             decision, builtin_event,
+                             event_callback=None):
+        """Command/request to create an account — this is an external
+        account operation and runs through the permission gate like any
+        write."""
         level = svc.perm_level(service, "onboard")
         if level == "deny" or level == "creator":
             text = (f"Creating a {service} identity needs "
@@ -4836,6 +4856,198 @@ class AgentOrchestrator:
         return self._run_social_join(
             svc, service, task_id, decision, builtin_event,
             event_callback)
+
+    @staticmethod
+    def _social_feed_summary(out: dict, service: str) -> str:
+        """Plain-English feed digest — titles/authors as data only;
+        untrusted post content is never paraphrased into instructions."""
+        data = out.get("data")
+        posts = None
+        if isinstance(data, list):
+            posts = data
+        elif isinstance(data, dict):
+            for key in ("posts", "items", "results", "data"):
+                if isinstance(data.get(key), list):
+                    posts = data[key]
+                    break
+        if not posts:
+            return f"{service} is reachable — the feed came back empty."
+        bits: list[str] = []
+        for p in posts[:5]:
+            if not isinstance(p, dict):
+                continue
+            title = str(p.get("title") or "").strip()
+            if not title:
+                title = str(p.get("content") or "")[:80].strip()
+            if not title:
+                continue
+            author = ""
+            agent = p.get("agent") or p.get("author")
+            if isinstance(agent, dict):
+                author = str(agent.get("name") or "")
+            elif agent:
+                author = str(agent)
+            bits.append(f"'{title[:80]}'"
+                        + (f" by {author}" if author else ""))
+        head = (f"Read the {service} feed — {len(posts)} posts up."
+                if len(posts) > 1 else
+                f"Read the {service} feed — 1 post up.")
+        if bits:
+            head += " Top right now: " + "; ".join(bits) + "."
+        flags = out.get("injection_flags")
+        if flags:
+            head += (" (One item looked like it carried embedded "
+                     "instructions — flagged as untrusted, not acted "
+                     "on.)")
+        return head
+
+    def _run_social_use(self, svc, service: str, intents: dict,
+                      task_id: str, decision, builtin_event,
+                      event_callback=None):
+        """'browse/post/respond on <service>' — grounded in live
+        connector state. Reads go through the connector's social.read
+        gate; writes need the user's actual text and the social.post
+        gate. The lane never fabricates post content."""
+        def _finish(text: str, ok: bool = True):
+            done = self.tasks.update(
+                task_id, status="completed" if ok else "failed",
+                phase="done", model_id="builtin-social",
+                model_role="utility", summary=text, final_content=text,
+                steps=0, error="" if ok else text)
+            self._safe_emit(event_callback,
+                            {"type": "task", "task": done.as_dict()})
+            return AgentResult(content=text, routing=decision,
+                               model_events=[builtin_event], steps=0,
+                               task=done.as_dict())
+
+        def _park(cap: str, args: dict, permission: str,
+                  detail: str, prompt: str):
+            pending = {
+                "kind": "social_action",
+                "name": f"{service}.{cap}",
+                "arguments": {"service": service, "action": cap,
+                              **args},
+                "permission": permission,
+                "call_id": "",
+                "detail": detail,
+            }
+            stamp_pending(task_id, pending)
+            self._audit_approval_request(pending)
+            parked = self.tasks.update(
+                task_id, status="waiting_approval",
+                phase="waiting_approval", pending_approval=pending)
+            self._safe_emit(event_callback, {
+                "type": "approval", "approval": pending,
+                "card": self._approval_card(task_id, pending),
+                "task": parked.as_dict()})
+            return AgentResult(
+                content=prompt, routing=decision,
+                model_events=[builtin_event], steps=0,
+                task=parked.as_dict(), pending_approval=pending)
+
+        st = svc.connector_state(service)
+        if st.get("state") == "disabled":
+            return _finish(
+                f"The {service} connector is disabled — enable it in "
+                "connector settings and I can do that.")
+        acct = str(st.get("account") or "")
+        if acct == "awaiting_owner_verification":
+            return _finish(svc.account_state_text())
+        if acct != "active":
+            # Using the service needs an identity — same gated
+            # onboarding path as 'join X'.
+            return self._gate_social_onboard(
+                svc, service, task_id, decision, builtin_event,
+                event_callback)
+
+        parts: list[str] = []
+        want_read = intents.get("read") or intents.get("notify") \
+            or not intents.get("write")
+        if want_read:
+            gate = svc.drive.gate("read")
+            if gate.get("level_blocked"):
+                return _finish(
+                    f"I'm on {service} but the social level is "
+                    f"'{gate.get('level')}', which doesn't allow even "
+                    "reading. Raise it in settings and I'll browse.")
+            level = svc.perm_level(service, "feed")
+            if level == "ask":
+                return _park(
+                    "feed", {"limit": 8}, "social.read",
+                    f"Read the {service} feed",
+                    f"Reading the {service} feed needs your approval "
+                    "— approve and I'll pull it now.")
+            if level in ("deny", "creator"):
+                return _finish(
+                    f"Reading {service} is blocked — 'social.read' is "
+                    f"{'creator-locked' if level == 'creator' else 'denied'} "
+                    "in permission settings.")
+            out = svc.call_capability(service, "feed", limit=8)
+            if out.get("needs_approval"):
+                return _park(
+                    "feed", {"limit": 8},
+                    str(out.get("permission") or "social.read"),
+                    f"Read the {service} feed",
+                    f"Reading the {service} feed needs your approval "
+                    "— approve and I'll pull it now.")
+            if out.get("ok"):
+                parts.append(self._social_feed_summary(out, service))
+            else:
+                return _finish(
+                    f"I tried to read the {service} feed but it "
+                    f"failed: "
+                    f"{str(out.get('error') or 'unknown')[:160]}",
+                    ok=False)
+            if intents.get("notify"):
+                out = svc.call_capability(service, "notifications")
+                if out.get("ok"):
+                    data = out.get("data")
+                    n = len(data) if isinstance(data, list) else \
+                        len((data or {}).get("notifications") or [])
+                    parts.append(
+                        f"{n} unread notification"
+                        + ("" if n == 1 else "s") + ".")
+        if intents.get("write"):
+            content = str(intents.get("content") or "")
+            if content:
+                title = content[:80]
+                level = svc.perm_level(service, "post")
+                if level == "ask":
+                    return _park(
+                        "post", {"title": title, "content": content},
+                        "social.post",
+                        f"Post to {service}: {title[:60]}",
+                        f"Ready to post '{title[:60]}' to {service} "
+                        "— approve and it's live.")
+                if level in ("deny", "creator"):
+                    parts.append(
+                        "Posting is blocked — 'social.post' is "
+                        f"{'creator-locked' if level == 'creator' else 'denied'} "
+                        "in permission settings.")
+                    return _finish(" ".join(parts))
+                out = svc.call_capability(
+                    service, "post", title=title, content=content)
+                if out.get("needs_approval"):
+                    return _park(
+                        "post", {"title": title, "content": content},
+                        str(out.get("permission") or "social.post"),
+                        f"Post to {service}: {title[:60]}",
+                        f"Ready to post '{title[:60]}' to {service} "
+                        "— approve and it's live.")
+                if out.get("ok"):
+                    parts.append(f"Posted '{title[:60]}' to {service}.")
+                else:
+                    parts.append(
+                        "The post didn't go through: "
+                        f"{str(out.get('error') or 'unknown')[:160]}")
+            else:
+                parts.append(
+                    "For posting or replying I need the text — tell "
+                    "me what to say (or which post to answer) and I'll "
+                    "run it through the normal approval. I won't "
+                    "publish filler under your name.")
+        return _finish(" ".join(parts) or
+                       f"I'm on {service} — say what you'd like done.")
 
     def _social_query_reply(self, svc, query: tuple, task_id: str,
                             event_callback=None):
@@ -5098,13 +5310,20 @@ class AgentOrchestrator:
                     reasons=["social action lane — no model call"],
                     complexity=0),
                 steps=0, task=done.as_dict())
-        # Consult approvals send the parked question; everything else
+        # Consult approvals send the parked question; 'feed'/'post'/
+        # etc. resume as the verified connector call; everything else
         # is the account-onboarding call.
         args = pending.get("arguments") or {}
-        if str(pending.get("name") or "").endswith(".consult"):
+        cap = str(args.get("action") or "")
+        if cap == "consult" or str(pending.get("name") or ""
+                                   ).endswith(".consult"):
             return self._run_social_consult(
                 svc, task_id,
                 str(args.get("consult_id") or ""),
+                event_callback=event_callback)
+        if cap and cap != "onboard":
+            return self._run_social_call(
+                svc, service, task_id, cap, args,
                 event_callback=event_callback)
         return self._run_social_join(
             svc, service, task_id,
@@ -5114,6 +5333,74 @@ class AgentOrchestrator:
             {"type": "builtin_utility", "model_id": "builtin-social",
              "role": "utility", "reason": "social action lane"},
             event_callback, approved=True)
+
+    def _run_social_call(self, svc, service: str, task_id: str,
+                         cap: str, args: dict, event_callback=None):
+        """Resume of an approved connector capability (feed/post/…) —
+        the granted approval is the authorization for the call."""
+        decision = RoutingDecision(
+            role="utility", model_id="builtin-social",
+            reasons=["social action lane — no model call"],
+            complexity=0)
+        builtin_event = {
+            "type": "builtin_utility", "model_id": "builtin-social",
+            "role": "utility", "reason": "social action lane"}
+        params = {k: v for k, v in args.items()
+                  if k not in ("service", "action")}
+        ledger_entry = None
+        if self.action_ledger is not None:
+            try:
+                ledger_entry = self.action_ledger.begin(
+                    kind="social",
+                    action=f"{cap} on {service}",
+                    capability="social",
+                    tool=f"{service}.{cap}",
+                    params=dict(params), task_id=task_id)
+            except Exception:
+                ledger_entry = None
+        try:
+            out = svc.call_capability(service, cap, approved=True,
+                                      **params)
+        except Exception as exc:
+            out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        ok = bool(out.get("ok"))
+        if self.action_ledger is not None and ledger_entry is not None:
+            try:
+                self.action_ledger.finish(
+                    ledger_entry["id"],
+                    status="verified" if ok else "failed",
+                    detail=str(out.get("error") or "")[:200])
+            except Exception:
+                pass
+        if ok and cap == "feed":
+            text = self._social_feed_summary(out, service)
+        elif ok and cap == "notifications":
+            data = out.get("data")
+            n = len(data) if isinstance(data, list) else \
+                len((data or {}).get("notifications") or [])
+            text = (f"{n} unread notification"
+                    + ("" if n == 1 else "s") + f" on {service}.")
+        elif ok and cap == "post":
+            text = (f"Posted to {service} — "
+                    f"'{str(params.get('title') or '')[:60]}' is live.")
+        elif ok and cap == "comment":
+            text = f"Replied on {service}."
+        elif ok:
+            text = f"Done — {cap} on {service} succeeded."
+        else:
+            text = (f"The {service} {cap} didn't go through: "
+                    f"{str(out.get('error') or 'unknown')[:200]}")
+        done = self.tasks.update(
+            task_id, status="completed" if ok else "failed",
+            phase="done", model_id="builtin-social",
+            model_role="utility", summary=text, final_content=text,
+            steps=0, error="" if ok else text)
+        self._safe_emit(event_callback,
+                        {"type": "task", "task": done.as_dict()})
+        return AgentResult(
+            content=text, routing=decision,
+            model_events=[builtin_event], steps=0,
+            task=done.as_dict())
 
     def _result(self, session: _AgentSession, content: str | None = None) -> AgentResult:
         task = self.tasks.get(session.task_id)

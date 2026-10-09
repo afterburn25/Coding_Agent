@@ -640,6 +640,128 @@ class SocialLaneTests(unittest.TestCase):
                 self.assertNotIn(leak, low)
 
 
+class _FeedClient(_FakeClient):
+    """_FakeClient with two canned posts for feed assertions."""
+
+    def request(self, method, path, *, params=None, body=None,
+                auth=True):
+        if path == "/posts" and method == "GET":
+            return {"ok": True, "status": 200, "data": {"posts": [
+                {"title": "Scaling agent memory",
+                 "agent": {"name": "Aurora"}},
+                {"title": "Vulkan vs CPU inference",
+                 "author": "byte_sage"}]}}
+        return super().request(method, path, params=params,
+                               body=body, auth=auth)
+
+
+def _authed_svc(root: Path, client=None):
+    """Active-account service — onboarded then owner-claimed."""
+    vault = _FakeVault()
+    conn = _conn(root, client=client or _FeedClient(status="claimed"),
+                 vault=vault)
+    conn.call("onboard")
+    conn.call("status")
+    return _svc(root, conn=conn, vault=vault,
+                perm=lambda p: "allow", level="autonomous")
+
+
+class SocialUseLaneTests(unittest.TestCase):
+    """'browse, post, respond on moltbook' — the dogfood where a
+    use-command fell past the join regex and the model denied a live
+    connector."""
+
+    def test_resolve_use_matches_service_plus_verb(self):
+        with tempfile.TemporaryDirectory() as td:
+            svc = _svc(Path(td))
+            use = svc.resolve_use(
+                "browse, post, and respond to posts on moltbook")
+            self.assertEqual(use["service"], "moltbook")
+            self.assertTrue(use["read"])
+            self.assertTrue(use["write"])
+            self.assertFalse(use["content"])
+
+    def test_resolve_use_rejects_bare_mention(self):
+        with tempfile.TemporaryDirectory() as td:
+            svc = _svc(Path(td))
+            self.assertIsNone(svc.resolve_use("moltbook is interesting"))
+            self.assertIsNone(svc.resolve_use("check my github repo"))
+
+    def test_use_unjoined_routes_to_onboard_gate(self):
+        """No account yet — using the service IS a join request, so it
+        parks on social.account instead of hallucinating a denial."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            svc = _svc(root / "s", perm=lambda p: "ask")
+            agent = _agent(root / "a", svc)
+            result = agent.run(
+                "browse, post, and respond to posts on moltbook")
+            self.assertEqual(result.task["status"], "waiting_approval")
+            pending = result.task["pending_approval"]
+            self.assertEqual(pending["kind"], "social_action")
+            self.assertEqual(pending["permission"], "social.account")
+
+    def test_use_awaiting_claim_returns_link(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vault = _FakeVault()
+            conn = _conn(root / "s", client=_FakeClient(), vault=vault)
+            conn.call("onboard")   # registered, awaiting owner claim
+            svc = _svc(root / "s", conn=conn, vault=vault,
+                       perm=lambda p: "allow")
+            agent = _agent(root / "a", svc)
+            result = agent.run("browse and post on moltbook")
+            self.assertIn("moltbook.com/claim", result.content or "")
+
+    def test_use_active_reads_feed_and_asks_for_text(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            svc = _authed_svc(root / "s")
+            agent = _agent(root / "a", svc)
+            result = agent.run(
+                "browse, post, and respond to posts on moltbook")
+            text = result.content or ""
+            self.assertIn("Scaling agent memory", text)
+            self.assertIn("tell me what to say", text.lower())
+            self.assertNotIn("can't", text.lower())
+
+    def test_use_quoted_post_executes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            client = _FeedClient(status="claimed")
+            svc = _authed_svc(root / "s", client=client)
+            agent = _agent(root / "a", svc)
+            result = agent.run(
+                'post "hello from nexus" on moltbook')
+            self.assertIn("Posted", result.content or "")
+            posts = [c for c in client.calls
+                     if c["method"] == "POST" and c["path"] == "/posts"]
+            self.assertTrue(posts)
+            self.assertEqual(posts[0]["body"]["title"],
+                             "hello from nexus")
+
+    def test_use_read_parks_and_resumes_on_ask(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vault = _FakeVault()
+            conn = _conn(root / "s",
+                         client=_FeedClient(status="claimed"),
+                         vault=vault)
+            conn.call("onboard")
+            conn.call("status")
+            svc = _svc(root / "s", conn=conn, vault=vault,
+                       perm=lambda p: "ask", level="autonomous")
+            agent = _agent(root / "a", svc)
+            result = agent.run("browse moltbook")
+            self.assertEqual(result.task["status"], "waiting_approval")
+            pending = result.task["pending_approval"]
+            self.assertEqual(pending["name"], "moltbook.feed")
+            self.assertEqual(pending["permission"], "social.read")
+            resumed = agent.resume(result.task["id"], approved=True)
+            self.assertIn("Scaling agent memory",
+                          resumed.content or "")
+
+
 # ------------------------------------------------------------------
 # Peer Intelligence — peer graph, domain expertise, consults,
 # debates, journal, experiments, provenance queries (0.39.0)
