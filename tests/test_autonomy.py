@@ -1434,6 +1434,42 @@ class MissionStoreTests(unittest.TestCase):
             self.assertNotEqual(node2["state"], "running")
             sup2.stop()
 
+    def test_same_owner_lock_reacquire_does_not_deadlock(self):
+        locks = ResourceLocks()
+        self.assertTrue(locks.acquire("workspace_write", "n1"))
+        # Same owner re-dispatching after a crash/reclaim must not wait
+        # on its own stale hold forever.
+        self.assertTrue(locks.acquire("workspace_write", "n1"))
+        self.assertFalse(locks.acquire("workspace_write", "n2"))
+        locks.release("workspace_write", "n1")
+        self.assertTrue(locks.acquire("workspace_write", "n2"))
+
+    def test_lease_reclaim_releases_node_lock(self):
+        # Live dogfood finding: a node whose worker died mid-run was
+        # requeued by reclaim_expired but kept holding workspace_write —
+        # non-reentrant acquire() then wedged it 'ready' forever.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="x", title="x")
+            nid = "t-v1"
+            def _fn(row):
+                g = TaskGraph(row)
+                n = new_task("Verify", "verify", kind="verify")
+                n["id"] = nid
+                n["state"] = "running"
+                n["lease"] = {"owner": "dead", "expires": time.time() - 1}
+                g.add(n)
+                row["graph"] = g.graph
+                row["status"] = "executing"
+            sup.missions.mutate(m["id"], _fn)
+            sup.locks.acquire("workspace_write", nid)  # dead worker's hold
+            sup.tick()
+            # After reclaim the stale hold is gone — or the same owner can
+            # retake it. Either way the node can never wedge on itself.
+            self.assertTrue(sup.locks.acquire("workspace_write", nid))
+            sup.locks.release("workspace_write", nid)
+            sup.stop()
+
     def test_illegal_transition_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             sup = make_sup(td)

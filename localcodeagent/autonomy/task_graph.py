@@ -250,7 +250,11 @@ class ResourceLocks:
         with self._guard:
             lock = self._locks.setdefault(name, threading.Lock())
         if not lock.acquire(blocking=False):
-            return False
+            # Same-owner re-dispatch (lease reclaim or a crash mid-dispatch
+            # left the node's own hold) — the hold is already theirs; a
+            # node must never deadlock waiting on itself.
+            with self._guard:
+                return self._holders.get(name) == owner
         with self._guard:
             self._holders[name] = owner
         return True

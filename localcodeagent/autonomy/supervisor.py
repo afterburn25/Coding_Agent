@@ -703,6 +703,13 @@ class AutonomousSupervisor:
                     self.workers.release(
                         wid, outcome="interrupted",
                         result={"error": "lease expired — worker lost"})
+                # The dead worker never ran its release-finally — the node
+                # still owns its resource lock, and acquire() is not
+                # owner-reentrant, so without this the requeued node can
+                # never dispatch again (observed live: a verify node
+                # wedged 'ready' forever on its own workspace_write).
+                self.locks.release(
+                    str(node.get("lock") or ""), str(node.get("id") or ""))
 
         # 3b. worker manager housekeeping — reap dead heartbeats, then drain
         # the durable queue into whatever capacity freed up this tick.
