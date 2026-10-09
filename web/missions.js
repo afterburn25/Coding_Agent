@@ -138,6 +138,8 @@ function renderDetail(){
     `<div class="detail-section"><h3>Objective</h3><div class="objective">${esc(m.objective)}</div></div>`+
     `<div class="detail-section"><h3>Requirements</h3><div id="missionReqs"><div class="hist-row">loading…</div></div></div>`+
     `<div class="detail-section"><h3>Success criteria</h3>${critHtml}</div>`+
+    `<div class="detail-section"><h3>Workstreams</h3><div id="missionWs"><div class="hist-row">loading…</div></div></div>`+
+    `<div class="detail-section"><h3>Mission context</h3><div id="missionCapsule"><div class="hist-row">loading…</div></div></div>`+
     (stages?`<div class="detail-section"><h3>Pipeline</h3><div class="stage-strip">${stages}</div></div>`:'')+
     `<div class="detail-section"><h3>Task graph (${nodes.length})</h3>${dag}</div>`+
     `<div class="detail-section"><h3>Activity</h3><div id="missionActivity"><div class="hist-row">loading…</div></div></div>`+
@@ -148,6 +150,67 @@ function renderDetail(){
   loadMissionActivity(m.id);
   loadMissionRequirements(m.id);
   loadMissionEvidence(m.id);
+  loadMissionWorkstreams(m.id);
+}
+
+const WS_MARKS={integrated:'✓',active:'●',ready:'◐',awaiting_review:'◐',
+  integration_ready:'◐',planned:'○',paused:'‖',blocked:'⊘',
+  failed:'✕',abandoned:'–'};
+async function loadMissionWorkstreams(mid){
+  // §34-35 — the durable workstream view: per-lane progress, controls
+  // (pause/resume/drop/prioritize), the compact context capsule, and
+  // mission metrics. Replaces digging through the raw DAG.
+  try{
+    const r=await api('/api/missions/'+encodeURIComponent(mid)+'/workstreams');
+    const wsel=$('#missionWs');
+    if(wsel&&selected===mid){
+      const rows=(r.workstreams||[]);
+      setHtml(wsel,rows.map(w=>{
+        const live=['ready','active','planned'].includes(w.status);
+        const paus=['paused','blocked'].includes(w.status);
+        const drop=!['integrated','abandoned','failed'].includes(w.status);
+        return `<div class="mission-card"><div class="title">`+
+          `${WS_MARKS[w.status]||'○'} ${esc(w.title)} `+
+          `<span class="mstatus ${w.status==='failed'?'failed':w.status==='integrated'?'done':live?'executing':''}">${esc(w.status)}</span> `+
+          `<span class="pill">${esc(w.priority||'p2')}</span></div>`+
+          `<div class="meta">${w.tasks_done||0}/${w.tasks||0} tasks · `+
+          `${Math.round((w.progress||0)*100)}%`+
+          (w.blocker?` — ${esc(w.blocker)}`:'')+
+          (w.role?` · ${esc(w.role)}`:'')+`</div>`+
+          ((w.acceptance||[]).length?`<div class="meta" style="color:#4d5f7c">${w.acceptance.map(a=>'· '+esc(a)).join('<br>')}</div>`:'')+
+          `<div class="side-actions">`+
+          (live?`<button class="mini-button" data-wsact="${w.id}:pause">Pause</button>`:'')+
+          (paus?`<button class="mini-button" data-wsact="${w.id}:resume">Resume</button>`:'')+
+          (live?`<button class="mini-button" data-wsact="${w.id}:reprioritize">P0</button>`:'')+
+          (drop?`<button class="mini-button danger" data-wsact="${w.id}:drop">Drop</button>`:'')+
+          `</div></div>`;
+      }).join('')||'<div class="hist-row">no workstreams — single-lane mission</div>');
+    }
+    const cel=$('#missionCapsule');
+    if(cel&&selected===mid){
+      const cap=r.capsule||{};
+      const rows=[];
+      if((r.decisions||[]).length)
+        rows.push(`<div class="hist-row"><b>decisions</b> `+
+          r.decisions.slice(0,6).map(d=>esc(d.decision)).join(' · ')+`</div>`);
+      if((cap.known_failures||[]).length)
+        rows.push(`<div class="hist-row"><b>known failures</b> `+
+          cap.known_failures.slice(0,4).map(f=>esc(f)).join(' · ')+`</div>`);
+      if((cap.blockers||[]).length)
+        rows.push(`<div class="hist-row"><b>blockers</b> `+
+          cap.blockers.slice(0,4).map(b=>esc(b)).join(' · ')+`</div>`);
+      const met=r.metrics||{};
+      const mbits=['compactions','repair_cycles','escalations',
+        'ownership_conflicts','checkpoints'].filter(k=>met[k])
+        .map(k=>`${k.replace('_',' ')} ${met[k]}`);
+      if(mbits.length)
+        rows.push(`<div class="hist-row"><b>metrics</b> ${esc(mbits.join(' · '))}</div>`);
+      setHtml(cel,rows.join('')||'<div class="hist-row">no capsule yet</div>');
+    }
+  }catch(e){
+    setHtml($('#missionWs'),'<div class="hist-row">workstreams unavailable</div>');
+    setHtml($('#missionCapsule'),'');
+  }
 }
 
 const REQ_MARKS={verified:'✓',implemented:'◐',in_progress:'~',planned:'~',
@@ -351,6 +414,13 @@ document.addEventListener('click',async e=>{
   const act=e.target.closest('[data-act]');
   if(act&&selected){
     try{await api(`/api/missions/${selected}/${act.dataset.act}`,'POST',{});refresh();}catch(err){alert(err.message);}
+    return;
+  }
+  const wsa=e.target.closest('[data-wsact]');
+  if(wsa&&selected){
+    const[wsid,op]=wsa.dataset.wsact.split(':');
+    const body=op==='reprioritize'?{priority:'p0'}:{};
+    try{await api(`/api/missions/${selected}/workstreams/${wsid}/${op}`,'POST',body);refresh();}catch(err){alert(err.message);}
     return;
   }
   const appr=e.target.closest('[data-appr]');

@@ -2935,6 +2935,26 @@ class AppState:
                         return _adopt(parked_row)
             instruction = str(
                 node.get("instruction") or node.get("title") or "")
+            # §6 task-specific context package — the worker gets the
+            # mission contract, its workstream, in-force decisions and
+            # repo guidance (NEXUS.md), not the whole mission record.
+            try:
+                if getattr(self, "supervisor", None) is not None:
+                    from .autonomy.missions import discover_nexus_md
+                    if not hasattr(self, "_nexus_md_cache"):
+                        self._nexus_md_cache = {}
+                    wroot = str(mission.get("workspace")
+                                or self.workspace)
+                    if wroot not in self._nexus_md_cache:
+                        self._nexus_md_cache[wroot] = \
+                            discover_nexus_md(wroot)
+                    pkg = self.supervisor.missions.context_package(
+                        mission, node,
+                        nexus_md=self._nexus_md_cache.get(wroot, ""))
+                    if pkg:
+                        instruction = pkg + "\n\n" + instruction
+            except Exception:
+                pass
             if node.get("stale_requirement"):
                 # Requirement-change propagation — the conversation fact
                 # this node was planned against has been superseded. Tell
@@ -4391,6 +4411,50 @@ class AppState:
                 return {"content": "There is no active mission to stop."}
             sup.cancel_mission(live[0]["id"])
             return {"content": f"Stopped mission '{live[0]['title']}'. Its state is preserved on the Missions page."}
+
+        # §19/§38 — live steering + status on running missions.
+        # Workstream-scoped verbs only claim when a live mission has a
+        # matching workstream; anything else falls through to the model.
+        live = [m for m in sup.missions.list()
+                if m.get("status") in
+                {"active", "planning", "executing", "verifying",
+                 "evaluating", "replanning", "waiting_dependency",
+                 "waiting_approval"}]
+        if live and any(v in low for v in (
+                "pause", "stop working on", "resume", "unpause",
+                "forget the", "drop the", "prioritize", "prioritise",
+                "focus on", "make the", "skip the")):
+            for m in live:
+                out = sup.steer(m["id"], low)
+                if out.get("ok"):
+                    word = {"pause": "Paused", "resume": "Resumed",
+                            "drop": "Dropped",
+                            "reprioritize": "Reprioritized"}.get(
+                                out["op"], out["op"].title())
+                    return {"content": (
+                        f"{word} workstream '{out['workstream']}' on "
+                        f"'{m.get('title')}'. The rest of the mission "
+                        "keeps running.")}
+        if live and any(p in low for p in (
+                "what are you working on", "what's the mission",
+                "mission status", "how is the mission",
+                "what is the mission doing", "what are you doing")):
+            m = live[0]
+            ans = sup.answer_about_mission(m["id"], message)
+            if ans:
+                return {"content": ans}
+            roll = sup.missions.workstream_rollup(m)
+            if roll:
+                lines = [f"Mission '{m.get('title')}' "
+                         f"({m.get('status')}):"]
+                for w in roll:
+                    mark = {"integrated": "✓", "active": "●",
+                            "awaiting_review": "◐"}.get(
+                                str(w.get("status")), "○")
+                    lines.append(
+                        f"{mark} {w.get('title')} — "
+                        f"{int(float(w.get('progress') or 0) * 100)}%")
+                return {"content": "\n".join(lines)}
 
         wants_standing = any(p in low for p in self._MISSION_STANDING_PHRASES)
         wants_mission = any(p in low for p in self._MISSION_CREATE_PHRASES)
@@ -8276,6 +8340,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(
                     self.state.action_ledger.mission_rollup(m.get("id") or mid))
                 return True
+            if mid.endswith("/workstreams"):
+                # §34-35 — the engineering-mission view: durable
+                # workstream rollup + compact context capsule + metrics.
+                mid = mid[:-len("/workstreams")]
+                m = sup.missions.get(mid)
+                if m is None:
+                    self._json({"error": "mission not found"}, 404)
+                    return True
+                self._json({
+                    "workstreams": sup.missions.workstream_rollup(m),
+                    "acceptance_criteria":
+                        m.get("acceptance_criteria") or [],
+                    "decisions": sup.missions.active_decisions(m),
+                    "capsule": m.get("context_capsule") or {},
+                    "checkpoints": m.get("git_checkpoints") or [],
+                    "metrics": m.get("metrics") or {},
+                    "questions": m.get("unresolved_questions") or [],
+                })
+                return True
             m = sup.missions.get(mid)
             if m is None:
                 self._json({"error": "mission not found"}, 404)
@@ -8485,6 +8568,35 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if path.startswith("/api/missions/"):
             rest = path[len("/api/missions/"):].strip("/")
+            # §19/§37 — live steering: free-text ("pause the frontend")
+            # or a direct workstream op.
+            if rest.endswith("/steer"):
+                mid = rest[:-len("/steer")]
+                out = sup.steer(mid, str(body.get("command")
+                                         or body.get("text") or ""))
+                self._json(out, 200 if out.get("ok") else 404)
+                return True
+            if "/workstreams/" in rest:
+                mid, tail = rest.split("/workstreams/", 1)
+                for wop in ("pause", "resume", "drop", "reprioritize"):
+                    if not tail.endswith("/" + wop):
+                        continue
+                    ws_id = tail[:-len("/" + wop)]
+                    if wop == "pause":
+                        out = sup.missions.pause_workstream(mid, ws_id)
+                    elif wop == "resume":
+                        out = sup.missions.resume_workstream(mid, ws_id)
+                    elif wop == "drop":
+                        out = sup.missions.drop_workstream(mid, ws_id)
+                    else:
+                        out = sup.missions.reprioritize_workstream(
+                            mid, ws_id, str(body.get("priority") or "p1"))
+                    if out is None:
+                        self._json({"error": "not found"}, 404)
+                        return True
+                    sup.wake()
+                    self._json({"ok": True})
+                    return True
             for verb in ("pause", "resume", "cancel", "replan", "ask", "update"):
                 suffix = "/" + verb
                 if not rest.endswith(suffix):

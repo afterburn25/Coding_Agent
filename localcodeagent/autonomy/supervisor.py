@@ -12,6 +12,7 @@ requests always outrank background work.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import threading
 import time
@@ -27,7 +28,7 @@ from .missions import MissionStore, TERMINAL_MISSION_STATUSES, DEFAULT_BUDGETS
 from .notifications import NotificationCenter
 from .planner import MissionPlanner
 from .policy import AutonomyPolicy
-from .recovery import RecoveryManager, FailureClass
+from .recovery import RecoveryManager, FailureClass, failure_signature
 from .scheduler import Scheduler
 from .state import AutonomyStore
 from .task_graph import ResourceLocks, TaskGraph, new_task
@@ -986,7 +987,39 @@ class AutonomousSupervisor:
         m = self.missions.get(mission_id)
         if m is None:
             return
+        # Ownership leases expire on worker crash (§12) — sweep before
+        # dispatch so a dead worker never fences off its files forever.
+        try:
+            released = self.missions.sweep_ownership(mission_id)
+            if released:
+                self.missions.append_history(
+                    mission_id, "ownership_sweep",
+                    f"expired leases released: {', '.join(released[:6])}")
+        except Exception:
+            pass
+        # §4/§5 — the capsule is the compact context workers read.
+        # Refresh when missing or stale; compact extracts durable facts
+        # when the raw record grows (history itself is never deleted).
+        try:
+            self.missions.maybe_compact(mission_id)
+            cap = (self.missions.get(mission_id) or {}).get(
+                "context_capsule") or {}
+            if time.time() - float(cap.get("built_at") or 0) > 300:
+                self.missions.refresh_capsule(mission_id)
+        except Exception:
+            pass
+        m = self.missions.get(mission_id)
+        if m is None:
+            return
         graph = TaskGraph(m)
+
+        # §25 baseline rollback ref (once) + §33 periodic drift probe.
+        try:
+            if graph.nodes:
+                self._git_checkpoint(m, "baseline")
+            self._goal_drift_check(m)
+        except Exception:
+            pass
 
         # Honor retry cooldowns.
         now = time.time()
@@ -1132,6 +1165,45 @@ class AutonomousSupervisor:
                     self.locks.release(
                         node.get("lock") or "agent_lane", node["id"])
                 continue
+            # §11 — file/symbol ownership: a node's declared scope is a
+            # reservation. Overlap with another live owner parks this
+            # node instead of letting two workers overwrite the same
+            # code. The reservation expires with the lease if the
+            # worker dies mid-run.
+            scope_pats = [str(s) for s in (meta.get("scope") or [])
+                          if str(s).strip()]
+            ws_id = str(meta.get("workstream") or "")
+            if not scope_pats and ws_id:
+                ws_row = next(
+                    (w for w in (m.get("workstreams") or [])
+                     if w.get("id") == ws_id), None)
+                scope_pats = [str(s) for s in
+                              ((ws_row or {}).get("scope") or [])
+                              if str(s).strip()]
+            if scope_pats:
+                res = self.missions.reserve_paths(
+                    mission_id, node["id"], scope_pats)
+                if not res.get("ok"):
+                    # Count the conflict once — a node parked for N ticks
+                    # is one conflict, not N.
+                    if node.get("queue_reason") != "ownership_conflict":
+                        self.missions.bump_metric(
+                            mission_id, "ownership_conflicts")
+                        self.missions.append_history(
+                            mission_id, "ownership_conflict",
+                            f"task '{node.get('title')}' parked — "
+                            + str(((res.get("conflicts") or [{}])[0]
+                                   .get("patterns") or [""])[0])[:60])
+                    node["queue_reason"] = "ownership_conflict"
+                    node["queue_detail"] = "another worker owns " + \
+                        str(((res.get("conflicts") or [{}])[0]
+                             .get("patterns") or [""])[0])[:80]
+                    if node.get("lock") or kind in {
+                            "agent", "integrate", "review"}:
+                        self.locks.release(
+                            node.get("lock") or "agent_lane", node["id"])
+                    self.workers.release(worker.id, outcome="cancelled")
+                    continue
             node.pop("queue_reason", None)
             node.pop("queue_detail", None)
             meta["worker_id"] = worker.id
@@ -1369,6 +1441,9 @@ class AutonomousSupervisor:
                 except Exception:
                     pass
         self.missions.mutate(mission_id, _fn)
+        # §25 — final rollback ref before the terminal transition.
+        self._git_checkpoint(m, "final")
+        self.missions.refresh_capsule(mission_id)
         self.missions.transition(
             mission_id,
             "completed_with_warnings" if warnings else "completed",
@@ -1664,6 +1739,34 @@ class AutonomousSupervisor:
                     # Bounded backoff — no instant hot retry.
                     node["retry_after"] = time.time() + min(
                         120.0, 10.0 * node["retries"])
+                    # §22 thrash detection — the same logical failure
+                    # repeating means the strategy isn't working. First
+                    # repeat escalates the retry to the deep model;
+                    # beyond that the workstream marks thrash so the
+                    # mission surface shows a strategy problem, not a
+                    # silent loop.
+                    sig = failure_signature(
+                        str(node.get("title") or ""),
+                        str(result.get("error") or
+                            result.get("output") or ""))
+                    meta = node.setdefault("metadata", {})
+                    if meta.get("fail_sig") == sig:
+                        meta["fail_sig_count"] = int(
+                            meta.get("fail_sig_count") or 1) + 1
+                    else:
+                        meta["fail_sig"] = sig
+                        meta["fail_sig_count"] = 1
+                    if int(meta.get("fail_sig_count") or 0) >= 2 \
+                            and node.get("model_role") != "deep":
+                        node["model_role"] = "deep"
+                        met = row.setdefault("metrics", {})
+                        met["escalations"] = int(
+                            met.get("escalations") or 0) + 1
+                        row.setdefault("history", []).append({
+                            "ts": time.time(), "event": "thrash",
+                            "detail": "same failure signature repeated "
+                                      "— retry escalated to deep model"})
+                        row["history"] = row["history"][-200:]
                 if node["state"] == "failed":
                     self.recovery.record_failure(
                         row, node.get("title", ""),
@@ -1685,6 +1788,13 @@ class AutonomousSupervisor:
             graph.refresh()
 
         self.missions.mutate(mission_id, _fn)
+        # §11 — the node's path reservation ends with its run (lease
+        # expiry covers the crash path; this is the clean release).
+        try:
+            self.missions.release_paths(mission_id, owner=node_id)
+        except Exception:
+            pass
+        self._sync_workstreams(mission_id, node_id, ok)
         self._receipt(mission_id, node_id, "task_finished", result)
 
         if pending_approval:
@@ -1701,6 +1811,190 @@ class AutonomousSupervisor:
             # Node exhausted its retries — run the recovery playbook.
             self._recover_node(mission_id, node_id)
         self.wake()
+
+    def _sync_workstreams(self, mission_id: str, node_id: str,
+                          ok: bool) -> None:
+        """Workstream lifecycle (§14-shaped) driven by node outcomes:
+        active on first dispatch, awaiting_review when its nodes drain,
+        blocked on terminal failure, integrated once the review node
+        passes. A git checkpoint lands at each meaningful boundary."""
+        m = self.missions.get(mission_id)
+        if m is None:
+            return
+        node = TaskGraph(m).get(node_id)
+        if node is None:
+            return
+        ws_id = str((node.get("metadata") or {}).get("workstream") or "")
+        kind = str(node.get("kind") or "")
+        if ws_id:
+            ws = next((w for w in (m.get("workstreams") or [])
+                       if w.get("id") == ws_id), None)
+            if ws is not None:
+                if not ok and str(node.get("state") or "") == "failed":
+                    self.missions.workstream_status(
+                        mission_id, ws_id, "blocked",
+                        detail=f"node failed: "
+                               f"{str(node.get('title') or '')[:80]}")
+                elif ok:
+                    linked = [n for n in
+                              (m.get("graph") or {}).get("nodes") or []
+                              if (n.get("metadata") or {}).get(
+                                  "workstream") == ws_id]
+                    if linked and all(
+                            n.get("state") in
+                            {"completed", "skipped", "cancelled"}
+                            for n in linked) and str(
+                            ws.get("status")) not in \
+                            {"integrated", "integration_ready"}:
+                        self.missions.workstream_status(
+                            mission_id, ws_id, "awaiting_review")
+                        self._git_checkpoint(
+                            m, f"ws-{str(ws.get('title') or ws_id)[:40]}")
+        if ok and kind == "integrate":
+            for w in (m.get("workstreams") or []):
+                if str(w.get("status")) == "awaiting_review":
+                    self.missions.workstream_status(
+                        mission_id, w["id"], "integration_ready")
+            self._git_checkpoint(m, "integration-candidate")
+        elif ok and kind == "review":
+            for w in (m.get("workstreams") or []):
+                if str(w.get("status")) in {"awaiting_review",
+                                            "integration_ready"}:
+                    self.missions.workstream_status(
+                        mission_id, w["id"], "integrated",
+                        detail="independent review passed")
+
+    def _git_checkpoint(self, mission: dict, label: str) -> None:
+        """§25 — a rollback ref at each safe stage. Non-destructive:
+        records HEAD, tags it nexus/<mid>/<label>, and when the tree is
+        dirty also stores a `git stash create` object (which never
+        mutates the worktree). No pushes — remote delivery stays behind
+        github.write permission."""
+        root = Path(str(mission.get("workspace") or self.workspace))
+        if not (root / ".git").exists():
+            return
+        labels = {c.get("label")
+                  for c in (mission.get("git_checkpoints") or [])}
+        if label in labels:
+            return
+
+        def _git(*argv: str) -> str:
+            try:
+                p = subprocess.run(
+                    ["git", *argv], cwd=root, text=True, timeout=60,
+                    capture_output=True,
+                    creationflags=getattr(subprocess,
+                                          "CREATE_NO_WINDOW", 0))
+                return p.stdout.strip() if p.returncode == 0 else ""
+            except Exception:
+                return ""
+
+        sha = _git("rev-parse", "HEAD")
+        if not sha:
+            return
+        stash = _git("stash", "create")   # commits dirty state w/o touching it
+        tag = f"nexus/{mission.get('id')}/{re.sub(r'[^A-Za-z0-9_.-]', '-', label)[:48]}"
+        _git("tag", "-f", tag, stash or sha)
+        self.missions.record_checkpoint(
+            str(mission.get("id") or ""), label,
+            commit=sha, ref=tag,
+            detail="includes uncommitted state" if stash else "")
+
+    def steer(self, mission_id: str, command: str) -> dict:
+        """§19 — live user steering: 'pause the frontend', 'make
+        installer the priority', 'forget the image work', 'stop working
+        on voice'. Resolves a workstream by fuzzy title match and
+        applies the op. The mission record is the control surface, so
+        no restart is needed."""
+        m = self.missions.get(mission_id)
+        if m is None:
+            return {"ok": False, "error": "no such mission"}
+        t = str(command or "").strip().lower()
+        ws_row = None
+        op = ""
+        # Priority phrasing: "make X the priority", "prioritize X".
+        pm = re.search(
+            r"(?:prioriti[sz]e|make|focus(?:\s+on)?| bump)\s+"
+            r"(?:the\s+|on\s+)?(.+?)(?:\s+(?:the\s+)?priority"
+            r"|(?:\s+to\s+)?(p[0-3]))?\s*$", t)
+        if pm and re.search(r"priorit|focus|first|priority", t):
+            op = "reprioritize"
+            ws_row = self.missions.find_workstream(m, pm.group(1))
+        if ws_row is None:
+            for pat, o in (
+                    (r"(?:pause|hold|stop(?:\s+working\s+on)?|freeze)"
+                     r"\s+(?:the\s+)?(.+?)\s*$", "pause"),
+                    (r"(?:resume|unpause|continue|start)\s+"
+                     r"(?:the\s+|working\s+on\s+)?(.+?)\s*$", "resume"),
+                    (r"(?:forget|drop|abandon|cancel|skip|"
+                     r"don'?t\s+(?:do|change|touch))\s+"
+                     r"(?:the\s+)?(.+?)\s*$", "drop")):
+                mm = re.search(pat, t)
+                if mm:
+                    op = o
+                    ws_row = self.missions.find_workstream(
+                        m, mm.group(1))
+                    if ws_row is not None:
+                        break
+        if ws_row is None:
+            return {"ok": False,
+                    "error": "no workstream matches that description"}
+        ws_id = str(ws_row.get("id") or "")
+        if op == "pause":
+            out = self.missions.pause_workstream(mission_id, ws_id)
+        elif op == "resume":
+            out = self.missions.resume_workstream(mission_id, ws_id)
+        elif op == "drop":
+            out = self.missions.drop_workstream(mission_id, ws_id)
+        else:
+            out = self.missions.reprioritize_workstream(
+                mission_id, ws_id, "p0" if "priority" in t else "p1")
+        if out is None:
+            return {"ok": False, "error": f"{op} failed"}
+        self._emit("mission", {"type": "mission_steered",
+                               "mission_id": mission_id,
+                               "workstream": ws_id, "op": op})
+        self.wake()
+        return {"ok": True, "op": op,
+                "workstream": str(ws_row.get("title") or ws_id)}
+
+    def _goal_drift_check(self, m: dict) -> None:
+        """§33 — active work should still serve the stated objective.
+        Conservative signal only: a node whose instruction shares ~no
+        vocabulary with objective+acceptance criteria is flagged once
+        (never silently cancelled — false positives cost real work)."""
+        try:
+            last = float((m.get("metrics") or {}).get(
+                "_drift_check_ts") or 0)
+            if time.time() - last < 600:
+                return
+            self.missions.bump_metric(m["id"], "_drift_check_ts",
+                                      time.time() - last)
+            obj_terms = set(re.findall(
+                r"[a-z]{4,}", (str(m.get("objective") or "") + " "
+                               + " ".join(str(c) for c in
+                                          m.get("acceptance_criteria")
+                                          or [])).lower()))
+            if not obj_terms:
+                return
+            flagged = []
+            for n in (m.get("graph") or {}).get("nodes") or []:
+                if n.get("state") not in {"ready", "running"}:
+                    continue
+                hay = set(re.findall(r"[a-z]{4,}", str(
+                    n.get("instruction") or "").lower()))
+                if hay and not (hay & obj_terms):
+                    flagged.append(str(n.get("title") or "")[:80])
+            if flagged:
+                self.missions.append_history(
+                    m["id"], "goal_drift",
+                    f"{len(flagged)} task(s) share no vocabulary with "
+                    f"the objective: {'; '.join(flagged[:4])}")
+                self._emit("mission", {
+                    "type": "goal_drift", "mission_id": m["id"],
+                    "nodes": flagged[:8]})
+        except Exception:
+            pass
 
     def _recover_node(self, mission_id: str, node_id: str) -> None:
         m = self.missions.get(mission_id)

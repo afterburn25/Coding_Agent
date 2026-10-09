@@ -2,6 +2,50 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 0.40.0 — Engineering Missions
+
+The autonomy layer grows the durable engineering hierarchy — Mission →
+Workstream → Task → Subtask → Verification — on top of the existing
+MissionPlanner/MissionStore/AutonomousSupervisor/TaskGraph (no parallel
+framework). Mission lifetime no longer depends on any model's context
+window.
+
+- **`missions.py`** — workstream records (`add_workstream`,
+  `workstream_rollup`, `find_workstream`, pause/resume/drop/
+  reprioritize ops, status sync `planned→active→awaiting_review→
+  integration_ready→integrated`); durable `record_decision`/
+  `active_decisions`; `reserve_paths`/`release_paths`/`sweep_ownership`
+  (glob overlap + lease expiry); `refresh_capsule`/`maybe_compact`/
+  `context_package`/`discover_nexus_md`; `bump_metric`.
+- **`planner.py`** — `derive_acceptance_criteria` runs before
+  decomposition; decomposed lanes write durable workstreams and link
+  every node (including per-lane integrate/review) via
+  `metadata.workstream`.
+- **`supervisor.py`** — dispatch reserves declared scopes first;
+  conflicts park the node (`queue_reason: ownership_conflict`,
+  metric counted once); expired leases swept each executing step;
+  `steer(mission, text)` maps "pause the frontend" / "forget the voice
+  work" / "make X the priority" to workstream ops; thrash detection
+  (same `failure_signature` ≥2 → `model_role: deep` + thrash event);
+  `_goal_drift_check` flags task titles unrelated to the objective;
+  `nexus/<mission>/<label>` git tags at baseline/final.
+- **Completion unchanged** — `MissionEvaluator` still gates on
+  machine-checked `success_criteria`; `acceptance_criteria` is the
+  human-readable contract injected into workers/reviewers/UI.
+- **API** — `GET /api/missions/:id/workstreams` (rollup + criteria +
+  decisions + capsule + checkpoints + metrics + open questions);
+  `POST /api/missions/:id/steer`; `POST /api/missions/:id/workstreams/
+  :ws/{pause,resume,drop,reprioritize}`.
+- **Chat** — mission command lane handles workstream steering and
+  "what are you working on" status from live state.
+- **UI** — `missions.js` renders workstream cards (progress, priority,
+  acceptance, Pause/Resume/P0/Drop) + a mission context section
+  (decisions, failures, blockers, metrics).
+- **Tests** — `EngineeringMissionTests` (8): workstream integration +
+  capsule, scoped context packages, compaction, NEXUS.md, ownership
+  park + release, steer pause/resume/drop, thrash escalation, git
+  checkpoints. 137 autonomy + full suite green.
+
 ## 0.39.0 — Peer Intelligence Network
 
 Moltbook becomes a real peer-learning network rather than a posting

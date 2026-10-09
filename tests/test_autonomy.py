@@ -2710,5 +2710,212 @@ class JsonlLogTests(unittest.TestCase):
                 json.loads(line)
 
 
+class EngineeringMissionTests(unittest.TestCase):
+    """Codex-scale layer — durable workstreams, context capsule,
+    ownership reservations, steering, thrash escalation, git checkpoints."""
+
+    def _decomposed(self, sup, td, **kw):
+        return sup.create_mission(
+            objective="refactor the backend api and update the web ui "
+                      "and write tests for both",
+            title="cross-stack",
+            scope="repository",
+            workspace=str(Path(td)),
+            decomposition=[
+                {"title": "backend", "instruction": "refactor the api",
+                 "scope": ["localcodeagent/"], "role": "backend"},
+                {"title": "frontend", "instruction": "update the ui",
+                 "scope": ["web/"], "role": "frontend"}],
+            success_criteria=[{"kind": "all_tasks_completed"}],
+            **kw)
+
+    def test_workstreams_integrate_and_capsule_builds(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            m = drive(sup, m["id"], ticks=60)
+            self.assertIn(m["status"],
+                          {"completed", "completed_with_warnings"})
+            roll = sup.missions.workstream_rollup(m)
+            self.assertEqual(len(roll), 2)
+            self.assertTrue(all(w["status"] == "integrated"
+                                for w in roll), [w["status"] for w in roll])
+            self.assertTrue(all(w["tasks"] >= 1 for w in roll))
+            # §2/§4 — acceptance criteria authored before implementation;
+            # capsule carries the compact continuation context.
+            self.assertTrue(m.get("acceptance_criteria"))
+            cap = m.get("context_capsule") or {}
+            self.assertEqual(cap.get("objective")[:30],
+                             m["objective"][:30])
+            self.assertTrue(cap.get("workstreams"))
+            sup.stop()
+
+    def test_context_package_scopes_to_workstream(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(
+                objective="improve startup", scope="repository",
+                constraints=["do not add Electron"])
+            sup.missions.record_decision(
+                m["id"], "Keep the desktop host native C#",
+                reason="startup cost", source="user")
+            ws = sup.missions.add_workstream(
+                m["id"], "voice startup", scope=["localcodeagent/voice/"],
+                acceptance=["cold start < 2s"])
+            node = new_task("warmup", "parallelize chatterbox warmup",
+                            metadata={"workstream": ws["id"],
+                                      "scope": ["localcodeagent/voice/"]})
+            pkg = sup.missions.context_package(m, node,
+                                               nexus_md="tests: pytest -q")
+            self.assertIn("voice startup", pkg)
+            self.assertIn("native C#", pkg)
+            self.assertIn("Electron", pkg)
+            self.assertIn("cold start", pkg)
+            self.assertIn("NEXUS.md", pkg)
+            sup.stop()
+
+    def test_maybe_compact_rebuilds_capsule_and_counts(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="grow forever")
+
+            def _grow(row):
+                row["history"] = [{"ts": 1, "event": "e", "detail": "d"}
+                                  ] * 190
+            sup.missions.mutate(m["id"], _grow)
+            self.assertTrue(sup.missions.maybe_compact(m["id"]))
+            m = sup.missions.get(m["id"])
+            self.assertTrue((m.get("context_capsule") or {}).get("version"))
+            self.assertEqual(
+                (m.get("metrics") or {}).get("compactions"), 1)
+            # Raw history is preserved — compaction adds a capsule, it
+            # never deletes the record.
+            self.assertEqual(len(m["history"]), 191)
+            sup.stop()
+
+    def test_nexus_md_discovery(self):
+        from localcodeagent.autonomy.missions import discover_nexus_md
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(discover_nexus_md(td), "")
+            Path(td, "NEXUS.md").write_text("# Ops\ntests: pytest -q")
+            self.assertIn("pytest -q", discover_nexus_md(td))
+
+    def test_ownership_conflict_parks_node(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="edit the web ui",
+                                   scope="repository",
+                                   workspace=td)
+            def _graph(row):
+                g = TaskGraph(row)
+                g.add(new_task("ui work", "edit web/app.js",
+                               metadata={"scope": ["web/app.js"]}))
+            sup.missions.mutate(m["id"], _graph)
+            # Inject straight into executing — a 'ready' mission would
+            # replan over the hand-built graph.
+            sup.missions.update(m["id"], status="executing")
+            # Another live worker already owns web/.
+            sup.missions.reserve_paths(m["id"], "other-worker",
+                                       ["web/"])
+            for _ in range(6):
+                sup.tick()
+                time.sleep(0.1)
+            m = sup.missions.get(m["id"])
+            node = TaskGraph(m).nodes[0]
+            self.assertNotEqual(node["state"], "running")
+            self.assertEqual(node.get("queue_reason"),
+                             "ownership_conflict")
+            self.assertEqual(
+                (m.get("metrics") or {}).get("ownership_conflicts"), 1)
+            # After the other worker releases, the node can proceed.
+            sup.missions.release_paths(m["id"], owner="other-worker")
+            m = drive(sup, m["id"], ticks=40)
+            self.assertEqual(TaskGraph(m).nodes[0]["state"],
+                             "completed")
+            sup.stop()
+
+    def test_steer_pause_resume_drop(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            sup.tick(); sup.tick()
+            m = sup.missions.get(m["id"])
+            front = next(w for w in sup.missions.workstream_rollup(m)
+                         if "frontend" in w["title"])
+            out = sup.steer(m["id"], "pause the frontend")
+            self.assertTrue(out["ok"])
+            m = sup.missions.get(m["id"])
+            ws = next(w for w in m["workstreams"]
+                      if w["id"] == front["id"])
+            self.assertEqual(ws["status"], "paused")
+            node = TaskGraph(m).get(front["node_ids"][0])
+            self.assertIn(node["state"], {"blocked", "running",
+                                          "completed"})
+            out = sup.steer(m["id"], "resume the frontend")
+            self.assertTrue(out["ok"])
+            out = sup.steer(m["id"], "forget the frontend")
+            self.assertTrue(out["ok"])
+            m = sup.missions.get(m["id"])
+            ws = next(w for w in m["workstreams"]
+                      if w["id"] == front["id"])
+            self.assertEqual(ws["status"], "abandoned")
+            out = sup.steer(m["id"], "pause the flux capacitor")
+            self.assertFalse(out["ok"])
+            sup.stop()
+
+    def test_thrash_escalates_to_deep_model(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="x")
+            def _graph(row):
+                g = TaskGraph(row)
+                g.add(new_task("flaky", "do the flaky thing",
+                               max_retries=4))
+            sup.missions.mutate(m["id"], _graph)
+            sup.missions.update(m["id"], status="executing")
+            node = TaskGraph(
+                sup.missions.get(m["id"])).nodes[0]
+            node["state"] = "running"
+            sup.missions.update(
+                m["id"], graph=TaskGraph(
+                    sup.missions.get(m["id"])).graph)
+            for _ in range(2):
+                sup._finish_node(m["id"], node["id"],
+                                 {"ok": False, "error": "same boom"})
+            node = TaskGraph(sup.missions.get(m["id"])).nodes[0]
+            self.assertEqual(node["state"], "ready")
+            self.assertEqual(node.get("model_role"), "deep")
+            m = sup.missions.get(m["id"])
+            self.assertEqual(
+                (m.get("metrics") or {}).get("escalations"), 1)
+            sup.stop()
+
+    def test_git_checkpoints_recorded(self):
+        import subprocess as _sp
+        with tempfile.TemporaryDirectory() as td:
+            _sp.run(["git", "init", "-q"], cwd=td, check=True)
+            _sp.run(["git", "config", "user.email", "t@t"], cwd=td)
+            _sp.run(["git", "config", "user.name", "t"], cwd=td)
+            Path(td, "a.txt").write_text("one")
+            _sp.run(["git", "add", "-A"], cwd=td, check=True)
+            _sp.run(["git", "commit", "-qm", "init"], cwd=td, check=True)
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            m = drive(sup, m["id"], ticks=60)
+            self.assertIn(m["status"],
+                          {"completed", "completed_with_warnings"})
+            labels = {c["label"] for c in
+                      (m.get("git_checkpoints") or [])}
+            self.assertIn("baseline", labels)
+            self.assertIn("final", labels)
+            tags = _sp.run(["git", "tag", "-l", "nexus/*"], cwd=td,
+                           capture_output=True, text=True).stdout
+            self.assertIn(f"nexus/{m['id']}/baseline", tags)
+            sup.stop()
+
+
 if __name__ == "__main__":
     unittest.main()
