@@ -34,7 +34,37 @@
   `test_finish_publishes_sealed_zero_for_unspoken`,
   `test_cancelled_job_publishes_skipped`.
 
-Checkpoint: **2921 tests** (2917 passed + 3 env skips).
+Checkpoint: **2921 tests** (2921 passed + 3 env skips).
+
+## Follow-up — Actions-artifact dogfood + deploy script
+
+Commits `6b2cd91a` + `38b4e813`; deployed `D:\Nexus_Core` at 0.35.2.
+
+- **Run-artifact parser** — `_GH_RUN_ART_RE` now accepts a trailing
+  `in/on/of repo owner/name` clause into `params.repo`; suffix cleanup
+  only strips a standalone `artifact` word, so `dogfood-artifact`
+  survives. Previously a repo-qualified request fell through to the
+  model lane entirely.
+- **Dedupe reattach** — a verified-existing GitHub download now
+  re-resolves its registry record by filename so the reply carries the
+  card again (was: honest text, empty `artifacts`).
+- **Deploy script** — `scripts/deploy_local.ps1` mirrors dist → install
+  with bare-name `/XD` (`data output runtime models tools .git` +
+  `config.json` file exclusion). Verified by controlled test: bare names
+  protect subtrees from `/MIR` purge; absolute paths do NOT (that bug
+  deleted `runtime/voice/chatterbox`, `models/voice/chatterbox`, and all
+  of `tools/` in the previous deploy — all re-provisioned).
+- **Live dogfood** — `download the artifact from the latest build in
+  repo afterburn25/nexus-dogfood` resolved run `37858760704`, downloaded
+  `dogfood-artifact.zip` via the durable manager, extracted
+  `dogfood-artifact.txt` beside it, registered both with
+  `run_artifact`/`run_artifact_extracted` provenance, and the dedupe
+  re-request reattached the verified card.
+- CI green on `e3ae8826`, `5669f420`, `6b2cd91a`, `38b4e813`.
+- Tests: `test_run_artifact_download_preserves_repo_clause`,
+  `test_run_artifact_name_ending_in_artifact_kept`,
+  `test_run_artifact_bare_request_stays_unnamed`,
+  `test_deduped_download_reattaches_artifact_card`.
 
 ## v0.35.1 — Artifact actions, artifacts panel, cancellable uploads
 
