@@ -72,6 +72,28 @@ hours across restarts.
 - **Mission metrics** — compactions, repair cycles, escalations,
   ownership conflicts, checkpoints — the raw material for scheduling
   tuning (§44).
+- **Requirement-change propagation to the hierarchy** — supersession now
+  reaches workstream acceptance rows (`requirement_flags`), mission
+  acceptance criteria (stale criteria leave the live contract), and
+  durable decisions (auto-superseded), on top of per-node
+  `stale_requirement` marking.
+- **Review evidence packets** — review/integrate workers receive a
+  per-predecessor outcome + files-changed digest in their context
+  package, so "independent review" audits real artifacts.
+- **Workstream worktrees (§13–14)** — multi-lane missions provision one
+  isolated checkout per workstream (`nexus/<ws>/<slug>` under
+  `.nexus/worktrees`); lane diffs commit on the lane branch; the
+  integrate node merges branches mechanically and surfaces conflicts;
+  integrated lanes tear down cleanly while dirty worktrees are never
+  force-deleted.
+- **Live model routing (§9–10)** — node `model_role` flows through
+  `agent.run(model_role=…)` to the router as a tier override; thrash
+  escalation and the review lane now genuinely reach
+  `deep_reasoner`-tier models. Dispatch batches the hot model tier
+  within a priority band (§31).
+- **Deploy hardening** — `deploy_local.ps1` reaps backend helper
+  children + orphaned selftest/unittest processes whose locks twice
+  failed the mirror (rc=11).
 
 ## [0.39.0]
 
