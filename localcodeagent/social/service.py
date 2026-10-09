@@ -187,8 +187,14 @@ class SocialService:
         state = conn.account_state()
         self._event("social", {"event": "verification_check",
                                "service": service, "state": state})
-        return {"ok": bool(out.get("ok", True)),
-                "state": state, "data": out.get("data")}
+        result = {"ok": bool(out.get("ok", True)),
+                  "state": state, "data": out.get("data")}
+        if out.get("needs_approval"):
+            result["needs_approval"] = True
+            result["permission"] = out.get("permission", "")
+        if out.get("error"):
+            result["error"] = out.get("error")
+        return result
 
     # -- heartbeat -------------------------------------------------------------------
 
