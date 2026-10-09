@@ -1018,7 +1018,7 @@ class SocialService:
             "account": st.get("account", "none"),
             "level": self.drive.level(),
             "interests": self.drive.interests(),
-            "interest_graph": self.store.interests(),
+            "interest_graph": self.store.interest_graph(),
             "peer_count": out.pop("peers", 0),
             "claim_count": out.pop("claims", 0),
             "thread_count": out.pop("followed", 0),
