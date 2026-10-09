@@ -54,9 +54,46 @@ if ($dirtyFiles.Count -gt 0) {
 
 # The running app locks its binaries — refuse to half-deploy.
 $running = Get-Process | Where-Object { $_.Path -like "$Dest\*" }
+# Its helper children (cmd/python running localcodeagent.selftest,
+# unittest discover, etc.) run executables OUTSIDE $Dest so the path
+# filter misses them — but they keep the deployed tree's DLLs open and
+# robocopy then fails mid-mirror (observed: dbghelp/msvcp140 locks,
+# rc=11). Capture them BEFORE killing the parents, since once orphaned
+# they can only be identified by their command line.
+$helperIds = @()
+if ($running) {
+    $parentIds = @($running.Id)
+    $helperIds = @(Get-CimInstance Win32_Process |
+        Where-Object { $parentIds -contains $_.ParentProcessId } |
+        ForEach-Object { $_.ProcessId })
+    # Grandchildren too (selftest spawns unittest discover under itself).
+    $helperIds += @(Get-CimInstance Win32_Process |
+        Where-Object { $helperIds -contains $_.ParentProcessId } |
+        ForEach-Object { $_.ProcessId })
+}
 if ($running) {
     Write-Host "Stopping running Nexus processes under $Dest ..."
     $running | Stop-Process -Force
+}
+if ($helperIds) {
+    $helperIds | ForEach-Object {
+        Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+}
+# Orphans from an earlier kill — parent already dead, still holding
+# locks. The dead-parent check protects a developer's own `unittest
+# discover` runs, which always have a live shell parent.
+$nexusOrphans = @(Get-CimInstance Win32_Process |
+    Where-Object {
+        ($_.Name -in 'python.exe', 'pythonw.exe', 'cmd.exe') -and
+        ($_.CommandLine -match 'localcodeagent\.selftest|unittest discover') -and
+        -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue)
+    })
+if ($nexusOrphans) {
+    Write-Host "Reaping $($nexusOrphans.Count) orphaned selftest helper(s) ..."
+    $nexusOrphans | ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+if ($running -or $helperIds -or $nexusOrphans) {
     Start-Sleep -Seconds 3
 }
 
