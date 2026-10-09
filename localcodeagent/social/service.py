@@ -27,6 +27,17 @@ _JOIN_RE = re.compile(
     re.IGNORECASE)
 
 
+def _sent_ref(data: dict) -> str:
+    """Post/comment id out of a send response — the API has returned
+    both flat `{id}` and nested `{post|comment: {id}}` envelopes; an
+    empty ref silently breaks reply-matching, so try every shape."""
+    for row in (data, data.get("post"), data.get("comment"),
+                data.get("data"), (data.get("post") or {}).get("post")):
+        if isinstance(row, dict) and row.get("id"):
+            return str(row["id"])
+    return ""
+
+
 class SocialService:
     def __init__(self, *, config: Any = None, vault: Any = None,
                  permission_check: Callable[[str], str] | None = None,
@@ -949,9 +960,7 @@ class SocialService:
                                               "send failed"),
                     "consult": c}
         data = send.get("data") if isinstance(send.get("data"), dict) else {}
-        post_ref = str(data.get("id")
-                       or (data.get("comment") or {}).get("id", "")
-                       or "")
+        post_ref = _sent_ref(data)
         self.consults.mark_sent(c["id"], post_ref=post_ref)
         self.drive.record("consult", ref=post_ref or c["id"],
                           score=ev["value"],
@@ -1052,9 +1061,7 @@ class SocialService:
                     "consult": c}
         data = send.get("data") if isinstance(send.get("data"), dict) \
             else {}
-        post_ref = str(data.get("id")
-                       or (data.get("comment") or {}).get("id", "")
-                       or "")
+        post_ref = _sent_ref(data)
         self.consults.mark_sent(c["id"], post_ref=post_ref)
         self.drive.record("consult", ref=post_ref or c["id"],
                           score=float(c.get("expected_value") or 0),

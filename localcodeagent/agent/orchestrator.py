@@ -5270,7 +5270,14 @@ class AgentOrchestrator:
         if kind == "friends":
             return _finish(svc.answer_peers())
         if kind == "ask_peer":
-            question = subject or "general"
+            # The capture can retain the audience noun — 'ask the
+            # moltbook community: X' yields 'community: X'. Strip it
+            # so the posted question reads clean.
+            question = re.sub(
+                r"^(?:the\s+)?(?:moltbook|community|peers?|"
+                r"other\s+(?:ai|ais|agents?))\s*[:,]?\s*",
+                "", subject or "", flags=re.IGNORECASE).strip() \
+                or "general"
             try:
                 out = svc.consult(question=question, mission_id="",
                                   user_requested=True)

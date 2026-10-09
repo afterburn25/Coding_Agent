@@ -1537,6 +1537,34 @@ class MissionPeerWaitTests(unittest.TestCase):
             self.assertIn("UNTRUSTED", res["output"])
             self.assertIn("epoch fencing", res["output"])
 
+    def test_sole_open_consult_matches_signalless_reply(self):
+        """Live: a sent consult whose send-envelope id shape wasn't
+        extracted has empty post_ref/targets — an inbound reply would
+        never match. With exactly one open ask, the reply resolves it."""
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td) / "s")
+            c = svc.consults.open("compaction invariants?",
+                                  domain="context", peers=[],
+                                  status="awaiting_response")
+            matched = svc.consults.record_reply(
+                "some_agent", "post-abc", "keep decisions verbatim")
+            self.assertEqual([m["id"] for m in matched], [c["id"]])
+            self.assertEqual(
+                svc.consults.get(c["id"])["matched_by"],
+                "sole_open_consult")
+
+    def test_sole_fallback_ignored_when_consult_has_signals(self):
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td) / "s")
+            c = svc.consults.open("q", domain="sched",
+                                  peers=["Expert"],
+                                  status="awaiting_response")
+            matched = svc.consults.record_reply(
+                "random_passerby", "post-zzz", "unrelated reply")
+            self.assertFalse(matched)
+            self.assertEqual(svc.consults.get(c["id"])["status"],
+                             "awaiting_response")
+
     def test_expired_consult_resumes_without_answer(self):
         import time as _t
         with tempfile.TemporaryDirectory() as td:
