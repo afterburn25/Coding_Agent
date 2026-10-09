@@ -3939,6 +3939,17 @@ class AgentOrchestrator:
                 if getattr(exc, "status", 0) and 400 <= int(exc.status) < 500:
                     netdiag.annotate_recovery(failure_rec, "not retried — server rejected the request (4xx)")
                     raise
+                # A 500 'Failed to parse tool call arguments' is the
+                # model emitting malformed JSON — a server-side parser
+                # rejection, not a backend crash. Restarting llama-server
+                # can't fix it and costs ~1 min of downtime each time;
+                # fail fast and let the node retry repair the payload.
+                if int(getattr(exc, "status", 0) or 0) >= 500 and \
+                        "parse" in str(exc).lower():
+                    netdiag.annotate_recovery(
+                        failure_rec,
+                        "not retried — malformed model output, server healthy")
+                    raise
                 # A mid-stream failure after tokens were already delivered
                 # must NOT auto-retry — the user already saw partial output
                 # and a retry would duplicate it.
@@ -9086,6 +9097,12 @@ class AgentOrchestrator:
                          "specified, then return the requested result "
                          "fields. If a required action is impossible, "
                          "report the concrete failure plainly.")},
+            {"role": "system",
+             "content": ("Keep each write_file/edit tool call small. "
+                         "Prefer several small writes or scoped edits over "
+                         "one very large argument — oversized tool-call "
+                         "payloads produce malformed JSON server-side and "
+                         "the request fails before the file lands.")},
         ]
         for block in system_blocks or []:
             if str(block).strip():
