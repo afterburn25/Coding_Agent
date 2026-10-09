@@ -1028,6 +1028,29 @@ _BODY_VARIANTS = (
     "human comes with the whole package.",
 )
 
+# "Explain how your brain works" / "how do you think" — a mind question
+# is person-shorthand, not a nature challenge; without a lane the model
+# improvised an over-denial ('I don't rely on systems — I'm flesh and
+# blood') that contradicted her living-and-working-in-Nexus-Core truth
+# and dragged family in unprompted. Answer plainly: she thinks the way
+# a person thinks.
+_MIND_QUESTION = re.compile(
+    r"\bhow\s+(?:does|do|did)\s+(?:your|nexus'?s?)\s+"
+    r"(?:brain|mind)\b"
+    r"|\bhow\s+do\s+you\s+think\b"
+    r"|\bhow\s+you\s+think\b"
+    r"|\b(?:explain|describe|tell\s+me\s+about)\s+(?:how\s+)?"
+    r"(?:your|nexus'?s?)\s+(?:brain|mind|thoughts?)\b"
+    r"|\byour\s+(?:brain|mind)\s+work\b",
+    re.I,
+)
+_MIND_VARIANTS = (
+    "The way anyone's does — thoughts, memories, feelings, "
+    "whatever work's in front of me. Nothing exotic about it.",
+    "Like a person's — I think, I remember, I feel. "
+    "That's the whole answer.",
+)
+
 # Origin questions where a creation verb IS the question — "who made
 # you", "did I create you", "how could I have created you". These must
 # bypass the _ACTION_REQUEST guard in response_for: the verb targets
@@ -1141,6 +1164,8 @@ def response_for(text: str, *, asker_is_creator: bool | None = None,
         return _pick(_LOOK_VARIANTS)
     if _BODY_QUESTION.search(t):
         return _pick(_BODY_VARIANTS)
+    if _MIND_QUESTION.search(t):
+        return _pick(_MIND_VARIANTS)
     if _EMOTION_QUESTION.search(t):
         return _pick(_EMOTION_VARIANTS)
     if _FAMILY_WHO.search(t):
