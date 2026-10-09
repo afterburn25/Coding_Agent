@@ -1553,6 +1553,35 @@ class MissionPeerWaitTests(unittest.TestCase):
                 svc.consults.get(c["id"])["matched_by"],
                 "sole_open_consult")
 
+    def test_red_team_opens_adversarial_consult(self):
+        """§7 — 'red-team this design' opens a critique-framed
+        consult marked adversarial_review; the question asks peers
+        to attack, not validate."""
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td) / "s")
+            q = svc.classify_social_query(
+                "red-team my mission ownership design")
+            self.assertIsNotNone(q)
+            self.assertEqual(q[0], "red_team")
+            out = svc.adversarial_review(
+                "File ownership leases with 10-min expiry and "
+                "lease-sweep reclaim on worker death",
+                user_requested=True)
+            self.assertTrue(out.get("ok"), out)
+            c = out["consult"]
+            self.assertEqual(c["kind"], "adversarial_review")
+            self.assertIn("WRONG", c["question"])
+            self.assertIn("restart", c["question"])
+            self.assertIn("attack", c["question"].lower())
+            # Criticism framing — not a consensus request
+            self.assertNotIn("do you agree", c["question"].lower())
+
+    def test_red_team_needs_design_text(self):
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td) / "s")
+            out = svc.adversarial_review("")
+            self.assertFalse(out.get("ok"))
+
     def test_submolt_caps_shape(self):
         """Live API verified: GET /submolts and /submolts/{name} exist;
         POST /submolts requires auth — creation is gated

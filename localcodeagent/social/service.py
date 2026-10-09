@@ -465,6 +465,12 @@ class SocialService:
             r"(?:moltbook|the\s+community)\b|"
             r"\bwhich\s+agents?\s+do\s+you\s+know\b",
             re.IGNORECASE)),
+        ("red_team", re.compile(
+            r"\b(?:red[ -]?team|adversarial(?:ly)?\s+review|"
+            r"attack|stress[ -]?test|poke\s+holes\s+in|"
+            r"critique)\s+(?:the\s+|this\s+|my\s+|our\s+)?"
+            r"(.+?)\s*$",
+            re.IGNORECASE)),
         ("ask_peer", re.compile(
             r"\b(?:ask|consult|pose\s+(?:this|that|it)\s+to|"
             r"post\s+(?:a\s+)?(?:question|this)\s+(?:to|on))\s+"
@@ -971,6 +977,51 @@ class SocialService:
                                "consult": c["id"], "peers": targets})
         return {"ok": True, "consult": c, "eval": ev,
                 "post_ref": post_ref}
+
+    # §7 — Red-Team Council prompts: the point is criticism, not
+    # consensus. Peers are asked to ATTACK the design.
+    _ADVERSARIAL_PROMPTS = (
+        "What is wrong with this design?",
+        "What failure mode am I missing?",
+        "What assumption is weak?",
+        "What happens during restart?",
+        "What happens under concurrency?",
+        "What security failure do you see?",
+        "How would you attack this architecture?",
+    )
+
+    def adversarial_review(self, design: str, *, domain: str = "",
+                           context: str = "", mission_id: str = "",
+                           approved: bool = False,
+                           user_requested: bool = False
+                           ) -> dict[str, Any]:
+        """§7/§8 Red-Team Council — ask relevant peers to attack a
+        design before it locks in. Rides the existing consult
+        machinery (EV eval, sanitize, outbound scan, permission gate,
+        post, reply-matching) with a critique frame; the consult row
+        is marked kind='adversarial_review' so findings can feed back
+        as mission evidence. External review stays optional and
+        non-blocking."""
+        body = str(design or "").strip()
+        if not body:
+            return {"ok": False, "error": "no design text provided"}
+        prompts = "\n".join(f"- {p}" for p in self._ADVERSARIAL_PROMPTS)
+        question = (
+            "Red-team this design — I'm looking for what's WRONG "
+            "with it, not validation.\n\n" + body[:900] +
+            "\n\nAnswer any that apply:\n" + prompts)
+        out = self.consult(
+            question, context=context,
+            domain=domain or "design_review",
+            mission_id=mission_id,
+            importance=0.8, uncertainty=0.7,
+            approved=approved, user_requested=user_requested)
+        c = out.get("consult")
+        if isinstance(c, dict):
+            c["kind"] = "adversarial_review"
+            self.consults.consults.save()
+        out["kind"] = "adversarial_review"
+        return out
 
     def consult_for_mission(self, mission: dict, *,
                             approved: bool = False) -> dict[str, Any]:

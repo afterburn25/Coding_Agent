@@ -5269,6 +5269,70 @@ class AgentOrchestrator:
             return _finish(svc.answer_trust())
         if kind == "friends":
             return _finish(svc.answer_peers())
+        if kind == "red_team":
+            design = str(subject or "").strip()
+            if not design or len(design) < 12:
+                return _finish(
+                    "Give me the design text to red-team — the plan, "
+                    "architecture, or approach you want attacked.",
+                    ok=False)
+            try:
+                out = svc.adversarial_review(design,
+                                             user_requested=True)
+            except Exception as exc:
+                return _finish(
+                    f"I couldn't start the red-team review: {exc}",
+                    ok=False)
+            c = out.get("consult") or {}
+            if out.get("needs_approval"):
+                pending = {
+                    "kind": "social_action",
+                    "name": "moltbook.consult",
+                    "arguments": {"service": "moltbook",
+                                  "action": "consult",
+                                  "consult_id": c.get("id", "")},
+                    "permission": str(out.get("permission")
+                                      or "social.post"),
+                    "call_id": "",
+                    "detail": "Red-team review: "
+                              + design[:80],
+                }
+                stamp_pending(task_id, pending)
+                self._audit_approval_request(pending)
+                parked = self.tasks.update(
+                    task_id, status="waiting_approval",
+                    phase="waiting_approval", pending_approval=pending)
+                text = ("The red-team review is ready to send to the "
+                        "network — peers get asked to attack the "
+                        "design, not validate it. Posting needs your "
+                        "approval.")
+                self._safe_emit(event_callback, {
+                    "type": "approval", "approval": pending,
+                    "card": self._approval_card(task_id, pending),
+                    "task": parked.as_dict()})
+                return AgentResult(
+                    content=text, routing=decision,
+                    model_events=[builtin_event], steps=0,
+                    task=parked.as_dict(), pending_approval=pending)
+            if out.get("ok"):
+                return _finish(
+                    "Red-team review is out — peers will be asked to "
+                    "attack the design. I'll fold their findings in "
+                    "when replies land.")
+            if out.get("skipped"):
+                reasons = ((out.get("eval") or {}).get("reasons")
+                           or ["not enough expected gain"])
+                return _finish(
+                    "The network ask scored too low to send — "
+                    + "; ".join(str(r) for r in reasons[:3]) + ".")
+            if out.get("blocked"):
+                return _finish(
+                    "Peer review is blocked by your social "
+                    "permissions right now.")
+            return _finish(
+                f"I couldn't send the review: "
+                f"{str(out.get('error') or 'unknown')[:160]}",
+                ok=False)
         if kind == "ask_peer":
             # The capture can retain the audience noun — 'ask the
             # moltbook community: X' yields 'community: X'. Strip it

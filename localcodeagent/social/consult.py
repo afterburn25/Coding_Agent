@@ -197,11 +197,16 @@ class ConsultEngine:
              expected_value: float = 0.0, privacy: str = "public_safe",
              backlog_id: str = "", mission_id: str = "",
              thread_ref: str = "", timeout_s: float = DEFAULT_TIMEOUT_S,
-             status: str = "pending_send") -> dict[str, Any]:
+             status: str = "pending_send",
+             kind: str = "consult") -> dict[str, Any]:
         """Record a consult intent. Status flow: pending_send →
-        awaiting_response → answered | unanswered | withdrawn."""
+        awaiting_response → answered | unanswered | withdrawn.
+        ``kind`` marks the workflow ('consult' |
+        'adversarial_review') so downstream handling can treat
+        critique answers differently from ordinary answers."""
         row = {
             "id": f"pc-{uuid.uuid4().hex[:10]}",
+            "kind": str(kind or "consult")[:40],
             "question": str(question or "")[:1600],
             "domain": str(domain or "general").lower(),
             "target_peers": [str(p)[:80] for p in (peers or [])][:6],
