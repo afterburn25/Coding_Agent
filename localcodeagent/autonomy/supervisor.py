@@ -1780,6 +1780,13 @@ class AutonomousSupervisor:
                 observed=obs)
         ok = bool(result.get("ok"))
         pending_approval = result.get("pending_approval")
+        if (not ok and not pending_approval
+                and "step limit" in str(
+                    (result or {}).get("output") or "").lower()):
+            # A step-limit stop will retry the same node — commit the
+            # lane's dirty work first so the next attempt (or a stray
+            # `git reset --hard`) can't destroy it.
+            self._wip_commit(m, fin_node)
         # Project-linked missions record each finished node on the
         # project's worker history — "what did Nexus do on this project".
         pid = str(m.get("project_id") or "")
@@ -2112,6 +2119,42 @@ class AutonomousSupervisor:
                         mission_id, w["id"], "integrated",
                         detail="independent review passed")
                     self._teardown_ws_worktree(m, w)
+
+    def _wip_commit(self, mission: dict, node: dict) -> None:
+        """Commit a lane worktree's uncommitted state as a WIP checkpoint
+        on its own branch — step-limit retries continue from committed
+        work instead of risking a wipe."""
+        meta = node.get("metadata") or {}
+        wt = str(meta.get("worktree_path") or "")
+        if not wt:
+            return
+        path = Path(wt)
+        if not (path / ".git").exists():
+            return
+        try:
+            def _git(*argv: str) -> tuple[int, str]:
+                p = subprocess.run(
+                    ["git", "-C", str(path), *argv], text=True,
+                    timeout=60, capture_output=True,
+                    creationflags=getattr(subprocess,
+                                          "CREATE_NO_WINDOW", 0))
+                return p.returncode, (p.stdout + p.stderr).strip()
+            rc, out = _git("status", "--porcelain")
+            if rc != 0 or not out.strip():
+                return
+            _git("add", "-A")
+            rc, out = _git(
+                "-c", "user.name=Nexus Agent",
+                "-c", "user.email=nexus-agent@local",
+                "commit", "-m",
+                f"wip: step-limit checkpoint ({node.get('id')})")
+            if rc == 0:
+                self.missions.append_history(
+                    str(mission.get("id") or ""), "worktree",
+                    f"WIP checkpoint on {meta.get('worktree_branch')}: "
+                    "step-limit state committed for the retry")
+        except Exception:
+            pass
 
     def _git_checkpoint(self, mission: dict, label: str) -> None:
         """§25 — a rollback ref at each safe stage. Non-destructive:

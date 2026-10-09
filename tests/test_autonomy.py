@@ -1840,6 +1840,34 @@ class NotificationTests(unittest.TestCase):
             self.assertEqual(rows[-1]["state"], "failed")
             sup.stop()
 
+    def test_step_limit_finish_commits_worktree_wip(self):
+        """A step-limit retry must not be able to lose the lane's
+        uncommitted work — the finish path commits a WIP checkpoint on
+        the lane branch before re-queuing the node."""
+        import subprocess as sp
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "lane"
+            repo.mkdir()
+            def git(*a):
+                return sp.run(["git", "-C", str(repo), *a],
+                              capture_output=True, text=True)
+            git("init", "-q")
+            git("-c", "user.name=T", "-c", "user.email=t@t",
+                "commit", "-qm", "base", "--allow-empty")
+            (repo / "work.py").write_text("partial = True\n")
+            sup = make_sup(td)
+            node = {"id": "n-1", "title": "Work", "kind": "agent",
+                    "metadata": {"worktree_path": str(repo),
+                                 "worktree_branch": "nexus/x/lane"}}
+            sup._wip_commit({"id": "m-1", "title": "M"}, node)
+            # The dirty file is now a committed WIP — a subsequent
+            # `git reset --hard` cannot destroy it.
+            sp.run(["git", "-C", str(repo), "reset", "--hard", "HEAD"],
+                   capture_output=True)
+            self.assertEqual(
+                (repo / "work.py").read_text(), "partial = True\n")
+            sup.stop()
+
 
 class SchedulerTests(unittest.TestCase):
     def test_once_fires_and_disables(self):

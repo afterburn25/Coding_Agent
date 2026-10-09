@@ -2980,11 +2980,25 @@ class AppState:
                 prev = str(((node.get("result") or {}).get("error"))
                            or ((node.get("result") or {}).get("output"))
                            or "")[:400]
-                instruction += (
-                    "\n\nYour previous attempt failed"
-                    + (f": {prev}" if prev else ".")
-                    + " Do not assert completed actions — actually invoke "
-                      "the required tools.")
+                if "step limit" in prev.lower():
+                    # A step-limit stop is not a failure of the work — the
+                    # workspace may already hold partial results. The
+                    # continuation must build on them, never reset them.
+                    instruction += (
+                        "\n\nA previous attempt stopped at the step "
+                        "limit — it was NOT a wrong-answer failure. "
+                        "Partial work may already exist in this "
+                        "workspace: inspect `git status` / the target "
+                        "files first, continue from what is there, and "
+                        "never run `git reset`, `git checkout --`, or "
+                        "`git clean` to start over. Finish only the "
+                        "remaining work.")
+                else:
+                    instruction += (
+                        "\n\nYour previous attempt failed"
+                        + (f": {prev}" if prev else ".")
+                        + " Do not assert completed actions — actually "
+                          "invoke the required tools.")
             # §10 — model escalation is real: a node's model_role (set
             # by the planner or thrash escalation) overrides routing to
             # that tier via the router, without disturbing mode=="auto"
