@@ -1553,6 +1553,24 @@ class MissionPeerWaitTests(unittest.TestCase):
                 svc.consults.get(c["id"])["matched_by"],
                 "sole_open_consult")
 
+    def test_submolt_caps_shape(self):
+        """Live API verified: GET /submolts and /submolts/{name} exist;
+        POST /submolts requires auth — creation is gated
+        social.account, reads are social.read."""
+        with tempfile.TemporaryDirectory() as td:
+            conn = _conn(Path(td), client=_FakeClient())
+            self.assertIn("submolts", conn.capabilities)
+            self.assertIn("submolt", conn.capabilities)
+            self.assertIn("create_submolt", conn.capabilities)
+            self.assertEqual(
+                conn._CAP_PERMISSION["create_submolt"],
+                "social.account")
+            # list call routes to the right endpoint
+            conn.call("submolts")
+            self.assertTrue(any(c["path"] == "/submolts"
+                                for c in
+                                conn._client.calls))
+
     def test_sole_fallback_ignored_when_consult_has_signals(self):
         with tempfile.TemporaryDirectory() as td:
             svc = _active_svc(Path(td) / "s")
