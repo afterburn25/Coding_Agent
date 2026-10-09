@@ -7691,7 +7691,7 @@ class Handler(BaseHTTPRequestHandler):
 
     _PLATFORM_PREFIXES = ("/api/health", "/api/twin", "/api/artifacts",
                           "/api/skills", "/api/connectors", "/api/knowledge",
-                          "/api/social",
+                          "/api/social", "/api/identity", "/api/situation",
                           "/api/rag", "/api/eval", "/api/experiments",
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
@@ -7748,13 +7748,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"audit": identity.audit() if identity else []})
             return True
         if path == "/api/capabilities/graph":
-            reg = getattr(self.state, "capability_registry", None)
-            if reg is None:
-                self._json({"error": "capability registry unavailable"},
-                           503)
-                return True
-            self._json(reg.graph(force=(q.get("refresh") == ["1"])))
-            return True
+            return False  # handled in the main GET chain — /api/capabilities
+                          # already exists outside the platform prefixes
         if path == "/api/artifacts":
             rows = self.state.artifacts.list(
                 kind=(q.get("kind") or [""])[0],
@@ -8213,15 +8208,7 @@ class Handler(BaseHTTPRequestHandler):
                 str(body.get("address") or "")))
             return True
         if path == "/api/capabilities/selftest":
-            reg = getattr(self.state, "capability_registry", None)
-            if reg is None:
-                self._json({"error": "capability registry unavailable"},
-                           503)
-                return True
-            self._json(reg.run_selftest(
-                str(body.get("capability") or ""),
-                force=bool(body.get("force"))))
-            return True
+            return False  # handled in the main POST chain — see do_POST
         if path == "/api/social/backlog/resolve":
             social = getattr(self.state, "social", None)
             if social is None:
@@ -9872,6 +9859,17 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(self.state.capabilities.summary())
             return
+        if path == "/api/capabilities/graph":
+            # The Capability Truth Graph — probed nodes + dependency
+            # edges + blocker chains (capabilities.py graph()).
+            reg = getattr(self.state, "capability_registry", None)
+            if reg is None:
+                self._json({"error": "capability registry unavailable"},
+                           503)
+                return
+            q = parse_qs(urlparse(self.path).query)
+            self._json(reg.graph(force=(q.get("refresh") == ["1"])))
+            return
         # Self-knowledge + control plane — the same registries the chat
         # lane resolves against. Read-only surfaces for the capability
         # browser; mutation goes through POST /api/actions/execute.
@@ -11134,6 +11132,19 @@ class Handler(BaseHTTPRequestHandler):
                 if self._platform_post(path, body):
                     return
                 self._json({"error": "unknown platform route"}, 404)
+                return
+
+            if path == "/api/capabilities/selftest":
+                # Bounded live exercise of one capability — explicit and
+                # rate-limited; never from the per-turn prompt path.
+                reg = getattr(self.state, "capability_registry", None)
+                if reg is None:
+                    self._json({"error": "capability registry unavailable"},
+                               503)
+                    return
+                self._json(reg.run_selftest(
+                    str(body.get("capability") or ""),
+                    force=bool(body.get("force"))))
                 return
 
             if path == "/api/nexus-brain/initialize":
