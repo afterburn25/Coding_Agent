@@ -3098,6 +3098,41 @@ class AppState:
                 out["error"] = (
                     "unverified action claims — reply asserted completed "
                     "actions but no tools ran")
+            # Scope audit — lane artifacts outside the declared scope
+            # globs are surfaced (not failed): a lane editing types.py
+            # while scoped to server.py may be legitimate support work,
+            # but the reviewer must SEE that it happened rather than
+            # trusting the artifact list is in-scope.
+            scope_globs = [
+                str(s) for s in (meta_out.get("scope") or [])
+                if str(s).strip()]
+            if not scope_globs and meta_out.get("workstream"):
+                ws_row = next(
+                    (w for w in (mission.get("workstreams") or [])
+                     if w.get("id") == meta_out.get("workstream")), None)
+                scope_globs = [
+                    str(s) for s in ((ws_row or {}).get("scope") or [])
+                    if str(s).strip()]
+            if scope_globs and out.get("artifacts"):
+                import fnmatch as _fn
+                def _in_scope(path: str) -> bool:
+                    p = str(path).replace("\\", "/").lstrip("./")
+                    return any(_fn.fnmatch(p, g) or p.startswith(
+                        g.rstrip("*").rstrip("/") + "/")
+                        or p == g.rstrip("*")
+                        for g in scope_globs)
+                out_scope = [a for a in out["artifacts"]
+                             if not _in_scope(a)]
+                if out_scope:
+                    out["out_of_scope"] = out_scope
+                    if len(out_scope) == len(out["artifacts"]):
+                        # EVERY artifact missed the declared scope — the
+                        # lane wrote somewhere else entirely; that is a
+                        # wrong-execution signal, not support work.
+                        out["ok"] = False
+                        out["error"] = (
+                            "all artifacts outside declared scope: "
+                            + ", ".join(out_scope[:5]))
             # Feed the cognitive architecture: PFC conflict monitoring
             # (repeated failures/loops) + Hippocampus episodic memory.
             brain = getattr(self, "brain", None)

@@ -742,6 +742,13 @@ class AutonomousSupervisor:
         # honest terminal record and stays resumable via failed→ready.
         self._retire_stale_blocked()
 
+        # 3f. stale internal approval waits — a heartbeat/internal
+        # mission parked on a social.post approval the user never
+        # answers accumulates forever (13+ observed live). Internal
+        # waits expire; user-objective approvals NEVER auto-retire —
+        # that's a user decision, not housekeeping.
+        self._retire_stale_internal_waits()
+
         # 4. drive live missions
         if self.policy.is_stopped() or self.policy.is_paused():
             return
@@ -852,6 +859,25 @@ class AutonomousSupervisor:
                     detail="blocked >3d with no intervention — "
                            "auto-retired (resume via failed→ready)")
                 self._audit("mission_blocked_retired", mission=m["id"])
+
+    STALE_INTERNAL_WAIT_S = 24 * 3600.0
+
+    def _retire_stale_internal_waits(self) -> None:
+        """Internal missions (heartbeats, self-repair) parked in
+        waiting_approval longer than the bound are cancelled — the
+        approval the user didn't grant is treated as declined by
+        inaction. External/user objectives are never touched."""
+        cutoff = time.time() - self.STALE_INTERNAL_WAIT_S
+        for m in self.missions.list():
+            if (str(m.get("status")) == "waiting_approval"
+                    and str(m.get("objective") or "").startswith("internal:")
+                    and float(m.get("updated_at") or 0) < cutoff):
+                self.missions.transition(
+                    m["id"], "cancelled",
+                    detail="internal approval unanswered >24h — "
+                           "auto-expired")
+                self._audit("mission_internal_wait_expired",
+                            mission=m["id"])
 
     def _step_mission(self, mission_id: str) -> None:
         m = self.missions.get(mission_id)
