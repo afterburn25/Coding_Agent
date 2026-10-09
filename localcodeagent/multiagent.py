@@ -54,6 +54,11 @@ class WorktreeAgent:
         self.wt_root.mkdir(parents=True, exist_ok=True)
         rc, out = _git(self.repo, "worktree", "add", "-b", self.branch,
                        str(self.path), base_ref)
+        if rc != 0 and "already exists" in out.lower():
+            # The lane's BRANCH survived a wiped checkout (deploy /MIR,
+            # crash prune) — reattach onto it instead of failing.
+            rc, out = _git(self.repo, "worktree", "add", str(self.path),
+                           self.branch)
         if rc != 0:
             return {"ok": False, "error": out[:400]}
         self.state = "ready"

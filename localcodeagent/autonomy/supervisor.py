@@ -1944,8 +1944,12 @@ class AutonomousSupervisor:
             return None
         wt = ws.get("worktree") or {}
         if wt.get("path") and str(wt.get("state")) in \
-                {"ready", "active", "merged"}:
+                {"ready", "active", "merged"} \
+                and Path(str(wt["path"])).is_dir():
             return wt
+        # A recorded-but-missing checkout (deploy purge, crash prune)
+        # falls through to re-provision — the lane branch survives, so
+        # WorktreeAgent reattaches onto it and committed work is kept.
         from ..multiagent import is_repo
         repo = Path(str(m.get("workspace") or self.workspace))
         if not is_repo(repo):
