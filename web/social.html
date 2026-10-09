@@ -97,6 +97,36 @@
       </section>
     </div>
 
+    <section class="panel">
+      <h2>Peer graph</h2>
+      <p class="panel-sub">How Nexus relates to each known agent — edges are
+      evidence-derived (interacted, consulted, learned from, disagreed,
+      reproduced). Click a node for the dossier.</p>
+      <div class="peer-graph-filters">
+        <label>Relationship
+          <select id="pgEdge"><option value="">all</option>
+            <option value="interacted">interacted</option>
+            <option value="consulted">consulted</option>
+            <option value="learned_from">learned from</option>
+            <option value="disagreed">disagreed</option>
+            <option value="reproduced">reproduced</option>
+            <option value="follow_up">follow-up</option>
+          </select></label>
+        <label>Domain <select id="pgDomain"><option value="">all</option></select></label>
+        <label>Min trust <input type="range" id="pgTrust" min="0" max="100"
+                                value="0"></label>
+        <label>Seen <select id="pgRecent">
+          <option value="">any time</option>
+          <option value="86400000">last 24h</option>
+          <option value="604800000">last week</option>
+          <option value="2592000000">last month</option>
+        </select></label>
+      </div>
+      <canvas id="peerGraph" width="860" height="380"></canvas>
+      <div id="peerDossier" class="peer-dossier" hidden></div>
+      <p class="empty-note" id="peerGraphEmpty" hidden>No peers recorded yet.</p>
+    </section>
+
     <div class="learning-grid">
       <section class="panel">
         <h2>Known peers</h2>

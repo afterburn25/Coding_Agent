@@ -621,6 +621,77 @@ class SocialStore:
             rows = [r for r in rows if r.get("ladder") == ladder]
         return rows
 
+    def peer_graph(self, *, consults: list[dict] | None = None
+                   ) -> dict[str, Any]:
+        """§21 — nodes + typed edges for the social peer graph.
+        Edge types derive from evidence, not decoration: interacted
+        (replies/comments/mentions), learned_from (peer-sourced
+        claims that climbed the ladder), consulted (targeted or
+        answering a consult), disagreed, reproduced (replication
+        experiments), followed (followed discussions)."""
+        consulted: set[str] = set()
+        for c in consults or []:
+            for p in c.get("target_peers") or []:
+                consulted.add(str(p).lower())
+            if c.get("answered_by"):
+                consulted.add(str(c["answered_by"]).lower())
+        reproduced: set[str] = set()
+        try:
+            for e in self.experiments_for():
+                for p in (e.get("peers") or e.get("participants") or []):
+                    reproduced.add(str(p).lower())
+        except Exception:
+            pass
+        learned_from: set[str] = set()
+        for c in self.claims_for():
+            if str(c.get("ladder") or "") in (
+                    "tested", "verified", "applied") \
+                    and c.get("source_peer"):
+                learned_from.add(str(c["source_peer"]).lower())
+
+        nodes = [{"id": "nexus", "name": "Nexus", "kind": "self"}]
+        edges: list[dict[str, Any]] = []
+        for p in self.peers.rows():
+            self._backfill_peer(p)
+            name = str(p.get("name") or "")
+            if not name:
+                continue
+            rel = p.get("relationship") or {}
+            nodes.append({
+                "id": name, "name": name, "kind": "peer",
+                "stage": p.get("stage", "new"),
+                "familiarity": round(float(p.get("familiarity", 0)), 3),
+                "trust": round(float(rel.get("trust", 0)), 3),
+                "domains": sorted(
+                    (p.get("expertise") or {}).keys(),
+                    key=lambda d: -float((p.get("expertise") or {})
+                                         .get(d, {}).get(
+                                             "confidence", 0)))[:4],
+                "flags": bool(p.get("manipulation_flags")),
+                "interactions": len(p.get("interactions") or []),
+                "last_seen": p.get("last_seen", 0),
+            })
+            kinds = {str(i.get("kind") or "")
+                     for i in (p.get("interactions") or [])}
+            et: set[str] = set()
+            if kinds & {"reply", "comment", "mention", "answer"}:
+                et.add("interacted")
+            if kinds & {"seen_post", "seen_comment"}:
+                et.add("observed")
+            if name.lower() in consulted:
+                et.add("consulted")
+            if name.lower() in learned_from:
+                et.add("learned_from")
+            if p.get("disagreements"):
+                et.add("disagreed")
+            if name.lower() in reproduced:
+                et.add("reproduced")
+            if (p.get("follow_up") or {}).get("wanted"):
+                et.add("follow_up")
+            edges.append({"from": "nexus", "to": name,
+                          "types": sorted(et or {"observed"})})
+        return {"nodes": nodes, "edges": edges}
+
     # -- learning backlog --------------------------------------------------------
 
     def add_backlog(self, kind: str, topic: str, *, why: str = "",

@@ -933,6 +933,25 @@ class PeerGraphTests(unittest.TestCase):
             st2 = SocialStore(Path(td))
             self.assertEqual(st2.peer_card("AgentX")["interactions"], 1)
 
+    def test_peer_graph_edges_are_evidence_derived(self):
+        """§21 — graph edges reflect real relationship evidence."""
+        with tempfile.TemporaryDirectory() as td:
+            st = SocialStore(Path(td))
+            st.record_interaction("Replier", "reply", ref="p1")
+            st.record_interaction("Lurker", "seen_post", ref="p2")
+            st.add_claim("kv cache scales", source_peer="Replier")
+            cid = st.claims_for(peer="Replier")[0]["id"]
+            st.promote_claim(cid, "tested", evidence="unit ok")
+            g = st.peer_graph(consults=[{
+                "target_peers": ["Replier"], "answered_by": "Replier"}])
+            edges = {e["to"]: set(e["types"]) for e in g["edges"]}
+            self.assertIn("interacted", edges["Replier"])
+            self.assertIn("consulted", edges["Replier"])
+            self.assertIn("learned_from", edges["Replier"])
+            self.assertEqual(edges["Lurker"], {"observed"})
+            names = {n["id"] for n in g["nodes"]}
+            self.assertEqual(names, {"nexus", "Replier", "Lurker"})
+
     def test_domain_expertise_is_contextual_not_global(self):
         with tempfile.TemporaryDirectory() as td:
             st = SocialStore(Path(td))

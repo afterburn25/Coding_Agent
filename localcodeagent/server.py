@@ -7770,6 +7770,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"peer": (social.store.peer_card(name)
                                  if social is not None else None)})
             return True
+        if path == "/api/social/peer_graph":
+            social = getattr(self.state, "social", None)
+            if social is None:
+                self._json({"nodes": [], "edges": []})
+            else:
+                self._json(social.store.peer_graph(
+                    consults=social.consults_list(limit=100)))
+            return True
         if path == "/api/social/consults":
             social = getattr(self.state, "social", None)
             self._json({"consults": (social.consults_list(limit=50)
