@@ -85,10 +85,27 @@ Status legend: complete | not-dogfooded | partial | broken | stale | missing | e
   per-tensor via safe_open (3753c762, venv patched live)
 - [closed] Tools "Image Model Packs" hid the fleet — merged fleet rows
   with live state + fleet install action (3753c762)
-- [open] InvokeAI venv is torch+cpu (2.14.1+cpu) — generation runs on
-  CPU. Provisioning should install the CUDA torch wheel on GPU hosts.
-- [open] ComfyUI cudaErrorUnknown at VAEDecode with 0.3GB free VRAM —
-  job ran into a starved GPU after auto-fallback; watch for recurrence
+- [closed] InvokeAI venv was torch+cpu (2.14.1+cpu) — manifest had no
+  PyTorch CUDA index so pip took PyPI's CPU wheel. Manifest now passes
+  `--extra-index-url .../cu130`; deployed venv repaired to
+  torch 2.14.1+cu130 / torchvision 0.29.1+cu130, `cuda: True` on the
+  RTX 3080 Ti (5bb5098f). Regression test pins the index in the manifest.
+- [closed] Cancel/timeout left orphaned InvokeAI queue work — queue
+  items persist in sqlite and resume on restart; a cancelled 30-step
+  job kept grinding ~40 min on CPU after the owning process was killed.
+  Job failure/timeout now cancels the queue item; cancels that miss an
+  unreachable backend persist to pending_cancels.json and flush on the
+  next healthy ensure_ready (5bb5098f, verified live: cancel landed,
+  queue drained to in_progress=0).
+- [closed] Fleet profiles carried no VRAM/RAM estimates — synthesized
+  InvokeAI profiles never copied the spec's estimated_vram_gb, so the
+  pre-job arbiter couldn't evict a resident LLM (observed ~148s/step
+  spilled). Fixed + verified live (5bb5098f).
+- [closed] ComfyUI cudaErrorUnknown at VAEDecode with 0.3GB free VRAM —
+  root cause was VRAM starvation during the InvokeAI crash-loop
+  fallback window, not a checkpoint or routing defect. InvokeAI is
+  healthy on CUDA; verified: 768×768/6-step RealVisXL job finished in
+  28.9s end-to-end (10.5s graph) with a valid PNG output.
 - [verified-live] RealVisXL: provisioned → downloaded 6.9GB → registered
   → installed; adult request routed realvisxl-v5 with "adult-content
   preference: RealVisXL V5.0"; non-adult honest fallback

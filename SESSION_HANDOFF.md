@@ -4447,3 +4447,40 @@ Checkpoint: **2911 tests** (2911 passed + 3 env skips).
 - Restore the V6 synthetic character only as a **single post-generation DSP pass**: neural/glass/micro layers + original tonal lift. This is intentional; the prior barrel defect was double-processing (processed reference + another pass), not the V6 character itself.
 - Center output (`stereo_width=0`) and keep ambience off. Loudness target: -12.5 LUFS, limiter ceiling ~-1 dBFS.
 - Preset signature: `approved-v7-v6-character-louder`.
+
+## 2026-10-09 — v0.42.0 Phase A deployed + InvokeAI GPU remediation (5bb5098f)
+
+Phase A (Identity Manager + Capability Truth Graph + Situation Model +
+Intelligence Center) is deployed and live-verified — see CHANGELOG.
+Then live image-runtime remediation landed three real fixes:
+
+- **CUDA provisioning**: `tools/manifests/invokeai.json` had no PyTorch
+  index → pip installed `torch 2.14.1+cpu` on an RTX 3080 Ti. Manifest
+  now adds `--extra-index-url https://download.pytorch.org/whl/cu130`.
+  Deployed venv repaired live to `torch 2.14.1+cu130` — `cuda: True`.
+- **Orphaned queue work**: InvokeAI persists its queue in sqlite and
+  RESUMES in-flight items on restart. A cancel that never landed left a
+  30-step job grinding ~40min on CPU after the owning process died.
+  Fix: failure/timeout now cancels the backend queue item; cancels that
+  fail against an unreachable backend persist to
+  `data/image/pending_cancels.json` and flush on the next healthy
+  `ensure_ready`. Verified live: cancel landed, queue drained.
+- **Fleet resource estimates**: synthesized InvokeAI profiles never
+  inherited `estimated_vram_gb`/`estimated_ram_gb` from the fleet spec,
+  so the pre-job arbiter had no estimate to act on (observed ~148s/step
+  spilled with qwen3-14b resident). Profiles now inherit both.
+
+Live dogfood after deploy: 768×768 / 6-step RealVisXL job via InvokeAI
+finished in 28.9s end-to-end (10.5s graph wall) producing a valid PNG —
+no cudaErrorUnknown. Earlier ComfyUI `cudaErrorUnknown` traced to 0.3GB
+free VRAM during the InvokeAI crash-loop fallback window — VRAM
+starvation, not a routing or checkpoint defect.
+
+Deploy gotcha hit and fixed: robocopy rc=11 (one locked exe) threw AFTER
+stopping the app but BEFORE relaunch — and the retry saw nothing running
+so it skipped relaunch. `deploy_local.ps1` now relaunches on the failure
+path too when the app was running.
+
+Tests: tests/test_image.py +5 cancel-propagation cases,
+tests/test_image_fleet.py +3 (manifest CUDA index, dedicated venv,
+fleet resource-estimate inheritance). 140 image tests pass.

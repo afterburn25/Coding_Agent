@@ -126,7 +126,15 @@ if ($backup -and (Test-Path $backup)) {
     Write-Host "Restored $($dirtyFiles.Count) uncommitted Source file(s)."
 }
 
-if ($rc -ge 8) { throw "robocopy failed with exit code $rc" }
+if ($rc -ge 8) {
+    # Observed: a locked exe mid-mirror threw here and left the app DOWN —
+    # the next clean run saw nothing running and skipped relaunch too.
+    if ($running) {
+        Write-Host "Partial deploy — relaunching NexusCore.exe ..."
+        Start-Process (Join-Path $Dest "NexusCore.exe")
+    }
+    throw "robocopy failed with exit code $rc"
+}
 Write-Host "Deployed to $Dest (robocopy rc=$rc)."
 
 # Restart the app if it was running before the deploy.

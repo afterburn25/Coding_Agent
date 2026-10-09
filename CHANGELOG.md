@@ -56,6 +56,27 @@ going on?" from measured state.
   `POST /api/capabilities/selftest`, `POST /api/identity/account/
   create|human-gate|resume|verify|remove`, `POST
   /api/identity/primary-email`.
+- **Fix — InvokeAI CPU-only torch**: the tool manifest had no PyTorch
+  CUDA index, so the dedicated venv installed `torch +cpu` even on GPU
+  hosts (observed live: every SDXL job grinding ~60–100s/step until the
+  job timeout fired). `pip_args` now adds the `cu130` wheel index.
+- **Fix — orphaned backend work after cancel/timeout**: InvokeAI
+  persists its queue in sqlite and *resumes* in-flight items on
+  restart. A Nexus-side cancel that never landed (backend
+  crash-looping) left a 30-step CPU job grinding ~40 min across a
+  process restart. Job failure/timeout now best-effort cancels the
+  queue item, and cancels that fail against an unreachable backend are
+  persisted to `pending_cancels.json` and flushed once the backend is
+  healthy again.
+- **Fix — fleet profiles lacked resource estimates**: synthesized
+  InvokeAI profiles never copied `estimated_vram_gb`/`estimated_ram_gb`
+  from the fleet spec, so the pre-job arbiter had nothing to act on and
+  jobs ran against a resident LLM's VRAM. Verified live: 768×768/6-step
+  RealVisXL job on the RTX 3080 Ti finished in 28.9 s end-to-end
+  (10.5 s graph) producing a real PNG.
+- **Fix — deploy relaunch gap**: a locked file mid-mirror (robocopy
+  rc≥8) threw after stopping the app but before relaunching it; the
+  failure path now relaunches NexusCore.exe before throwing.
 
 ## [0.41.0]
 
