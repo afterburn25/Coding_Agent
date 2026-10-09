@@ -222,6 +222,33 @@ class SandboxedVerifyTests(unittest.TestCase):
                 sup.missions.get(m["id"])["status"], "waiting_approval")
             sup.stop()
 
+    def test_missing_task_row_replans_parked_mission(self):
+        # The ledger never drops non-terminal rows — a vanished row for a
+        # parked task means the resumable work is gone (e.g. a deploy
+        # wiped workspace/.agent). Replan rather than freeze forever.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td, task_resolver=lambda tid: None)
+            m = sup.create_mission(objective="x", title="x")
+            nid = "t-work1"
+            def _fn(row):
+                g = TaskGraph(row)
+                n = new_task("Work", "work", kind="agent")
+                n["id"] = nid
+                n["state"] = "waiting_approval"
+                n["result"] = {"task_id": "gone"}
+                g.add(n)
+                row["graph"] = g.graph
+                row["status"] = "waiting_approval"
+            sup.missions.mutate(m["id"], _fn)
+            ap = sup._create_approval(
+                m["id"], nid, {"name": "write_file", "detail": "x"})
+            sup._reconcile_approvals(time.time())
+            row = [r for r in sup.approvals() if r["id"] == ap["id"]][0]
+            self.assertEqual(row["state"], "denied")
+            self.assertNotEqual(
+                sup.missions.get(m["id"])["status"], "waiting_approval")
+            sup.stop()
+
     def test_still_pending_task_gate_stays_parked(self):
         with tempfile.TemporaryDirectory() as td:
             tasks = {"task-1": {"id": "task-1", "status": "waiting_approval",

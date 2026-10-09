@@ -34,7 +34,7 @@
   `test_finish_publishes_sealed_zero_for_unspoken`,
   `test_cancelled_job_publishes_skipped`.
 
-Checkpoint: **2926 tests** (2926 passed + 3 env skips).
+Checkpoint: **2927 tests** (2927 passed + 3 env skips).
 
 ## Follow-up — Mission/task approval reconciliation
 
@@ -62,9 +62,15 @@ have re-run the whole node.
   leaves the mission parked.
 - Tests: `test_chat_side_approval_releases_parked_mission`,
   `test_chat_side_denial_replans_parked_mission`,
-  `test_still_pending_task_gate_stays_parked`.
+  `test_still_pending_task_gate_stays_parked`,
+  `test_missing_task_row_replans_parked_mission`.
+- `scripts/deploy_local.ps1` — added `.agent` to the bare-name `/XD`
+  set. The deployed task ledger lives under `Source\.agent`, and `/MIR`
+  was purging it on every deploy, stranding in-flight tasks and parked
+  missions (observed live: the dogfood mission's task row vanished on
+  the `fdf699af` deploy).
 
-Checkpoint: **2926 tests** (2926 passed + 3 env skips).
+Checkpoint: **2927 tests** (2927 passed + 3 env skips).
 
 ## Follow-up — Actions-artifact dogfood + deploy script
 
@@ -3228,7 +3234,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2926 tests` passing (3 environment skips).
+Expected at this checkpoint: `2927 tests` passing (3 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

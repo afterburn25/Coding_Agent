@@ -16,6 +16,9 @@
 #   runtime, models       — provisioned runtimes (llama, chatterbox) + model weights
 #   tools                 — ComfyUI portable, InvokeAI, other tool payloads
 #   .git                  — deployed Source checkout metadata
+#   .agent                — durable task ledger + checkpoints under Source\
+#                           (dist ships a fresh clone; wiping it mid-deploy
+#                           strands in-flight tasks and parked missions)
 #   config.json           — live user configuration (file-level exclusion)
 param(
     [string]$Source = (Join-Path $PSScriptRoot "..\dist\ChatNexus"),
@@ -33,7 +36,8 @@ if ($running) {
     Start-Sleep -Seconds 3
 }
 
-$excludeDirs = @("data", "output", "runtime", "models", "tools", ".git")
+$excludeDirs = @("data", "output", "runtime", "models", "tools",
+                 ".git", ".agent")
 $args = @($Source, $Dest, "/MIR", "/XD") + $excludeDirs +
         @("/XF", "config.json", "/R:2", "/W:1", "/NFL", "/NDL", "/NP")
 robocopy @args | Select-Object -Last 12

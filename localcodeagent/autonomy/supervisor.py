@@ -1949,7 +1949,11 @@ class AutonomousSupervisor:
         except Exception:
             task = None
         if not task:
-            return None
+            # The ledger never drops non-terminal rows — a missing row for
+            # a parked task means the resumable work is gone for good
+            # (corrupt store, wiped deploy). Deny so the mission replans
+            # the node instead of freezing on an unresolvable gate.
+            return False
         for res in (task.get("approval_resolutions") or []):
             if str(res.get("status") or "") == "resolved":
                 return str(res.get("decision") or "") != "deny"
