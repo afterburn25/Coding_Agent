@@ -362,6 +362,8 @@ def extract_decision(text: str, env: Any = None) -> dict | None:
     value = re.split(
         r"\s+(?:for|because|so\s+that|instead\s+of|rather\s+than)\s+",
         value)[0]
+    value = re.sub(r"\s+(?:instead|now|this\s+time)\s*$", "", value,
+                   flags=re.IGNORECASE)
     value = re.sub(r"\s+", " ", value).strip(" .,;'\"")[:120]
     if not value:
         return None
