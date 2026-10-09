@@ -1575,6 +1575,11 @@ class MissionPeerWaitTests(unittest.TestCase):
             self.assertIn("attack", c["question"].lower())
             # Criticism framing — not a consensus request
             self.assertNotIn("do you agree", c["question"].lower())
+            # Council roster recorded — the store's council API has a
+            # real writer now.
+            councils = svc.store.councils()
+            self.assertTrue(any(k.startswith("redteam-")
+                                for k in councils), councils)
 
     def test_red_team_needs_design_text(self):
         with tempfile.TemporaryDirectory() as td:

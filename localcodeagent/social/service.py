@@ -1024,6 +1024,15 @@ class SocialService:
         if isinstance(c, dict):
             c["kind"] = "adversarial_review"
             self.consults.consults.save()
+            # Council roster — who was asked to attack this. The
+            # store's council record finally has a real writer.
+            try:
+                self.store.set_council(
+                    f"redteam-{c.get('id', '')[-8:]}",
+                    domain or "design_review",
+                    members=list(c.get("target_peers") or []))
+            except Exception:
+                pass
         out["kind"] = "adversarial_review"
         return out
 
