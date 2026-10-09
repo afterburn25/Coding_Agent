@@ -28,6 +28,10 @@
     "package": "invokeai==6.14.2",
     "dest": "tools/InvokeAI",
     "size_bytes": 6000000000,
+    "pip_args": [
+      "--extra-index-url",
+      "https://download.pytorch.org/whl/cu130"
+    ],
     "python_candidates": [
       "3.12",
       "3.11",

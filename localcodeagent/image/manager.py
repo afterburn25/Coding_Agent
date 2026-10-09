@@ -85,6 +85,19 @@ class ImageManager:
         from .sampling import SamplingAdvisor
         self.sampling_advisor = SamplingAdvisor(self.data_dir / "sampling_stats.json")
         self._jobs: dict[str, ImageJob] = {}
+        # Backend cancels that never landed (backend unreachable/crash-looping).
+        # InvokeAI persists its queue in sqlite and RESUMES in-flight items on
+        # restart — a missed cancel leaves orphaned work burning CPU/GPU after
+        # the Nexus job is already gone (observed: a cancelled 30-step job
+        # grinding ~90s/step on CPU for 40+ min across a process restart).
+        self._pending_cancels_path = self.data_dir / "pending_cancels.json"
+        self._pending_cancels: set[str] = set()
+        try:
+            saved = json.loads(self._pending_cancels_path.read_text(encoding="utf-8"))
+            if isinstance(saved, list):
+                self._pending_cancels = {str(x) for x in saved}
+        except Exception:
+            pass
         self._lock = threading.RLock()
         self._ws_listener = None
         self._backend_up_ts: dict[str, float] = {}
@@ -775,6 +788,7 @@ class ImageManager:
                               "note": "already registered"})
                 return
             self.invokeai_runtime.ensure_ready()
+            self._flush_pending_cancels()
             # The backend may have been stopped a moment ago — re-check
             # the live registry now that it is up before downloading.
             if not repair and self._fleet_installed_row(fid, force=True) is not None:
@@ -902,6 +916,7 @@ class ImageManager:
         if spec is None:
             raise KeyError(f"unknown fleet model '{fleet_id}'")
         self.invokeai_runtime.ensure_ready()
+        self._flush_pending_cancels()
         row = self._fleet_installed_row(spec["id"], force=True)
         if row is None:
             return {"ok": True, "removed": False,
@@ -1117,6 +1132,14 @@ class ImageManager:
                 profile.display_name = spec["display_name"]
                 profile.capability_class = "photoreal"
                 profile.restriction_status = spec["restriction_status"]
+                # Resource estimates feed the pre-job arbiter — without them
+                # the job submits alongside a resident LLM and the backend
+                # spills to shared memory (observed: ~148s/step instead of
+                # ~8s/step on a 12 GB card with qwen3-14b resident).
+                profile.estimated_vram_gb = float(
+                    spec.get("estimated_vram_gb") or 0.0)
+                profile.estimated_ram_gb = float(
+                    spec.get("estimated_ram_gb") or 0.0)
                 for k, v in (spec.get("sampling") or {}).items():
                     profile.metadata.setdefault("sampling", {})[k] = v
                 profile.metadata["sampling"]["model_scope"] = spec["id"]
@@ -1665,6 +1688,7 @@ class ImageManager:
             job.stage = "starting InvokeAI" if job.backend_starting else "connecting to InvokeAI"
             job.progress = max(job.progress, 0.10); self._save_jobs(job)
             self.invokeai_runtime.ensure_ready()
+            self._flush_pending_cancels()
             job.backend_starting = False
 
             job.stage = "preparing generation"; job.progress = max(job.progress, 0.14)
@@ -1703,6 +1727,7 @@ class ImageManager:
                     except Exception:
                         pass
                     self.invokeai_runtime.ensure_ready()
+                    self._flush_pending_cancels()
 
             job.stage = "saving image"; job.progress = max(job.progress, 0.92)
             self._save_jobs(job)
@@ -1733,6 +1758,9 @@ class ImageManager:
         except _ImageJobCancelled:
             pass
         except Exception as exc:
+            # Timeouts and failures must not leave the queue item grinding —
+            # InvokeAI persists in-flight items and resumes them on restart.
+            self._discard_backend_work(job)
             error = describe_image_error(exc)
             job.state = "failed"; job.stage = "failed"
             job.error_code = error["code"]; job.error_message = error["message"]
@@ -1926,12 +1954,48 @@ class ImageManager:
             meta=Path(output).with_suffix(Path(output).suffix+".json")
             meta.write_text(json.dumps(row, indent=2), encoding="utf-8")
 
+    def _discard_backend_work(self, job: "ImageJob") -> None:
+        """Best-effort cancel of the job's backend queue item. Never raises —
+        a failed InvokeAI cancel is persisted and retried once the backend is
+        healthy again (see _pending_cancels)."""
+        bid = job.backend_job_id
+        if not bid:
+            return
+        try:
+            (self.backends.get(job.backend) or self.backend).cancel(str(bid))
+        except Exception:
+            if job.backend != "invokeai":
+                return  # ComfyUI's queue is in-memory; a restart drops it.
+            try:
+                self._pending_cancels.add(str(bid))
+                _atomic_json_write(self._pending_cancels_path,
+                                   sorted(self._pending_cancels))
+            except Exception:
+                pass
+
+    def _flush_pending_cancels(self) -> None:
+        """Retry persisted InvokeAI cancels once the backend is reachable —
+        call after ensure_ready() or a confirmed-healthy status poll."""
+        if not self._pending_cancels:
+            return
+        for bid in list(self._pending_cancels):
+            try:
+                self.invokeai_backend.cancel(bid)
+                self._pending_cancels.discard(bid)
+            except Exception:
+                pass
+        try:
+            _atomic_json_write(self._pending_cancels_path,
+                               sorted(self._pending_cancels))
+        except Exception:
+            pass
+
     def cancel(self, job_id: str) -> ImageJob:
         job=self._jobs[job_id]
         if job.state in {"finished","failed","cancelled"}: return job
-        if job.backend_job_id:
-            backend = self.backends.get(job.backend) or self.backend
-            backend.cancel(job.backend_job_id)
+        self._discard_backend_work(job)
+        if job.backend == "invokeai":
+            self._flush_pending_cancels()
         job.state="cancelled"; job.stage="cancelled"; job.finished_at=time.time(); self._save_jobs(job); return job
 
     def get_job(self, job_id: str) -> ImageJob:

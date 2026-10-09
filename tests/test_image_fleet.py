@@ -518,5 +518,46 @@ class SafetyGateTests(unittest.TestCase):
                     prompt="explicit nude photograph"))
 
 
+class InvokeAIInstallManifestTests(unittest.TestCase):
+    """The InvokeAI venv manifest must resolve CUDA torch wheels — without a
+    PyTorch CUDA index pip installs the CPU-only build from PyPI even on GPU
+    hosts (observed live: torch 2.14.1+cpu on an RTX 3080 Ti, every SDXL job
+    grinding at ~60-100s/step until the timeout fired)."""
+
+    MANIFEST = Path(__file__).resolve().parents[1] / "tools" / "manifests" / "invokeai.json"
+
+    def test_manifest_pins_cuda_torch_index(self):
+        data = json.loads(self.MANIFEST.read_text(encoding="utf-8"))
+        pip_args = [str(a) for a in (data.get("install", {}).get("pip_args") or [])]
+        joined = " ".join(pip_args)
+        self.assertIn("--extra-index-url", pip_args)
+        self.assertRegex(joined, r"download\.pytorch\.org/whl/cu\d+",
+                         "InvokeAI install must add a PyTorch CUDA wheel index")
+
+    def test_manifest_installs_dedicated_venv(self):
+        data = json.loads(self.MANIFEST.read_text(encoding="utf-8"))
+        install = data.get("install", {})
+        self.assertTrue(str(install.get("package", "")).startswith("invokeai=="))
+        self.assertTrue(install.get("python_candidates"))
+
+
+class FleetProfileResourceTests(unittest.TestCase):
+    def test_fleet_profile_inherits_resource_estimates(self):
+        """The pre-job arbiter frees LLM VRAM using profile.estimated_vram_gb
+        — a fleet profile without it submits alongside a resident model and
+        the backend spills to shared memory (observed: ~148s/step instead of
+        ~8s/step on a 12 GB card with qwen3-14b resident)."""
+        with tempfile.TemporaryDirectory() as td:
+            m = _manager(Path(td))
+            m._invokeai_models = lambda **kw: [_registry_row("realvisxl-v5")]
+            m._refresh_invokeai_models()
+            prof = next(p for p in m.router.models
+                        if p.id.startswith("invokeai:"))
+            spec = FLEET_BY_ID["realvisxl-v5"]
+            self.assertEqual(prof.estimated_vram_gb,
+                             spec["estimated_vram_gb"])
+            self.assertGreater(prof.estimated_vram_gb, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

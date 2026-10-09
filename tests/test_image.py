@@ -17,7 +17,7 @@ from localcodeagent.image.library import ImageAssetLibrary
 from localcodeagent.image.manager import ImageManager
 from localcodeagent.image.router import ImageRouter
 from localcodeagent.image.runtime import ComfyUIRuntime
-from localcodeagent.image.types import ImageModelProfile, ImageRequest
+from localcodeagent.image.types import ImageJob, ImageModelProfile, ImageRequest
 from localcodeagent.image.workflow import WorkflowManager
 
 
@@ -1595,3 +1595,97 @@ class SamplingAdvisorTests(unittest.TestCase):
         adv.apply(r, prof, "text_to_image")
         self.assertEqual(r.steps, 35)   # 25 + 10 exploration
         self.assertEqual(r.guidance, 3.5)  # 4.0 - 0.5
+
+
+class BackendCancelPropagationTests(unittest.TestCase):
+    """InvokeAI persists its queue in sqlite and resumes in-flight items on
+    restart — a cancel that never lands leaves orphaned work burning CPU/GPU
+    after the Nexus job is gone (observed live: a cancelled 30-step job
+    grinding ~90s/step on CPU for 40+ min across a process restart)."""
+
+    def _manager(self, root: Path) -> ImageManager:
+        profile = ImageModelProfile(
+            id="m", family="f", capabilities=["text_to_image"])
+        config = SimpleNamespace(
+            image_models_dir="models/image", image_data_dir="data/image",
+            image_workflows_dir="workflows/image",
+            comfyui_endpoint="http://127.0.0.1:9",
+            invokeai_endpoint="http://127.0.0.1:9",
+            comfyui_auto_start=False, image_auto_run_jobs=False,
+        )
+        return ImageManager(base_dir=root, models=[profile], config=config,
+                            workspace=root / "workspace")
+
+    def test_unreachable_backend_cancel_is_persisted_and_retried(self):
+        with tempfile.TemporaryDirectory() as td:
+            mgr = self._manager(Path(td))
+            calls: list[str] = []
+
+            def boom(bid):
+                calls.append(bid)
+                raise RuntimeError("connection refused")
+
+            mgr.invokeai_backend.cancel = boom
+            job = ImageJob(id="j1", request={}, backend="invokeai",
+                           backend_job_id="42")
+            mgr._jobs["j1"] = job
+            out = mgr.cancel("j1")
+            self.assertEqual(out.state, "cancelled")
+            self.assertEqual(mgr._pending_cancels, {"42"})
+            saved = json.loads(mgr._pending_cancels_path.read_text())
+            self.assertEqual(saved, ["42"])
+            # Backend healthy again — the flush lands the missed cancel.
+            mgr.invokeai_backend.cancel = lambda bid: calls.append(bid)
+            mgr._flush_pending_cancels()
+            self.assertEqual(mgr._pending_cancels, set())
+            self.assertEqual(calls[-1], "42")
+            self.assertEqual(
+                json.loads(mgr._pending_cancels_path.read_text()), [])
+
+    def test_pending_cancels_survive_restart(self):
+        with tempfile.TemporaryDirectory() as td:
+            mgr = self._manager(Path(td))
+            mgr.invokeai_backend.cancel = lambda bid: (
+                _ for _ in ()).throw(RuntimeError("down"))
+            job = ImageJob(id="j", request={}, backend="invokeai",
+                           backend_job_id="7")
+            mgr._discard_backend_work(job)
+            # A fresh manager over the same state dir re-loads the queue.
+            mgr2 = self._manager(Path(td))
+            self.assertEqual(mgr2._pending_cancels, {"7"})
+
+    def test_job_failure_discards_backend_queue_item(self):
+        """Timeout/failure must cancel the backend item, not leave it
+        running detached from the failed Nexus job."""
+        with tempfile.TemporaryDirectory() as td:
+            mgr = self._manager(Path(td))
+            calls: list[str] = []
+            mgr.invokeai_backend.cancel = lambda bid: calls.append(bid)
+            job = ImageJob(id="j2", request={}, backend="invokeai",
+                           backend_job_id="9", state="generating")
+            mgr._discard_backend_work(job)
+            self.assertEqual(calls, ["9"])
+
+    def test_comfyui_cancel_failure_is_not_persisted(self):
+        """ComfyUI's queue is in-memory — a restart already drops the item,
+        so nothing is worth persisting."""
+        with tempfile.TemporaryDirectory() as td:
+            mgr = self._manager(Path(td))
+            mgr.backend.cancel = lambda bid: (
+                _ for _ in ()).throw(RuntimeError("down"))
+            job = ImageJob(id="j3", request={}, backend="comfyui",
+                           backend_job_id="5")
+            mgr._jobs["j3"] = job
+            out = mgr.cancel("j3")
+            self.assertEqual(out.state, "cancelled")
+            self.assertEqual(mgr._pending_cancels, set())
+            self.assertFalse(mgr._pending_cancels_path.is_file())
+
+    def test_discard_without_backend_job_id_is_noop(self):
+        with tempfile.TemporaryDirectory() as td:
+            mgr = self._manager(Path(td))
+            mgr.invokeai_backend.cancel = lambda bid: self.fail(
+                "cancel should not run without a backend_job_id")
+            job = ImageJob(id="j4", request={}, backend="invokeai")
+            mgr._discard_backend_work(job)
+            self.assertEqual(mgr._pending_cancels, set())
