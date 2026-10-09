@@ -158,6 +158,94 @@ class SandboxedVerifyTests(unittest.TestCase):
                 node["metadata"]["approval_granted"]["action"], "run_tests")
             sup.stop()
 
+    def test_chat_side_approval_releases_parked_mission(self):
+        # Live dogfood finding: a mission node parks when its inner agent
+        # task hits a tool/verify gate; the chat lane's /api/tasks/decide
+        # resolves THAT gate directly, leaving the mission-level row —
+        # and the whole mission — parked until timeout. Reconcile must
+        # adopt the task's recorded decision.
+        with tempfile.TemporaryDirectory() as td:
+            tasks = {"task-1": {
+                "id": "task-1", "status": "completed",
+                "approval_resolutions": [
+                    {"id": "ap-task", "decision": "once",
+                     "status": "resolved"}]}}
+            sup = make_sup(td, task_resolver=lambda tid: tasks.get(tid))
+            m = sup.create_mission(objective="x", title="x")
+            nid = "t-work1"
+            def _fn(row):
+                g = TaskGraph(row)
+                n = new_task("Work", "work", kind="agent")
+                n["id"] = nid
+                n["state"] = "waiting_approval"
+                n["result"] = {"task_id": "task-1"}
+                g.add(n)
+                row["graph"] = g.graph
+                row["status"] = "waiting_approval"
+            sup.missions.mutate(m["id"], _fn)
+            ap = sup._create_approval(
+                m["id"], nid, {"name": "write_file", "detail": "x"})
+            sup._reconcile_approvals(time.time())
+            row = [r for r in sup.approvals() if r["id"] == ap["id"]][0]
+            self.assertEqual(row["state"], "approved")
+            node = TaskGraph(sup.missions.get(m["id"])).get(nid)
+            self.assertEqual(node["state"], "ready")
+            self.assertTrue(node["metadata"].get("approval_granted"))
+            sup.stop()
+
+    def test_chat_side_denial_replans_parked_mission(self):
+        with tempfile.TemporaryDirectory() as td:
+            tasks = {"task-1": {
+                "id": "task-1", "status": "failed",
+                "approval_resolutions": [
+                    {"id": "ap-task", "decision": "deny",
+                     "status": "resolved"}]}}
+            sup = make_sup(td, task_resolver=lambda tid: tasks.get(tid))
+            m = sup.create_mission(objective="x", title="x")
+            nid = "t-work1"
+            def _fn(row):
+                g = TaskGraph(row)
+                n = new_task("Work", "work", kind="agent")
+                n["id"] = nid
+                n["state"] = "waiting_approval"
+                n["result"] = {"task_id": "task-1"}
+                g.add(n)
+                row["graph"] = g.graph
+                row["status"] = "waiting_approval"
+            sup.missions.mutate(m["id"], _fn)
+            ap = sup._create_approval(
+                m["id"], nid, {"name": "write_file", "detail": "x"})
+            sup._reconcile_approvals(time.time())
+            row = [r for r in sup.approvals() if r["id"] == ap["id"]][0]
+            self.assertEqual(row["state"], "denied")
+            self.assertNotEqual(
+                sup.missions.get(m["id"])["status"], "waiting_approval")
+            sup.stop()
+
+    def test_still_pending_task_gate_stays_parked(self):
+        with tempfile.TemporaryDirectory() as td:
+            tasks = {"task-1": {"id": "task-1", "status": "waiting_approval",
+                                "approval_resolutions": []}}
+            sup = make_sup(td, task_resolver=lambda tid: tasks.get(tid))
+            m = sup.create_mission(objective="x", title="x")
+            nid = "t-work1"
+            def _fn(row):
+                g = TaskGraph(row)
+                n = new_task("Work", "work", kind="agent")
+                n["id"] = nid
+                n["state"] = "waiting_approval"
+                n["result"] = {"task_id": "task-1"}
+                g.add(n)
+                row["graph"] = g.graph
+                row["status"] = "waiting_approval"
+            sup.missions.mutate(m["id"], _fn)
+            sup._create_approval(
+                m["id"], nid, {"name": "write_file", "detail": "x"})
+            sup._reconcile_approvals(time.time())
+            self.assertEqual(
+                sup.missions.get(m["id"])["status"], "waiting_approval")
+            sup.stop()
+
 
 class JobNodeTests(unittest.TestCase):
     def test_job_kind_is_accepted_and_carries_no_default_lock(self):

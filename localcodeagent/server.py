@@ -17,6 +17,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 from typing import Any, Callable
 
+from types import SimpleNamespace
+
 from .fsutil import atomic_write_text
 from .procutil import no_window_flags
 from . import netdiag
@@ -2808,11 +2810,31 @@ class AppState:
                 # Resumed after a mission approval — replay the exact gated
                 # call that parked instead of starting a fresh run that
                 # would re-derive it and re-gate forever.
-                try:
-                    parked_row = self.tasks.get(parked_task)
-                    parked_state = str(getattr(parked_row, "status", "") or "")
-                except Exception:
-                    parked_state = ""
+                def _parked_state() -> tuple[str, Any]:
+                    try:
+                        row = self.tasks.get(parked_task)
+                        return (str(getattr(row, "status", "") or ""), row)
+                    except Exception:
+                        return ("", None)
+
+                def _adopt(row) -> dict:
+                    # The task-level gate was resolved directly (chat
+                    # /api/tasks/decide drives agent.resume itself) — the
+                    # parked task already reached an outcome. Adopt it
+                    # instead of running the whole node a second time.
+                    try:
+                        data = row.as_dict() if hasattr(row, "as_dict") \
+                            else dict(row)
+                    except Exception:
+                        data = {}
+                    adopted = SimpleNamespace(
+                        content=str(data.get("final_content")
+                                    or data.get("summary") or ""),
+                        task=data,
+                        pending_approval=None)
+                    return _mission_node_out(mission, node, adopted)
+
+                parked_state, parked_row = _parked_state()
                 if parked_state == "waiting_approval":
                     try:
                         result = self.agent.resume(
@@ -2822,6 +2844,29 @@ class AppState:
                         result = None
                     if result is not None:
                         return _mission_node_out(mission, node, result)
+                elif parked_state in _TERMINAL_TASK_STATUSES:
+                    return _adopt(parked_row)
+                elif parked_state:
+                    # Chat-side resume may still be in flight — wait for
+                    # its terminal state (bounded) rather than duplicating
+                    # the work with a fresh run underneath it.
+                    deadline = time.time() + 300
+                    while time.time() < deadline:
+                        if parked_state not in _INFLIGHT_TASK_STATUSES:
+                            break
+                        time.sleep(3)
+                        parked_state, parked_row = _parked_state()
+                    if parked_state == "waiting_approval":
+                        try:
+                            result = self.agent.resume(
+                                parked_task, approved=True,
+                                event_callback=emit_cb)
+                        except Exception:
+                            result = None
+                        if result is not None:
+                            return _mission_node_out(mission, node, result)
+                    elif parked_state in _TERMINAL_TASK_STATUSES:
+                        return _adopt(parked_row)
             instruction = str(
                 node.get("instruction") or node.get("title") or "")
             if node.get("stale_requirement"):
@@ -3017,6 +3062,7 @@ class AppState:
             approval_timeout_seconds=lambda: float(getattr(
                 self.config, "autonomous_approval_timeout_seconds", 0.0) or 0.0)
             if getattr(self.config, "autonomous_mode", False) else 0.0,
+            task_resolver=self._task_row,
         )
         self._register_goal_metrics(registry, sup, runtime_root)
         # Evidence for non-executor node kinds (verify/internal/job) —
@@ -3029,6 +3075,18 @@ class AppState:
                                              hooks, emit)
         self._wire_signal_sources(sup, runtime_root)
         return sup
+
+    def _task_row(self, task_id: str) -> dict | None:
+        """Ledger row for a task id — supervisor approval reconciliation
+        consults it to notice chat-lane decisions on parked tasks."""
+        try:
+            row = self.tasks.get(task_id)
+        except Exception:
+            return None
+        try:
+            return row.as_dict() if hasattr(row, "as_dict") else dict(row)
+        except Exception:
+            return None
 
     def _wire_signal_sources(self, sup, runtime_root: Path) -> None:
         """Bind live telemetry providers to the detector scanner. Every
@@ -7016,6 +7074,25 @@ def _task_status_succeeded(status: str) -> bool:
     `ok: false` and wedge its dependents.
     """
     return str(status).startswith("completed") or str(status) == "reverted"
+
+
+# Ledger statuses where a parked mission task has already reached its
+# outcome — a chat-side approval decision (`/api/tasks/decide`) drives the
+# resume itself, so a terminal parked row means the node's work is done
+# and must be adopted, not re-run. `interrupted` is included deliberately:
+# it is non-terminal for the ledger (cold-resumable) but dead in this
+# process, so the mission must adopt its error rather than re-run it.
+_TERMINAL_TASK_STATUSES = frozenset({
+    "completed", "completed_with_warnings", "error", "failed",
+    "cancelled", "reverted", "step_limit", "interrupted",
+})
+
+# Ledger statuses that mean a chat-side resume is still in flight for a
+# parked mission task — wait (bounded) for it to land instead of starting
+# a second run on top of it.
+_INFLIGHT_TASK_STATUSES = frozenset({
+    "running", "planning", "verifying", "reviewing",
+})
 
 
 def _clean_attachments(body: dict) -> list[dict]:

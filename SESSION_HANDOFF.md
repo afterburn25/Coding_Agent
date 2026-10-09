@@ -34,7 +34,37 @@
   `test_finish_publishes_sealed_zero_for_unspoken`,
   `test_cancelled_job_publishes_skipped`.
 
-Checkpoint: **2923 tests** (2921 passed + 3 env skips).
+Checkpoint: **2926 tests** (2926 passed + 3 env skips).
+
+## Follow-up — Mission/task approval reconciliation
+
+Found by live mission dogfood on `D:\Nexus_Core`: a mission work node
+parked when its inner agent task hit a verify-gate (`write_file` landed,
+task requested shell approval). Resolving the gate through the task lane
+(`/api/tasks/decide`) resumed the task — but the mission stayed
+`waiting_approval` forever, and a manual mission-level approval would
+have re-run the whole node.
+
+- `server.py` — the node executor now inspects the parked task row when a
+  mission `approval_granted` stamp lands: `waiting_approval` →
+  `agent.resume` (existing path); terminal status → the task's outcome is
+  **adopted** as the node result (`_mission_node_out` derives `ok` from
+  the ledger status, so failures propagate); in-flight
+  (`running`/`planning`/`verifying`/`reviewing`) → bounded 300s wait for
+  the chat-side resume to land, then adopt/resume accordingly.
+  `interrupted` is adopted as a failure (dead in this process).
+- `supervisor.py` — new `task_resolver` hook (wired to `self.tasks` in
+  `AppState`); `_reconcile_approvals` consults `TaskRecord.
+  approval_resolutions` on each tick: a recorded chat-lane decision is
+  adopted into the mission approval row (`resolve_approval`), which
+  stamps `approval_granted` and dispatches the node — the executor then
+  adopts the already-finished task. A task row still `waiting_approval`
+  leaves the mission parked.
+- Tests: `test_chat_side_approval_releases_parked_mission`,
+  `test_chat_side_denial_replans_parked_mission`,
+  `test_still_pending_task_gate_stays_parked`.
+
+Checkpoint: **2926 tests** (2926 passed + 3 env skips).
 
 ## Follow-up — Actions-artifact dogfood + deploy script
 
@@ -3198,7 +3228,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2923 tests` passing (3 environment skips).
+Expected at this checkpoint: `2926 tests` passing (3 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

@@ -69,6 +69,7 @@ class AutonomousSupervisor:
         safemode: Any = None,                # SafeModeStore — denies autonomous work
         rc: Any = None,                      # RCManager — freezes self-dev/packages
         approval_timeout_seconds: float | Callable[[], float] = 0.0,
+        task_resolver: Callable[[str], dict | None] | None = None,
     ) -> None:
         self.workspace = Path(workspace)
         self.store = AutonomyStore(store_root)
@@ -155,6 +156,10 @@ class AutonomousSupervisor:
         self.activities = activities
         self._node_rows: dict[str, str] = {}  # node_id -> activity row id
         self._hooks = dict(runtime_hooks or {})
+        # task_id -> task ledger row (dict) — lets approval reconciliation
+        # notice a gate decided through the chat lane (`/api/tasks/decide`)
+        # instead of this supervisor's own approval endpoint.
+        self._task_resolver = task_resolver
 
         self._wake = threading.Event()
         self._running = False
@@ -1918,6 +1923,48 @@ class AutonomousSupervisor:
         except (TypeError, ValueError):
             return 0.0
 
+    def _chat_side_decision(self, mission: dict) -> bool | None:
+        """Whether a chat-lane decision already resolved this mission's
+        parked task gate.
+
+        A mission node parks when its inner agent *task* hits an approval
+        gate. The task's own decide path (`/api/tasks/decide`) can resolve
+        that gate without ever touching the mission-level approval row —
+        recording the decision on the task's ``approval_resolutions`` and
+        driving the resume itself. Returns True/False when such a decision
+        is found, None when the gate is genuinely still pending."""
+        if self._task_resolver is None:
+            return None
+        node = next(
+            (n for n in (mission.get("graph") or {}).get("nodes", [])
+             if n.get("state") == "waiting_approval"),
+            None)
+        if node is None:
+            return None
+        task_id = str((node.get("result") or {}).get("task_id") or "")
+        if not task_id:
+            return None
+        try:
+            task = self._task_resolver(task_id)
+        except Exception:
+            task = None
+        if not task:
+            return None
+        for res in (task.get("approval_resolutions") or []):
+            if str(res.get("status") or "") == "resolved":
+                return str(res.get("decision") or "") != "deny"
+        # No recorded decision — the task still parks or resolved through
+        # another lane (session grant). A terminal task means the work
+        # finished (or can't): success adopts, failure denies.
+        status = str(task.get("status") or "")
+        if status == "waiting_approval":
+            return None
+        if status.startswith("completed") or status == "reverted":
+            return True
+        if status in {"failed", "error", "cancelled", "step_limit"}:
+            return False
+        return None  # still running — the resume is in flight
+
     def _pending_approval_for(self, mission_id: str) -> dict | None:
         def created(row: dict) -> float:
             try:
@@ -1952,6 +1999,20 @@ class AutonomousSupervisor:
                 if str(m.get("status")) != "waiting_approval":
                     continue
                 pending = self._pending_approval_for(str(m.get("id") or ""))
+                if pending is not None:
+                    decided = self._chat_side_decision(m)
+                    if decided is not None:
+                        # The parked task's gate was approved/denied through
+                        # the chat lane (/api/tasks/decide) — adopt that
+                        # decision so the mission doesn't sit parked on a
+                        # resolved gate until the timeout fires.
+                        try:
+                            self.resolve_approval(
+                                str(pending.get("id") or ""),
+                                approve=decided)
+                        except Exception:
+                            pass
+                        continue
                 if pending is None:
                     node = next(
                         (n for n in (m.get("graph") or {}).get("nodes", [])
