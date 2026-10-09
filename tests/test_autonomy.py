@@ -3040,6 +3040,33 @@ class EngineeringMissionTests(unittest.TestCase):
             self.assertFalse(Path(wt["path"]).exists())
             sup.stop()
 
+    def test_replan_reuses_workstreams(self):
+        """§1 — workstream identity is durable: a replan rebuilds the
+        task graph but must NOT append duplicate lane records (observed
+        live: 4 lanes became 8 orphaned rows)."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            sup.tick()
+            time.sleep(0.2)
+            m = sup.missions.get(m["id"])
+            ws_before = {w["id"] for w in m.get("workstreams") or []}
+            self.assertEqual(len(ws_before), 2)
+            # Force a replan — same decomposition.
+            sup.missions.update(m["id"], status="replanning")
+            sup.tick()
+            time.sleep(0.2)
+            m = sup.missions.get(m["id"])
+            titles = [w["title"] for w in m.get("workstreams") or []]
+            self.assertEqual(len(titles), len(set(titles)),
+                             "replan duplicated workstream rows")
+            live = [w for w in m["workstreams"]
+                    if w["status"] not in
+                    {"integrated", "abandoned", "failed"}]
+            self.assertEqual(len(live), 2)
+            sup.stop()
+
     def test_restart_preserves_hierarchy_state(self):
         """§39 — workstreams, decisions, ownership leases and the
         context capsule are all durable record state: a supervisor
