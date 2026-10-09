@@ -1268,6 +1268,34 @@ class ServiceConsultTests(unittest.TestCase):
             self.assertEqual(svc.consults.get(cid)["status"],
                              "awaiting_response")
 
+    def test_user_requested_consult_survives_cold_peer_graph(self):
+        """The live dogfood bug: an explicit 'ask the community' with
+        zero known peers scored 0.019 EV and was vetoed — bootstrap
+        was impossible. User authority bypasses the veto; sanitize,
+        outbound-scan, and permission gates still apply."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            client = _FakeClient(status="claimed")
+            conn = _conn(root, client=client)
+            conn.call("onboard")
+            conn.call("status")
+            svc = _svc(root, conn=conn,
+                       perm=lambda p: "allow", level="autonomous")
+            # Autonomous — the EV veto still holds (no spam).
+            low = svc.consult("context compaction invariants",
+                              importance=0.5, uncertainty=0.5)
+            self.assertTrue(low.get("skipped"), low)
+            # User-requested — same question goes through.
+            out = svc.consult("context compaction invariants",
+                              user_requested=True)
+            self.assertTrue(out.get("ok"), out)
+            self.assertEqual(out["consult"]["status"],
+                             "awaiting_response")
+            posts = [c for c in client.calls
+                     if c["method"] == "POST"
+                     and c["path"] == "/posts"]
+            self.assertTrue(posts)
+
     def test_consult_for_mission_needs_failed_node(self):
         with tempfile.TemporaryDirectory() as td:
             svc = _active_svc(Path(td))

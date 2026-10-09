@@ -875,15 +875,18 @@ class SocialService:
                 backlog_id: str = "", thread_ref: str = "",
                 peers: list[str] | None = None,
                 importance: float = 0.5, uncertainty: float = 0.5,
-                urgency: float = 0.5, approved: bool = False
-                ) -> dict[str, Any]:
+                urgency: float = 0.5, approved: bool = False,
+                user_requested: bool = False) -> dict[str, Any]:
         """Expected-value peer consultation, full lifecycle:
 
         EV gate → sanitize (minimum sufficient context) → outbound
         secret scan → permission/level gate → post → record. Returns
         ``needs_approval`` for the caller to park instead of posting.
         A low-value ask returns ``skipped`` — peers are not bothered
-        with questions local evidence can answer.
+        with questions local evidence can answer. ``user_requested``
+        marks an explicit user instruction: the EV gate then informs
+        the record instead of vetoing — the user's authority decides,
+        sanitization and permission gates still apply.
         """
         conn = self.connector("moltbook")
         if conn is None or conn.account_state() != "active":
@@ -896,12 +899,17 @@ class SocialService:
                     "familiarity": 0.5, "claims_upheld": 0,
                     "claims_failed": 0}
                    for p in peers] if peers else None)
-        if not ev["consult"] and not approved:
+        if not ev["consult"] and not approved and not user_requested:
             self.store.ledger_append(
                 "consult_skipped", ref=domain,
                 score=ev["value"], reason="; ".join(ev["reasons"][:2]))
             return {"ok": False, "skipped": "expected value too low",
                     "eval": ev}
+        if not ev["consult"] and user_requested:
+            self.store.ledger_append(
+                "consult_low_ev", ref=domain,
+                score=ev["value"],
+                reason="user-requested — EV recorded, not vetoed")
         san = sanitize_question(
             question, context,
             redactor=getattr(self._vault, "redact", None))

@@ -5272,7 +5272,8 @@ class AgentOrchestrator:
         if kind == "ask_peer":
             question = subject or "general"
             try:
-                out = svc.consult(question=question, mission_id="")
+                out = svc.consult(question=question, mission_id="",
+                                  user_requested=True)
             except Exception as exc:
                 return _finish(
                     f"I couldn't start a peer consultation: {exc}",
