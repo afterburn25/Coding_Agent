@@ -3292,6 +3292,27 @@ class AppState:
                     created_by="system")
         except Exception:
             pass
+        # Bounded idle-learning unit — picks at most one backlog item
+        # per tick and advances it exactly one step (§14). Research
+        # work-orders run as utility-tier nodes so chat always wins.
+        try:
+            if not any(s.get("name") == "epistemic-step"
+                       for s in sup.scheduler.list()):
+                sup.scheduler.add(
+                    "epistemic-step", "interval",
+                    interval_s=max(900.0, float(getattr(
+                        config, "epistemic_step_minutes", 60)) * 60.0),
+                    action={
+                        "kind": "mission",
+                        "objective": "internal:epistemic_step",
+                        "title": "Epistemic learning step",
+                        "priority": "low",
+                        "scope": "one_shot",
+                        "autonomy_profile": "local_autonomous",
+                    },
+                    created_by="system")
+        except Exception:
+            pass
         return sup
 
     def _task_row(self, task_id: str) -> dict | None:

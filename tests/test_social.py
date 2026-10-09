@@ -1158,6 +1158,112 @@ class EpistemicStoreTests(unittest.TestCase):
             et = {x["to"]: x["types"] for x in g["edges"]}
             self.assertIn("reproduced", et["PeerA"])
 
+    def test_teaching_requires_verified_evidence_not_time(self):
+        """§11/§12 — untested or low-confidence lessons are never
+        published no matter how long they sit."""
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td))
+            svc.store.journal_add(
+                "KV cache at q8 trades 2%% VRAM for measurable ppl",
+                source="local", tested="bench: -18%% VRAM, +0.02 ppl",
+                confidence=0.8)
+            svc.store.journal_add(
+                "A hunch with no evidence behind it yet",
+                source="local", confidence=0.9)
+            svc.store.journal_add(
+                "Tested but unsure whether it generalises at all",
+                source="local", tested="one run", confidence=0.4)
+            cands = svc.teaching_candidates()
+            self.assertEqual(len(cands), 1)
+            self.assertIn("KV cache", cands[0]["learned"])
+
+    def test_teaching_parks_then_publishes_once(self):
+        """§11 — ask-level gate parks the candidate; approval publishes
+        and marks the journal entry taught so it never reposts."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vault = _FakeVault()
+            conn = _conn(root, client=_FakeClient(status="claimed"),
+                         vault=vault)
+            conn.call("onboard")
+            conn.call("status")
+            svc = _svc(root, conn=conn, vault=vault,
+                       perm=lambda p: "ask", level="autonomous")
+            svc.store.journal_add(
+                "Lease-backed ownership prevents stale writers from "
+                "clobbering a lane", source="local",
+                tested="conflict dogfood: parked lane, dirty work kept",
+                confidence=0.85)
+            first = svc.consider_teaching()
+            self.assertTrue(first["needs_approval"])
+            posts = [c for c in conn._client.calls
+                     if c["method"] == "POST" and "/posts" in c["path"]]
+            self.assertEqual(posts, [])
+            second = svc.consider_teaching(approved=True)
+            self.assertTrue(second["published"])
+            posts = [c for c in conn._client.calls
+                     if c["method"] == "POST" and "/posts" in c["path"]]
+            self.assertEqual(len(posts), 1)
+            third = svc.consider_teaching(approved=True)
+            self.assertIsNone(third["candidate"])
+            posts = [c for c in conn._client.calls
+                     if c["method"] == "POST" and "/posts" in c["path"]]
+            self.assertEqual(len(posts), 1)
+
+    def test_epistemic_step_units_bounded(self):
+        """§14 — one item, one transition: peers→consult, plan→
+        experiment, plain→research, done→journal+resolved. Nothing
+        loops."""
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td))
+            svc.store.add_backlog(
+                "question", "KV cache paging",
+                question="does paged KV help 32k ctx", urgency=0.9,
+                candidate_peers=["PeerKV"])
+            svc.store.add_backlog(
+                "claim_verification", "flag X VRAM",
+                verification_plan="measure peak with flag", urgency=0.5)
+            svc.store.add_backlog(
+                "question", "open mystery", urgency=0.2)
+            out = svc.epistemic_step()
+            self.assertEqual(out["unit"], "consult")
+            svc.store.set_backlog_status(out["item"], "awaiting_response")
+            out = svc.epistemic_step()
+            self.assertEqual(out["unit"], "experiment")
+            out = svc.epistemic_step()
+            self.assertEqual(out["unit"], "research")
+            self.assertEqual(out["item"],
+                             svc.store.backlog_open()[-1]["id"])
+            done = svc.epistemic_step(
+                research={"output": "paged KV works on llama.cpp"},
+                item_id=out["item"])
+            self.assertEqual(done["unit"], "journal")
+            j = svc.store.journal_recent(limit=5)
+            self.assertTrue(any("Researched" in e.get("learned", "")
+                                for e in j))
+            # Nothing actionable remains — in-flight items wait.
+            self.assertEqual(svc.epistemic_step()["unit"], "waiting")
+
+    def test_epistemic_step_respects_off_level(self):
+        """§75 — 'off' means no background social learning at all."""
+        with tempfile.TemporaryDirectory() as td:
+            svc = _svc(Path(td), level="off")
+            svc.store.add_backlog("question", "topic", urgency=0.9)
+            out = svc.epistemic_step()
+            self.assertIsNone(out["unit"])
+            self.assertIn("off", out.get("skipped", ""))
+
+    def test_epistemic_step_research_wait_not_duplicated(self):
+        """An item already out for research waits — the step does not
+        attach a second unit or consult."""
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td))
+            it = svc.store.add_backlog("question", "deep question",
+                                       urgency=0.9)
+            svc.mark_research(it["id"], "m-x", "t-y")
+            out = svc.epistemic_step()
+            self.assertEqual(out["unit"], "waiting")
+
     def test_replication_single_env_is_comparable(self):
         with tempfile.TemporaryDirectory() as td:
             st = SocialStore(Path(td))

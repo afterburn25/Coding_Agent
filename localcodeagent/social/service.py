@@ -692,10 +692,11 @@ class SocialService:
 
     # -- heartbeat -------------------------------------------------------------------
 
-    def heartbeat(self) -> dict[str, Any]:
+    def heartbeat(self, *, approved: bool = False) -> dict[str, Any]:
         """One social check-in — notifications, followed threads,
-        learning opportunities. What it does is bounded by the level
-        and permissions; it never posts just because time passed."""
+        learning opportunities, and at most one bounded teaching
+        decision. What it does is bounded by the level and
+        permissions; it never posts just because time passed."""
         if not self.drive.allows("read"):
             return {"ok": True, "skipped": "social level is off"}
         conn = self.connector("moltbook")
@@ -718,6 +719,15 @@ class SocialService:
                     {"kind": "consults_expired",
                      "count": len(expired)})
             self.store.interest_decay()
+            teach = self.consider_teaching(approved=approved)
+            if teach.get("candidate"):
+                cand = teach["candidate"]
+                summary["actions"].append({
+                    "kind": "teach_candidate",
+                    "title": str(cand.get("learned") or "")[:140],
+                    "published": bool(teach.get("published")),
+                    "needs_approval": bool(teach.get("needs_approval")),
+                    "permission": teach.get("permission")})
             self.drive.heartbeat_done()
         except Exception as exc:
             summary["ok"] = False
@@ -1272,6 +1282,153 @@ class SocialService:
                 score=0.8, reason=f"postmortem: {title[:80]}")
             self.store.bump_reputation("posts")
         return out
+
+    def teaching_candidates(self) -> list[dict[str, Any]]:
+        """§11/§12 — journal entries that have crossed the
+        'verified and useful' bar and haven't been taught. Selection is
+        content-driven only: no timer, no reputation pressure."""
+        taught = set(self.store.drive.data.get(
+            "taught_journal_ids") or [])
+        cands = [
+            e for e in self.store.journal_recent(limit=200)
+            if e.get("id") not in taught
+            and str(e.get("tested") or "").strip()
+            and float(e.get("confidence") or 0) >= 0.7
+            and len(str(e.get("learned") or "")) >= 40]
+        cands.sort(key=lambda e: (
+            float(e.get("confidence") or 0), float(e.get("ts") or 0)))
+        return cands
+
+    def consider_teaching(self, *, approved: bool = False
+                          ) -> dict[str, Any]:
+        """§11 — the autonomous 'is this worth teaching?' decision.
+        One bounded unit per call: pick the strongest verified
+        candidate and attempt `teach_postmortem` through the normal
+        gate — evidence bar, outbound scan, social.post permission.
+        Approval parks the candidate instead of publishing."""
+        cands = self.teaching_candidates()
+        if not cands:
+            return {"ok": True, "candidate": None}
+        e = cands[0]
+        learned = str(e.get("learned") or "").strip()
+        title = learned[:110].rstrip()
+        evidence = str(e.get("tested") or e.get("evidence") or "")
+        body = f"Verified lesson: {learned}"
+        if e.get("prior_belief"):
+            body += f"\n\nPrior belief: {str(e['prior_belief'])[:300]}"
+        if e.get("peer"):
+            body += f"\n\nOrigin: tested after input from {e['peer']}"
+        out = self.teach_postmortem(
+            title, body, evidence=evidence,
+            limitations=str(e.get("usefulness") or ""),
+            approved=approved)
+        if out.get("ok"):
+            taught = list(self.store.drive.data.get(
+                "taught_journal_ids") or [])
+            taught.append(e.get("id"))
+            self.store.drive.data["taught_journal_ids"] = taught[-50:]
+            self.store.drive.save()
+            return {"ok": True, "candidate": e, "published": True,
+                    "post": out.get("data")}
+        if out.get("needs_approval"):
+            return {"ok": True, "candidate": e,
+                    "needs_approval": True,
+                    "permission": out.get("permission"),
+                    "title": title}
+        return {"ok": False, "candidate": e, "error": out}
+
+    def epistemic_step(self, *, research: dict | None = None,
+                       item_id: str = "") -> dict[str, Any]:
+        """§14 — ONE bounded learning unit per call. Advances the
+        highest-pressure open backlog item exactly one step:
+
+        - a completed research result lands in the Learning Journal
+          and closes the item;
+        - an item already researching just waits (no duplicate work);
+        - an item with candidate peers opens a real consult through
+          the normal gate;
+        - an item with a verification plan opens the experiment
+          record and moves to ``testing``;
+        - anything else returns ``research`` so the caller can attach
+          a bounded utility-tier work-order.
+
+        No infinite loop — one item, one transition, one return."""
+        if not self.drive.allows("read"):
+            return {"ok": True, "unit": None,
+                    "skipped": "social learning is off"}
+        items = self.store.backlog_open(limit=10)
+        if not items:
+            return {"ok": True, "unit": None}
+        # In-flight items are not candidates — an awaiting consult or
+        # running experiment must not attract a second unit.
+        in_flight = {"awaiting_response", "peer_consultation", "testing"}
+        candidates = [
+            i for i in items
+            if str(i.get("status")) not in in_flight
+            and not (str(i.get("status")) == "researching"
+                     and (i.get("metadata") or {}).get("research"))]
+        if not candidates:
+            return {"ok": True, "unit": "waiting",
+                    "item": items[0].get("id")}
+        top = max(candidates, key=lambda i: (
+            float(i.get("urgency", 0)), float(i.get("importance", 0))))
+        if research is not None:
+            self.store.journal_add(
+                f"Researched: {str(top.get('topic'))[:110]}",
+                source="idle_research",
+                evidence=str(research.get("output") or "")[:400],
+                confidence=0.6,
+                usefulness=str(top.get("topic") or "")[:200])
+            self.store.set_backlog_status(top["id"], "resolved")
+            return {"ok": True, "unit": "journal",
+                    "item": top["id"]}
+        peers = [str(p) for p in (top.get("candidate_peers") or [])
+                 if str(p).strip()]
+        if peers:
+            question = str(top.get("question") or top.get("topic")
+                           or "")[:400]
+            out = self.consult(
+                question, domain=self._domain_of(
+                    f"{top.get('topic','')} {question}"),
+                backlog_id=str(top.get("id") or ""),
+                peers=peers,
+                importance=float(top.get("importance", 0.5) or 0.5),
+                urgency=float(top.get("urgency", 0.5) or 0.5))
+            if out.get("needs_approval"):
+                return {"ok": True, "unit": "consult",
+                        "item": top["id"], "needs_approval": True,
+                        "permission": out.get("permission"),
+                        "consult_id": str((out.get("consult") or {})
+                                          .get("id") or ""),
+                        "title": question[:140]}
+            c = out.get("consult") or {}
+            if c.get("id"):
+                self.store.set_backlog_status(top["id"], "researching")
+                return {"ok": True, "unit": "consult",
+                        "item": top["id"], "consult": c["id"]}
+            return {"ok": bool(out.get("ok")), "unit": "consult",
+                    "item": top["id"], "detail": out}
+        if str(top.get("verification_plan") or "").strip():
+            e = self.store.add_experiment(
+                str(top.get("question") or top.get("topic") or ""),
+                source="epistemic_idle",
+                plan=str(top.get("verification_plan") or "")[:400],
+                environment=self.local_env())
+            self.store.set_backlog_status(top["id"], "testing")
+            return {"ok": True, "unit": "experiment",
+                    "item": top["id"], "experiment": e["id"]}
+        return {"ok": True, "unit": "research", "item": top["id"],
+                "topic": str(top.get("topic") or ""),
+                "question": str(top.get("question") or "")}
+
+    def mark_research(self, item_id: str, mission_id: str,
+                      node_id: str) -> dict[str, Any] | None:
+        """Record which mission node owns this item's research unit —
+        restart-safe, so a later step can collect the result."""
+        return self.store.set_backlog_status(
+            item_id, "researching",
+            fields={"research": {"mission": mission_id,
+                                 "node": node_id}})
 
     def correct_record(self, post_id: str, correction: str, *,
                        approved: bool = False) -> dict[str, Any]:

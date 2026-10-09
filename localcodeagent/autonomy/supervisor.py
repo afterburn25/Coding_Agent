@@ -2894,11 +2894,75 @@ class AutonomousSupervisor:
                 return {"ok": True,
                         "output": "social heartbeat: no service wired"}
             try:
-                out = hb() or {}
+                granted = (node.get("metadata") or {}).get(
+                    "approval_granted") or {}
+                approved = str(granted.get("action")) == "social.post"
+                out = hb(approved=approved) or {}
+                parked = next(
+                    (a for a in (out.get("actions") or [])
+                     if a.get("needs_approval")), None)
+                if parked:
+                    return {"ok": False,
+                            "pending_approval": {
+                                "name": "social.post",
+                                "kind": "social",
+                                "detail": "Publish verified lesson: "
+                                          f"{str(parked.get('title'))[:200]}"}}
                 return {"ok": bool(out.get("ok", True)),
                         "output": json.dumps(out)[:800]}
             except Exception as exc:
                 return {"ok": False, "output": f"social heartbeat: {exc}"}
+        if instr.startswith("internal:epistemic_step"):
+            social = getattr(self, "social", None)
+            step = getattr(social, "epistemic_step", None)
+            if not callable(step):
+                return {"ok": True,
+                        "output": "epistemic step: no social service"}
+            try:
+                meta = node.get("metadata") or {}
+                granted = meta.get("approval_granted") or {}
+                parked_cid = str(meta.get("parked_consult") or "")
+                if (str(granted.get("action")) == "social.post"
+                        and parked_cid):
+                    out = social.dispatch_consult(
+                        parked_cid, approved=True)
+                    return {"ok": bool(out.get("ok")),
+                            "output": f"consult {parked_cid}: "
+                                      f"{str(out.get('status') or out.get('error'))[:200]}"}
+                research = self._epistemic_research_result(mission_id)
+                if research is not None:
+                    out = step(research=research,
+                               item_id=research["item"])
+                    return {"ok": bool(out.get("ok", True)),
+                            "output": "journaled research for "
+                                      f"{research['item']}"}
+                out = step() or {}
+                if out.get("needs_approval"):
+                    cid = str(out.get("consult_id") or "")
+                    if cid:
+                        self._mutate_node_meta(
+                            mission_id, str(node.get("id") or ""),
+                            {"parked_consult": cid})
+                    return {"ok": False,
+                            "pending_approval": {
+                                "name": "social.post",
+                                "kind": "social",
+                                "detail": "Ask peers: "
+                                          f"{str(out.get('title'))[:200]}"}}
+                if str(out.get("unit") or "") == "research":
+                    nid = self._attach_epistemic_research(
+                        mission_id, out)
+                    if nid:
+                        social.mark_research(
+                            str(out.get("item") or ""), mission_id, nid)
+                    return {"ok": True,
+                            "output": "research unit attached for "
+                                      f"{out.get('item')}"}
+                return {"ok": bool(out.get("ok", True)),
+                        "output": json.dumps(out)[:800]}
+            except Exception as exc:
+                return {"ok": False,
+                        "output": f"epistemic step: {exc}"}
         if instr.startswith("internal:peer_wait:"):
             cid = instr.split("internal:peer_wait:", 1)[1].strip()
             social = getattr(self, "social", None)
@@ -2923,6 +2987,64 @@ class AutonomousSupervisor:
                     "output": f"peer consult {cid}: {status} — "
                               "continuing without an answer"}
         return {"ok": True, "output": "internal task acknowledged"}
+
+    def _mutate_node_meta(self, mission_id: str, node_id: str,
+                          patch: dict) -> None:
+        def _fn(row: dict) -> None:
+            for n in (row.get("graph") or {}).get("nodes") or []:
+                if n.get("id") == node_id:
+                    n.setdefault("metadata", {}).update(patch)
+        self.missions.mutate(mission_id, _fn)
+
+    def _epistemic_research_result(self, exclude_mission: str
+                                   ) -> dict | None:
+        """Find a completed epistemic research work-order whose output
+        hasn't been journaled yet. Marking it consumed here keeps the
+        collection exactly-once."""
+        for m in self.missions.list():
+            for n in (m.get("graph") or {}).get("nodes") or []:
+                meta = n.get("metadata") or {}
+                if (meta.get("epistemic_item")
+                        and not meta.get("consumed")
+                        and n.get("state") == "completed"):
+                    out = {
+                        "item": str(meta["epistemic_item"]),
+                        "output": str((n.get("result") or {})
+                                      .get("output") or "")}
+                    self._mutate_node_meta(
+                        str(m.get("id") or ""), str(n.get("id") or ""),
+                        {"consumed": True})
+                    return out
+        return None
+
+    def _attach_epistemic_research(self, mission_id: str,
+                                   step: dict) -> str:
+        """Attach ONE bounded utility-tier research work-order to this
+        mission — the model does the research; a later step journals
+        the result."""
+        from .task_graph import new_task
+        topic = str(step.get("topic") or "")[:200]
+        question = str(step.get("question") or "")[:400]
+        item = str(step.get("item") or "")
+        instruction = (
+            "Bounded research unit — answer this question from your own "
+            "knowledge, clearly marking what is fact vs inference, in "
+            "under 250 words. Do not modify any files.\n\n"
+            f"Topic: {topic}\nQuestion: {question or topic}")
+        node = new_task(
+            f"Research: {topic[:60] or 'open question'}",
+            instruction, kind="agent", priority=40, verify="none",
+            max_retries=1, created_by="epistemic_step",
+            model_role="utility",
+            metadata={"epistemic_item": item})
+
+        def _fn(row: dict) -> None:
+            row.setdefault("graph", {}).setdefault(
+                "nodes", []).append(node)
+        self.missions.mutate(mission_id, _fn)
+        self._audit("epistemic_research", mission=mission_id,
+                    item=item, node=node["id"])
+        return str(node.get("id") or "")
 
     def _default_job(self, mission: dict, node: dict) -> dict:
         op = str((node.get("metadata") or {}).get("job") or "")

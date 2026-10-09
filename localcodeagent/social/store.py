@@ -772,7 +772,9 @@ class SocialStore:
         return row
 
     def set_backlog_status(self, item_id: str, status: str,
-                           note: str = "") -> dict[str, Any] | None:
+                           note: str = "",
+                           fields: dict | None = None
+                           ) -> dict[str, Any] | None:
         """Move a backlog item through its lifecycle — identified →
         researching → peer_consultation → awaiting_response → testing →
         verified/rejected/unresolved."""
@@ -780,6 +782,10 @@ class SocialStore:
             if it.get("id") == item_id:
                 it["status"] = status
                 it["updated_at"] = _now()
+                if fields:
+                    it.setdefault("metadata", {}).update(
+                        {k: v for k, v in fields.items()
+                         if v is not None})
                 if status in BACKLOG_CLOSED:
                     it["resolved_at"] = _now()
                 if note:
