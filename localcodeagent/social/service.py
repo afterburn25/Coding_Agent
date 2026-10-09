@@ -343,6 +343,19 @@ class SocialService:
                 r"\b(?:have|did)\s+you\s+join\w*\b", t,
                 re.IGNORECASE):
             return "account_state", ""
+        # 'i already did that' / 'done' / 'verified it' — a completion
+        # report whose referent resolves to the outstanding claim. Only
+        # claimed while verification is genuinely pending; the gate is
+        # connector state, not the phrasing alone.
+        if pending and re.search(
+                r"\b(?:i\s+(?:have\s+)?already|already)\s+"
+                r"(?:done|did|verified|claimed|finished)\b|"
+                r"\b(?:i'?ve|i\s+have)\s+(?:already\s+)?"
+                r"(?:done|verified|claimed|finished)\b|"
+                r"\b(?:it|that)(?:'s| is)\s+done\b|"
+                r"\bdid\s+(?:it|that)\b|"
+                r"^\s*done\b", t, re.IGNORECASE):
+            return "verification_done", ""
         return None
 
     def pending_claim_url(self) -> str:

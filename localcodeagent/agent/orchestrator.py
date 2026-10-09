@@ -4758,6 +4758,9 @@ class AgentOrchestrator:
         except Exception:
             query = None
         if query is not None:
+            if query[0] == "verification_done":
+                return self._confirm_social_verification(
+                    svc, task_id, event_callback)
             return self._social_query_reply(
                 svc, query, task_id, event_callback)
         try:
@@ -4856,6 +4859,72 @@ class AgentOrchestrator:
         return self._run_social_join(
             svc, service, task_id, decision, builtin_event,
             event_callback)
+
+    def _confirm_social_verification(self, svc, task_id: str,
+                                     event_callback=None):
+        """'i already did that' while an ownership claim is pending —
+        poll the live connector (the only authority on whether the user
+        completed verification), then resume the use request the
+        verification blocked. The blocked intent is recovered from the
+        recent conversation rather than re-asked."""
+        service = "moltbook"
+        decision = RoutingDecision(
+            role="utility", model_id="builtin-social",
+            reasons=["social verification check — live connector state"],
+            complexity=0)
+        builtin_event = {
+            "type": "builtin_utility", "model_id": "builtin-social",
+            "role": "utility", "reason": "social verification check"}
+        self._safe_emit(event_callback,
+                        {"type": "model", "event": builtin_event})
+
+        def _finish(text: str, ok: bool = True):
+            done = self.tasks.update(
+                task_id, status="completed" if ok else "failed",
+                phase="done", model_id="builtin-social",
+                model_role="utility", summary=text, final_content=text,
+                steps=0, error="" if ok else text)
+            self._safe_emit(event_callback,
+                            {"type": "task", "task": done.as_dict()})
+            return AgentResult(content=text, routing=decision,
+                               model_events=[builtin_event], steps=0,
+                               task=done.as_dict())
+
+        try:
+            svc.check_verification(service)
+        except Exception:
+            pass
+        st = svc.connector_state(service)
+        if str(st.get("account") or "") == "active":
+            # Verified — resume the blocked use-intent so the user's
+            # original ask ('browse, post, respond') runs now instead of
+            # being dropped on the floor.
+            intents = self._recent_social_use(svc)
+            if intents is not None:
+                return self._run_social_use(
+                    svc, service, intents, task_id, decision,
+                    builtin_event, event_callback)
+            return _finish(
+                "Verified — my Moltbook account is active now. "
+                "What would you like me to do there?")
+        return _finish(
+            "The claim hasn't flipped yet — the account still reads "
+            "as awaiting verification.\n\n" + svc.account_state_text(),
+            ok=False)
+
+    def _recent_social_use(self, svc) -> dict | None:
+        """Most recent resolve_use match in the visible conversation —
+        the request a pending verification interrupted."""
+        try:
+            for msg in reversed(self._convo_messages(limit=12)):
+                if str(msg.get("role")) != "user":
+                    continue
+                use = svc.resolve_use(str(msg.get("content") or ""))
+                if use is not None:
+                    return use
+        except Exception:
+            pass
+        return None
 
     @staticmethod
     def _social_feed_summary(out: dict, service: str) -> str:
@@ -8898,6 +8967,139 @@ class AgentOrchestrator:
         if env.ambiguity:
             final.ambiguity = list(env.ambiguity)[:4]
         return final
+
+    def run_work_order(
+        self,
+        instruction: str,
+        *,
+        task_title: str = "",
+        mission_id: str | None = None,
+        model_role: str | None = None,
+        system_blocks: list[str] | None = None,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentResult:
+        """Execute a delegated work order (mission node instruction).
+
+        A machine-authored work order is NOT a user utterance — feeding
+        it through run() re-adjudicates it as conversation, where lane
+        matchers can claim it ('add an endpoint to server.py' became a
+        GitHub repo-read, the connector 404'd, and the chat reply was
+        marked a completed node). This path skips intent adjudication,
+        lane replies, memory recall, and persona shaping entirely and
+        goes straight to the same agentic tool loop (_drive), the same
+        tool registry, permissions, sessions, and task ledger the
+        interactive path uses. The instruction is executed, not
+        interpreted.
+        """
+        instruction = str(instruction or "").strip()
+        task = self.tasks.create(
+            instruction or task_title or "mission work order",
+            "work_order")
+        if mission_id:
+            self._mission_by_task[task.id] = mission_id
+            self.tasks.update(task.id, mission_id=mission_id)
+        event_callback = self._logging_callback(task.id, event_callback)
+        self._last_callback = event_callback
+        self._task_context(task.id)
+        self.tasks.update(task.id, phase="planning")
+        plan_act = self._act(
+            task.id, "planning", "Planning",
+            "Delegated work order — skipping conversational routing",
+            callback=event_callback)
+        try:
+            project_memory = self.memory.context()
+        except Exception:
+            project_memory = ""
+        try:
+            index_summary = self.repository_index.ensure()
+        except Exception:
+            index_summary = {}
+        decision = self.router.choose(
+            instruction, override=str(model_role or "primary_coder"))
+        if model_role:
+            decision.reasons.append(
+                f"mission worker role override: {model_role}")
+        model_events = [{
+            "type": "selected",
+            "model_id": decision.model_id,
+            "role": decision.role,
+            "reasons": decision.reasons,
+        }]
+        self._safe_emit(event_callback,
+                        {"type": "model", "event": model_events[0]})
+        self._act_update(
+            task.id, plan_act, state="completed",
+            summary=f"Routed to {decision.role} · {decision.model_id}",
+            callback=event_callback)
+        try:
+            decision, profile, provider = self._activate_with_fallback(
+                decision,
+                user_text=instruction,
+                mode="work_order",
+                model_events=model_events,
+                event_callback=event_callback,
+            )
+        except Exception as exc:
+            error_task = self.tasks.update(
+                task.id, status="error", phase="done",
+                error=f"{type(exc).__name__}: {exc}")
+            self._safe_emit(event_callback,
+                            {"type": "task", "task": error_task.as_dict()})
+            self._safe_emit(event_callback,
+                            {"type": "error", "error": error_task.error})
+            if self.activities is not None:
+                self.activities.close_open(task.id, "failed")
+            try:
+                self.tasks.flush_log(task.id)
+            except Exception:
+                pass
+            self._mission_by_task.pop(task.id, None)
+            return AgentResult(
+                content=error_task.error or "model activation failed",
+                routing=decision,
+                task=error_task.as_dict(),
+                model_events=model_events)
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system",
+             "content": f"Workspace memory:\n{project_memory}\n\n"
+                        f"Repository index: "
+                        f"{index_summary.get('file_count', 0)} "
+                        f"indexed files."},
+            {"role": "system",
+             "content": ("This is a delegated engineering work order from "
+                         "the mission supervisor. It is not a chat message "
+                         "— do not reply conversationally and do not "
+                         "describe what you would do. Use the tools to "
+                         "perform the work inside the workspace exactly as "
+                         "specified, then return the requested result "
+                         "fields. If a required action is impossible, "
+                         "report the concrete failure plainly.")},
+        ]
+        for block in system_blocks or []:
+            if str(block).strip():
+                messages.append({"role": "system", "content": str(block)})
+        messages.append({"role": "user", "content": instruction})
+        session = _AgentSession(
+            task_id=task.id,
+            user_text=instruction,
+            mode="work_order",
+            messages=messages,
+            decision=decision,
+            profile=profile,
+            provider=provider,
+            model_events=model_events,
+            event_callback=event_callback,
+            tool_categories=_session_tool_categories(
+                "tool_action", instruction),
+            intent="tool_action",
+        )
+        self._sessions[task.id] = session
+        routed_task = self.tasks.update(
+            task.id, model_id=decision.model_id, model_role=decision.role)
+        self._safe_emit(event_callback,
+                        {"type": "task", "task": routed_task.as_dict()})
+        return self._drive_or_error(session)
 
     def recover(
         self,

@@ -21,6 +21,8 @@ from localcodeagent.social.safety import (
 from localcodeagent.social.service import SocialService
 from localcodeagent.social.store import SocialStore
 from localcodeagent.tools.base import ToolRegistry
+from localcodeagent.workflow.conversation_manager import (
+    ConversationManager)
 from localcodeagent.workflow.checkpoint import CheckpointManager
 from localcodeagent.workflow.memory import ProjectMemory
 from localcodeagent.workflow.repository import RepositoryIndex
@@ -105,7 +107,7 @@ def _svc(root: Path, conn=None, perm=lambda p: "allow",
     return svc
 
 
-def _agent(root: Path, svc=None):
+def _agent(root: Path, svc=None, conv=None):
     profile = ModelProfile(
         id="local", endpoint="http://unused/v1", model="x",
         roles=["primary_coder", "fast_coder", "deep_reasoner",
@@ -121,7 +123,7 @@ def _agent(root: Path, svc=None):
         config, router, tools, _FakeRuntime(),
         tasks=TaskStore(root), checkpoints=CheckpointManager(root),
         memory=ProjectMemory(root), repository_index=index,
-        social=lambda: svc)
+        social=lambda: svc, conversation_manager=conv)
 
 
 # ------------------------------------------------------------------
@@ -760,6 +762,50 @@ class SocialUseLaneTests(unittest.TestCase):
             resumed = agent.resume(result.task["id"], approved=True)
             self.assertIn("Scaling agent memory",
                           resumed.content or "")
+
+    def test_verification_done_resumes_blocked_use(self):
+        """'i have already done that' while a claim is pending — the
+        live connector is the authority: once status flips to claimed
+        the interrupted browse request resumes instead of dropping."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            client = _FeedClient(status="pending_claim")
+            vault = _FakeVault()
+            conn = _conn(root / "s", client=client, vault=vault)
+            conn.call("onboard")          # awaiting owner claim
+            svc = _svc(root / "s", conn=conn, vault=vault,
+                       perm=lambda p: "allow", level="autonomous")
+            conv = ConversationManager(root / "conv.json")
+            agent = _agent(root / "a", svc, conv=conv)
+            first = agent.run("browse moltbook and read posts")
+            self.assertIn("claim", (first.content or "").lower())
+            client._status = "claimed"    # user completed the claim
+            res = agent.run("i have already done that")
+            self.assertIn("Scaling agent memory", res.content or "")
+
+    def test_verification_done_still_pending_reports_truth(self):
+        """Claim not yet completed — poll reports the true state and
+        re-shows the link; no fake 'verified' and no fabricated feed."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            client = _FeedClient(status="pending_claim")
+            conn = _conn(root / "s", client=client)
+            conn.call("onboard")
+            svc = _svc(root / "s", conn=conn, perm=lambda p: "allow")
+            agent = _agent(root / "a", svc)
+            res = agent.run("i already did it")
+            self.assertIn("awaiting", (res.content or "").lower())
+            self.assertNotIn("Scaling agent memory",
+                             res.content or "")
+
+    def test_verification_done_ignored_when_nothing_pending(self):
+        """With no pending claim the same words are ordinary chat —
+        the gate is connector state, not the phrasing."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            svc = _authed_svc(root / "s")
+            self.assertIsNone(
+                svc.classify_social_query("i have already done that"))
 
 
 # ------------------------------------------------------------------

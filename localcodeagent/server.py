@@ -2985,12 +2985,31 @@ class AppState:
             # by the planner or thrash escalation) overrides routing to
             # that tier via the router, without disturbing mode=="auto"
             # behavior elsewhere in the run.
-            result = self.agent.run(
-                instruction, history=[], mode="auto",
-                event_callback=emit_cb,
-                mission_id=str(mission.get("id") or "") or None,
-                model_role=str(node.get("model_role") or "") or None,
-            )
+            # §10 — model escalation is real: a node's model_role (set
+            # by the planner or thrash escalation) overrides routing to
+            # that tier via the router.
+            # A node instruction is a delegated work ORDER, not a user
+            # utterance — run_work_order skips conversational intent
+            # adjudication (which once routed 'add an endpoint to
+            # server.py' into the GitHub repo-read lane; the connector
+            # 404'd and every lane "completed" with the same error
+            # prose) and drives the agentic tool loop directly.
+            wo_runner = getattr(self.agent, "run_work_order", None)
+            if wo_runner is not None:
+                result = wo_runner(
+                    instruction,
+                    task_title=str(node.get("title") or ""),
+                    mission_id=str(mission.get("id") or "") or None,
+                    model_role=str(node.get("model_role") or "") or None,
+                    event_callback=emit_cb,
+                )
+            else:
+                result = self.agent.run(
+                    instruction, history=[], mode="auto",
+                    event_callback=emit_cb,
+                    mission_id=str(mission.get("id") or "") or None,
+                    model_role=str(node.get("model_role") or "") or None,
+                )
             return _mission_node_out(mission, node, result)
 
         def _mission_node_out(mission: dict, node: dict, result) -> dict:
@@ -3035,6 +3054,21 @@ class AppState:
                         failure=str(out.get("error") or "")[:300])
                 except Exception:
                     pass
+            meta_out = node.get("metadata") or {}
+            if (out["ok"] and node.get("kind") == "agent"
+                    and (meta_out.get("workstream")
+                         or meta_out.get("scope"))
+                    and not out.get("artifacts")):
+                # A scoped work lane that 'succeeded' while changing zero
+                # files produced prose, not work (observed live: all four
+                # lanes returned a conversational error string and every
+                # node passed). A lane that legitimately changes nothing
+                # can say so — but a retry gets to try doing the work
+                # first.
+                out["ok"] = False
+                out["error"] = (
+                    "no artifacts — lane reported success but zero files "
+                    "changed; the work was not performed")
             if (out["ok"] and node.get("kind") == "agent"
                     and _UNVERIFIED_CLAIMS_MARKER in str(
                         out.get("output") or "")):
