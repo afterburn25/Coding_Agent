@@ -5944,13 +5944,39 @@ class AgentOrchestrator:
         session.pending_call_index = 0
         return None
 
+    def _work_order_verification(self, task) -> list[dict[str, str]]:
+        """Scoped per-lane verification for work orders: run the test
+        files the lane actually touched, plus a syntax check on changed
+        Python sources. Nothing to run for non-code artifacts."""
+        changed = [str(f) for f in (task.files_changed or [])]
+        tests = [f for f in changed
+                 if f.endswith(".py") and "test" in Path(f).name.lower()]
+        pyfiles = [f for f in changed if f.endswith(".py")]
+        cmds: list[dict[str, str]] = []
+        if tests:
+            cmds.append({"name": "scoped tests",
+                         "command": f"python -m pytest {' '.join(tests)} -x -q"})
+        if pyfiles:
+            cmds.append({"name": "syntax check",
+                         "command": f"python -m compileall -q {' '.join(pyfiles)}"})
+        return cmds
+
     def _run_verification(self, session: _AgentSession) -> AgentResult | None:
         task = self.tasks.get(session.task_id)
         if not task.files_changed or not self.config.auto_verify_after_changes:
             session.verification_done = True
             return None
         if not session.verification_commands:
-            session.verification_commands = detect_verification_commands(self.checkpoints.workspace)
+            if session.mode == "work_order":
+                # Per-lane checks must be scoped — the repo-wide selftest
+                # (second instance + full suite) cannot fit inside a lane's
+                # step/wall budget; whole-repo verification is the mission
+                # verify node's job.
+                session.verification_commands = \
+                    self._work_order_verification(task)
+            if not session.verification_commands:
+                session.verification_commands = detect_verification_commands(
+                    self.checkpoints.workspace)
         if not session.verification_commands:
             session.verification_done = True
             return None

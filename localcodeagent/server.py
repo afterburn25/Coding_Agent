@@ -3073,6 +3073,20 @@ class AppState:
                 out["error"] = (
                     "no artifacts — lane reported success but zero files "
                     "changed; the work was not performed")
+            if (not out["ok"] and status == "step_limit"
+                    and out.get("artifacts")):
+                # A lane that produced artifacts and passed its scoped
+                # verification before exhausting the step budget did the
+                # work — 'ran out of steps' is a budget artifact, not a
+                # failure signature. The mission's own verify node still
+                # gates the integrated result downstream.
+                vres = list(task.get("verification") or [])
+                if vres and "EXIT_CODE=0" in str(
+                        (vres[-1] or {}).get("result") or ""):
+                    out["ok"] = True
+                    out["output"] = (
+                        str(out.get("output") or "")
+                        + " [step budget reached after artifacts verified]")
             if (out["ok"] and node.get("kind") == "agent"
                     and _UNVERIFIED_CLAIMS_MARKER in str(
                         out.get("output") or "")):
