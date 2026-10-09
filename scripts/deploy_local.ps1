@@ -104,7 +104,14 @@ if ($running -or $helperIds -or $nexusOrphans) {
 
 $excludeDirs = @("data", "output", "runtime", "models", "tools",
                  ".git", ".agent", ".nexus", ".repair-worktrees")
-$args = @($Source, $Dest, "/MIR", "/XD") + $excludeDirs +
+# /XJ is mandatory here: data, output and .agent under the install
+# root are junctions into %LOCALAPPDATA%\NexusCore. Junction points
+# must never be traversed, copied or deleted by the mirror —
+# (observed 2026-10-09: the entire live state at the per-user root —
+# missions, profiles, social, secrets.vault — was empty after a
+# deploy+restart; root cause not conclusively isolated, so /XJ is
+# defense-in-depth alongside the /XD name exclusions).
+$args = @($Source, $Dest, "/MIR", "/XJ", "/XD") + $excludeDirs +
         @("/XF", "config.json", "/R:2", "/W:1", "/NFL", "/NDL", "/NP")
 robocopy @args | Select-Object -Last 12
 $rc = $LASTEXITCODE

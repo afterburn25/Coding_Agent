@@ -685,6 +685,149 @@ class MissionStore:
         return [d for d in (mission.get("decisions") or [])
                 if not d.get("superseded")]
 
+    # -- plain-English report ----------------------------------------------
+
+    def mission_report(self, mission: dict,
+                       *, requirements: list[dict] | None = None) -> dict:
+        """GET /api/missions/<id>/report payload — a durable, plain-English
+        rollup of what the mission set out to do, what happened, and what
+        is left. Built only from the mission record + workstream rollup
+        so it stays truthful for completed, failed and in-flight missions.
+        """
+        nodes = (mission.get("graph") or {}).get("nodes") or []
+        rollup = self.workstream_rollup(mission)
+        done_states = {"completed", "skipped"}
+        tasks_done = sum(1 for n in nodes if n.get("state") in done_states)
+        tasks_total = len(nodes)
+        ws_done = sum(1 for w in rollup
+                      if w.get("status") in TERMINAL_WORKSTREAM_STATES
+                      and w.get("status") != "failed")
+        ws_total = len(rollup)
+        running = [n for n in nodes
+                   if n.get("state") in {"running", "verifying"}]
+        failed = [n for n in nodes if n.get("state") == "failed"]
+        artifacts = sorted({
+            str(a)[:240]
+            for n in nodes
+            for a in ((n.get("result") or {}).get("artifacts") or [])
+        })
+
+        verifs = mission.get("verification_history") or []
+        verif_passed = sum(1 for v in verifs if v.get("ok") or
+                           v.get("status") in {"passed", "ok", "success"})
+        blockers = [str(b)[:200]
+                    for b in ((mission.get("context_capsule") or {})
+                              .get("blockers") or [])]
+        if mission.get("blocked_reason"):
+            blockers.insert(0, str(mission["blocked_reason"])[:200])
+        failed_ws = [w for w in rollup if w.get("status") == "failed"]
+
+        pct = (round(tasks_done / tasks_total * 100)
+               if tasks_total else
+               (round(ws_done / ws_total * 100) if ws_total else 0))
+        status = str(mission.get("status") or "unknown")
+        if status in TERMINAL_MISSION_STATUSES:
+            verb = {"completed": "completed",
+                    "completed_with_warnings": "completed with warnings",
+                    "failed": "failed",
+                    "cancelled": "was cancelled"}.get(status, status)
+            headline = (f"Mission {verb} — {tasks_done}/{tasks_total} tasks, "
+                        f"{ws_done}/{ws_total} workstreams integrated.")
+        elif running:
+            headline = (f"Running — {tasks_done}/{tasks_total} tasks done "
+                        f"({pct}%); currently: "
+                        f"{str(running[0].get('title') or '')[:80]}.")
+        elif blockers:
+            headline = f"{status} — {blockers[0][:140]}"
+        else:
+            headline = (f"{status} — {tasks_done}/{tasks_total} tasks, "
+                        f"{ws_done}/{ws_total} workstreams done.")
+
+        criteria = []
+        for c in mission.get("acceptance_criteria") or []:
+            if isinstance(c, dict):
+                criteria.append({
+                    "description": str(c.get("description") or
+                                     c.get("text") or c)[:240],
+                    "status": str(c.get("status") or "unchecked")})
+            else:
+                criteria.append({"description": str(c)[:240],
+                                 "status": "unchecked"})
+
+        reqs = []
+        for r in requirements or []:
+            reqs.append({"id": str(r.get("id") or "")[:40],
+                         "description": str(r.get("description") or
+                                          r.get("text") or "")[:240],
+                         "status": str(r.get("status") or "unknown"),
+                         "inferred": bool(r.get("inferred"))})
+
+        started = mission.get("started_at")
+        finished = mission.get("completed_at") or mission.get("updated_at")
+        elapsed = None
+        if started and finished:
+            try:
+                elapsed = max(0.0, float(finished) - float(started))
+            except (TypeError, ValueError):
+                elapsed = None
+
+        next_steps = []
+        if status in {"paused", "blocked"}:
+            next_steps.append("Resume or reprioritize from the "
+                              "Missions page or chat lane.")
+        if failed:
+            next_steps.append(
+                f"Investigate {len(failed)} failed task(s): "
+                + ", ".join(str(n.get("title") or n.get("id"))[:40]
+                            for n in failed[:3]))
+        if failed_ws:
+            next_steps.append(
+                "Failed workstreams can be dropped or retried: "
+                + ", ".join(str(w.get("title") or w.get("id"))[:40]
+                            for w in failed_ws[:3]))
+        if status not in TERMINAL_MISSION_STATUSES and not next_steps:
+            next_steps.append(
+                "Mission is in flight — progress updates land in the "
+                "activity feed as lanes report.")
+
+        hist = mission.get("history") or []
+        return {
+            "mission_id": mission.get("id"),
+            "title": mission.get("title") or "",
+            "status": status,
+            "phase": mission.get("phase") or "",
+            "objective": mission.get("objective") or "",
+            "generated_at": time.time(),
+            "headline": headline,
+            "progress": {
+                "percent": pct,
+                "tasks_done": tasks_done,
+                "tasks_total": tasks_total,
+                "workstreams_done": ws_done,
+                "workstreams_total": ws_total,
+            },
+            "timeline": {
+                "created_at": mission.get("created_at"),
+                "started_at": started,
+                "completed_at": mission.get("completed_at"),
+                "elapsed_s": elapsed,
+            },
+            "acceptance": criteria,
+            "requirements": reqs,
+            "workstreams": rollup,
+            "decisions": self.active_decisions(mission)[:10],
+            "verification": {
+                "runs": len(verifs),
+                "passed": verif_passed,
+                "failed": len(verifs) - verif_passed,
+                "latest": verifs[-1] if verifs else None,
+            },
+            "artifacts": artifacts[:40],
+            "blockers": blockers[:10],
+            "next_steps": next_steps[:5],
+            "events_tail": hist[-8:],
+        }
+
     # -- ownership reservations -------------------------------------------
 
     OWNERSHIP_LEASE_S = 600.0

@@ -2,6 +2,43 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 2026-10-09 post-deploy incident — live state wipe (P0)
+
+After the v0.40.0 rebuild+deploy+relaunch, the entire per-user state
+root (`%LOCALAPPDATA%\NexusCore\{data,.agent,output}` — junctioned
+from the install dir) contained only fresh files: `missions.json`
+(mission `m-6541468d68c1` and all history), profiles, the social store
+(consults, peer graph, claims), approvals, `secrets.vault` (Moltbook +
+connector keys) and conversations were all gone. The host log shows
+`data/` arrived at `EnsureStateJunctions` as a **real dir** — the
+pre-existing junction was already gone before first launch — and a
+conflict-merge that lets "target wins" then `recursive: true`-deletes
+the losing side is a verified silent-loss path. An isolated robocopy
+/MIR + /XD repro proved the deploy mirror alone does NOT purge a
+junction's target; the exact deletion path remains unproven (watch for
+recurrence).
+
+**Hardening landed:**
+
+- `scripts/deploy_local.ps1` — `/XJ` added so the mirror never
+  traverses or deletes junction points (defense-in-depth over `/XD`).
+- `Program.cs` — `MigrateDirectoryContents` now *parks* conflicting
+  source files under `target\.conflicts\<stamp>\` instead of deleting
+  them; nothing is silently dropped during state migration.
+
+**Recovery status:**
+
+- Onboarding re-completed (profile `9ca0ab4a…`); APIs unlocked.
+- `secrets.vault` must be re-populated (Moltbook API key etc.) —
+  user action required; social connectors are unauthenticated until
+  then.
+- Mission `m-6541468d68c1` (report endpoint + UI) lost with the wipe —
+  the feature was rebuilt directly: `MissionStore.mission_report`,
+  `GET /api/missions/<id>/report`, Report panel in `missions.js`,
+  payload-shape tests, `ARCHITECTURE.md` Engineering Missions section.
+- Onboarding-lock note: the lock observed post-deploy was *correct*
+  behavior — the profile store was genuinely empty, not a gate bug.
+
 ## 0.40.0 — Engineering Missions
 
 The autonomy layer grows the durable engineering hierarchy — Mission →

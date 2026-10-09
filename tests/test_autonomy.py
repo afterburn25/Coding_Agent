@@ -2779,6 +2779,52 @@ class EngineeringMissionTests(unittest.TestCase):
             self.assertTrue(cap.get("workstreams"))
             sup.stop()
 
+    def test_mission_report_payload_shape(self):
+        # GET /api/missions/<id>/report — plain-English rollup assembled
+        # purely from the durable record; the detail-page Report panel
+        # and external checks rely on this shape staying stable.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            m = drive(sup, m["id"], ticks=60)
+            rep = sup.missions.mission_report(
+                m,
+                requirements=[{"id": "req-1", "description": "api works",
+                               "status": "verified"}])
+            for key in ("mission_id", "title", "status", "headline",
+                        "progress", "timeline", "acceptance",
+                        "requirements", "workstreams", "decisions",
+                        "verification", "artifacts", "blockers",
+                        "next_steps", "events_tail"):
+                self.assertIn(key, rep, key)
+            self.assertEqual(rep["mission_id"], m["id"])
+            p = rep["progress"]
+            self.assertEqual(p["tasks_total"], len(m["graph"]["nodes"]))
+            self.assertGreaterEqual(p["percent"], 0)
+            self.assertLessEqual(p["percent"], 100)
+            self.assertEqual(p["workstreams_total"], 2)
+            self.assertIsInstance(rep["headline"], str)
+            self.assertTrue(rep["headline"])
+            self.assertEqual(rep["requirements"][0]["status"], "verified")
+            self.assertIn("runs", rep["verification"])
+            self.assertIsInstance(rep["workstreams"], list)
+            self.assertIsInstance(rep["next_steps"], list)
+            sup.stop()
+
+    def test_mission_report_terminal_headline(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            m = drive(sup, m["id"], ticks=60)
+            rep = sup.missions.mission_report(m)
+            self.assertIn(rep["status"],
+                          {"completed", "completed_with_warnings"})
+            self.assertIn("Mission", rep["headline"])
+            self.assertIn("/", rep["headline"])  # "N/N tasks" rollup
+            sup.stop()
+
     def test_context_package_scopes_to_workstream(self):
         with tempfile.TemporaryDirectory() as td:
             sup = make_sup(td)

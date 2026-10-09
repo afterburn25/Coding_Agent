@@ -8488,6 +8488,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(
                     self.state.action_ledger.mission_rollup(m.get("id") or mid))
                 return True
+            if mid.endswith("/report"):
+                # Plain-English mission report — durable rollup of
+                # objective, progress, criteria, decisions, evidence and
+                # next steps; consumed by the missions detail Report
+                # panel and safe to poll at any mission stage.
+                mid = mid[:-len("/report")]
+                m = sup.missions.get(mid)
+                if m is None:
+                    self._json({"error": "mission not found"}, 404)
+                    return True
+                reqs = self.state.requirements.list(
+                    scope_type="mission", scope_id=m.get("id") or mid)
+                self._json({
+                    "report": sup.missions.mission_report(
+                        m, requirements=reqs)})
+                return True
             if mid.endswith("/workstreams"):
                 # §34-35 — the engineering-mission view: durable
                 # workstream rollup + compact context capsule + metrics.

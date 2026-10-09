@@ -2459,10 +2459,19 @@ internal sealed class BackendProcess : IDisposable
 
     /// <summary>
     /// Move source contents into target; existing target entries win.
+    /// Source entries that lose a conflict are NOT deleted — they are
+    /// parked under target\.conflicts\ so a migration can never
+    /// silently destroy state (observed 2026-10-09: live mission,
+    /// profile, social and vault state lost during a data/ junction
+    /// migration where both sides carried files).
     /// Moves keep model-size migrations instant on the same volume; the
     /// recursive fallback covers the rare cross-volume case.
     /// </summary>
     private static void MigrateDirectoryContents(string source, string target)
+        => MigrateDirectoryContents(source, target, source, null);
+
+    private static void MigrateDirectoryContents(
+        string source, string target, string sourceRoot, string? stamp)
     {
         Directory.CreateDirectory(target);
         foreach (var file in Directory.EnumerateFiles(source))
@@ -2471,6 +2480,10 @@ internal sealed class BackendProcess : IDisposable
             if (!File.Exists(dest))
             {
                 File.Move(file, dest);
+            }
+            else
+            {
+                ParkConflict(file, target, sourceRoot, ref stamp);
             }
         }
         foreach (var dir in Directory.EnumerateDirectories(source))
@@ -2488,8 +2501,30 @@ internal sealed class BackendProcess : IDisposable
                     // Cross-volume: fall through to the copy path.
                 }
             }
-            MigrateDirectoryContents(dir, dest);
+            MigrateDirectoryContents(dir, dest, sourceRoot, stamp);
             try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// A source file that conflicts with an existing target entry is
+    /// moved — never deleted — into target\.conflicts\<stamp>\
+    /// preserving its relative path, so the user can always recover it.
+    /// </summary>
+    private static void ParkConflict(
+        string sourceFile, string target, string sourceRoot, ref string? stamp)
+    {
+        try
+        {
+            stamp ??= DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            var rel = Path.GetRelativePath(sourceRoot, sourceFile);
+            var parked = Path.Combine(target, ".conflicts", stamp, rel);
+            Directory.CreateDirectory(Path.GetDirectoryName(parked)!);
+            File.Move(sourceFile, parked);
+        }
+        catch
+        {
+            // Parking is best-effort; never let it block startup.
         }
     }
 

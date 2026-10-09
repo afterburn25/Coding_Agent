@@ -136,6 +136,7 @@ function renderDetail(){
     (actionable?`<button class="mini-button danger" data-act="cancel">Cancel</button>`:'')+
     `</div></div>`+
     `<div class="detail-section"><h3>Objective</h3><div class="objective">${esc(m.objective)}</div></div>`+
+    `<div class="detail-section"><h3>Report</h3><div id="missionReport"><div class="hist-row">loading…</div></div></div>`+
     `<div class="detail-section"><h3>Requirements</h3><div id="missionReqs"><div class="hist-row">loading…</div></div></div>`+
     `<div class="detail-section"><h3>Success criteria</h3>${critHtml}</div>`+
     `<div class="detail-section"><h3>Workstreams</h3><div id="missionWs"><div class="hist-row">loading…</div></div></div>`+
@@ -151,6 +152,43 @@ function renderDetail(){
   loadMissionRequirements(m.id);
   loadMissionEvidence(m.id);
   loadMissionWorkstreams(m.id);
+  loadMissionReport(m.id);
+}
+
+async function loadMissionReport(mid){
+  // Plain-English mission report — the headline answer ("what happened,
+  // what's left") plus criteria/decisions/artifacts detail, sourced from
+  // the durable record rather than the live DAG.
+  try{
+    const r=await api('/api/missions/'+encodeURIComponent(mid)+'/report');
+    const el=$('#missionReport');
+    if(!el||selected!==mid)return;
+    const rep=r.report||{};
+    const p=rep.progress||{};
+    const t=rep.timeline||{};
+    const rows=[];
+    if(rep.headline)
+      rows.push(`<div class="report-headline">${esc(rep.headline)}</div>`);
+    rows.push(`<div class="hist-row"><b>progress</b> ${p.percent||0}% — `+
+      `${p.tasks_done||0}/${p.tasks_total||0} tasks · `+
+      `${p.workstreams_done||0}/${p.workstreams_total||0} workstreams`+
+      (t.elapsed_s!=null?` · ${Math.round(t.elapsed_s/60)}m elapsed`:'')+
+      `</div>`);
+    (rep.acceptance||[]).slice(0,6).forEach(c=>
+      rows.push(`<div class="hist-row"><b>${esc(c.status||'unchecked')}</b> ${esc(c.description)}</div>`));
+    (rep.blockers||[]).slice(0,3).forEach(b=>
+      rows.push(`<div class="hist-row"><b>blocker</b> ${esc(b)}</div>`));
+    const v=rep.verification||{};
+    if(v.runs)
+      rows.push(`<div class="hist-row"><b>verification</b> ${v.passed||0}/${v.runs} run(s) passed</div>`);
+    (rep.artifacts||[]).slice(0,6).forEach(a=>
+      rows.push(`<div class="hist-row"><b>artifact</b> ${esc(a)}</div>`));
+    (rep.next_steps||[]).forEach(s=>
+      rows.push(`<div class="hist-row"><b>next</b> ${esc(s)}</div>`));
+    setHtml(el,rows.join('')||'<div class="hist-row">no report data yet</div>');
+  }catch(e){
+    setHtml($('#missionReport'),'<div class="hist-row">report unavailable</div>');
+  }
 }
 
 const WS_MARKS={integrated:'✓',active:'●',ready:'◐',awaiting_review:'◐',

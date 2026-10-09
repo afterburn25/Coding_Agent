@@ -440,3 +440,40 @@ listening/thinking, and `/api/nexus/state` supplies the fallback operational
 presentation. CSS handles the initial low-cost motion and honors
 `prefers-reduced-motion`; failure or absence of the renderer leaves the static
 portrait and all agent/voice behavior intact. See `docs/AVATAR.md`.
+
+## Engineering Missions layer (v0.40)
+
+```text
+Mission (objective + acceptance_criteria, durable in missions.json)
+  └─ Workstream (scoped slice: role, file scope, acceptance, worktree)
+       └─ Task → Subtask (graph nodes; worker lanes on worktrees)
+            └─ Verification → Evaluation → Integration
+```
+
+- The record hierarchy is durable and restart-safe: Mission →
+  Workstream → Task → Subtask → Verification lives on the mission row,
+  so a restart or redeploy resumes the same plan rather than replanning
+  from scratch (internal `internal:` missions are exempt from the
+  `verify_passed` criterion that has no verification run).
+- Acceptance criteria are authored before implementation; machine-
+  checkable `success_criteria` (e.g. `verify_passed`,
+  `all_tasks_completed`) stay distinct from prose acceptance text.
+- `context_capsule` + `context_package` give each worker a scoped,
+  auto-compacting context independent of the model window; `NEXUS.md`
+  discovery/drafting carries repo-level operating instructions into
+  workers and durable `decisions` are injected into every lane.
+- `ownership` reservations lease file-scope patterns per lane —
+  overlapping claims park instead of overwriting.
+- Steering is live: pause/resume/drop/reprioritize per mission and per
+  workstream via chat, `/api/missions/<id>/workstreams/<ws>/<op>`, and
+  the Missions UI; thrash detection escalates to the deep model;
+  goal-drift probes re-check worker output against the objective;
+  step-limit stops commit WIP on the lane branch so retries resume
+  instead of resetting.
+- `GET /api/missions/<id>/report` returns a plain-English rollup —
+  headline, task/workstream progress, timeline, acceptance and
+  requirement status, decisions, verification runs, artifacts,
+  blockers, next steps — assembled only from the durable record
+  (`MissionStore.mission_report`), so it is truthful for in-flight,
+  completed and failed missions alike. The missions detail page renders
+  it as the Report panel.
