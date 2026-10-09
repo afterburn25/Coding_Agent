@@ -1117,6 +1117,66 @@ class EpistemicStoreTests(unittest.TestCase):
                                  conclusion="failed", success=False)
             self.assertEqual(st.claim(c2["id"])["ladder"], "refuted")
 
+    def test_replication_measurements_never_merge_incompatible(self):
+        """§9/§10 — results under different environments are reported
+        side-by-side, never averaged into one number."""
+        with tempfile.TemporaryDirectory() as td:
+            st = SocialStore(Path(td))
+            e = st.add_experiment(
+                "flag X cuts VRAM", metric="VRAM GB",
+                environment={"model": "m1", "quantization": "q4",
+                             "context": "8k", "metric": "VRAM GB",
+                             "methodology": "peak", "hardware": "rtx"})
+            st.finish_experiment(e["id"], result="5.2",
+                                 conclusion="reproduced", success=True,
+                                 metric_value=5.2)
+            st.add_measurement(e["id"], who="PeerA", value=5.0,
+                               environment={"model": "m1",
+                                            "quantization": "q4",
+                                            "context": "8k",
+                                            "metric": "VRAM GB",
+                                            "methodology": "peak",
+                                            "hardware": "a100"})
+            st.add_measurement(e["id"], who="PeerB", value=7.9,
+                               environment={"model": "m1",
+                                            "quantization": "q8",
+                                            "context": "8k",
+                                            "metric": "VRAM GB",
+                                            "methodology": "peak"})
+            s = st.replication_summary(e["id"])
+            self.assertFalse(s["comparable"])
+            self.assertEqual(len(s["groups"]), 2)
+            self.assertTrue(s["uncertainty"])
+            same = [g for g in s["groups"] if g["n"] == 2][0]
+            self.assertTrue(same["reproduced_across_environments"])
+            self.assertIn("hardware", same["env_differences"])
+            self.assertAlmostEqual(same["spread"], 0.2, places=5)
+            self.assertIn("PeerA", s["participants"])
+            self.assertIn("PeerB", s["participants"])
+            # peer_graph picks up the reproduced edge
+            g = st.peer_graph()
+            et = {x["to"]: x["types"] for x in g["edges"]}
+            self.assertIn("reproduced", et["PeerA"])
+
+    def test_replication_single_env_is_comparable(self):
+        with tempfile.TemporaryDirectory() as td:
+            st = SocialStore(Path(td))
+            env = {"model": "m1", "quantization": "q4",
+                   "context": "8k", "metric": "VRAM GB",
+                   "methodology": "peak"}
+            e = st.add_experiment("h", metric="VRAM GB",
+                                  environment=env)
+            st.add_measurement(e["id"], who="nexus", value=5.0,
+                               environment=env)
+            st.add_measurement(e["id"], who="PeerA", value=5.1,
+                               environment=env)
+            s = st.replication_summary(e["id"])
+            self.assertTrue(s["comparable"])
+            self.assertTrue(s["groups"][0][
+                "reproduced_across_environments"])
+            self.assertAlmostEqual(s["groups"][0]["spread"], 0.1,
+                                   places=5)
+
     def test_backlog_rich_states(self):
         """§5 — backlog items carry state + verification plan."""
         with tempfile.TemporaryDirectory() as td:

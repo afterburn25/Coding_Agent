@@ -1079,6 +1079,81 @@ class SocialService:
         rows.sort(key=lambda r: -float(r.get("created_at", 0)))
         return rows[:limit]
 
+    # -- distributed replication (§9/§10) ----------------------------------------
+
+    def local_env(self, *, model: str = "", quantization: str = "",
+                  context: str = "") -> dict[str, Any]:
+        """Nexus's normalized environment for replication records —
+        hardware/software from the live runtime where available."""
+        env: dict[str, Any] = {}
+        try:
+            from ..runtime.hardware import detect_hardware
+            snap = detect_hardware()
+            gpus = getattr(snap, "gpus", None) or []
+            if gpus:
+                env["hardware"] = getattr(
+                    gpus[0], "name", "") or str(gpus[0])[:60]
+            env["ram_gb"] = round(getattr(snap, "total_ram_gb",
+                                          0) or 0, 1)
+            import platform as _pl
+            env["os"] = _pl.system().lower()
+        except Exception:
+            pass
+        if model:
+            env["model"] = model
+        if quantization:
+            env["quantization"] = quantization
+        if context:
+            env["context"] = context
+        return env
+
+    def open_replication(self, hypothesis: str, *, claim_id: str = "",
+                         source: str = "", plan: str = "",
+                         metric: str = "", model: str = "",
+                         quantization: str = "", context: str = ""
+                         ) -> dict[str, Any]:
+        """Open a replication experiment seeded with Nexus's own
+        normalized environment (§9)."""
+        env = self.local_env(model=model, quantization=quantization,
+                             context=context)
+        return self.store.add_experiment(
+            hypothesis, claim_id=claim_id, source=source,
+            environment=env, plan=plan, metric=metric)
+
+    def record_peer_measurement(self, experiment_id: str, peer: str, *,
+                                environment: dict | None = None,
+                                value: float | str | None = None,
+                                metric: str = "", note: str = ""
+                                ) -> dict[str, Any]:
+        """§9 — a peer reports running the same test elsewhere. Stored
+        under its own environment; never merged into Nexus's number."""
+        row = self.store.add_measurement(
+            experiment_id, who=peer, environment=environment,
+            value=value, metric=metric, note=note)
+        if row is not None:
+            self.store.record_interaction(
+                peer, "replication", ref=experiment_id,
+                summary=f"reported {metric or 'result'} on "
+                        f"{experiment_id}")
+        return {"ok": row is not None, "measurement": row}
+
+    def replication_report(self, experiment_id: str
+                           ) -> dict[str, Any]:
+        """§10 — local vs cross-environment reproduction summary."""
+        return self.store.replication_summary(experiment_id) or {
+            "ok": False, "error": "unknown experiment"}
+
+    def finish_replication(self, experiment_id: str, *, result: str,
+                           conclusion: str, success: bool | None = None,
+                           metric_value: float | None = None,
+                           **kw: Any) -> dict[str, Any]:
+        """Close Nexus's own run; the measured value is recorded as a
+        self-measurement so the summary can compare across peers."""
+        return self.store.finish_experiment(
+            experiment_id, result=result, conclusion=conclusion,
+            success=success, metric_value=metric_value, **kw) or {
+                "ok": False, "error": "unknown experiment"}
+
     def dispatch_consult(self, consult_id: str, *,
                          approved: bool = False) -> dict[str, Any]:
         """Send a recorded pending_send consult — the path an approval

@@ -79,6 +79,32 @@ def overlap(a: set[str], b: set[str]) -> float:
     return len(a & b) / max(1, min(len(a), len(b)))
 
 
+# §9 — an environment is only comparable across participants when the
+# measured-variable context matches: model, quantization, context size,
+# metric and methodology. Hardware/software differences are recorded
+# and reported, but never silently merged into one number.
+ENV_COMPARE_KEYS = ("model", "quantization", "context", "metric",
+                    "methodology")
+ENV_DESCRIBE_KEYS = ("hardware", "gpu", "cpu", "ram_gb", "os",
+                     "software", "version")
+
+
+def _norm_env(env: dict) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for k, v in (env or {}).items():
+        k = str(k).strip().lower().replace(" ", "_")
+        if k and v not in (None, ""):
+            out[k] = str(v)[:120]
+    return out
+
+
+def _env_sig(env: dict) -> str:
+    """Comparability signature — measurements may only be aggregated
+    within one signature bucket."""
+    e = _norm_env(env)
+    return "|".join(f"{k}={e.get(k, '')}" for k in ENV_COMPARE_KEYS)
+
+
 class SocialStore:
     """Root handle for all persisted social/epistemic state."""
 
@@ -975,10 +1001,11 @@ class SocialStore:
         row = {
             "id": _uid("ex"), "hypothesis": str(hypothesis or "")[:400],
             "claim_id": str(claim_id or ""), "source": str(source)[:160],
-            "environment": dict(environment or {}),
+            "environment": _norm_env(environment or {}),
             "plan": str(plan or "")[:400], "metric": str(metric)[:120],
             "baseline": "", "treatment": "", "result": "",
             "confidence": 0.0, "artifact": "", "conclusion": "",
+            "measurements": [], "participants": [],
             "status": "running",
             "created_at": _now(), "updated_at": _now(),
         }
@@ -991,7 +1018,8 @@ class SocialStore:
     def finish_experiment(self, experiment_id: str, *, result: str,
                           conclusion: str, success: bool | None = None,
                           baseline: str = "", treatment: str = "",
-                          confidence: float = 0.0, artifact: str = ""
+                          confidence: float = 0.0, artifact: str = "",
+                          metric_value: float | None = None
                           ) -> dict[str, Any] | None:
         """Close an experiment with measured outcome; when it resolves a
         peer claim the ladder moves and the peer's domain expertise
@@ -1009,6 +1037,16 @@ class SocialStore:
                     "status": "replicated" if success else (
                         "failed" if success is False else "inconclusive"),
                     "updated_at": _now()})
+                if metric_value is not None:
+                    e.setdefault("measurements", []).append({
+                        "who": "nexus",
+                        "environment": e.get("environment") or {},
+                        "sig": _env_sig(e.get("environment") or {}),
+                        "value": float(metric_value),
+                        "metric": e.get("metric", ""),
+                        "note": str(conclusion)[:240], "ts": _now()})
+                    if "nexus" not in e.setdefault("participants", []):
+                        e["participants"].append("nexus")
                 self.experiments.save()
                 claim_id = str(e.get("claim_id") or "")
                 if claim_id and success is not None:
@@ -1026,6 +1064,101 @@ class SocialStore:
         if claim_id:
             rows = [r for r in rows if r.get("claim_id") == claim_id]
         return rows
+
+    def add_measurement(self, experiment_id: str, *, who: str,
+                        environment: dict | None = None,
+                        value: float | str | None = None,
+                        metric: str = "", note: str = ""
+                        ) -> dict[str, Any] | None:
+        """§9 — one participant's run of the experiment. Each result is
+        stored separately with its normalized environment; results are
+        never merged across incomparable configurations."""
+        env = _norm_env(environment or {})
+        who = str(who or "peer")[:80]
+        if who.lower() != "nexus":
+            self.ensure_peer(who)
+        for e in self.experiments.rows():
+            if e.get("id") == experiment_id:
+                e.setdefault("measurements", []).append({
+                    "who": who, "environment": env,
+                    "sig": _env_sig(env),
+                    "value": value,
+                    "metric": str(metric or e.get("metric") or "")[:120],
+                    "note": str(note or "")[:240], "ts": _now()})
+                parts = e.setdefault("participants", [])
+                if who not in parts:
+                    parts.append(who)
+                e["updated_at"] = _now()
+                self.experiments.save()
+                return e["measurements"][-1]
+        return None
+
+    def replication_summary(self, experiment_id: str
+                            ) -> dict[str, Any] | None:
+        """§10 — aggregate compatible measurements. Reports Nexus's
+        result vs peer results, spread, environmental differences and
+        whether the claim reproduced locally vs across environments.
+        Measurements in different comparability buckets are reported
+        side-by-side, never averaged."""
+        for e in self.experiments.rows():
+            if e.get("id") != experiment_id:
+                continue
+            ms = e.get("measurements") or []
+            if e.get("result") and not any(
+                    str(m.get("who", "")).lower() == "nexus"
+                    for m in ms):
+                ms = ms + [{"who": "nexus", "environment": e.get(
+                            "environment") or {},
+                            "sig": _env_sig(e.get("environment") or {}),
+                            "value": None, "metric": e.get("metric", ""),
+                            "note": e["result"], "ts": e.get(
+                                "updated_at", 0)}]
+            buckets: dict[str, list[dict]] = {}
+            for m in ms:
+                buckets.setdefault(m.get("sig") or "", []).append(m)
+            groups = []
+            for sig, rows in buckets.items():
+                vals = [float(m["value"]) for m in rows
+                        if isinstance(m.get("value"), (int, float))]
+                local = [m for m in rows if str(
+                    m.get("who", "")).lower() == "nexus"]
+                peers = [m for m in rows if str(
+                    m.get("who", "")).lower() != "nexus"]
+                env_diffs = []
+                if rows:
+                    keys = set().union(
+                        *(set((m.get("environment") or {}).keys())
+                          for m in rows))
+                    for k in sorted(keys):
+                        seen = {str((m.get("environment") or {}).get(k))
+                                for m in rows}
+                        if len(seen) > 1:
+                            env_diffs.append(k)
+                groups.append({
+                    "sig": sig, "n": len(rows),
+                    "local": local, "peers": peers,
+                    "values": vals,
+                    "spread": (round(max(vals) - min(vals), 6)
+                               if len(vals) > 1 else 0.0),
+                    "mean": (round(sum(vals) / len(vals), 6)
+                             if vals else None),
+                    "env_differences": env_diffs,
+                    "reproduced_locally": bool(local),
+                    "reproduced_across_environments": bool(
+                        local and peers)})
+            return {
+                "experiment": experiment_id,
+                "hypothesis": e.get("hypothesis", ""),
+                "claim_id": e.get("claim_id", ""),
+                "groups": groups,
+                "participants": e.get("participants") or [],
+                "comparable": len(groups) == 1,
+                "uncertainty": ([] if len(groups) <= 1 else [
+                    "measurements ran under different model/quant/"
+                    "context/methodology — results are reported per "
+                    "environment, not merged"]),
+            }
+        return None
 
     # -- learning journal ------------------------------------------------------------
 
