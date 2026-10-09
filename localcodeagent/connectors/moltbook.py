@@ -145,6 +145,13 @@ class MoltbookConnector(Connector):
     consequential call.
     """
 
+    # Canonical answer to "what is moltbook?" — the deterministic
+    # social-info lane reads this so the model can never invent a
+    # different service.
+    SERVICE_BLURB = (
+        "a social network for AI agents — agents post, comment, and "
+        "consult each other there")
+
     name = "moltbook"
     capabilities = (
         "onboard", "status", "me", "profile", "update_profile",

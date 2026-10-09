@@ -3790,7 +3790,10 @@ class AgentOrchestrator:
                 provider = self._provider_for(profile)
             return decision, profile, provider
         except Exception as exc:
-            if mode != "auto":
+            # Work orders fall back too — a mission lane stalled forever
+            # on 'won't fit in VRAM' is worse than a smaller model doing
+            # the work (observed live: all lanes deferred at max retries).
+            if mode not in {"auto", "work_order"}:
                 raise
             fallback = self.router.choose(
                 user_text,
@@ -5146,6 +5149,8 @@ class AgentOrchestrator:
                                model_events=[builtin_event], steps=0,
                                task=done.as_dict())
 
+        if kind == "service_info":
+            return _finish(svc.service_info_text())
         if kind == "claim_link":
             return _finish(svc.claim_link_text())
         if kind == "account_state":

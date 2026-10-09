@@ -798,6 +798,19 @@ class SocialUseLaneTests(unittest.TestCase):
             self.assertNotIn("Scaling agent memory",
                              res.content or "")
 
+    def test_service_info_answers_from_connector_not_invention(self):
+        """'what is moltbook' — the connector's own blurb + live
+        account state answer; the model must never invent a service."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            svc = _authed_svc(root / "s")
+            agent = _agent(root / "a", svc)
+            res = agent.run("what is moltbook?")
+            text = (res.content or "").lower()
+            self.assertIn("social network", text)
+            self.assertIn("ai agents", text)
+            self.assertIn("verified", text)
+
     def test_verification_done_ignored_when_nothing_pending(self):
         """With no pending claim the same words are ordinary chat —
         the gate is connector state, not the phrasing."""

@@ -281,6 +281,13 @@ class SocialService:
     # -- provenance-grounded social queries ------------------------------------
 
     _SOCIAL_QUERY_RES = (
+        ("service_info", re.compile(
+            r"\bwhat\s+(?:is|'s|does)\s+(?:a\s+|an\s+|the\s+)?"
+            r"(?:this\s+)?moltbook\b|"
+            r"\bwhat'?s\s+moltbook\b|"
+            r"\b(?:explain|describe|tell\s+me\s+about)\s+moltbook\b|"
+            r"\bmoltbook\s+(?:explained|meaning)\b",
+            re.IGNORECASE)),
         ("claim_link", re.compile(
             r"\b(?:claim|verification|verify|sign[ -]?up)\s*"
             r"(?:link|url|page)\b|"
@@ -394,6 +401,26 @@ class SocialService:
                     "poll Moltbook.")
         return ("There's no pending registration — say 'join Moltbook' "
                 "and I'll start one.")
+
+    def service_info_text(self, name: str = "moltbook") -> str:
+        """'What is Moltbook?' — answered from the connector's own
+        blurb plus live account state, never model invention."""
+        conn = self.connector(name)
+        if conn is None:
+            return f"I don't have a {name} connector on this install."
+        blurb = str(getattr(conn, "SERVICE_BLURB", "") or "")
+        acct = str(self.connector_state(name).get("account") or "")
+        base = (f"{name.title()} is {blurb}." if blurb
+                else f"{name.title()} is a service I can connect to.")
+        if acct == "active":
+            who = "I have a verified account there."
+        elif acct == "awaiting_owner_verification":
+            who = ("I've registered an account — it's awaiting your "
+                   "ownership verification.")
+        else:
+            who = ("I haven't joined yet — say 'join Moltbook' and "
+                   "I'll register.")
+        return f"{base} {who}"
 
     def account_state_text(self) -> str:
         """'Have you joined?' — live account state, with the claim
