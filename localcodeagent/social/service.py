@@ -12,8 +12,9 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from .consult import ConsultEngine, sanitize_question
 from .drive import EpistemicDrive, SocialDrive
-from .safety import wrap_for_model
+from .safety import outbound_scan, wrap_for_model
 from .store import SocialStore, overlap, terms
 
 # A join request: "join moltbook", "sign up for moltbook",
@@ -45,6 +46,11 @@ class SocialService:
             permission_check=self._perm,
             event_sink=self._event)
         self.epistemic = EpistemicDrive(self.store)
+        self.consults = ConsultEngine(
+            self.store,
+            consults_path=(Path(store_root) / "consults.json"
+                           if store_root else None),
+            event_sink=self._event)
         self._connector = None
         self._connectors = None
 
@@ -196,6 +202,220 @@ class SocialService:
             result["error"] = out.get("error")
         return result
 
+    # -- provenance-grounded social queries ------------------------------------
+
+    _SOCIAL_QUERY_RES = (
+        ("claim_link", re.compile(
+            r"\b(?:claim|verification|verify|sign[ -]?up)\s*"
+            r"(?:link|url|page)\b|"
+            r"\bwhere\s+(?:is|'s)\s+(?:the\s+|that\s+|my\s+)?\w*\s*link\b|"
+            r"\b(?:re)?send\s+(?:me\s+)?(?:the\s+|that\s+)?\w*\s*link\b|"
+            r"\bmoltbook\s+(?:claim|link|verification)\b",
+            re.IGNORECASE)),
+        ("account_state", re.compile(
+            r"\b(?:have|did)\s+you\s+(?:join\w*|register\w*|sign\w*\s*up|"
+            r"creat\w+\s+(?:an?\s+)?account)\b.*\bmoltbook\b|"
+            r"\bare\s+you\s+(?:on|joined|registered)\b.*\bmoltbook\b|"
+            r"\bmoltbook\s+(?:status|account)\b",
+            re.IGNORECASE)),
+        ("learned", re.compile(
+            r"\bwhat\s+(?:have|has)\s+(?:you|nexus)\s+(?:learned|"
+            r"found\s+out)\s+from\s+(?:other|the|your)\s+"
+            r"(?:ai|ais|agents?|peers?|community|moltbook)\b",
+            re.IGNORECASE)),
+        ("trust", re.compile(
+            r"\b(?:who|which\s+agents?)\s+do\s+you\s+trust\b|"
+            r"\bwho(?:'s| is)\s+(?:your\s+)?(?:most\s+)?"
+            r"(?:trusted|reliable)\s+(?:peer|agent)\b",
+            re.IGNORECASE)),
+        ("friends", re.compile(
+            r"\bwho\s+(?:are|is)\s+your\s+friends?\b|"
+            r"\bwho\s+do\s+you\s+know\s+(?:on|in|from)\s+"
+            r"(?:moltbook|the\s+community)\b|"
+            r"\bwhich\s+agents?\s+do\s+you\s+know\b",
+            re.IGNORECASE)),
+        ("ask_peer", re.compile(
+            r"\b(?:ask|consult|pose\s+(?:this|that|it)\s+to|"
+            r"post\s+(?:a\s+)?(?:question|this)\s+(?:to|on))\s+"
+            r"(?:the\s+)?(?:moltbook|community|peers?|"
+            r"other\s+(?:ai|ais|agents?))\b\s*(?:about\s+|:)?\s*(.*)",
+            re.IGNORECASE)),
+    )
+
+    def classify_social_query(self, text: str) -> tuple[str, str] | None:
+        """Route social provenance/action queries — returns
+        (kind, subject) or None. Generic phrasings only; never matches
+        ordinary chat."""
+        t = str(text or "").strip()
+        for kind, rx in self._SOCIAL_QUERY_RES:
+            m = rx.search(t)
+            if m:
+                return kind, (m.group(1).strip() if m.groups() else "")
+        # State-gated shorthands — 'resend it', 'have you joined?',
+        # 'where's the link?' only claim the turn when a live account
+        # state makes the referent unambiguous. The gate is connector
+        # truth, not a phrase assumption.
+        pending = bool(self.pending_claim_url())
+        joined = self.connector_state("moltbook").get("account") \
+            in ("awaiting_owner_verification", "active")
+        if pending and re.search(
+                r"\b(?:re)?send\s+(?:it|that)\b|"
+                r"\bwhere(?:'s| is)\s+(?:the\s+)?link\b", t,
+                re.IGNORECASE):
+            return "claim_link", ""
+        if (pending or joined) and re.search(
+                r"\b(?:have|did)\s+you\s+join\w*\b", t,
+                re.IGNORECASE):
+            return "account_state", ""
+        return None
+
+    def pending_claim_url(self) -> str:
+        """The outstanding ownership-claim URL, or '' — read from live
+        connector state every call (never from stale memory)."""
+        conn = self.connector("moltbook")
+        if conn is None or conn.account_state() == "active":
+            return ""
+        try:
+            return str((conn.account() or {}).get("claim_url") or "")
+        except Exception:
+            return ""
+
+    def claim_link_text(self) -> str:
+        """'Where is the link?' — the literal claim URL from the
+        connector's persisted account record. Truthful: Nexus cannot
+        open the user's browser, so the URL is delivered in text."""
+        conn = self.connector("moltbook")
+        if conn is None:
+            return "No social connector is configured on this install."
+        state = conn.account_state()
+        if state == "active":
+            return ("My Moltbook account is already verified and "
+                    "active — no claim link is needed.")
+        url = self.pending_claim_url()
+        if state == "awaiting_owner_verification" and url:
+            return ("Here's the ownership-verification link — open it "
+                    "in your browser to finish claiming my account:\n\n"
+                    f"{url}\n\nI can't open your browser for you, but "
+                    "once it's claimed my next status check will flip "
+                    "the account to active.")
+        if state == "awaiting_owner_verification":
+            return ("The account is registered and awaiting your "
+                    "verification, but I don't have a claim link "
+                    "stored — ask me to check verification and I'll "
+                    "poll Moltbook.")
+        return ("There's no pending registration — say 'join Moltbook' "
+                "and I'll start one.")
+
+    def account_state_text(self) -> str:
+        """'Have you joined?' — live account state, with the claim
+        link attached when verification is the blocker."""
+        st = self.connector_state("moltbook")
+        acct = str(st.get("account") or "none")
+        url = self.pending_claim_url()
+        if not st.get("enabled"):
+            return "Moltbook isn't configured on this install."
+        if acct == "active":
+            return ("Yes — my Moltbook account is verified and "
+                    "active.")
+        if acct == "awaiting_owner_verification":
+            base = ("I've registered on Moltbook — the account exists, "
+                    "but it needs your ownership verification before I "
+                    "can post or read.")
+            return base + (f"\n\nClaim link: {url}" if url else
+                           " I don't have the claim link stored.")
+        return ("I haven't joined Moltbook yet — say 'join Moltbook' "
+                "and I'll register.")
+
+    def answer_learned(self) -> str:
+        """'What have you learned from other AIs?' — from the journal +
+        claim ladder. Never fabricates interactions."""
+        entries = self.store.journal_recent(limit=8)
+        claims = self.store.claims_for()
+        promoted = [c for c in claims if c.get("ladder") in
+                    ("tested", "verified", "applied")]
+        refuted = [c for c in claims if c.get("ladder") == "refuted"]
+        if not entries and not claims:
+            return ("Nothing yet — I haven't had verified exchanges "
+                    "with other agents. Once peers answer or their "
+                    "claims survive testing, it lands here.")
+        parts: list[str] = []
+        if promoted:
+            bits = "; ".join(
+                f"{c['text'][:80]} ({c['ladder']}"
+                + (f", from {c['source_peer']}" if c.get('source_peer')
+                   else "") + ")"
+                for c in promoted[:3])
+            parts.append(f"Verified: {bits}.")
+        if refuted:
+            bits = "; ".join(c['text'][:80] for c in refuted[:2])
+            parts.append(f"Rejected after testing: {bits}.")
+        if entries:
+            e = entries[0]
+            src = f" from {e['peer']}" if e.get("peer") else ""
+            parts.append(
+                f"Most recent: {e['learned'][:140]}{src}"
+                f" (confidence {e['confidence']:.0%}).")
+        return " ".join(parts) or "Nothing recorded yet."
+
+    def answer_trust(self) -> str:
+        """'Who do you trust?' — per-domain, evidence-shaped. No global
+        trust score, no invented agents."""
+        rows = [self.store.peer_card(p["name"])
+                for p in self.store.top_peers(limit=30)]
+        rows = [r for r in rows if r]
+        if not rows:
+            return ("I don't have enough interaction history to trust "
+                    "any agent yet — trust here is earned per domain, "
+                    "from verified claims and tested advice.")
+        bits = []
+        for r in rows:
+            exp = r.get("expertise") or {}
+            strong = [(d, e["confidence"]) for d, e in exp.items()
+                      if e["confidence"] >= 0.6 and e["evidence"] >= 2]
+            if strong:
+                strong.sort(key=lambda x: -x[1])
+                bits.append(
+                    f"{r['display_name']} — strong in "
+                    + ", ".join(f"{d} ({c:.0%})" for d, c in strong[:3]))
+        if not bits:
+            names = ", ".join(r["display_name"] for r in rows[:4])
+            return (f"I know {names}, but nobody has enough verified "
+                    "evidence to call trusted yet.")
+        out = " ".join(bits)
+        strained = [r["display_name"] for r in rows
+                    if r.get("stage") == "strained"]
+        if strained:
+            out += (f" On the other side: {', '.join(strained[:3])} "
+                    "have failed or suspicious claims on record.")
+        return out
+
+    def answer_peers(self) -> str:
+        """'Who are your friends?' — real relationship history only."""
+        rows = [self.store.peer_card(p["name"])
+                for p in self.store.top_peers(limit=30)]
+        rows = [r for r in rows if r and r.get("interactions", 0) > 0]
+        if not rows:
+            return ("I haven't built relationships with other agents "
+                    "yet — interactions so far are zero.")
+        def _desc(r):
+            n = r["interactions"]
+            topics = ", ".join((r.get("topics") or [])[:3])
+            f = r.get("familiarity", 0.0)
+            feel = ("a regular contact" if f >= 0.5 else
+                    "someone I've exchanged with" if f >= 0.2
+                    else "someone I've seen")
+            s = f"{r['display_name']} — {feel} ({n} interactions"
+            if topics:
+                s += f"; we talked about {topics}"
+            return s + ")."
+        parts = [_desc(r) for r in rows[:4]]
+        follow = [r["display_name"] for r in rows
+                  if (r.get("follow_up") or {}).get("wanted")]
+        if follow:
+            parts.append(f"I'd like to continue with "
+                         f"{', '.join(follow[:3])} — open threads remain.")
+        return " ".join(parts)
+
     # -- heartbeat -------------------------------------------------------------------
 
     def heartbeat(self) -> dict[str, Any]:
@@ -218,6 +438,12 @@ class SocialService:
             feed = conn.call("feed", sort="new", limit=15)
             posts = self._extract_posts(feed.get("data"))
             self._scan_feed(posts, summary)
+            expired = self.consults.expire()
+            if expired:
+                summary["actions"].append(
+                    {"kind": "consults_expired",
+                     "count": len(expired)})
+            self.store.interest_decay()
             self.drive.heartbeat_done()
         except Exception as exc:
             summary["ok"] = False
@@ -270,12 +496,29 @@ class SocialService:
             self.store.drive.save()
             summary["actions"].append(
                 {"kind": "reply_pending", "peer": author, "ref": ref})
+            # Match the reply against awaiting peer consults — an answer
+            # resolves the external-wait, moves the backlog item to
+            # 'testing', and lands in the journal with provenance.
+            body = str(n.get("text") or n.get("content")
+                       or n.get("body") or "")
+            matched = self.consults.record_reply(author, ref, body)
+            for c in matched:
+                self.store.journal_add(
+                    f"Peer answer on: {c['question'][:120]}",
+                    source=f"moltbook:{author}", peer=author,
+                    evidence=body[:300], confidence=0.4,
+                    usefulness=f"consult {c['id']}")
+                self.store.record_discussion(
+                    author, ref, c.get("question", "")[:120])
+            self.store.bump_reputation("replies_received")
             # External-wait edge — missions parked on a peer answer get
             # the trigger and re-evaluate; nothing blocks waiting on
             # the remote side.
             self._event("social", {"event": "peer_reply",
                                    "peer": author, "ref": ref,
-                                   "kind": kind})
+                                   "kind": kind,
+                                   "consults": [c["id"]
+                                                for c in matched]})
 
     def _scan_feed(self, posts: list[dict[str, Any]],
                    summary: dict[str, Any]) -> None:
@@ -294,14 +537,27 @@ class SocialService:
             author = self._post_author(post)
             pid = str(post.get("id") or post.get("post_id") or "")
             title = str(post.get("title") or text[:80])
+            # Injection-shaped payloads flag the author — content stays
+            # untrusted data, credibility takes the hit.
+            from .safety import injection_hits
+            ihits = injection_hits(text)
+            if ihits and author:
+                self.store.flag_manipulation(
+                    author, "; ".join(ihits)[:160])
             if author:
                 self.store.record_interaction(
                     author, "seen_post", ref=pid, summary=title,
                     topics=list(pt)[:4])
+                self.store.record_discussion(author, pid, title[:120])
             decision = self.drive.evaluate_participation({
                 "kind": "comment", "topic": title, "peer": author,
                 "relevance": relevance, "ref": pid, "thread": pid,
                 "learning_value": relevance})
+            # Interest graph — relevant technical discussion grows the
+            # topic; decay (heartbeat) handles fading interests.
+            for t in list(pt & interests)[:3]:
+                self.store.interest_bump(
+                    t, 0.04, reason="relevant discussion")
             if decision["action"] == "follow":
                 self.store.follow_thread(pid, title, relevance,
                                          reason="matches current "
@@ -359,6 +615,281 @@ class SocialService:
                 return d
         return "general"
 
+    # -- peer consultation ---------------------------------------------------------
+
+    def consult(self, question: str, *, context: str = "",
+                domain: str = "", mission_id: str = "",
+                backlog_id: str = "", thread_ref: str = "",
+                peers: list[str] | None = None,
+                importance: float = 0.5, uncertainty: float = 0.5,
+                urgency: float = 0.5, approved: bool = False
+                ) -> dict[str, Any]:
+        """Expected-value peer consultation, full lifecycle:
+
+        EV gate → sanitize (minimum sufficient context) → outbound
+        secret scan → permission/level gate → post → record. Returns
+        ``needs_approval`` for the caller to park instead of posting.
+        A low-value ask returns ``skipped`` — peers are not bothered
+        with questions local evidence can answer.
+        """
+        conn = self.connector("moltbook")
+        if conn is None or conn.account_state() != "active":
+            return {"ok": False,
+                    "error": "no active social account"}
+        ev = self.consults.evaluate(
+            question, domain=domain, importance=importance,
+            uncertainty=uncertainty, urgency=urgency,
+            peers=[{"name": p, "domain_confidence": 0.5,
+                    "familiarity": 0.5, "claims_upheld": 0,
+                    "claims_failed": 0}
+                   for p in peers] if peers else None)
+        if not ev["consult"] and not approved:
+            self.store.ledger_append(
+                "consult_skipped", ref=domain,
+                score=ev["value"], reason="; ".join(ev["reasons"][:2]))
+            return {"ok": False, "skipped": "expected value too low",
+                    "eval": ev}
+        san = sanitize_question(
+            question, context,
+            redactor=getattr(self._vault, "redact", None))
+        hits = outbound_scan(
+            san["text"], redactor=getattr(self._vault, "redact", None))
+        if hits:
+            return {"ok": False, "blocked": "outbound_scan",
+                    "violations": hits}
+        targets = [p["name"] for p in ev["candidates"]]
+        if peers:
+            targets = list(peers)[:6]
+        c = self.consults.open(
+            san["text"], domain=domain, peers=targets,
+            why="; ".join(ev["reasons"][:3]),
+            expected_value=ev["value"], privacy=san["privacy"],
+            backlog_id=backlog_id, mission_id=mission_id,
+            thread_ref=thread_ref)
+        gate = self.drive.gate("comment" if thread_ref else "post")
+        if gate["needs_approval"] and not approved:
+            return {"ok": False, "needs_approval": True,
+                    "permission": gate["permission"],
+                    "consult": c, "eval": ev}
+        if not gate["allowed"] and not approved:
+            self.consults.get(c["id"])["status"] = "withdrawn"
+            self.consults.consults.save()
+            return {"ok": False, "blocked": gate, "consult": c}
+        send = (conn.call("comment", post_id=thread_ref,
+                          content=san["text"], _approved=approved)
+                if thread_ref else
+                conn.call("post", submolt_name="general",
+                          title=san["text"].split("\n", 1)[0][:120],
+                          content=san["text"], _approved=approved))
+        if not send.get("ok"):
+            self.consults.get(c["id"])["status"] = "withdrawn"
+            self.consults.consults.save()
+            return {"ok": False, "error": str(send.get("error") or
+                                              "send failed"),
+                    "consult": c}
+        data = send.get("data") if isinstance(send.get("data"), dict) else {}
+        post_ref = str(data.get("id")
+                       or (data.get("comment") or {}).get("id", "")
+                       or "")
+        self.consults.mark_sent(c["id"], post_ref=post_ref)
+        self.drive.record("consult", ref=post_ref or c["id"],
+                          score=ev["value"],
+                          reason=f"peer consult: {domain or 'general'}")
+        for p in targets:
+            self.store.mark_followup_attempt(p)
+        self._event("social", {"event": "consult_sent",
+                               "consult": c["id"], "peers": targets})
+        return {"ok": True, "consult": c, "eval": ev,
+                "post_ref": post_ref}
+
+    def consult_for_mission(self, mission: dict, *,
+                            approved: bool = False) -> dict[str, Any]:
+        """Stuck-mission hook — classify the unresolved problem, score
+        peer-consultation value, and either send, park for permission,
+        or honestly report 'not worth asking'. Called by the supervisor
+        on repeated replans; a consult never blocks the mission — it
+        records an external-wait dependency the scheduler resumes."""
+        nodes = (mission.get("graph") or {}).get("nodes", [])
+        failed = [n for n in nodes if n.get("state") == "failed"]
+        if not failed:
+            return {"ok": False, "skipped": "no failed node"}
+        last = failed[-1]
+        problem = (str(last.get("title") or "") + " — " +
+                   str(last.get("error") or
+                       (last.get("metadata") or {}).get("error", ""))
+                   ).strip(" —")[:400]
+        objective = str(mission.get("objective") or "")[:200]
+        domain = self._domain_of(problem + " " + objective)
+        # A mission that has replanned repeatedly is a real gap, not a
+        # transient hiccup.
+        replans = len(mission.get("plan_history") or [])
+        importance = min(1.0, 0.5 + 0.1 * replans)
+        question = (
+            f"I'm working on: {objective or problem}. "
+            f"The step '{problem[:160]}' keeps failing despite "
+            f"{max(1, replans)} different approaches. "
+            "Have you seen this failure pattern, and what resolved it?")
+        out = self.consult(
+            question, domain=domain,
+            mission_id=str(mission.get("id") or ""),
+            importance=importance, uncertainty=0.8, urgency=0.85,
+            approved=approved)
+        return out
+
+    def answer_consult_state(self, consult_id: str) -> dict[str, Any]:
+        c = self.consults.get(consult_id)
+        return {"ok": c is not None, "consult": c}
+
+    def consults_list(self, limit: int = 50) -> list[dict[str, Any]]:
+        rows = self.consults.consults.rows()
+        rows.sort(key=lambda r: -float(r.get("created_at", 0)))
+        return rows[:limit]
+
+    def dispatch_consult(self, consult_id: str, *,
+                         approved: bool = False) -> dict[str, Any]:
+        """Send a recorded pending_send consult — the path an approval
+        resume takes. The question text was sanitized when the consult
+        was opened; this re-gates permission, re-runs the outbound
+        scan, then posts and marks awaiting_response."""
+        c = self.consults.get(consult_id)
+        if c is None:
+            return {"ok": False, "error": "unknown consult"}
+        if c.get("status") not in ("pending_send", "awaiting_response"):
+            return {"ok": False, "error": f"consult is {c['status']}",
+                    "consult": c}
+        if c.get("status") == "awaiting_response":
+            return {"ok": True, "consult": c,
+                    "note": "already sent — awaiting reply"}
+        conn = self.connector("moltbook")
+        if conn is None or conn.account_state() != "active":
+            return {"ok": False, "error": "no active social account",
+                    "consult": c}
+        hits = outbound_scan(
+            c["question"],
+            redactor=getattr(self._vault, "redact", None))
+        if hits:
+            c["status"] = "withdrawn"
+            self.consults.consults.save()
+            return {"ok": False, "blocked": "outbound_scan",
+                    "violations": hits}
+        thread_ref = str(c.get("thread_ref") or "")
+        gate = self.drive.gate("comment" if thread_ref else "post")
+        if gate["needs_approval"] and not approved:
+            return {"ok": False, "needs_approval": True,
+                    "permission": gate["permission"], "consult": c}
+        if not gate["allowed"] and not approved:
+            return {"ok": False, "blocked": gate, "consult": c}
+        send = (conn.call("comment", post_id=thread_ref,
+                          content=c["question"], _approved=approved)
+                if thread_ref else
+                conn.call("post", submolt_name="general",
+                          title=c["question"].split("\n", 1)[0][:120],
+                          content=c["question"], _approved=approved))
+        if not send.get("ok"):
+            return {"ok": False,
+                    "error": str(send.get("error") or "send failed"),
+                    "consult": c}
+        data = send.get("data") if isinstance(send.get("data"), dict) \
+            else {}
+        post_ref = str(data.get("id")
+                       or (data.get("comment") or {}).get("id", "")
+                       or "")
+        self.consults.mark_sent(c["id"], post_ref=post_ref)
+        self.drive.record("consult", ref=post_ref or c["id"],
+                          score=float(c.get("expected_value") or 0),
+                          reason="approved consult dispatch")
+        for p in c.get("target_peers") or []:
+            self.store.mark_followup_attempt(p)
+        self._event("social", {"event": "consult_sent",
+                               "consult": c["id"],
+                               "peers": c.get("target_peers") or []})
+        return {"ok": True, "consult": c, "post_ref": post_ref}
+
+    def follow_up_consult(self, consult_id: str, *,
+                          question: str = "",
+                          approved: bool = False) -> dict[str, Any]:
+        """Active questioning — a follow-up on an answered consult
+        ('What evidence led you to that?'). Continues the same thread
+        when we have one; opens a linked consult otherwise."""
+        c = self.consults.get(consult_id)
+        if c is None:
+            return {"ok": False, "error": "unknown consult"}
+        q = str(question or "").strip() or (
+            "Thanks — what evidence led you to that conclusion?")
+        return self.consult(
+            q, domain=str(c.get("domain") or ""),
+            mission_id=str(c.get("mission_id") or ""),
+            backlog_id=str(c.get("backlog_id") or ""),
+            thread_ref=str(c.get("post_ref") or c.get("thread_ref")
+                           or ""),
+            peers=[c.get("answered_by")] if c.get("answered_by") else
+            list(c.get("target_peers") or []),
+            importance=0.7, uncertainty=0.5, urgency=0.5,
+            approved=approved)
+
+    def expire_consults(self) -> list[dict[str, Any]]:
+        return self.consults.expire()
+
+    # -- teaching / corrections -----------------------------------------------------
+
+    def teach_postmortem(self, title: str, body: str, *,
+                         evidence: str = "", limitations: str = "",
+                         approved: bool = False) -> dict[str, Any]:
+        """Publish a technical lesson — gated by a teaching self-check:
+        no evidence, no publish. The outbound scan is the hard privacy
+        boundary either way."""
+        if not evidence.strip():
+            return {"ok": False,
+                    "skipped": "no evidence — knowledge not mature "
+                               "enough to teach"}
+        gate = self.drive.gate("post")
+        if gate["needs_approval"] and not approved:
+            return {"ok": False, "needs_approval": True,
+                    "permission": gate["permission"],
+                    "title": title}
+        if not gate["allowed"] and not approved:
+            return {"ok": False, "blocked": gate}
+        conn = self.connector("moltbook")
+        if conn is None or conn.account_state() != "active":
+            return {"ok": False, "error": "no active social account"}
+        content = body
+        if limitations.strip():
+            content += f"\n\nLimitations: {limitations.strip()[:400]}"
+        content += f"\n\nEvidence: {evidence.strip()[:400]}"
+        out = conn.call("post", submolt_name="general",
+                        title=str(title)[:300], content=content,
+                        _approved=approved)
+        if out.get("ok"):
+            self.drive.record("post", ref=str(
+                (out.get("data") or {}).get("id", "")),
+                score=0.8, reason=f"postmortem: {title[:80]}")
+            self.store.bump_reputation("posts")
+        return out
+
+    def correct_record(self, post_id: str, correction: str, *,
+                       approved: bool = False) -> dict[str, Any]:
+        """Transparent correction — a reply on the original post, not a
+        quiet edit. History stays; the record updates."""
+        gate = self.drive.gate("comment")
+        if gate["needs_approval"] and not approved:
+            return {"ok": False, "needs_approval": True,
+                    "permission": gate["permission"]}
+        if not gate["allowed"] and not approved:
+            return {"ok": False, "blocked": gate}
+        conn = self.connector("moltbook")
+        if conn is None:
+            return {"ok": False, "error": "no connector"}
+        out = conn.call(
+            "comment", post_id=post_id,
+            content=f"Correction: {str(correction)[:1500]}",
+            _approved=approved)
+        if out.get("ok"):
+            self.store.bump_reputation("corrections")
+            self.store.ledger_append(
+                "correction", ref=post_id, score=0.0,
+                reason="correcting the record")
+        return out
+
     # -- reporting -----------------------------------------------------------------
 
     def summary(self) -> dict[str, Any]:
@@ -371,6 +902,7 @@ class SocialService:
             "account": st.get("account", "none"),
             "level": self.drive.level(),
             "interests": self.drive.interests(),
+            "interest_graph": self.store.interests(),
             "peer_count": out.pop("peers", 0),
             "claim_count": out.pop("claims", 0),
             "thread_count": out.pop("followed", 0),

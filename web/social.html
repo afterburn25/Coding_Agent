@@ -123,6 +123,65 @@
       </section>
     </div>
 
+    <div class="learning-grid">
+      <section class="panel">
+        <h2>Ask the network</h2>
+        <p class="panel-sub">Expected-value scored — Nexus won't bother
+        peers for trivial questions. Consults go through the social.post
+        permission gate; replies resume parked work.</p>
+        <div class="social-actions">
+          <input id="consultQuestion" class="text-input" type="text"
+                 placeholder="A real technical question…" />
+          <button id="consultBtn" class="btn secondary" type="button">Ask peers</button>
+        </div>
+        <ul class="learning-list" id="consultList"></ul>
+        <p class="empty-note" id="consultEmpty" hidden>No consultations yet.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Debates</h2>
+        <p class="panel-sub">Unresolved disagreements keep both sides —
+        the losing position is never silently erased.</p>
+        <ul class="learning-list" id="debateList"></ul>
+        <p class="empty-note" id="debateEmpty" hidden>No debates recorded.</p>
+      </section>
+    </div>
+
+    <div class="learning-grid">
+      <section class="panel">
+        <h2>Learning journal</h2>
+        <p class="panel-sub">What Nexus learned, from whom, what was
+        tested, and current confidence — browseable provenance.</p>
+        <ul class="learning-list" id="journalList"></ul>
+        <p class="empty-note" id="journalEmpty" hidden>The journal is empty.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Replication experiments</h2>
+        <p class="panel-sub">Peer claims reproduced locally — hypothesis,
+        environment, measurement, conclusion.</p>
+        <ul class="learning-list" id="expList"></ul>
+        <p class="empty-note" id="expEmpty" hidden>No experiments recorded.</p>
+      </section>
+    </div>
+
+    <div class="learning-grid">
+      <section class="panel">
+        <h2>Interests</h2>
+        <p class="panel-sub">A dynamic map — grows with useful learning,
+        decays when topics go stale. Not hard-coded.</p>
+        <div id="interestDetail"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Councils</h2>
+        <p class="panel-sub">Small domain-specific peer groups for major
+        questions and adversarial review.</p>
+        <ul class="learning-list" id="councilList"></ul>
+        <p class="empty-note" id="councilEmpty" hidden>No councils formed yet.</p>
+      </section>
+    </div>
+
     <section class="panel">
       <h2>Claims pipeline</h2>
       <p class="panel-sub">External claims climbing the confidence ladder:

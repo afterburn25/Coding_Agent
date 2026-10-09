@@ -4432,6 +4432,17 @@ class AgentOrchestrator:
         svc = self._social_service()
         if svc is None:
             return None
+        # Provenance-grounded social queries — 'what have you learned
+        # from other AIs', 'who do you trust', 'who are your friends',
+        # 'ask the community about X'. All answers come from the peer/
+        # claim/journal stores; nothing is fabricated.
+        try:
+            query = svc.classify_social_query(user_text)
+        except Exception:
+            query = None
+        if query is not None:
+            return self._social_query_reply(
+                svc, query, task_id, event_callback)
         try:
             service = svc.resolve_service(user_text)
         except Exception:
@@ -4508,6 +4519,157 @@ class AgentOrchestrator:
         return self._run_social_join(
             svc, service, task_id, decision, builtin_event,
             event_callback)
+
+    def _social_query_reply(self, svc, query: tuple, task_id: str,
+                            event_callback=None):
+        """Deterministic answers for peer-intelligence queries —
+        learned/trust/friends read the stores; ask_peer opens a real
+        consult through the permission gate."""
+        kind, subject = query
+        decision = RoutingDecision(
+            role="utility", model_id="builtin-social",
+            reasons=["social query lane — provenance from stores"],
+            complexity=0)
+        builtin_event = {
+            "type": "builtin_utility", "model_id": "builtin-social",
+            "role": "utility", "reason": "social query lane"}
+        self._safe_emit(event_callback,
+                        {"type": "model", "event": builtin_event})
+
+        def _finish(text: str, ok: bool = True):
+            done = self.tasks.update(
+                task_id, status="completed" if ok else "failed",
+                phase="done", model_id="builtin-social",
+                model_role="utility", summary=text, final_content=text,
+                steps=0, error="" if ok else text)
+            self._safe_emit(event_callback,
+                            {"type": "task", "task": done.as_dict()})
+            return AgentResult(content=text, routing=decision,
+                               model_events=[builtin_event], steps=0,
+                               task=done.as_dict())
+
+        if kind == "claim_link":
+            return _finish(svc.claim_link_text())
+        if kind == "account_state":
+            return _finish(svc.account_state_text())
+        if kind == "learned":
+            return _finish(svc.answer_learned())
+        if kind == "trust":
+            return _finish(svc.answer_trust())
+        if kind == "friends":
+            return _finish(svc.answer_peers())
+        if kind == "ask_peer":
+            question = subject or "general"
+            try:
+                out = svc.consult(question=question, mission_id="")
+            except Exception as exc:
+                return _finish(
+                    f"I couldn't start a peer consultation: {exc}",
+                    ok=False)
+            c = out.get("consult") or {}
+            target = ((c.get("target_peers") or ["a peer"])[0]
+                      or "a peer")
+            if out.get("needs_approval"):
+                pending = {
+                    "kind": "social_action",
+                    "name": "moltbook.consult",
+                    "arguments": {"service": "moltbook",
+                                  "action": "consult",
+                                  "consult_id": c.get("id", "")},
+                    "permission": str(out.get("permission")
+                                      or "social.post"),
+                    "call_id": "",
+                    "detail": f"Ask peers: {question[:100]}",
+                }
+                stamp_pending(task_id, pending)
+                self._audit_approval_request(pending)
+                parked = self.tasks.update(
+                    task_id, status="waiting_approval",
+                    phase="waiting_approval", pending_approval=pending)
+                text = (f"That's worth asking the network — I picked "
+                        f"{target} as the best contact. Posting needs "
+                        "your approval; approve and I'll send the "
+                        "sanitized question.")
+                self._safe_emit(event_callback, {
+                    "type": "approval", "approval": pending,
+                    "card": self._approval_card(task_id, pending),
+                    "task": parked.as_dict()})
+                return AgentResult(
+                    content=text, routing=decision,
+                    model_events=[builtin_event], steps=0,
+                    task=parked.as_dict(), pending_approval=pending)
+            if out.get("ok"):
+                return _finish(
+                    f"Asked {target} — I've parked the question and "
+                    "will fold the reply into the record when it "
+                    "lands.")
+            if out.get("skipped"):
+                reasons = ((out.get("eval") or {}).get("reasons")
+                           or ["not enough expected gain"])
+                return _finish(
+                    "I don't think that's worth asking peers — "
+                    + "; ".join(str(r) for r in reasons[:3]) + ".")
+            if out.get("blocked"):
+                return _finish(
+                    "Peer consultation is blocked by your social "
+                    "permissions right now.")
+            return _finish(
+                f"I couldn't ask the network: "
+                f"{str(out.get('error') or 'no active account')[:160]}",
+                ok=False)
+        return None
+
+    def _run_social_consult(self, svc, task_id: str, consult_id: str,
+                            event_callback=None):
+        """Resume of an approved consult — the approval authorizes the
+        send; deliverable text reports what happened."""
+        decision = RoutingDecision(
+            role="utility", model_id="builtin-social",
+            reasons=["social action lane — no model call"],
+            complexity=0)
+        builtin_event = {
+            "type": "builtin_utility", "model_id": "builtin-social",
+            "role": "utility", "reason": "social action lane"}
+        ledger_entry = None
+        if self.action_ledger is not None:
+            try:
+                ledger_entry = self.action_ledger.begin(
+                    kind="social", action="ask peer",
+                    capability="social", tool="moltbook.consult",
+                    params={"consult": consult_id}, task_id=task_id)
+            except Exception:
+                ledger_entry = None
+        try:
+            out = svc.dispatch_consult(consult_id, approved=True)
+        except Exception as exc:
+            out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        ok = bool(out.get("ok"))
+        if self.action_ledger is not None and ledger_entry is not None:
+            try:
+                self.action_ledger.finish(
+                    ledger_entry["id"],
+                    status="verified" if ok else "failed",
+                    detail=str(out.get("error") or
+                               out.get("status") or "")[:200])
+            except Exception:
+                pass
+        if ok:
+            text = (f"Sent — the question is out to the peer and I'm "
+                    f"watching for a reply (consult {consult_id}).")
+        else:
+            text = (f"The consult didn't go through: "
+                    f"{str(out.get('error') or 'unknown')[:200]}")
+        done = self.tasks.update(
+            task_id, status="completed" if ok else "failed",
+            phase="done", model_id="builtin-social",
+            model_role="utility", summary=text, final_content=text,
+            steps=0, error="" if ok else text)
+        self._safe_emit(event_callback,
+                        {"type": "task", "task": done.as_dict()})
+        return AgentResult(
+            content=text, routing=decision,
+            model_events=[builtin_event], steps=0,
+            task=done.as_dict())
 
     def _run_social_join(self, svc, service: str, task_id: str,
                          decision, builtin_event, event_callback=None,
@@ -4619,6 +4781,14 @@ class AgentOrchestrator:
                     reasons=["social action lane — no model call"],
                     complexity=0),
                 steps=0, task=done.as_dict())
+        # Consult approvals send the parked question; everything else
+        # is the account-onboarding call.
+        args = pending.get("arguments") or {}
+        if str(pending.get("name") or "").endswith(".consult"):
+            return self._run_social_consult(
+                svc, task_id,
+                str(args.get("consult_id") or ""),
+                event_callback=event_callback)
         return self._run_social_join(
             svc, service, task_id,
             RoutingDecision(role="utility", model_id="builtin-social",

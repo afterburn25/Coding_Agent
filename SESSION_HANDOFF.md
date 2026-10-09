@@ -2,6 +2,76 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 0.39.0 — Peer Intelligence Network
+
+Moltbook becomes a real peer-learning network rather than a posting
+surface. All of it rides the existing stores/drives/permission gate —
+no parallel framework.
+
+- **Peer graph** (`social/store.py`) — per-agent dossier:
+  relationship dims (familiarity/respect/trust/reciprocity/
+  communication), per-domain expertise w/ evidence counts, topics,
+  discussions, disagreements, open questions, manipulation flags,
+  follow-up intent (attempt cap 2 + 2-day cooldown — bounded pursuit),
+  evaluate marks. `peer_card()` → UI dossier. Expertise moves only on
+  verified outcomes (`update_expertise` ±delta; promote_claim feeds
+  claims_upheld/failed). `set_council`/`council_for` for domain
+  councils; `interest_bump`/`interest_decay`/`interest_graph` for the
+  dynamic interest map; `reputation()` counters (posts,
+  replies_received, reproductions, corrections, helpful_marks).
+- **Claim ladder** — `heard→corroborated→testable→tested→verified→
+  applied` + terminal `refuted`/`retired`. `add_claim` dedupes on
+  normalized text — a second peer repeating a claim adds a
+  corroboration entry to the same record (never an independent
+  observation).
+- **ConsultEngine** (`social/consult.py`) — `evaluate()` EV =
+  gap × importance × peer_relevance × info_gain × urgency (≥0.28 to
+  consult); `select_peers()` excludes manipulation-flagged/strained;
+  `open/mark_sent/record_reply/expire` lifecycle; reply matching by
+  target peer or thread_ref; injected replies record
+  `injection_flags` + `flag_manipulation`. `sanitize_question` strips
+  private paths/addresses/oversized code + runs the vault redactor
+  before outbound_scan.
+- **Service consult flows** — `consult()` (EV → sanitize → outbound
+  scan → gate → post → mark_sent), `dispatch_consult()` (approval
+  resume path), `follow_up_consult()` (active questioning on the same
+  thread), `consult_for_mission()` (stuck-mission hook: failed node →
+  domain → sanitized question), `answer_consult_state`,
+  `teach_postmortem` (evidence self-check), `correct_record`.
+- **Mission external-wait** — supervisor `_maybe_peer_consult` opens
+  one consult after ≥2 replans and attaches an `external_wait` node in
+  `waiting_dependency`; `_step_executing` parks it while the consult
+  is live, releases on answered/unanswered/withdrawn; runner
+  `internal:peer_wait:<id>` returns the answer tagged UNTRUSTED or
+  "continuing without an answer". The mission never blocks.
+- **Chat lanes** — `classify_social_query` adds `claim_link` /
+  `account_state` / `learned` / `trust` / `friends` / `ask_peer`
+  kinds. ask_peer opens a real consult — parks a `social_action`
+  approval (`moltbook.consult`) resumed through `dispatch_consult`.
+  State-gated shorthands: "resend it"/"where's the link" bind only
+  while a claim URL is outstanding; "have you joined" only when an
+  account exists. `answer_learned/trust/peers` read stores — no
+  fabricated peers.
+- **Live dogfood fix** — model claimed "I sent the claim link to your
+  browser" (no such action). `claim_link_text()` returns the literal
+  persisted `claim_url`; `account_state_text()` reports live
+  connector state. Registration as `Nexus_Core` succeeded earlier;
+  account was `awaiting_owner_verification` pending the user's manual
+  claim at moltbook.com/claim/… .
+- **API/UI** — GETs: `/peer?name=`, `/consults`, `/debates`,
+  `/journal`, `/experiments`, `/councils`, `/interests`. POSTs:
+  `/consult`, `/consult/dispatch`, `/followup`, `/backlog/add`.
+  `social.html` panels: Ask the network, Debates, Learning Journal,
+  Replication Experiments, Interests, Councils.
+- **Tests** — `tests/test_social.py` 71 tests: peer graph,
+  expertise up/down, dedupe consensus, bounded follow-up,
+  manipulation → strained, councils, debates both-sides,
+  journal/experiment persistence, ladder drive-by-experiment,
+  backlog states, EV scoring/selection/sanitization/reply/timeout/
+  injection, service consult+dispatch+followup+teaching, provenance
+  queries + claim-link grounding, mission external-wait park/resume/
+  expire.
+
 ## 0.38.0 — Live Capability Grounding + Social/Epistemic Drives
 
 The observed failure — "Join Moltbook" answered with "I don't have a

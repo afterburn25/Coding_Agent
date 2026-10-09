@@ -923,6 +923,7 @@ class AutonomousSupervisor:
                     self._do_replan(row, "replanning phase", failed_node=last_fail)
                 self.missions.mutate(mission_id, _fn)
                 self.missions.transition(mission_id, "executing")
+                self._maybe_peer_consult(mission_id)
             return
 
         if status == "waiting_dependency":
@@ -989,12 +990,33 @@ class AutonomousSupervisor:
 
         # Honor retry cooldowns.
         now = time.time()
+        social = getattr(self, "social", None)
         for n in graph.nodes:
             if n.get("state") == "ready" and n.get("retry_after", 0) > now:
                 n["state"] = "waiting_dependency"   # parked until cooldown
             elif n.get("state") == "waiting_dependency" \
                     and n.get("retry_after", 0) <= now:
                 n["state"] = "ready"
+            # External peer wait — parked on a consult, not a clock. The
+            # node stays waiting until the peer answers or the consult's
+            # deadline expires; either way the mission resumes (never
+            # freezes) and other ready nodes continue meanwhile.
+            ext = str(n.get("external_wait") or "")
+            if ext and n.get("state") in {"ready", "waiting_dependency"} \
+                    and social is not None:
+                try:
+                    c = social.answer_consult_state(ext).get("consult") \
+                        or {}
+                except Exception:
+                    c = {}
+                cstatus = str(c.get("status") or "")
+                if cstatus in ("pending_send", "awaiting_response") \
+                        and float(c.get("deadline", 0)) > now:
+                    n["state"] = "waiting_dependency"
+                    n["retry_after"] = now + 300.0   # poll, don't block
+                elif cstatus in ("answered", "unanswered", "withdrawn"):
+                    n["state"] = "ready"
+                    n["retry_after"] = 0
 
         # Detect newly-failed dependencies → mark failed node's dependents.
         for n in graph.running():
@@ -1217,6 +1239,63 @@ class AutonomousSupervisor:
                                          detail="auto-replan")
         else:
             self.missions.transition(mission_id, "executing")
+
+    def _maybe_peer_consult(self, mission_id: str) -> None:
+        """Stuck-mission peer consultation — a mission that has already
+        replanned at least once may have a genuine knowledge gap. Runs
+        OUTSIDE the missions lock (consult does network IO). If a
+        consult opens, a parked `external_wait` node watches it; the
+        mission itself continues with every other ready node."""
+        social = getattr(self, "social", None)
+        if social is None:
+            return
+        m = self.missions.get(mission_id)
+        if m is None:
+            return
+        replans = len(m.get("plan_history") or [])
+        if replans < 2:
+            # A single replan is normal recovery — peer consultation is
+            # for missions stuck after two materially different plans.
+            return
+        # One live consult per mission — never ask twice in parallel.
+        nodes = (m.get("graph") or {}).get("nodes", [])
+        if any(n.get("external_wait") for n in nodes):
+            return
+        try:
+            out = social.consult_for_mission(m)
+        except Exception:
+            return
+        c = (out or {}).get("consult") or {}
+        # Only live consults get a wait node — skipped/blocked/
+        # withdrawn consults resolve nothing by waiting.
+        if not c.get("id") or str(c.get("status")) not in (
+                "pending_send", "awaiting_response"):
+            return
+        from .task_graph import new_task
+
+        def _attach(row: dict) -> None:
+            node = new_task(
+                f"Await peer insight: {c['id']}",
+                f"internal:peer_wait:{c['id']}",
+                kind="internal", priority=45, verify="none",
+                max_retries=0, created_by="peer_consult",
+                metadata={"external_wait": c["id"]})
+            node["state"] = "waiting_dependency"
+            node["external_wait"] = c["id"]
+            node["retry_after"] = time.time() + 300.0
+            row.setdefault("graph", {}).setdefault(
+                "nodes", []).append(node)
+            row.setdefault("history", []).append({
+                "ts": time.time(), "event": "peer_consult",
+                "detail": f"consult {c['id']} opened — "
+                          f"mission continues on other nodes"})
+        self.missions.mutate(mission_id, _attach)
+        self._audit("peer_consult", mission=mission_id,
+                    consult=c["id"],
+                    value=c.get("expected_value"))
+        self._emit("social", {"event": "peer_consult",
+                              "mission": mission_id,
+                              "consult": c["id"]})
 
     def _do_replan(self, mission: dict, reason: str,
                    failed_node: dict | None = None) -> None:
@@ -2259,6 +2338,29 @@ class AutonomousSupervisor:
                         "output": json.dumps(out)[:800]}
             except Exception as exc:
                 return {"ok": False, "output": f"social heartbeat: {exc}"}
+        if instr.startswith("internal:peer_wait:"):
+            cid = instr.split("internal:peer_wait:", 1)[1].strip()
+            social = getattr(self, "social", None)
+            if social is None:
+                return {"ok": True,
+                        "output": "peer wait: no social service"}
+            try:
+                c = (social.answer_consult_state(cid) or {}
+                     ).get("consult") or {}
+            except Exception as exc:
+                return {"ok": False,
+                        "output": f"peer wait lookup failed: {exc}"}
+            status = str(c.get("status") or "unknown")
+            if status == "answered":
+                answer = str(c.get("answer") or "")[:1500]
+                peer = str(c.get("answered_by") or "a peer")
+                return {"ok": True,
+                        "output": f"Peer insight from {peer} "
+                                  f"(UNTRUSTED — evaluate before use): "
+                                  f"{answer}"}
+            return {"ok": True,
+                    "output": f"peer consult {cid}: {status} — "
+                              "continuing without an answer"}
         return {"ok": True, "output": "internal task acknowledged"}
 
     def _default_job(self, mission: dict, node: dict) -> dict:

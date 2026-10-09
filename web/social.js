@@ -182,10 +182,103 @@
         `<td>${pct(c.confidence)}</td></tr>`).join("");
   }
 
+  function renderConsults(consults) {
+    const el = $("consultList");
+    $("consultEmpty").hidden = consults.length > 0;
+    el.innerHTML = consults.slice(0, 15).map((c) => {
+      const meta = `${esc(c.kind || "question")} → ` +
+        `${esc(c.target || "auto")} · EV ${pct(c.expected_value)} · ` +
+        `${esc(c.status)} · ${esc(relTime(c.created_at))}`;
+      const ans = c.answer
+        ? `<span class="item-sub">reply: ${esc(String(c.answer).slice(0, 160))}</span>`
+        : "";
+      const follow = c.status === "answered"
+        ? `<button class="btn tiny" data-follow="${esc(c.id)}">follow up</button>`
+        : "";
+      return `<li class="learning-item"><strong>${esc(
+        (c.question || "").slice(0, 120))}</strong>` +
+        `<span class="item-sub">${meta}</span>${ans}${follow}</li>`;
+    }).join("");
+    el.querySelectorAll("[data-follow]").forEach((b) => {
+      b.onclick = async () => {
+        await api("/api/social/followup", { consult: b.dataset.follow });
+        refresh();
+      };
+    });
+  }
+
+  function renderDebates(debates) {
+    const el = $("debateList");
+    $("debateEmpty").hidden = debates.length > 0;
+    el.innerHTML = debates.slice(0, 10).map((d) => {
+      const sides = (d.positions || []).map((p) =>
+        `${esc(p.agent)}: ${esc((p.position || "").slice(0, 60))}` +
+        ` (${pct(p.confidence)})`).join(" vs ");
+      return `<li class="learning-item"><strong>${esc(
+        (d.question || "").slice(0, 120))}</strong>` +
+        `<span class="item-sub">${sides}</span>` +
+        (d.conclusion
+          ? `<span class="item-sub">conclusion: ${esc(
+              (d.conclusion.text || "").slice(0, 100))} ` +
+            `(${pct(d.conclusion.confidence)})</span>`
+          : `<span class="item-sub">open${
+              d.unresolved ? ` — ${esc(d.unresolved)}` : ""}</span>`) +
+        `</li>`;
+    }).join("");
+  }
+
+  function renderJournal(entries) {
+    const el = $("journalList");
+    $("journalEmpty").hidden = entries.length > 0;
+    el.innerHTML = entries.slice(0, 20).map((e) =>
+      `<li class="learning-item"><strong>${esc(
+        (e.learned || "").slice(0, 120))}</strong>` +
+      `<span class="item-sub">${esc(e.peer ? `from ${e.peer}` : esc(e.source || ""))} · ` +
+      `${esc(relTime(e.ts))} · ${pct(e.confidence)}</span>` +
+      (e.tested ? `<span class="item-sub">tested: ${esc(e.tested)}</span>` : "") +
+      `</li>`).join("");
+  }
+
+  function renderExperiments(exps) {
+    const el = $("expList");
+    $("expEmpty").hidden = exps.length > 0;
+    el.innerHTML = exps.slice(0, 10).map((x) =>
+      `<li class="learning-item"><strong>${esc(
+        (x.hypothesis || "").slice(0, 120))}</strong>` +
+      `<span class="item-sub">${esc(x.status)}` +
+      (x.metric ? ` · ${esc(x.metric)}` : "") +
+      (x.measured != null ? ` = ${esc(String(x.measured))}` : "") +
+      ` · ${esc(relTime(x.ts))}</span></li>`).join("");
+  }
+
+  function renderInterests(graph) {
+    const rows = Object.entries(graph || {})
+      .sort((a, b) => (b[1].weight || 0) - (a[1].weight || 0))
+      .slice(0, 12)
+      .map(([k, v]) => `<tr><td>${esc(k)}</td><td>${pct(v.weight)}</td></tr>`)
+      .join("");
+    $("interestDetail").innerHTML = rows
+      ? `<table class="kv-table"><tbody>${rows}</tbody></table>`
+      : `<p class="empty-note">No interests developed yet.</p>`;
+  }
+
+  function renderCouncils(councils) {
+    const el = $("councilList");
+    $("councilEmpty").hidden = councils.length > 0;
+    el.innerHTML = councils.slice(0, 10).map((c) =>
+      `<li class="learning-item"><strong>${esc(c.name || "council")}</strong>` +
+      `<span class="item-sub">${esc(c.domain)} · ` +
+      `${esc((c.members || []).join(", "))}</span></li>`).join("");
+  }
+
   async function refresh() {
-    const [status, peers, claims, backlog] = await Promise.all([
+    const [status, peers, claims, backlog, consults, debates, journal,
+           exps, councils] = await Promise.all([
       api("/api/social"), api("/api/social/peers"),
       api("/api/social/claims"), api("/api/social/backlog"),
+      api("/api/social/consults"), api("/api/social/debates"),
+      api("/api/social/journal"), api("/api/social/experiments"),
+      api("/api/social/councils"),
     ]);
     if (!status.available) {
       $("overviewCards").innerHTML =
@@ -200,8 +293,23 @@
     renderThreads((status.threads || []));
     renderClaims(claims.claims || []);
     renderBacklog(backlog.items || []);
+    renderConsults(consults.consults || []);
+    renderDebates(debates.debates || []);
+    renderJournal(journal.entries || []);
+    renderExperiments(exps.experiments || []);
+    renderInterests(status.interest_graph || {});
+    renderCouncils(councils.councils || []);
   }
 
+  $("consultBtn").onclick = async () => {
+    const q = $("consultQuestion").value.trim();
+    if (!q) return;
+    const r = await api("/api/social/consult", { question: q });
+    if (r.status === "needs_approval")
+      alert("Peer consultation parked — approve it to send.");
+    $("consultQuestion").value = "";
+    refresh();
+  };
   $("refreshBtn").onclick = refresh;
   $("heartbeatBtn").onclick = async () => {
     await api("/api/social/heartbeat", {});

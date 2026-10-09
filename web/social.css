@@ -26,5 +26,11 @@
 .rung-verified { background: rgba(90,210,140,.18); color: #7fe0a8; }
 .rung-applied { background: rgba(90,210,140,.28); color: #8ff0b8; }
 .rung-refuted { background: rgba(255,110,110,.18); color: #ff9b9b; }
+.rung-testable { background: rgba(255,200,120,.18); color: #ffd08a; }
+.rung-retired { background: rgba(140,140,150,.12); color: #99a; }
+
+.text-input { flex: 1; padding: 8px 10px; border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px; background: rgba(0,0,0,.25); color: inherit; font-size: 13px; }
+.text-input:focus { outline: none; border-color: rgba(120,180,255,.5); }
 
 .learning-item .item-sub { display: block; color: var(--muted, #8a93a6); font-size: 12px; }

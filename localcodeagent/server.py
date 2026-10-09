@@ -3159,6 +3159,9 @@ class AppState:
         # user-tunable and the service itself decides whether acting is
         # worthwhile, so the schedule only wakes the check.
         sup.social_heartbeat = self.social.heartbeat
+        # Peer-intelligence hook — stuck missions may open peer
+        # consults; external_wait nodes poll consult state through it.
+        sup.social = self.social
         try:
             if not any(s.get("name") == "social-heartbeat"
                        for s in sup.scheduler.list()):
@@ -7592,6 +7595,44 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"items": (social.store.backlog_open(limit=100)
                                   if social is not None else [])})
             return True
+        if path == "/api/social/peer":
+            social = getattr(self.state, "social", None)
+            name = (q.get("name") or [""])[0]
+            self._json({"peer": (social.store.peer_card(name)
+                                 if social is not None else None)})
+            return True
+        if path == "/api/social/consults":
+            social = getattr(self.state, "social", None)
+            self._json({"consults": (social.consults_list(limit=50)
+                                     if social is not None else [])})
+            return True
+        if path == "/api/social/debates":
+            social = getattr(self.state, "social", None)
+            self._json({"debates": (social.store.debates.rows()
+                                    if social is not None else [])})
+            return True
+        if path == "/api/social/journal":
+            social = getattr(self.state, "social", None)
+            self._json({"entries": (social.store.journal_recent(limit=100)
+                                    if social is not None else [])})
+            return True
+        if path == "/api/social/experiments":
+            social = getattr(self.state, "social", None)
+            self._json({"experiments": (social.store.experiments_for()
+                                        if social is not None else [])})
+            return True
+        if path == "/api/social/councils":
+            social = getattr(self.state, "social", None)
+            cs = (social.store.councils()
+                  if social is not None else {})
+            self._json({"councils": [{"name": n, **c}
+                                     for n, c in cs.items()]})
+            return True
+        if path == "/api/social/interests":
+            social = getattr(self.state, "social", None)
+            self._json({"interests": (social.store.interest_graph()
+                                      if social is not None else {})})
+            return True
         if path == "/api/knowledge":
             if self.state.knowledge is None:
                 self._json({"available": False})
@@ -7704,6 +7745,49 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": bool(social.store.resolve_backlog(
                 item_id, str(body.get("status") or "resolved"),
                 note=str(body.get("note") or "")))})
+            return True
+        if path == "/api/social/consult":
+            # Owner-initiated peer consultation — the same EV-scored,
+            # permission-gated path the mission supervisor uses.
+            social = getattr(self.state, "social", None)
+            if social is None:
+                self._json({"error": "social service unavailable"}, 503)
+                return True
+            self._json(social.consult(
+                question=str(body.get("question") or ""),
+                domain=str(body.get("domain") or ""),
+                importance=float(body.get("importance") or 0.6)))
+            return True
+        if path == "/api/social/consult/dispatch":
+            social = getattr(self.state, "social", None)
+            if social is None:
+                self._json({"error": "social service unavailable"}, 503)
+                return True
+            self._json(social.dispatch_consult(
+                str(body.get("consult") or ""),
+                approved=bool(body.get("approved"))))
+            return True
+        if path == "/api/social/followup":
+            social = getattr(self.state, "social", None)
+            if social is None:
+                self._json({"error": "social service unavailable"}, 503)
+                return True
+            self._json(social.follow_up_consult(
+                str(body.get("consult") or ""),
+                question=str(body.get("question") or ""),
+                approved=bool(body.get("approved"))))
+            return True
+        if path == "/api/social/backlog/add":
+            social = getattr(self.state, "social", None)
+            if social is None:
+                self._json({"error": "social service unavailable"}, 503)
+                return True
+            item = social.store.add_backlog(
+                kind=str(body.get("kind") or "question"),
+                topic=str(body.get("topic") or ""),
+                question=str(body.get("question") or ""),
+                source="owner", importance=0.7)
+            self._json({"ok": bool(item), "item": item})
             return True
         if path == "/api/audit/run":
             tool = self.state.tools.get("project_audit")
