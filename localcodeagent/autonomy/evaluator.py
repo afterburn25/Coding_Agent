@@ -49,9 +49,26 @@ class MissionEvaluator:
         elif kind == "verify_passed":
             verifs = mission.get("verification_history") or []
             ok = [v for v in verifs if v.get("ok")]
-            out["met"] = bool(ok)
-            out["detail"] = (f"{len(ok)} passing verification(s)"
-                             if ok else "no passing verification recorded")
+            if not ok and str(mission.get("objective") or ""
+                              ).strip().startswith("internal:"):
+                # Legacy internal missions were derived with an
+                # unsatisfiable verify criterion — they have no verify
+                # node, so their internal check's own result is the
+                # evidence. Prevents the diagnose→replan treadmill.
+                done = [n for n in graph_nodes
+                        if n.get("state") == "completed"
+                        and (n.get("result") or {}).get("ok")]
+                failed = [n for n in graph_nodes
+                          if n.get("state") == "failed"]
+                out["met"] = bool(done) and not failed
+                out["detail"] = (f"{len(done)} internal check(s) ok"
+                                 if done else
+                                 "no internal check completed")
+            else:
+                out["met"] = bool(ok)
+                out["detail"] = (f"{len(ok)} passing verification(s)"
+                                 if ok else
+                                 "no passing verification recorded")
 
         elif kind in {"artifact_exists", "file_exists",
                       "artifact_verified"}:

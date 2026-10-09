@@ -76,6 +76,33 @@ class RequirementStoreTests(unittest.TestCase):
         self.assertTrue(any(s["verification"]["kind"] == "no_failures"
                             for s in specs))
 
+    def test_internal_objective_gets_no_unsatisfiable_verify(self):
+        """Live bug: heartbeat missions got the universal verify_passed
+        criterion but have no verification node — evaluation could
+        never pass, forcing a diagnose→replan treadmill that starved
+        the agent lane."""
+        from localcodeagent.requirements import derive_requirement_specs
+        specs = derive_requirement_specs("internal:social_heartbeat")
+        kinds = {s["verification"]["kind"] for s in specs}
+        self.assertIn("no_failures", kinds)
+        self.assertNotIn("verify_passed", kinds)
+
+    def test_internal_verify_passed_satisfied_by_checks(self):
+        """Legacy internal missions still carrying verify_passed accept
+        their completed internal nodes as evidence."""
+        from localcodeagent.autonomy.evaluator import MissionEvaluator
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            ev = MissionEvaluator(Path(td))
+            m = {"objective": "internal:social_heartbeat",
+                 "graph": {"nodes": [
+                     {"state": "completed",
+                      "result": {"ok": True}}]},
+                 "verification_history": []}
+            out = ev._check_criterion({"kind": "verify_passed"}, m)
+            self.assertTrue(out["met"], out)
+
     def test_attach_mission_fills_criteria(self):
         m = {"id": "m-9", "objective": "fix the installer update",
              "success_criteria": []}

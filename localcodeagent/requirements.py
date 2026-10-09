@@ -394,12 +394,17 @@ def derive_requirement_specs(objective: str) -> list[dict[str, Any]]:
             verification={"kind": "custom", "check": "behavior_verified"},
             priority="high")
 
-    # Universal completion gates — cheap, always meaningful.
+    # Universal completion gates — cheap, always meaningful. Internal
+    # missions (heartbeats, maintenance) have no verification node, so
+    # 'verify_passed' is unsatisfiable for them and forces an infinite
+    # diagnose→replan treadmill; 'no_failures' is their honest gate.
+    internal = text.startswith("internal:")
     add("Planned work completes without failed tasks",
         verification={"kind": "no_failures"})
-    add("At least one verification run passes",
-        verification={"kind": "verify_passed"})
-    if repair or feature:
+    if not internal:
+        add("At least one verification run passes",
+            verification={"kind": "verify_passed"})
+    if (repair or feature) and not internal:
         add("No regressions: existing checks still pass",
             verification={"kind": "verify_passed"})
     return specs
