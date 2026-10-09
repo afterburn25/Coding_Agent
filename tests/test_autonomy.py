@@ -322,6 +322,40 @@ class JobNodeTests(unittest.TestCase):
             {"objective": "x", "scope": "one_shot"})
         self.assertFalse([t for t in plan2 if t["kind"] == "job"])
 
+    def test_work_node_names_declared_artifacts_upfront(self):
+        # Soak finding: the first work pass produced prose because nothing
+        # told the model a file was a hard deliverable — only the replan
+        # path named it. The criterion must reach the initial instruction.
+        from localcodeagent.autonomy.planner import MissionPlanner
+        plan = MissionPlanner().initial_plan({
+            "objective": "write a report",
+            "scope": "one_shot",
+            "success_criteria": [
+                {"kind": "artifact_exists", "target": "docs/report.md"}]})
+        work = next(t for t in plan if t["kind"] == "agent"
+                    and t["title"].startswith("Execute"))
+        self.assertIn("docs/report.md", work["instruction"])
+        self.assertIn("file-write tool", work["instruction"])
+        # No declared artifact → no extra clause.
+        plan2 = MissionPlanner().initial_plan({
+            "objective": "x", "scope": "one_shot",
+            "success_criteria": [{"kind": "all_tasks_completed"}]})
+        work2 = next(t for t in plan2 if t["kind"] == "agent"
+                     and t["title"].startswith("Execute"))
+        self.assertNotIn("Required deliverable", work2["instruction"])
+
+    def test_integrate_node_names_declared_artifacts(self):
+        from localcodeagent.autonomy.planner import MissionPlanner
+        plan = MissionPlanner().initial_plan({
+            "objective": "update frontend and backend",
+            "scope": "repository",
+            "success_criteria": [
+                {"kind": "artifact_exists", "target": "dist/out.zip"}],
+            "lanes_hint": ""})
+        ints = [t for t in plan if t["kind"] == "integrate"]
+        self.assertEqual(len(ints), 1)  # decomposition must have fired
+        self.assertIn("dist/out.zip", ints[0]["instruction"])
+
     def test_multi_domain_objective_decomposes_to_lanes(self):
         # "Audit backend, UI and tests" → parallel scoped lanes converging
         # on integrate → review → verify (the spec's canonical shape).

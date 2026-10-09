@@ -34,7 +34,7 @@
   `test_finish_publishes_sealed_zero_for_unspoken`,
   `test_cancelled_job_publishes_skipped`.
 
-Checkpoint: **2921 tests** (2921 passed + 3 env skips).
+Checkpoint: **2923 tests** (2921 passed + 3 env skips).
 
 ## Follow-up — Actions-artifact dogfood + deploy script
 
@@ -3198,7 +3198,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2921 tests` passing (3 environment skips).
+Expected at this checkpoint: `2923 tests` passing (3 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

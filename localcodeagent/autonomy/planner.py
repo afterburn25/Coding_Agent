@@ -134,6 +134,7 @@ class MissionPlanner:
             f"Execute: {str(mission.get('title') or objective)[:100]}",
             ("Accomplish the authorized objective. Work only inside the "
              "mission's constraints. Objective: " + objective +
+             self._deliverables_text(mission) +
              self._constraints_text(mission) +
              self._project_context(mission)),
             kind="agent", deps=[inspect["id"]], priority=20,
@@ -236,7 +237,8 @@ class MissionPlanner:
              "detect conflicts, apply compatible work, and leave shared/"
              "integration-owned files consistent. Do NOT blindly merge — "
              "record conflicts you could not resolve in the output.\n"
-             "Objective: " + objective),
+             "Objective: " + objective
+             + self._deliverables_text(mission)),
             kind="integrate", deps=lane_ids, priority=38,
             verify="none", max_retries=1,
             metadata={"worker_role": "integrator"})
@@ -288,6 +290,27 @@ class MissionPlanner:
                       for n in tasks
                       if (n.get("metadata") or {}).get("lane")]})
         return tasks
+
+    def _deliverables_text(self, mission: dict) -> str:
+        """Declared artifact_exists/file_exists criteria are hard
+        deliverables — the first executor pass must know prose does not
+        satisfy them (bounded-soak finding: missions burned a full
+        fail→replan cycle before the recovery instruction named the
+        target). Name every required artifact and demand a real write."""
+        targets = [
+            str(c.get("target") or "").strip()
+            for c in (mission.get("success_criteria") or [])
+            if str(c.get("kind") or "") in {"artifact_exists",
+                                           "file_exists"}
+            and str(c.get("target") or "").strip()]
+        if not targets:
+            return ""
+        named = "; ".join(targets[:8])
+        return (
+            f"\nRequired deliverable(s): {named}. The mission is NOT "
+            "complete until each exists on disk — invoke the file-write "
+            "tool with complete, concrete content. A prose summary or a "
+            "description of the file does not count.")
 
     def _constraints_text(self, mission: dict) -> str:
         cons = [c for c in (mission.get("constraints") or []) if c]
