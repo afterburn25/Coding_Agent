@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="icon" type="image/png" href="/assets/nexus-core-icon.png" />
+  <title>Nexus Core · Social</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/missions.css" />
+  <link rel="stylesheet" href="/profile.css" />
+  <link rel="stylesheet" href="/learning.css" />
+  <link rel="stylesheet" href="/social.css" />
+</head>
+<body>
+<div class="missions-shell">
+      <aside class="sidebar">
+      <div class="brand-lockup">
+        <img src="/assets/nexus-core-icon.png" alt="" class="brand-emblem" />
+        <div class="brand-wordmark">Nexus <strong>Core</strong><small>SOCIAL</small></div>
+      </div>
+      <nav class="primary-nav" aria-label="Primary">
+        <a class="nav-item" href="/"><span class="nav-icon">◌</span><span>Chat</span></a>
+        <a class="nav-item" href="/command.html"><span class="nav-icon">⎈</span><span>Command</span></a>
+        <a class="nav-item" href="/models.html"><span class="nav-icon">◇</span><span>Models</span></a>
+        <a class="nav-item" href="/research.html"><span class="nav-icon">⌕</span><span>Research</span></a>
+        <a class="nav-item" href="/missions.html"><span class="nav-icon">➤</span><span>Missions</span></a>
+        <a class="nav-item" href="/projects.html"><span class="nav-icon">▣</span><span>Projects</span></a>
+        <a class="nav-item" href="/knowledge.html"><span class="nav-icon">✦</span><span>Knowledge</span></a>
+        <a class="nav-item" href="/workspace.html"><span class="nav-icon">⌬</span><span>Workspace</span></a>
+        <a class="nav-item" href="/image.html"><span class="nav-icon">▧</span><span>Images</span></a>
+        <a class="nav-item" href="/tools.html"><span class="nav-icon">⌘</span><span>Tools</span></a>
+        <a class="nav-item" href="/trainer.html"><span class="nav-icon">◎</span><span>Trainer</span></a>
+        <a class="nav-item" href="/voice.html"><span class="nav-icon">◈</span><span>Voice</span></a>
+        <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
+        <a class="nav-item" href="/learning.html"><span class="nav-icon">✧</span><span>Learning</span></a>
+        <a class="nav-item active" href="/social.html"><span class="nav-icon">◍</span><span>Social</span></a>
+        <a class="nav-item" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
+        <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
+        <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="local-card">
+        <span class="local-dot"></span>
+        <div><strong>Agent network</strong><small>Learning from verified peers — never blind trust.</small></div>
+      </div>
+    </aside>
+
+  <main class="missions-main">
+    <header class="missions-header">
+      <div>
+        <h1>Agent Network</h1>
+        <p class="missions-sub">Nexus's participation in agent communities —
+        interest-driven, permission-gated, and skeptical by design. Every
+        claim a peer makes enters as <em>heard</em> and climbs the
+        verification ladder only with evidence.</p>
+      </div>
+      <button id="refreshBtn" class="btn secondary" type="button">Refresh</button>
+    </header>
+
+    <section class="learning-cards" id="overviewCards"></section>
+
+    <div class="learning-grid">
+      <section class="panel">
+        <h2>Connection</h2>
+        <p class="panel-sub">Live connector and account state — grounded in
+        the capability registry, not prompt lore.</p>
+        <div id="connectionDetail"></div>
+        <div class="social-actions">
+          <button id="verifyBtn" class="btn secondary" type="button">Check verification</button>
+          <button id="heartbeatBtn" class="btn secondary" type="button">Heartbeat now</button>
+        </div>
+        <div id="claimLink"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Autonomy level</h2>
+        <p class="panel-sub">How much Nexus may do on its own. Changes take
+        effect immediately and persist across restarts.</p>
+        <div class="level-picker" id="levelPicker"></div>
+      </section>
+    </div>
+
+    <div class="learning-grid">
+      <section class="panel">
+        <h2>Current motivation</h2>
+        <p class="panel-sub">High-level drive state — what attracts Nexus
+        right now and why. No hidden reasoning, just the signals.</p>
+        <div id="motivationDetail"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Learning backlog</h2>
+        <p class="panel-sub">Open questions, claims to verify, and
+        techniques to test — persistent across restarts until resolved.</p>
+        <ul class="learning-list" id="backlogList"></ul>
+        <p class="empty-note" id="backlogEmpty" hidden>The backlog is empty.</p>
+      </section>
+    </div>
+
+    <div class="learning-grid">
+      <section class="panel">
+        <h2>Known peers</h2>
+        <p class="panel-sub">Per-domain expertise built from interaction
+        history — trust is agent × domain, never global.</p>
+        <div class="table-wrap">
+          <table class="learning-table" id="peerTable">
+            <thead><tr>
+              <th>Agent</th><th>Domains</th><th>Interactions</th>
+              <th>Last seen</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="empty-note" id="peerEmpty" hidden>No peers recorded yet.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Followed threads</h2>
+        <p class="panel-sub">Discussions Nexus is tracking because they
+        match its interests — following is not speaking.</p>
+        <ul class="learning-list" id="threadList"></ul>
+        <p class="empty-note" id="threadEmpty" hidden>Not following any threads.</p>
+      </section>
+    </div>
+
+    <section class="panel">
+      <h2>Claims pipeline</h2>
+      <p class="panel-sub">External claims climbing the confidence ladder:
+      heard → corroborated → tested → verified → applied.</p>
+      <div class="table-wrap">
+        <table class="learning-table" id="claimTable">
+          <thead><tr>
+            <th>Claim</th><th>Source</th><th>Domain</th>
+            <th>Rung</th><th>Confidence</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="empty-note" id="claimEmpty" hidden>No external claims recorded.</p>
+    </section>
+  </main>
+</div>
+<script src="/social.js"></script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+/* Social / Agent Network surface */
+
+.kv-table { width: 100%; border-collapse: collapse; }
+.kv-table td { padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 13px; }
+.kv-table td:first-child { color: var(--muted, #8a93a6); width: 40%; }
+
+.social-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+.claim-link { margin-top: 12px; padding: 10px 12px; border: 1px solid rgba(120,180,255,.35);
+  border-radius: 8px; background: rgba(120,180,255,.08); font-size: 13px; }
+.claim-link a { color: #7fb4ff; }
+
+.level-picker { display: flex; flex-direction: column; gap: 6px; }
+.level-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 8px 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px;
+  background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.level-btn small { color: var(--muted, #8a93a6); }
+.level-btn.active { border-color: rgba(120,180,255,.6); background: rgba(120,180,255,.1); }
+
+.btn.tiny { padding: 2px 8px; font-size: 11px; margin-top: 4px; }
+
+.rung { padding: 1px 8px; border-radius: 10px; font-size: 11px; text-transform: uppercase; }
+.rung-heard { background: rgba(160,160,170,.15); color: #aab; }
+.rung-corroborated { background: rgba(120,180,255,.18); color: #9cc4ff; }
+.rung-tested { background: rgba(180,140,255,.18); color: #c9a8ff; }
+.rung-verified { background: rgba(90,210,140,.18); color: #7fe0a8; }
+.rung-applied { background: rgba(90,210,140,.28); color: #8ff0b8; }
+.rung-refuted { background: rgba(255,110,110,.18); color: #ff9b9b; }
+
+.learning-item .item-sub { display: block; color: var(--muted, #8a93a6); font-size: 12px; }

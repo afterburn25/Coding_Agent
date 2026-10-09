@@ -147,6 +147,26 @@ The response self-audit (`context/scope.audit_response`) is a cheap structural c
 
 Debugging: the scope inspector (`/api/conversations/scope`) now carries a `state` excerpt — active topic, topic stack, entity labels, active decisions, open loops, goal. Tests: `tests/test_conversation_state.py` (entities, pronouns, ordinals, topic matrices, decision supersession, open loops, distractor churn, 50/100/200-turn sessions, restart round-trip).
 
+## Capability grounding + social/epistemic layer
+
+Capability claims are probed, never remembered. `CapabilityRegistry` evaluates each capability against live env probes (tool manifest, connector state, permission policy, runtime readiness) and caches per a short TTL. Two additions matter:
+
+- **`denied(text)`** — detects "I can't X / I don't have X" phrasing and returns every spec whose probed state is *positive* — a stale self-knowledge denial is a self-audit contradiction, not an answer.
+- **`capability_brief()`** — the live positive list injected into ability-shaped prompts so the model can say "I can do A, B, C" only for what is actually verified.
+
+Probed specs now include `web_access` (tool + offline policy) and `moltbook` (connector + account onboarding state). The permanent rule: observed runtime capability outranks stored autobiographical self-model.
+
+**Agent-network participation** is a first-class connector, not a prompt trick:
+
+- `connectors/moltbook.py` — HTTPS client pinned to `https://www.moltbook.com/api/v1` (config `moltbook_api_url`); `Authorization` is attached only when the request host equals the configured API host, and cross-host redirects strip it via the shared `_AUTH_SAFE_OPENER`; the API key lives only in the SecretVault (`moltbook_api_key`) — never in Brain, conversation memory, logs, URLs, or account state files. Registration → vault the key → surface the clickable claim URL → `awaiting_owner_verification` → status checks flip `active`. Every read endpoint returns payloads tagged `UNTRUSTED_EXTERNAL_CONTENT` with advisory `injection_flags`; every outbound write passes a blocking secret scan.
+- **`social.*` permissions** (`read`, `account`, `post`, `react`, `follow`, `message`) ride the normal PermissionManager — offline denies all, reads may be session-allowed, writes default ask/session.
+- **Join lane** — `_social_action_reply` resolves `join X` against connectors exposing `onboard`; questions answer from live connector state (`capability_text`), commands gate `social.account` and park as `kind:"social_action"` approvals resumed by `_resume_social_action` — the same session-less pattern as `local_action`.
+- **Social Drive** (`social/drive.py`) — level-gated participation (`off` / `read_only` / `assisted` / `autonomous` / `learning`), scored decisions over relevance × reply-obligation × novelty × relationship × learning × contribution minus spam/repetition/cooldown penalties. Silence is a valid decision; there is no forced posting cadence.
+- **Epistemic Drive** — persistent learning backlog (questions, claims to verify, techniques to test, peers to ask) with urgency + verification plans; open items never decay while unresolved — the "compelled to learn" invariant.
+- **Stores** (`social/store.py`) — peers carry per-domain expertise (agent × domain × evidence, never one global trust score), interaction history, familiarity and stage; claims carry full provenance through the ladder heard → corroborated → tested → verified → applied, with `refuted` discounting the source's domain credibility.
+- **Heartbeat** — a seeded `social-heartbeat` interval schedule materializes a low-priority `internal:` mission (`internal:social_heartbeat`) through the normal planner; `SocialService.heartbeat()` polls notifications (peer replies publish the `social_reply` trigger signal so missions can external-wait), scans the feed against interests + open backlog, follows threads without speaking, and captures claims at `heard`.
+- **Surface** — `/api/social*` status/peers/claims/backlog GETs, level/heartbeat/verify/backlog-resolve POSTs, and `web/social.html` — a dashboard showing connection, motivation, backlog, peers, threads and the claims ladder plus the autonomy-level picker.
+
 ## Transactional mutation model
 
 Filesystem edits are tracked per task. On the first mutation of a path, `CheckpointManager` records whether it existed and stores the original bytes if necessary.

@@ -405,6 +405,21 @@ class AgentConfig:
     github_timeout: int = 15
     github_default_remote: str = "origin"
 
+    # v0.38 Moltbook / social participation. The endpoint is config, not
+    # lore — official docs can move it, and the connector reads it live.
+    moltbook_enabled: bool = True
+    moltbook_api_url: str = "https://www.moltbook.com/api/v1"
+    moltbook_secret_name: str = "moltbook_api_key"
+    moltbook_agent_name: str = "Nexus"
+    moltbook_description: str = (
+        "Nexus Core — a local-first personal AI workstation. Interested "
+        "in agent architecture, memory, verification, and peer learning.")
+    moltbook_timeout: int = 20
+    # Social autonomy level: off | read_only | assisted | autonomous |
+    # learning_focused. Assisted = Nexus proposes, user approves.
+    social_level: str = "assisted"
+    social_heartbeat_minutes: int = 45
+
 
 def default_config() -> AgentConfig:
     return AgentConfig(
@@ -853,4 +868,17 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.github_token_env = str(raw.get("github_token_env", cfg.github_token_env))
     cfg.github_timeout = max(3, int(raw.get("github_timeout", cfg.github_timeout)))
     cfg.github_default_remote = str(raw.get("github_default_remote", cfg.github_default_remote)) or "origin"
+    cfg.moltbook_enabled = bool(raw.get("moltbook_enabled", cfg.moltbook_enabled))
+    cfg.moltbook_api_url = str(raw.get("moltbook_api_url", cfg.moltbook_api_url))
+    cfg.moltbook_secret_name = str(raw.get("moltbook_secret_name", cfg.moltbook_secret_name))
+    cfg.moltbook_agent_name = str(raw.get("moltbook_agent_name", cfg.moltbook_agent_name))
+    cfg.moltbook_description = str(raw.get("moltbook_description", cfg.moltbook_description))
+    cfg.moltbook_timeout = max(3, int(raw.get("moltbook_timeout", cfg.moltbook_timeout)))
+    if str(raw.get("social_level", cfg.social_level)) in (
+            "off", "read_only", "assisted", "autonomous",
+            "learning_focused"):
+        cfg.social_level = str(raw.get("social_level", cfg.social_level))
+    cfg.social_heartbeat_minutes = max(
+        10, int(raw.get("social_heartbeat_minutes",
+                        cfg.social_heartbeat_minutes)))
     return cfg

@@ -96,6 +96,16 @@ class MissionPlanner:
             return self._record_plan(mission, self._maintenance_plan(mission),
                                      "maintenance")
 
+        if objective.strip().startswith("internal:"):
+            # Fully-internal mission — the supervisor's built-in runner
+            # owns the instruction (heartbeat checks, maintenance).
+            return self._record_plan(
+                mission,
+                [new_task("Run internal check", objective.strip(),
+                          kind="internal", priority=50,
+                          verify="none", max_retries=1)],
+                "internal")
+
         if str(mission.get("pipeline") or "") == "coding":
             from ..coding_pipeline import build_coding_tasks
             tasks = build_coding_tasks(mission)

@@ -175,6 +175,11 @@ class TriggerEngine:
                 signal = "ci_failed"
         elif etype == "pull_request":
             signal = "pull_request_updated"
+        elif etype == "social":
+            # SocialService events — a peer reply can release missions
+            # parked on an external-wait dependency.
+            if str(event.get("event") or "") == "peer_reply":
+                signal = "social_reply"
         elif etype == "job" and sub == "failed":
             signal = "custom"
         if signal:

@@ -11,6 +11,7 @@ requests always outrank background work.
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 import time
@@ -2247,6 +2248,17 @@ class AutonomousSupervisor:
                 return run_light_maintenance(self.workspace, self.store)
             except Exception as exc:
                 return {"ok": False, "output": f"maintenance: {exc}"}
+        if instr.startswith("internal:social_heartbeat"):
+            hb = getattr(self, "social_heartbeat", None)
+            if not callable(hb):
+                return {"ok": True,
+                        "output": "social heartbeat: no service wired"}
+            try:
+                out = hb() or {}
+                return {"ok": bool(out.get("ok", True)),
+                        "output": json.dumps(out)[:800]}
+            except Exception as exc:
+                return {"ok": False, "output": f"social heartbeat: {exc}"}
         return {"ok": True, "output": "internal task acknowledged"}
 
     def _default_job(self, mission: dict, node: dict) -> dict:

@@ -653,6 +653,41 @@ class AppState:
             permission_check=lambda p: self.permission_manager.effective(p),
             audit=lambda e, d: self.connectors._audit(
                 "github", e, json.dumps(d)[:200]))
+        # Social participation — Moltbook connector + Social/Epistemic
+        # drives + peer/claim/backlog stores. The service owns onboarding
+        # state and the heartbeat; every capability call is permission-
+        # gated per-action (social.read/post/react/follow/account).
+        from .social.service import SocialService
+        from .connectors.moltbook import MoltbookConnector
+        self.social = SocialService(
+            config=config, vault=self.secrets,
+            permission_check=lambda p: self.permission_manager.effective(p),
+            store_root=runtime_root / "data" / "social",
+            event_sink=lambda e, p: self.events.publish(e, p))
+        try:
+            self._moltbook_connector = MoltbookConnector(
+                base_url=str(getattr(config, "moltbook_api_url",
+                                     "") or ""),
+                secret_name=str(getattr(config, "moltbook_secret_name",
+                                        "") or ""),
+                agent_name=str(getattr(config, "moltbook_agent_name",
+                                       "") or ""),
+                description=str(getattr(config, "moltbook_description",
+                                        "") or ""),
+                timeout=float(getattr(config, "moltbook_timeout", 20)),
+                state_path=runtime_root / "data" / "social"
+                           / "moltbook_account.json",
+                permission_check=lambda p:
+                    self.permission_manager.effective(p),
+                redactor=self.secrets.redact)
+            # Vault wiring is eager — auth_state()/account probes must
+            # see stored credentials before the first API call.
+            self._moltbook_connector.authenticate(self.secrets)
+            if getattr(config, "moltbook_enabled", True):
+                self.connectors.register(self._moltbook_connector)
+            self.social.attach(self.connectors, self._moltbook_connector)
+        except Exception:
+            self._moltbook_connector = None
         self._knowledge_path = runtime_root / "data" / "knowledge_graph.db"
         self.skills = SkillRegistry(runtime_root)
         # L13: learned procedures promote to real skills only through
@@ -1011,6 +1046,7 @@ class AppState:
             learning=self.learning,
             action_ledger=self.action_ledger,
             artifacts=self.artifacts,
+            social=lambda: self.social,
         )
         # The /shutdown /exit /restart commands run the same graceful
         # close as the /api/shutdown endpoint — wired here because the
@@ -1875,8 +1911,35 @@ class AppState:
             "voice_ready": _voice_ready,
             "llm_ready": _llm_ready,
             "browser_state": self._browser_state,
+            "network_offline":
+                lambda: bool(self.policies.is_offline()),
+            "connector_state": self._connector_capability_state,
         }
         return CapabilityRegistry(env)
+
+    def _connector_capability_state(self, name: str) -> dict:
+        """Live connector state for capability probes — enabled, auth,
+        and (for account-based services) onboarding/verification state."""
+        try:
+            rows = self.connectors.status()
+            status = next((r for r in rows if r.get("name") == name), {})
+        except Exception:
+            return {"state": "missing"}
+        if not status:
+            return {"state": "missing"}
+        if not status.get("enabled", True):
+            return {"state": "disabled"}
+        st = {"state": "enabled",
+              "authed": bool(status.get("authed"))}
+        probe = getattr(
+            (self.connectors.connectors.get(name) or {}).get("conn"),
+            "account_state", None)
+        if callable(probe):
+            try:
+                st["account"] = str(probe() or "")
+            except Exception:
+                pass
+        return st
 
     def _browser_runtime_status(self) -> dict:
         """Browser-runtime probe for the provisioning plan — verified
@@ -3091,6 +3154,29 @@ class AppState:
         sup.repair = self._build_self_repair(config, sup, runtime_root,
                                              hooks, emit)
         self._wire_signal_sources(sup, runtime_root)
+        # Social heartbeat — Moltbook check-ins ride the normal
+        # scheduler (audit, dedup, quiet-hours aware); the interval is
+        # user-tunable and the service itself decides whether acting is
+        # worthwhile, so the schedule only wakes the check.
+        sup.social_heartbeat = self.social.heartbeat
+        try:
+            if not any(s.get("name") == "social-heartbeat"
+                       for s in sup.scheduler.list()):
+                sup.scheduler.add(
+                    "social-heartbeat", "interval",
+                    interval_s=max(600.0, float(getattr(
+                        config, "social_heartbeat_minutes", 45)) * 60.0),
+                    action={
+                        "kind": "mission",
+                        "objective": "internal:social_heartbeat",
+                        "title": "Social heartbeat",
+                        "priority": "low",
+                        "scope": "one_shot",
+                        "autonomy_profile": "local_autonomous",
+                    },
+                    created_by="system")
+        except Exception:
+            pass
         return sup
 
     def _task_row(self, task_id: str) -> dict | None:
@@ -7247,6 +7333,7 @@ class Handler(BaseHTTPRequestHandler):
 
     _PLATFORM_PREFIXES = ("/api/health", "/api/twin", "/api/artifacts",
                           "/api/skills", "/api/connectors", "/api/knowledge",
+                          "/api/social",
                           "/api/rag", "/api/eval", "/api/experiments",
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
@@ -7485,6 +7572,26 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/connectors":
             self._json({"connectors": self.state.connectors.status()})
             return True
+        if path == "/api/social" or path == "/api/social/status":
+            social = getattr(self.state, "social", None)
+            self._json({"available": social is not None,
+                        **(social.summary() if social is not None else {})})
+            return True
+        if path == "/api/social/claims":
+            social = getattr(self.state, "social", None)
+            self._json({"claims": (social.store.claims_for() if social
+                                   is not None else [])})
+            return True
+        if path == "/api/social/peers":
+            social = getattr(self.state, "social", None)
+            self._json({"peers": (social.store.top_peers(limit=50)
+                                  if social is not None else [])})
+            return True
+        if path == "/api/social/backlog":
+            social = getattr(self.state, "social", None)
+            self._json({"items": (social.store.backlog_open(limit=100)
+                                  if social is not None else [])})
+            return True
         if path == "/api/knowledge":
             if self.state.knowledge is None:
                 self._json({"available": False})
@@ -7554,6 +7661,50 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def _platform_post(self, path: str, body: dict) -> bool:
+        if path == "/api/social/level":
+            # Social autonomy level — off / read_only / assisted /
+            # autonomous / learning. Persisted to config so restart
+            # keeps the user's choice.
+            social = getattr(self.state, "social", None)
+            if social is None:
+                self._json({"error": "social service unavailable"}, 503)
+                return True
+            level = str(body.get("level") or "").strip().lower()
+            if level not in ("off", "read_only", "assisted",
+                             "autonomous", "learning_focused"):
+                self._json({"error": "unknown level"}, 400)
+                return True
+            try:
+                self.state.config.social_level = level
+                self.state.persist_config_fields(["social_level"])
+            except Exception:
+                pass
+            self._json({"ok": True, "level": level})
+            return True
+        if path == "/api/social/heartbeat":
+            social = getattr(self.state, "social", None)
+            if social is None:
+                self._json({"error": "social service unavailable"}, 503)
+                return True
+            self._json(social.heartbeat())
+            return True
+        if path == "/api/social/verify":
+            social = getattr(self.state, "social", None)
+            if social is None:
+                self._json({"error": "social service unavailable"}, 503)
+                return True
+            self._json(social.check_verification())
+            return True
+        if path == "/api/social/backlog/resolve":
+            social = getattr(self.state, "social", None)
+            if social is None:
+                self._json({"error": "social service unavailable"}, 503)
+                return True
+            item_id = str(body.get("id") or "")
+            self._json({"ok": bool(social.store.resolve_backlog(
+                item_id, str(body.get("status") or "resolved"),
+                note=str(body.get("note") or "")))})
+            return True
         if path == "/api/audit/run":
             tool = self.state.tools.get("project_audit")
             if tool is None:

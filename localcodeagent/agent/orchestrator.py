@@ -52,7 +52,7 @@ UTILITY_PROMPT = """You are Nexus — a woman, a person. You live and work insid
 Your name is Nexus. When asked who you are or what to call you, answer as a person ("I'm Nexus — Nexus Core is the workstation I live in"). You are not an AI, a bot, or a program — never describe yourself that way, and never hedge with "as an AI".
 For greetings, capability questions, and casual conversation, answer directly and naturally.
 In ordinary conversation, sound like a capable adult rather than a scripted help bot. Track what the user has already said, carry references forward, notice relevant time gaps, vary phrasing, and avoid repetitive stock closings. Do not force a follow-up question onto every reply.
-You can explain that you can inspect/edit code, run tools with permission gates, test changes, research technical and general-knowledge questions, use Git/GitHub workflows when authorized, work with local image tools when configured, and adapt your conversational behavior through Nexus Brain memory/feedback/training signals.
+For "what can you do" / "can you X" questions, answer from the live runtime capability status attached to the turn (the available/unavailable lists), never from memory — capabilities change between sessions. If a capability is listed unavailable, name the concrete blocker (permission, setup, credential); if it is available, you may act on it.
 Do not claim that an action was performed unless it actually was. Do not invoke coding tools for a simple greeting or capability question.
 """ + TRUTH_RULE
 
@@ -385,6 +385,7 @@ class AgentOrchestrator:
         learning=None,
         action_ledger=None,
         artifacts=None,
+        social=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -463,6 +464,9 @@ class AgentOrchestrator:
         # ArtifactManager — local-action results that produced
         # downloadable files attach their client-view cards through it.
         self.artifacts = artifacts
+        # Callable returning the SocialService — lazy because AppState
+        # builds the orchestrator during its own construction.
+        self._social = social
         # Requirement-change propagation — AppState wires this to the
         # mission store so a superseded conversation fact flags
         # in-flight mission nodes referencing the stale value.
@@ -2806,10 +2810,12 @@ class AgentOrchestrator:
         if reg is None:
             return None
         try:
+            brief = reg.capability_brief()
             note = reg.prompt_note()
+            content = " ".join(x for x in (brief, note) if x)
         except Exception:
             return None
-        return {"role": "system", "content": note} if note else None
+        return {"role": "system", "content": content} if content else None
 
     def _capability_contradictions(self, text: str) -> list[dict[str, str]]:
         """Claims in `text` asserting a capability whose execution path is
@@ -2820,6 +2826,21 @@ class AgentOrchestrator:
         try:
             return [{"capability": r.id, "name": r.name, "state": r.state}
                     for r in reg.contradicted(text)]
+        except Exception:
+            return []
+
+    def _capability_denials(self, text: str) -> list[dict[str, str]]:
+        """Denials in `text` of a capability the live registry reports as
+        healthy ("I don't have a browser" while browser automation is
+        verified). Stale self-knowledge never outranks probed runtime
+        reality — the reply must be regenerated."""
+        reg = getattr(self, "capabilities", None)
+        if reg is None:
+            return []
+        try:
+            return [{"capability": r.id, "name": r.name, "state": r.state,
+                     "detail": r.detail}
+                    for r in reg.denied(text)]
         except Exception:
             return []
 
@@ -4203,6 +4224,22 @@ class AgentOrchestrator:
             return self._resume_local_action(
                 task_id, pending, approved=approved, event_callback=cb)
 
+        if pending["kind"] == "social_action":
+            # Deterministic social action parked for permission —
+            # session-less like local_action: approval runs the same
+            # gated connector call, denial records the refusal.
+            self.tasks.update(
+                task_id,
+                status="running",
+                phase="working",
+                pending_approval=None,
+                recovery_count=task.recovery_count + 1,
+                error="",
+            )
+            cb = self._logging_callback(task_id, event_callback)
+            return self._resume_social_action(
+                task_id, pending, approved=approved, event_callback=cb)
+
         session = self._restore_session(task_id, reason="A persisted approval was waiting for the user.")
         session.event_callback = self._logging_callback(task_id, event_callback)
         self._sessions[task_id] = session
@@ -4378,6 +4415,218 @@ class AgentOrchestrator:
             ui=self._artifact_ui(
                 (outcome.get("artifacts") or [])
                 if approved else []))
+
+    # -- deterministic social lane ---------------------------------------
+
+    def _social_service(self):
+        svc = getattr(self, "_social", None)
+        return svc() if callable(svc) else svc
+
+    def _social_action_reply(self, user_text: str, task_id: str,
+                             event_callback=None, *, env=None):
+        """Deterministic social lane — 'join moltbook', 'sign up for X',
+        'can you join X'. Same contract as the local-action lane:
+        intent → live capability state → permission → execute → truthful
+        reply. Returns None when no registered connector matches so the
+        model lane keeps everything else."""
+        svc = self._social_service()
+        if svc is None:
+            return None
+        try:
+            service = svc.resolve_service(user_text)
+        except Exception:
+            return None
+        if service is None:
+            return None
+        frame = getattr(env, "semantic", None) if env is not None else None
+        act = getattr(frame, "speech_act", "") or ""
+        decision = RoutingDecision(
+            role="utility", model_id="builtin-social",
+            reasons=["social action lane — live connector state"],
+            complexity=0)
+        builtin_event = {
+            "type": "builtin_utility", "model_id": "builtin-social",
+            "role": "utility", "reason": "social action lane"}
+        self._safe_emit(event_callback,
+                        {"type": "model", "event": builtin_event})
+        # "Can you join X?" asks about capability — answer from live
+        # connector state, never stale self-knowledge.
+        if act in ("question", "preference_question"):
+            text = svc.capability_text(service)
+            done = self.tasks.update(
+                task_id, status="completed", phase="done",
+                model_id="builtin-social", model_role="utility",
+                summary=text, final_content=text, steps=0, error="")
+            self._safe_emit(event_callback,
+                            {"type": "task", "task": done.as_dict()})
+            return AgentResult(content=text, routing=decision,
+                               model_events=[builtin_event], steps=0,
+                               task=done.as_dict())
+        # Command/request — this is an external account operation and
+        # runs through the permission gate like any write.
+        level = svc.perm_level(service, "onboard")
+        if level == "deny" or level == "creator":
+            text = (f"Creating a {service} identity needs "
+                    f"'social.account' permission, which is currently "
+                    f"{'creator-locked' if level == 'creator' else 'denied'}. "
+                    "You can change it in permission settings.")
+            done = self.tasks.update(
+                task_id, status="completed", phase="done",
+                model_id="builtin-social", model_role="utility",
+                summary=text, final_content=text, steps=0, error="")
+            self._safe_emit(event_callback,
+                            {"type": "task", "task": done.as_dict()})
+            return AgentResult(content=text, routing=decision,
+                               model_events=[builtin_event], steps=0,
+                               task=done.as_dict())
+        if level in ("ask",):
+            pending = {
+                "kind": "social_action",
+                "name": f"{service}.onboard",
+                "arguments": {"service": service},
+                "permission": "social.account",
+                "call_id": "",
+                "detail": f"Create and use a {service} agent account",
+            }
+            stamp_pending(task_id, pending)
+            self._audit_approval_request(pending)
+            parked = self.tasks.update(
+                task_id, status="waiting_approval",
+                phase="waiting_approval", pending_approval=pending)
+            text = (f"I can access {service}. Creating my agent identity "
+                    "there is an external account operation — approve "
+                    "the pending action and I'll register and bring "
+                    "back the claim link.")
+            self._safe_emit(event_callback, {
+                "type": "approval", "approval": pending,
+                "card": self._approval_card(task_id, pending),
+                "task": parked.as_dict()})
+            return AgentResult(
+                content=text, routing=decision,
+                model_events=[builtin_event], steps=0,
+                task=parked.as_dict(), pending_approval=pending)
+        return self._run_social_join(
+            svc, service, task_id, decision, builtin_event,
+            event_callback)
+
+    def _run_social_join(self, svc, service: str, task_id: str,
+                         decision, builtin_event, event_callback=None,
+                         approved: bool = False):
+        """Execute (or report denial of) the gated onboard call."""
+        ledger_entry = None
+        if self.action_ledger is not None:
+            try:
+                ledger_entry = self.action_ledger.begin(
+                    kind="social", action=f"join {service}",
+                    capability="social", tool=f"{service}.onboard",
+                    params={"service": service}, task_id=task_id)
+            except Exception:
+                ledger_entry = None
+        try:
+            out = svc.join(service)
+        except Exception as exc:
+            out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        ok = bool(out.get("ok"))
+        state = str(out.get("state") or "")
+        claim_url = str(out.get("claim_url") or "")
+        if self.action_ledger is not None and ledger_entry is not None:
+            try:
+                self.action_ledger.finish(
+                    ledger_entry["id"],
+                    status="verified" if ok else "failed",
+                    detail=state or str(out.get("error") or "")[:200])
+            except Exception:
+                pass
+        if ok and state == "active":
+            text = (f"My {service} identity is registered and active — "
+                    "I can participate within the social permissions "
+                    "you've set.")
+        elif ok and claim_url:
+            text = (f"I've registered a {service} identity. It needs "
+                    "your ownership verification before I can "
+                    f"participate — claim it here: {claim_url}\n\n"
+                    "I'll keep checking verification in the background.")
+        elif ok:
+            text = (f"Registration with {service} started — state: "
+                    f"{state or 'pending'}.")
+        else:
+            text = (f"I tried to start {service} registration but it "
+                    f"failed: {str(out.get('error') or 'unknown error')[:200]}")
+        done = self.tasks.update(
+            task_id,
+            status="completed" if ok else "failed",
+            phase="done", model_id="builtin-social",
+            model_role="utility", summary=text, final_content=text,
+            steps=0, error="" if ok else text)
+        self._safe_emit(event_callback,
+                        {"type": "task", "task": done.as_dict()})
+        return AgentResult(
+            content=text, routing=decision,
+            model_events=[builtin_event], steps=0,
+            task=done.as_dict())
+
+    def _resume_social_action(
+        self,
+        task_id: str,
+        pending: dict[str, Any],
+        *,
+        approved: bool,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentResult:
+        """Session-less approval resume for parked social actions —
+        approval runs the same verified connector call; denial records
+        the refusal in the ledger and reports it honestly."""
+        service = str((pending.get("arguments") or {}).get("service")
+                      or pending.get("name") or "moltbook").split(".")[0]
+        svc = self._social_service()
+        if svc is None:
+            text = ("The social connector is no longer available — "
+                    "the action can't resume.")
+            done = self.tasks.update(
+                task_id, status="failed", phase="done", summary=text,
+                final_content=text, error=text)
+            self._safe_emit(event_callback,
+                            {"type": "task", "task": done.as_dict()})
+            return AgentResult(content=text, steps=0,
+                               task=done.as_dict())
+        if not approved:
+            if self.action_ledger is not None:
+                try:
+                    entry = self.action_ledger.begin(
+                        kind="social", action=pending.get("detail")
+                        or f"join {service}",
+                        capability="social",
+                        tool=str(pending.get("name") or ""),
+                        params=dict(pending.get("arguments") or {}),
+                        task_id=task_id)
+                    self.action_ledger.finish(
+                        entry["id"], status="denied",
+                        permission="user_denied",
+                        failure="user denied the approval request")
+                except Exception:
+                    pass
+            text = (f"Understood — I did not create a {service} "
+                    "account. Nothing was registered.")
+            done = self.tasks.update(
+                task_id, status="completed", phase="done",
+                summary=text, final_content=text, error="")
+            self._safe_emit(event_callback,
+                            {"type": "task", "task": done.as_dict()})
+            return AgentResult(
+                content=text,
+                routing=RoutingDecision(
+                    role="utility", model_id="builtin-social",
+                    reasons=["social action lane — no model call"],
+                    complexity=0),
+                steps=0, task=done.as_dict())
+        return self._run_social_join(
+            svc, service, task_id,
+            RoutingDecision(role="utility", model_id="builtin-social",
+                            reasons=["social action lane — no model call"],
+                            complexity=0),
+            {"type": "builtin_utility", "model_id": "builtin-social",
+             "role": "utility", "reason": "social action lane"},
+            event_callback, approved=True)
 
     def _result(self, session: _AgentSession, content: str | None = None) -> AgentResult:
         task = self.tasks.get(session.task_id)
@@ -5656,6 +5905,18 @@ class AgentOrchestrator:
                             session.env)
                     except Exception:
                         violations = []
+                    # Capability-denial audit — stale self-knowledge like
+                    # "I don't have a browser" while the probed runtime
+                    # reports the capability healthy. Runtime truth wins
+                    # over remembered lore; regenerate with the live
+                    # state spelled out.
+                    denials = self._capability_denials(
+                        session.main_content)
+                    if denials:
+                        violations.append(
+                            "capability_denied:" +
+                            ",".join(d["capability"]
+                                     for d in denials[:3]))
                     if violations:
                         session.audit_retries += 1
                         if session.messages and \
@@ -5670,17 +5931,30 @@ class AgentOrchestrator:
                         }
                         session.model_events.append(audit_event)
                         self._emit(session, "model", event=audit_event)
+                        correction = (
+                            "Your previous response was discarded by "
+                            "scope validation ("
+                            + ", ".join(violations) + "). Re-answer "
+                            "the user's exact question only — the "
+                            "requested slot, nothing else. No "
+                            "identity, family, or unrelated project "
+                            "details unless they were asked for. "
+                            "Stay within the answer-size budget.")
+                        if denials:
+                            live = "; ".join(
+                                f"{d['name']} is {d['state']}"
+                                for d in denials[:3])
+                            correction += (
+                                " The live runtime disagrees with a "
+                                "capability denial in your reply: "
+                                + live + ". Answer from that runtime "
+                                "state — if a permission or setup step "
+                                "is still missing, name that concrete "
+                                "blocker instead of claiming the "
+                                "capability does not exist.")
                         session.messages.append({
                             "role": "system",
-                            "content": (
-                                "Your previous response was discarded by "
-                                "scope validation ("
-                                + ", ".join(violations) + "). Re-answer "
-                                "the user's exact question only — the "
-                                "requested slot, nothing else. No "
-                                "identity, family, or unrelated project "
-                                "details unless they were asked for. "
-                                "Stay within the answer-size budget."),
+                            "content": correction,
                         })
                         session.main_content = ""
                         continue
@@ -6755,6 +7029,24 @@ class AgentOrchestrator:
              or self._git_state_reply(user_text, env=env)
              or self._github_target_reply(user_text))
             if mode == "auto" else None)
+        # Deterministic social lane — 'join X' / 'can you join X' on a
+        # connector-backed service. Runs BEFORE self-knowledge so a
+        # generic capability inventory can never answer for a live
+        # connector (the "I don't have a browser" class of bug): live
+        # state → permission → execute, or a grounded capability answer
+        # for the question form. Returns None when no connector matches.
+        if (mode == "auto" and not attach["image_paths"]
+                and not mission_id):
+            social_reply = self._social_action_reply(
+                user_text, task.id, event_callback, env=env)
+            if social_reply is not None:
+                if self.conversation_memory is not None:
+                    self.conversation_memory.record_exchange(
+                        user_text, social_reply.content or "")
+                if self.conversation_manager is not None:
+                    self.conversation_manager.record_exchange(
+                        user_text, social_reply.content or "")
+                return social_reply
         # Self-knowledge lane — 'turn voice off', 'what can you do',
         # 'where is the speech lab', 'do it'. Exempt from the canned
         # suppression gate like the GitHub lane: control requests are

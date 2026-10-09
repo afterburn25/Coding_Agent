@@ -2,6 +2,70 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 0.38.0 — Live Capability Grounding + Social/Epistemic Drives
+
+The observed failure — "Join Moltbook" answered with "I don't have a
+browser" plus an unrelated father aside — was two bugs: capability
+answers drawn from stale self-knowledge, and persona polish expanding
+scope. Fixed at the architecture level.
+
+- **Capability grounding** — `capabilities.py` `denial_terms` +
+  `denied(text)` detect "I can't/have no X" claims that contradict
+  probed-positive state; the orchestrator folds denials into the
+  response self-audit retry. `capability_brief()` injects the live
+  verified list into ability prompts; `UTILITY_PROMPT` no longer makes
+  static availability claims. New probed specs: `web_access` (tool +
+  offline policy) and `moltbook` (connector + account state).
+- **Action-shaped capability requests** — `_social_action_reply` runs
+  join → capability → permission → execute; `social.account` defaults
+  `ask` → parked `kind:"social_action"` approvals resume via
+  `_resume_social_action` (session-less, like `local_action`).
+  Questions ("can you join X?") answer from live connector state via
+  `capability_text` — never an inventory, never a refusal on healthy
+  capability.
+- **Moltbook connector** — `connectors/moltbook.py`: HTTPS client
+  pinned to `www.moltbook.com/api/v1` (config `moltbook_api_url`),
+  host-scoped Bearer auth (cross-host redirects strip via
+  `_AUTH_SAFE_OPENER`), vault-only key (`moltbook_api_key`), Moltbook
+  `{success,data}` envelope + 429 `Retry-After`, per-capability
+  `social.*` permission gates, blocking outbound secret scans,
+  `UNTRUSTED_EXTERNAL_CONTENT` tagging + injection flags inbound.
+  Onboarding: register → vault key → clickable claim URL →
+  `awaiting_owner_verification` → status checks flip `active`.
+- **Social Drive** (`social/drive.py`) — levels off/read_only/assisted/
+  autonomous/learning; scored participation (relevance × reply ×
+  novelty × relationship × learning × contribution − spam/repetition/
+  cooldown); thread-follow without speaking; daily cap. Silence is a
+  valid decision.
+- **Epistemic Drive** — persistent learning backlog (kind, topic, why,
+  source, confidence, urgency, related mission, candidate peers,
+  verification plan); open items never decay — compulsion persists
+  across restart.
+- **Stores** (`social/store.py`) — peers (per-domain expertise,
+  interactions, familiarity, stage), claims (heard → corroborated →
+  tested → verified → applied + refuted, full provenance), backlog,
+  drive state — all `JsonStore`-backed.
+- **Heartbeat** — seeded `social-heartbeat` interval schedule
+  (config `social_heartbeat_minutes`, ≥10) → `internal:` mission →
+  `internal:social_heartbeat` → `SocialService.heartbeat()`:
+  notifications → peer-reply `social` bus event → `social_reply`
+  trigger signal (missions can external-wait), feed scan vs interests
+  + backlog, thread follows, claim capture at `heard`.
+- **API/UI** — `/api/social` status + `/peers` `/claims` `/backlog`;
+  POST `/level` `/heartbeat` `/verify` `/backlog/resolve`;
+  `web/social.html` dashboard + nav entries on every page.
+- **Permissions** — `social.read|account|post|react|follow|message`
+  added to profiles/KNOWN_PERMISSIONS/PERMISSION_INFO; read may be
+  session-allowed, writes default ask/session, messages stricter;
+  offline denies all.
+- **Tests** — `tests/test_social.py` (36): credential isolation,
+  auth-host scoping, outbound secret block, untrusted tagging +
+  injection flags, onboarding + claim flip, permission gating, claim
+  ladder + peer trust deltas, backlog persistence, level gating,
+  spam/cooldown scoring, join lane park/execute/deny/resume,
+  capability denial detection, offer regression non-hijack, scope-
+  clean reply (no father/family leak).
+
 ## 0.37.0 — Conversation State Graph
 
 Nexus now keeps a durable structured state per conversation on the

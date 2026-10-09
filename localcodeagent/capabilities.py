@@ -23,6 +23,7 @@ decoupled from AppState and is cheap to test.
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,6 +55,14 @@ _STATE_DISPOSITION = {
 }
 
 CACHE_TTL_S = 30.0
+
+# Negation markers that turn a domain mention into a capability denial.
+_DENIAL_NEG_RE = re.compile(
+    r"\b(?:don'?t|do\s+not|didn'?t|can'?t|cannot|can\s+not|couldn'?t|"
+    r"unable|not\s+able|never\s+able|no\s+(?:way|access|tools?)|"
+    r"without|lack(?:ing)?|not\s+(?:set\s+up|configured|equipped)|"
+    r"aren'?t\s+set\s+up|not\s+currently\s+able)\b",
+    re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -89,6 +98,10 @@ class CapabilitySpec:
     # Terms in generated text that would constitute a claim about this
     # capability — used to detect claims contradicting a negative state.
     claim_terms: tuple[str, ...] = ()
+    # Domain phrases that, when negated, constitute a denial of this
+    # capability — used to catch stale self-knowledge ("I don't have a
+    # browser") contradicting a live positive state.
+    denial_terms: tuple[str, ...] = ()
 
 
 def _tool(env: dict[str, Any], name: str) -> dict[str, Any] | None:
@@ -256,6 +269,22 @@ def _probe_browser_preview(env, r: CapabilityReport) -> None:
         r.requirements_unmet.append("browser_tool")
 
 
+def _probe_web_access(env, r: CapabilityReport) -> None:
+    """Outbound web reach — search + fetch. Offline policy and missing
+    tools are different blockers and must be named separately."""
+    if _call(env, "network_offline", default=False):
+        r.state, r.detail = "unavailable", "offline policy mode active"
+        r.requirements_unmet.append("network_policy")
+        return
+    ok, name = _tool_ok(env, ("web_search", "fetch_url"))
+    if ok:
+        r.state, r.detail = "verified", f"web access via {name}"
+        r.requirements_met.append("web_tool")
+        return
+    r.state, r.detail = "setup_required", "no web search/fetch tool enabled"
+    r.requirements_unmet.append("web_tool")
+
+
 def _probe_deployment(env, r: CapabilityReport) -> None:
     if _call(env, "command", "docker"):
         r.state = "experimental"
@@ -332,6 +361,32 @@ def _probe_desktop_control(env, r: CapabilityReport) -> None:
         r.requirements_unmet.append("desktop_tool")
 
 
+def _probe_social(env, r: CapabilityReport) -> None:
+    """Social/agent-network participation — grounded in the live
+    connector state, including onboarding/claim status, never lore."""
+    st = _call(env, "connector_state", "moltbook", default={}) or {}
+    state = str(st.get("state") or "")
+    account = str(st.get("account") or "")
+    if state in ("missing", "disabled"):
+        r.state, r.detail = "setup_required", "connector not configured"
+        r.requirements_unmet.append("connector")
+        return
+    r.requirements_met.append("connector")
+    if account == "active":
+        r.state, r.detail = "verified", "agent identity verified"
+        r.requirements_met.append("account")
+        return
+    if account == "awaiting_owner_verification":
+        r.state, r.detail = ("setup_required",
+                             "registered — awaiting owner claim")
+        r.requirements_met.append("registered")
+        r.requirements_unmet.append("owner_claim")
+        return
+    r.state, r.detail = ("setup_required",
+                         "connector live — agent not yet registered")
+    r.requirements_unmet.append("registration")
+
+
 def _probe_coding_model(env, r: CapabilityReport) -> None:
     ready = _call(env, "llm_ready", default=None)
     if ready is True:
@@ -350,46 +405,71 @@ def _default_specs() -> list[CapabilitySpec]:
         CapabilitySpec("filesystem", "Local filesystem write",
                        _probe_filesystem,
                        ("file", "files", "wrote", "saved", "created",
-                        "deleted", "edited", "folder", "directory")),
+                        "deleted", "edited", "folder", "directory"),
+                       ("filesystem", "the file system")),
         CapabilitySpec("code_editing", "Code editing",
                        _probe_code_editing,
                        ("applied", "patched", "refactored", "edited",
                         "modified")),
         CapabilitySpec("terminal", "Terminal commands",
                        _probe_terminal,
-                       ("command", "terminal", "ran", "executed", "shell")),
+                       ("command", "terminal", "ran", "executed", "shell"),
+                       ("run commands", "the terminal", "a terminal",
+                        "shell access")),
         CapabilitySpec("git", "Local Git", _probe_git,
                        ("git", "commit", "committed", "branch", "clone",
-                        "cloned", "checkout", "merge", "staged")),
+                        "cloned", "checkout", "merge", "staged"),
+                       ("git",)),
         CapabilitySpec("github", "GitHub", _probe_github,
                        ("github", "pushed", "push", "pull request", "pr",
-                        "remote", "synced", "ci")),
+                        "remote", "synced", "ci"),
+                       ("github",)),
         CapabilitySpec("compilation", "Build toolchain",
                        _probe_toolchains,
                        ("compiled", "build", "built", "packaged")),
         CapabilitySpec("testing", "Testing", _probe_testing,
                        ("tests", "test", "pytest", "unittest",
                         "test suite")),
+        CapabilitySpec("web_access", "Web access", _probe_web_access,
+                       ("searched", "fetched", "looked up", "the web"),
+                       ("web access", "the web", "the internet",
+                        "internet access", "websites", "a website",
+                        "external sites", "external access",
+                        "online", "web search", "fetch urls",
+                        "download files", "download")),
         CapabilitySpec("browser_preview", "Browser preview",
                        _probe_browser_preview,
-                       ("preview", "browser", "opened the app", "page")),
+                       ("preview", "browser", "opened the app", "page"),
+                       ("a browser", "a web browser", "browser",
+                        "browse the web", "browsing")),
         CapabilitySpec("deployment", "Deployment", _probe_deployment,
                        ("deployed", "deploy", "released", "published")),
         CapabilitySpec("image_generation", "Image generation",
                        _probe_image_generation,
                        ("generated", "image", "picture", "render",
-                        "artwork")),
+                        "artwork"),
+                       ("generate images", "create images",
+                        "image generation", "make images")),
         CapabilitySpec("stt", "Speech-to-text", _probe_stt,
                        ("transcribed", "heard you", "listened")),
         CapabilitySpec("tts", "Text-to-speech", _probe_tts,
                        ("spoke", "said aloud", "voice reply",
-                        "narrated")),
+                        "narrated"),
+                       ("a voice", "speak")),
         CapabilitySpec("desktop_control", "Desktop control",
                        _probe_desktop_control,
                        ("clicked", "moved the mouse", "typed into",
-                        "screen")),
+                        "screen"),
+                       ("control your desktop", "see your screen",
+                        "your screen")),
         CapabilitySpec("coding_model", "Coding model", _probe_coding_model,
                        ("model", "inference")),
+        CapabilitySpec("moltbook", "Agent network", _probe_social,
+                       ("moltbook",),
+                       ("moltbook", "the agent community",
+                        "an agent community", "ai community",
+                        "the agent network", "a social network",
+                        "social platforms", "an ai community")),
     ]
 
 
@@ -481,5 +561,53 @@ class CapabilityRegistry:
                 out.append(report)
         return out
 
-    def disposition_for(self, cap_id: str) -> str:
-        return self.evaluate_one(cap_id).disposition
+    def denied(self, text: str) -> list[CapabilityReport]:
+        """The inverse of ``contradicted``: capabilities in a *positive*
+        state that ``text`` denies having ("I don't have a browser",
+        "I can't access websites") — stale self-knowledge overriding
+        live runtime truth. Runtime reality wins; these replies must be
+        regenerated against the probed state."""
+        low = str(text or "").lower()
+        out: list[CapabilityReport] = []
+        reports = self.evaluate()
+        for spec in self._specs:
+            if not spec.denial_terms:
+                continue
+            report = reports.get(spec.id)
+            if report is None or report.state in ALL_NEGATIVE:
+                # Denying a dead capability is truthful, not stale lore.
+                continue
+            for term in spec.denial_terms:
+                pos = 0
+                hit = False
+                while True:
+                    i = low.find(term, pos)
+                    if i < 0:
+                        break
+                    pos = i + len(term)
+                    # The denial must live in the same clause — a
+                    # negation marker between the last sentence break
+                    # and the domain phrase.
+                    boundary = max(low.rfind(c, 0, i)
+                                   for c in ".!?\n")
+                    if _DENIAL_NEG_RE.search(low[boundary + 1:i]):
+                        hit = True
+                        break
+                if hit:
+                    out.append(report)
+                    break
+        return out
+
+    def capability_brief(self) -> str:
+        """Compact positive roster for utility/self-knowledge prompts —
+        what the runtime can actually do right now, so ability answers
+        come from probed state rather than remembered lore."""
+        ups = [r.name for r in self.evaluate().values()
+               if r.state in ("verified", "available", "degraded")]
+        if not ups:
+            return ""
+        return ("Live capability check — currently available: "
+                + "; ".join(ups[:14])
+                + ". Answer ability questions from this list and the "
+                  "unavailable list, never from memory.")
+
