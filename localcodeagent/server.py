@@ -416,6 +416,10 @@ class AppState:
         self._queue_announced: set[str] = set()
         self._queue_line_cursor: dict[str, int] = {}
         self._notice_cursor: dict[str, int] = {}
+        # Per-family cooldown for notices that re-arm on state
+        # transitions (capacity flap, etc.) — a notice id may speak
+        # again only after the family has been quiet this long.
+        self._notice_last: dict[str, float] = {}
         self._queue_burst: list[float] = []
         self.workers = AdaptiveWorkerManager(
             self.workspace,
@@ -5913,14 +5917,16 @@ class AppState:
             return
         if event_type == "worker_capacity_reduced":
             # Resource pressure explains slowdowns — speak once per
-            # distinct ceiling so repeated failures don't nag. Clear
-            # the restore id so a later recovery speaks again.
+            # distinct ceiling so repeated failures don't nag, AND
+            # once per 10 min for the family so a flapping ceiling
+            # doesn't narrate every oscillation.
             ceiling = payload.get("ceiling")
             # Next restore lands at ceiling+1 — let it speak again.
             self._queue_announced.discard(f"cap-up-{int(ceiling or 0) + 1}")
             self._speak_notice(
                 f"cap-{ceiling}", "status",
-                "Worker capacity reduced — heavy jobs may run slower.")
+                "Worker capacity reduced — heavy jobs may run slower.",
+                family="capacity", cooldown_s=600.0)
             return
         if event_type == "worker_capacity_restored":
             ceiling = payload.get("ceiling")
@@ -5928,7 +5934,8 @@ class AppState:
             self._queue_announced.discard(f"cap-{int(ceiling or 0) - 1}")
             self._speak_notice(
                 f"cap-up-{ceiling}", "status",
-                "Workers are recovering — capacity is back up.")
+                "Workers are recovering — capacity is back up.",
+                family="capacity", cooldown_s=600.0)
             return
         if event_type == "queued_task_started":
             w = payload.get("worker") or {}
@@ -5977,12 +5984,22 @@ class AppState:
         except Exception:
             pass
 
-    def _speak_notice(self, dedup_id: str, kind: str, fact: str) -> None:
+    def _speak_notice(self, dedup_id: str, kind: str, fact: str,
+                      *, family: str = "", cooldown_s: float = 0.0
+                      ) -> None:
         """Persona-wrapped spoken notice for worker/notification events.
-        Deduplicates by id against the shared announced set; silent when
-        voice is unavailable or muted (enqueue drops muted jobs)."""
+        Deduplicates by id against the shared announced set; a `family`
+        cooldown additionally silences every id in the group for
+        `cooldown_s` after the last speak, so re-armed transitions can't
+        narrate state flapping. Silent when voice is unavailable or
+        muted (enqueue drops muted jobs)."""
         if not dedup_id or dedup_id in self._queue_announced:
             return
+        if family and cooldown_s > 0:
+            last = float(self._notice_last.get(family) or 0.0)
+            if time.monotonic() - last < cooldown_s:
+                return
+            self._notice_last[family] = time.monotonic()
         if len(self._queue_announced) > 512:
             self._queue_announced.clear()
         self._queue_announced.add(dedup_id)
