@@ -208,6 +208,8 @@ async function loadMissionWorkstreams(mid){
         .map(k=>`${k.replace('_',' ')} ${met[k]}`);
       if(mbits.length)
         rows.push(`<div class="hist-row"><b>metrics</b> ${esc(mbits.join(' · '))}</div>`);
+      if(r.nexus_md_proposal)
+        rows.push(`<div class="hist-row"><b>NEXUS.md proposal</b> — repo has no operating-instructions file; a draft was generated from this mission's decisions, scopes and criteria. <details><summary>view</summary><pre>${esc(r.nexus_md_proposal)}</pre></details></div>`);
       setHtml(cel,rows.join('')||'<div class="hist-row">no capsule yet</div>');
     }
   }catch(e){

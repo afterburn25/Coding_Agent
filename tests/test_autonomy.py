@@ -3040,6 +3040,46 @@ class EngineeringMissionTests(unittest.TestCase):
             self.assertFalse(Path(wt["path"]).exists())
             sup.stop()
 
+    def test_restart_preserves_hierarchy_state(self):
+        """§39 — workstreams, decisions, ownership leases and the
+        context capsule are all durable record state: a supervisor
+        restart loses nothing, and a dead worker's reservation is
+        reclaimable on the other side."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="durable restart check")
+            sup.missions.mutate(
+                m["id"],
+                lambda row: row.update({
+                    "acceptance_criteria": ["tests stay green"]}))
+            ws = sup.missions.add_workstream(
+                m["id"], "db layer", scope=["localcodeagent/db/"])
+            sup.missions.record_decision(
+                m["id"], "Use SQLite", reason="embedded")
+            sup.missions.reserve_paths(
+                m["id"], "crashed-worker", ["localcodeagent/db/"],
+                lease_s=0.01)
+            sup.missions.refresh_capsule(m["id"])
+            sup.missions.update(m["id"], status="executing")
+            sup.stop()
+
+            time.sleep(0.05)  # let the crashed worker's lease expire
+            sup2 = make_sup(td)
+            m2 = sup2.missions.get(m["id"])
+            self.assertTrue(m2.get("workstreams"))
+            self.assertTrue(m2.get("context_capsule"))
+            self.assertTrue(sup2.missions.active_decisions(m2))
+            res = (m2.get("ownership") or [])
+            self.assertTrue(any(r.get("owner") == "crashed-worker"
+                                for r in res))
+            # The dead lease is reclaimable on the new supervisor.
+            freed = sup2.missions.sweep_ownership(m["id"])
+            self.assertIn("crashed-worker", freed)
+            # And the mission still drives — the durable record was all
+            # it needed.
+            sup2.tick()
+            sup2.stop()
+
     def test_git_checkpoints_recorded(self):
         import subprocess as _sp
         with tempfile.TemporaryDirectory() as td:

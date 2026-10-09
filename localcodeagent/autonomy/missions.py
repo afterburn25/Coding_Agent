@@ -1185,3 +1185,42 @@ def discover_nexus_md(root: Any) -> str:
     except Exception:
         pass
     return ""
+
+
+def draft_nexus_md(mission: dict) -> str:
+    """§16 — propose a NEXUS.md from what the mission already learned:
+    active decisions, constraints, workstream lanes/scopes, acceptance
+    criteria. Returned as a PROPOSAL — writing it into the repo goes
+    through the normal file-edit permission path; nothing here ever
+    lands silently."""
+    lines = ["# Nexus Engineering Instructions", ""]
+    roll = mission.get("workstreams") or []
+    if roll:
+        lines.append("## Workstreams")
+        for w in roll[:12]:
+            scope = ", ".join(str(s) for s in
+                              (w.get("scope") or [])[:6])
+            lines.append(
+                f"- {str(w.get('title') or '')[:80]}"
+                + (f" — owns: {scope}" if scope else ""))
+        lines.append("")
+    decs = [d for d in (mission.get("decisions") or [])
+            if not d.get("superseded")]
+    if decs:
+        lines.append("## Decisions in force")
+        for d in decs[:12]:
+            lines.append(f"- {str(d.get('decision') or '')[:160]}"
+                         + (f" ({str(d.get('reason') or '')[:80]})"
+                            if d.get("reason") else ""))
+        lines.append("")
+    cons = mission.get("constraints") or []
+    if cons:
+        lines.append("## Do not")
+        lines += [f"- {str(c)[:160]}" for c in cons[:12]]
+        lines.append("")
+    crit = mission.get("acceptance_criteria") or []
+    if crit:
+        lines.append("## Acceptance criteria")
+        lines += [f"- {str(c)[:160]}" for c in crit[:12]]
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"

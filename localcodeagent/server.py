@@ -8353,6 +8353,15 @@ class Handler(BaseHTTPRequestHandler):
                 if m is None:
                     self._json({"error": "mission not found"}, 404)
                     return True
+                nexus_md_proposal = ""
+                try:
+                    from .autonomy.missions import (
+                        discover_nexus_md, draft_nexus_md)
+                    wroot = str(m.get("workspace") or self.workspace)
+                    if not discover_nexus_md(wroot):
+                        nexus_md_proposal = draft_nexus_md(m)
+                except Exception:
+                    pass
                 self._json({
                     "workstreams": sup.missions.workstream_rollup(m),
                     "acceptance_criteria":
@@ -8362,6 +8371,7 @@ class Handler(BaseHTTPRequestHandler):
                     "checkpoints": m.get("git_checkpoints") or [],
                     "metrics": m.get("metrics") or {},
                     "questions": m.get("unresolved_questions") or [],
+                    "nexus_md_proposal": nexus_md_proposal,
                 })
                 return True
             m = sup.missions.get(mid)
