@@ -76,6 +76,22 @@ Status legend: complete | not-dogfooded | partial | broken | stale | missing | e
 - [closed] .part downloads never resumed — init deleted partials,
   failures deleted them, downloads always restarted at byte 0. Fix:
   Range-resume + verify-then-promote (8bd0892)
+- [closed] invokeai.yaml missing schema_version → KeyError in
+  load_and_migrate_config, InvokeAI never started (post-wipe root).
+  Managed-block writer seeds it from invokeai.example.yaml (3753c762)
+- [closed] safetensors.torch.load_file segfault (exit 139) on multi-GB
+  checkpoints — install classification killed invokeai-web after
+  hashing, twice. _apply_load_file_guard: >2GiB safetensors load
+  per-tensor via safe_open (3753c762, venv patched live)
+- [closed] Tools "Image Model Packs" hid the fleet — merged fleet rows
+  with live state + fleet install action (3753c762)
+- [open] InvokeAI venv is torch+cpu (2.14.1+cpu) — generation runs on
+  CPU. Provisioning should install the CUDA torch wheel on GPU hosts.
+- [open] ComfyUI cudaErrorUnknown at VAEDecode with 0.3GB free VRAM —
+  job ran into a starved GPU after auto-fallback; watch for recurrence
+- [verified-live] RealVisXL: provisioned → downloaded 6.9GB → registered
+  → installed; adult request routed realvisxl-v5 with "adult-content
+  preference: RealVisXL V5.0"; non-adult honest fallback
 
 ## P2
 - [closed] splash error/recovery animations never played — stray

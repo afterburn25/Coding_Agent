@@ -44,7 +44,34 @@ permitted adult-content requests.
 - **Safety** — `ImageSafetyPolicy` + creator-locked adult gate still
   run before selection; `adult_capable` remains routing metadata.
 
-**Verify:** `pytest tests/test_image_fleet.py` (22 tests) +
+**Live dogfood (2026-10-09, D:\Nexus_Core v0.41.0):**
+
+- `model-realvisxl-v5` was `waiting_approval` → approved → downloaded
+  (~6.9 GB) → **registered + verified** in InvokeAI; `fleet_status`
+  reports `installed`. Adult-classified request routed to
+  `invokeai:<realvis key>` with reason
+  `adult-content preference: RealVisXL V5.0` (job cancelled after
+  capture — no generation). Non-adult landscape fell back honestly
+  (sole installed InvokeAI model at the time).
+- Two live crash paths found and fixed during the install:
+  `invokeai.yaml` missing `schema_version` → `load_and_migrate_config`
+  KeyError (managed-block writer now seeds it, commit `3753c762`);
+  `safetensors.torch.load_file` segfault (exit 139) on the 6.9 GB
+  checkpoint during classification — `_apply_load_file_guard` routes
+  >2 GiB safetensors through per-tensor `safe_open` (commit `3753c762`,
+  also patched live into the deployed venv).
+- **InvokeAI venv has CPU-only torch (2.14.1+cpu)** — generation via
+  InvokeAI runs on CPU until a CUDA wheel is installed into
+  `tools/InvokeAI`. Provisioning gap: the InvokeAI install should pull
+  the CUDA torch index for GPU hosts.
+- A ComfyUI Juggernaut job failed `cudaErrorUnknown` at VAEDecode with
+  0.3 GB free VRAM — `auto` fell back to ComfyUI only because the
+  InvokeAI registry was empty during the crash-loop. Preference stayed
+  `auto`; not a regression.
+- Tools page "Image Model Packs" now merges fleet rows (previously
+  configured profiles only — RealVis invisible there).
+
+**Verify:** `pytest tests/test_image_fleet.py` (30 tests) +
 `tests/test_provisioning.py` + `tests/test_image.py` — 147 + 36 green.
 Live dogfood (install via provisioning → registry check → adult +
 non-adult routing) still pending on the workstation.
