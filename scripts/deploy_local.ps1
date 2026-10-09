@@ -19,6 +19,11 @@
 #   .agent                — durable task ledger + checkpoints under Source\
 #                           (dist ships a fresh clone; wiping it mid-deploy
 #                           strands in-flight tasks and parked missions)
+#   .nexus                — live mission lane worktrees under Source\
+#                           (observed: /MIR purged all 3 executing lanes'
+#                           checkouts mid-deploy — committed branch work
+#                           survived but uncommitted lane work was lost)
+#   .repair-worktrees     — self-repair patch worktrees, same reason
 #   config.json           — live user configuration (file-level exclusion)
 param(
     [string]$Source = (Join-Path $PSScriptRoot "..\dist\ChatNexus"),
@@ -98,19 +103,23 @@ if ($running -or $helperIds -or $nexusOrphans) {
 }
 
 $excludeDirs = @("data", "output", "runtime", "models", "tools",
-                 ".git", ".agent")
+                 ".git", ".agent", ".nexus", ".repair-worktrees")
 $args = @($Source, $Dest, "/MIR", "/XD") + $excludeDirs +
         @("/XF", "config.json", "/R:2", "/W:1", "/NFL", "/NDL", "/NP")
 robocopy @args | Select-Object -Last 12
 $rc = $LASTEXITCODE
 
-if ($rc -ge 8) { throw "robocopy failed with exit code $rc" }
-
+# Restore preserved uncommitted work BEFORE the failure check — a
+# partially-failed mirror must never strand the snapshot in %TEMP%
+# (observed: rc=11 throw skipped this restore, leaving 40 files
+# orphaned in a temp dir while Source had been reset to the clone).
 if ($backup -and (Test-Path $backup)) {
     robocopy $backup $srcRepo /E /IS /NFL /NDL /NP | Out-Null
     Remove-Item $backup -Recurse -Force
     Write-Host "Restored $($dirtyFiles.Count) uncommitted Source file(s)."
 }
+
+if ($rc -ge 8) { throw "robocopy failed with exit code $rc" }
 Write-Host "Deployed to $Dest (robocopy rc=$rc)."
 
 # Restart the app if it was running before the deploy.
