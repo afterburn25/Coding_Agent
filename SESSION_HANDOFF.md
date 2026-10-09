@@ -2,6 +2,39 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 0.37.0 — Conversation State Graph
+
+Nexus now keeps a durable structured state per conversation on the
+existing `ActiveContext` row — same persistence, same per-conversation
+isolation, no parallel framework. Each interactive turn folds through
+`context/state.update_state` inside `record_turn`:
+
+- Entity graph: stable `type:slug` ids, aliases, salience; canon
+  project vocab (Moltbook, Isabella, Coding_Agent, installer, GitHub,
+  RTX 3080, llama.cpp, qwen) + proper-noun/path/version/model capture.
+- Topic stack: explicit shift pushes, `back to X` restores by stack
+  label or entity alias (containment-aware), `okay continue` resumes
+  only after a real displacement, utility asides never displace.
+- Decisions: `use port 9000`-shaped commitments supersede per subject;
+  bare corrections (`actually 9500`) inherit the matching-shape slot;
+  questions/offers/hypotheticals never record.
+- Open loops: complaints about live entities + promises open loops;
+  `it's fixed`/`never mind` closes; `what happened with that?` binds
+  the prominent loop.
+- Resolution: alias noun phrases, possessives, bare pronouns ranked by
+  domain × salience × recency, ordinals/`the other one` by mention
+  order, expletive-`it` guard, 0.18 ambiguity margin → clarify.
+- Retrieval: `prompt_context(focus=)` ranks by query × focus × recency.
+- State recall lane: `what did we settle on` / `where were we` answer
+  deterministically behind the `memory_recall` gate.
+- Self-audit: `scope.audit_response` + one-shot retry on
+  unrequested-biography/overscope; narrow slots inject an exclusion
+  directive into the model prompt.
+- Forget propagation: `forget X` also strips matching entities,
+  decisions, referents and loops.
+- Inspector: `/api/conversations/scope` exposes `state` excerpt.
+- Tests: `tests/test_conversation_state.py` — 64 tests + ~400 subtests.
+
 ## 0.36.0 — Whole-utterance semantic adjudication
 
 The observed failure — "would you like the capabilities to join an ai

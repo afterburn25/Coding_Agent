@@ -1297,6 +1297,7 @@ class ConversationMemory:
         *,
         project_id: str = "",
         conversation_id: str = "",
+        focus: dict[str, Any] | None = None,
     ) -> str:
         if not self.enabled:
             return ""
@@ -1323,6 +1324,14 @@ class ConversationMemory:
         # like) shared with the query don't count, or "my favorite food
         # is steak" rides a "favorite color" question into the prompt.
         q_terms = self._content_terms(query)
+        # Conversation-state focus — active topic + live entity labels.
+        # Facts overlapping the focus outrank bare term matches, and a
+        # stale fact about a paused topic decays out of the window
+        # instead of riding the prompt on recency alone.
+        focus_terms: set[str] = set()
+        if focus:
+            focus_terms = self._content_terms(" ".join(
+                str(v) for v in focus.values() if v))
         with self._lock:
             fact_rows = [
                 row for row in self._data.get("facts", [])
@@ -1335,6 +1344,24 @@ class ConversationMemory:
                                               str(row.get("slot") or ""))
                     & q_terms
                 ]
+            now = time.time()
+            if focus_terms and fact_rows:
+                scored: list[tuple[float, int, dict]] = []
+                for i, row in enumerate(fact_rows):
+                    ft = self._fact_query_terms(
+                        str(row.get("text", "")),
+                        str(row.get("slot") or ""))
+                    q_hit = len(ft & q_terms)
+                    f_hit = len(ft & focus_terms)
+                    age_h = max(0.0, (now - float(
+                        row.get("updated_at") or now)) / 3600)
+                    recency = max(0.0, 1.0 - age_h / (96 * 7))
+                    score = q_hit * 1.0 + f_hit * 1.6 + recency * 0.5
+                    scored.append((score, i, row))
+                scored.sort(key=lambda x: (-x[0], -x[1]))
+                picked = {i for _s, i, _r in scored[:12]}
+                fact_rows = [row for i, row in enumerate(fact_rows)
+                             if i in picked]
             facts = [str(row.get("text", "")) for row in fact_rows][-12:]
             rules = [
                 str(row.get("text", ""))

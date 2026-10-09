@@ -55,7 +55,13 @@ REFERENCE_TERMS: dict[str, tuple[str, ...]] = {
 # Bare pronouns resolve by ACTIVE DOMAIN, not by nearest noun — "fix it"
 # binds the active error; "make it darker" binds the active image.
 _BARE_PRONOUN_RE = re.compile(
-    r"\b(it|that|this|them|they|those)\b", re.IGNORECASE)
+    r"\b(it|that|this|them|they|those|she|he|him|her)\b", re.IGNORECASE)
+
+# 'her voice', 'the installer' — possessive/article + noun resolved
+# against the entity graph's aliases before domain defaults apply.
+_NOUN_REF_RE = re.compile(
+    r"\b(the|that|this|her|his|your|my|our|their)\s+"
+    r"([a-z][\w.-]{1,30})\b", re.IGNORECASE)
 
 # Verb hints that disambiguate which domain a bare pronoun points at.
 _VERB_DOMAIN = (
@@ -145,11 +151,69 @@ def _domain_label(active: Any, domain: str) -> str:
     return ""
 
 
+# Entity-graph resolution — the second stage. Verb/pronoun domains map
+# onto entity *types* extracted by state.extract_entities, then ranked
+# by salience × recency. Two live candidates within the margin are
+# ambiguous: ask, never guess.
+_DOMAIN_TYPES: dict[str, tuple[str, ...]] = {
+    "error": ("error",),
+    "image": ("image",),
+    "artifact": ("artifact", "project", "file", "version", "lib",
+                 "runtime", "app", "system", "tool", "mission"),
+    "person": ("person", "voice", "agent"),
+    "model": ("model",),
+    "voice": ("voice", "engine"),
+}
+
+# Closeness in salience that still counts as "can't tell them apart".
+_AMBIGUITY_MARGIN = 0.18
+# A referent never resolves below this combined score.
+_RESOLVE_FLOOR = 0.30
+
+
+def _entity_candidates(active: Any, domain: str,
+                       *, now: float | None = None) -> list[dict]:
+    """Salience-ranked graph entities compatible with the verb domain."""
+    import time as _t
+    now = _t.time() if now is None else now
+    graph = getattr(active, "entity_graph", None) or {}
+    types = _DOMAIN_TYPES.get(domain, ())
+    rows = []
+    for row in graph.values():
+        if types and row.get("type") not in types:
+            continue
+        age_h = max(0.0, (now - float(row.get("last_ts") or now)) / 3600)
+        recency = max(0.0, 1.0 - age_h / 96.0)  # ~4 day halving window
+        score = float(row.get("salience", 0)) * 0.6 + recency * 0.4
+        rows.append({**row, "score": round(score, 3)})
+    rows.sort(key=lambda r: (-r["score"],
+                             -float(r.get("last_ts") or 0)))
+    return rows
+
+
+def _entity_resolve(active: Any, domain: str,
+                    now: float | None = None) -> tuple[str, bool]:
+    """(label, ambiguous) — empty label means no candidate."""
+    cands = _entity_candidates(active, domain, now=now)
+    if not cands:
+        return "", False
+    if len(cands) == 1:
+        return str(cands[0].get("label") or ""), False
+    top, nxt = cands[0], cands[1]
+    if top["score"] >= _RESOLVE_FLOOR and \
+            top["score"] - nxt["score"] <= _AMBIGUITY_MARGIN:
+        return str(top.get("label") or ""), True
+    if top["score"] < _RESOLVE_FLOOR:
+        return "", False
+    return str(top.get("label") or ""), False
+
+
 def resolve_with_report(text: str, active: Any) -> dict[str, Any]:
     """Rich resolution — typed terms plus bare pronouns bound by active
-    domain. Returns {"resolved": {term: label}, "ambiguous": [term]}.
+    domain first, then by the entity graph. Returns
+    {"resolved": {term: label}, "ambiguous": [term]}.
 
-    A bare pronoun only binds when exactly one live domain matches —
+    A bare pronoun only binds when one candidate clearly dominates —
     two plausible antecedents mean ASK, never guess.
     """
     report: dict[str, Any] = {"resolved": {}, "ambiguous": []}
@@ -158,10 +222,65 @@ def resolve_with_report(text: str, active: Any) -> dict[str, Any]:
     report["resolved"] = resolve_references(text, active)
     already = {t.lower() for t in report["resolved"]}
     t = str(text or "")
-    pronouns = [m.group(0) for m in _BARE_PRONOUN_RE.finditer(t)
-                if m.group(0).lower() not in already]
-    if not pronouns:
-        return report
+    # Alias pass — 'her voice' / 'the installer' bind a graph entity by
+    # alias or label, no string-matching every historical mention.
+    for m in _NOUN_REF_RE.finditer(t):
+        phrase = m.group(0).strip()
+        if phrase.lower() in already:
+            continue
+        row = (graph_entity_for(active, phrase)
+               or graph_entity_for(active, m.group(2)))
+        if row is not None:
+            report["resolved"][phrase] = str(row.get("label") or phrase)
+            already.add(phrase.lower())
+    # Open-loop recall — 'what happened with that?', 'any update on it'
+    # resolve the pronoun to the pending loop, not the last noun.
+    if open_loops := [l for l in
+                      (getattr(active, "open_loops", None) or [])
+                      if l.get("status") == "open"]:
+        if re.search(r"\bwhat\s+happened\s+(?:with|to)|\bany\s+"
+                     r"(?:update|news|progress)\b|\bstatus\s+of\b",
+                     t, re.I):
+            for m in _BARE_PRONOUN_RE.finditer(t):
+                p = m.group(0)
+                if p.lower() not in already:
+                    loop = open_loops[-1]
+                    row = (getattr(active, "entity_graph", None)
+                           or {}).get(str(loop.get("entity") or ""))
+                    report["resolved"][p] = (
+                        str(row.get("label")) if row else
+                        str(loop.get("text") or ""))[:160]
+                    already.add(p.lower())
+    # Ordinal fallback — 'the second one'/'the other one' against the
+    # graph when the flat recent-entity list didn't cover it.
+    for term, kind in find_references(t):
+        if kind != "ordinal" or term in report["resolved"]:
+            continue
+        label = _ordinal_from_graph(term, active)
+        if label:
+            report["resolved"][term] = label
+    pronouns: list[str] = []
+    for m in _BARE_PRONOUN_RE.finditer(t):
+        p = m.group(0).lower()
+        if p in already:
+            continue
+        # 'her voice' — possessive, not a bare pronoun; the alias pass
+        # above already handled it.
+        if p in ("her", "his", "their") and re.match(
+                r"\s+\w", t[m.end():]):
+            continue
+        # Expletive/dummy 'it' — 'what time is it', 'it's raining',
+        # 'how is it going' — has no referent; never bind.
+        if p == "it" and re.search(
+                r"\b(?:time|date|day|weather|raining|cold|hot|late|"
+                r"early|going|means?|seems?|looks?|sounds?|feels?|"
+                r"works?|worth|possible|ok(?:ay)?|fine|done|true|"
+                r"clear|safe|legal|allowed|hard|easy)\b",
+                t, re.I) and re.search(
+                r"\b(?:is|was|does|do|did|what|how|why|where|when|"
+                r"'s|s)\b", t, re.I):
+            continue
+        pronouns.append(m.group(0))
     hint = next((dom for pat, dom in _VERB_DOMAIN if pat.search(t)), "")
     candidates: dict[str, str] = {}
     for dom in ("error", "image", "artifact"):
@@ -177,7 +296,94 @@ def resolve_with_report(text: str, active: Any) -> dict[str, Any]:
                 if d != "image" or image_live}
         if len(live) == 1:
             report["resolved"][pron] = next(iter(live.values()))
-        elif len(live) > 1:
+            continue
+        if len(live) > 1:
             report["ambiguous"].append(pron)
-        # zero candidates: unbound, not ambiguous — nothing to bind to
+            continue
+        # No active-domain label — try the entity graph. The verb hint
+        # picks the compatible type; salience × recency ranks.
+        dom = hint or (
+            "person" if pron.lower() in ("she", "he", "him", "her",
+                                         "they", "them")
+            else "artifact")
+        label, amb = _entity_resolve(active, dom)
+        if label and not amb:
+            report["resolved"][pron] = label
+        elif amb:
+            report["ambiguous"].append(pron)
     return report
+
+
+_ORDINAL_INDEX = {"first": 0, "second": 1, "third": 2, "fourth": 3,
+                  "fifth": 4, "last": -1, "previous": -2, "earlier": -2,
+                  "middle": -2}
+
+
+def _ordinal_from_graph(term: str, active: Any) -> str:
+    """Ordinal/'other' referents against graph entities ordered by
+    last mention — 'the other one' is the same-type entity that ISN'T
+    the last bound referent."""
+    graph = getattr(active, "entity_graph", None) or {}
+    if not graph:
+        return ""
+    t = term.lower()
+    m = re.search(r"\b(first|second|third|fourth|fifth|last|previous|"
+                  r"earlier|middle|other|another|next)\b", t)
+    if not m:
+        return ""
+    ord_word = m.group(1)
+    # Same-type context: if a prior referent exists, prefer entities
+    # of that referent's type.
+    bound = getattr(active, "referents", None) or {}
+    same_type = ""
+    for v in bound.values():
+        if isinstance(v, str) and v in graph:
+            same_type = graph[v].get("type", "")
+    rows = sorted(graph.values(),
+                  key=lambda r: float(r.get("last_ts") or 0))
+    if same_type:
+        typed = [r for r in rows if r.get("type") == same_type]
+        if len(typed) >= 2:
+            rows = typed
+    if not rows:
+        return ""
+    if ord_word in ("other", "another"):
+        # the one that ISN'T the most recent same-type mention
+        label = str(rows[-1].get("label") or "")
+        for v in bound.values():
+            if isinstance(v, str) and v in graph and \
+                    graph[v].get("label") == label and len(rows) >= 2:
+                label = str(rows[-2].get("label") or "")
+                break
+        return label
+    idx = _ORDINAL_INDEX.get(ord_word, 0)
+    try:
+        return str(rows[idx].get("label") or "")
+    except IndexError:
+        return ""
+
+
+def graph_entity_for(active: Any, label_or_alias: str) -> dict | None:
+    """Look up an entity by label/alias — used by 'back to X' returns
+    and decision recall. Exact first, then containment either way so
+    'the ai community idea' still lands on Moltbook."""
+    graph = getattr(active, "entity_graph", None) or {}
+    low = str(label_or_alias or "").lower().strip()
+    if not low:
+        return None
+    for row in graph.values():
+        if row.get("label", "").lower() == low:
+            return row
+        if low in [a.lower() for a in (row.get("aliases") or [])]:
+            return row
+    # Containment — 'ai community idea' contains alias 'ai community'.
+    best = None
+    for row in graph.values():
+        cands = [row.get("label", "")] + list(row.get("aliases") or [])
+        for c in cands:
+            cl = c.lower().strip()
+            if len(cl) >= 4 and (cl in low or low in cl):
+                if best is None or len(cl) > len(
+                        str(best.get("_hit", ""))):
+                    best = {**row, "_hit": cl}
+    return best

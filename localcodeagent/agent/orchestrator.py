@@ -300,6 +300,11 @@ class _AgentSession:
     # where the model narrates a plan instead of calling write_file.
     intent: str = ""
     action_nudged: bool = False
+    # Semantic self-audit — the IntentEnvelope/ResponseScope computed at
+    # turn start; a reply that violates the plan retries once.
+    env: Any = None
+    scope: Any = None
+    audit_retries: int = 0
     # Set by the action nudge — the next model call runs with
     # tool_choice="required" so a stalling model must emit a call.
     force_tool_call: bool = False
@@ -2159,6 +2164,111 @@ class AgentOrchestrator:
         genome, ctx = sp
         return _BUILTIN_RENDERER.render_semantic(
             sem, genome, ctx, intent="memory_facts_recall",
+            canonical=canonical)
+
+    _STATE_DECISION_Q_RE = re.compile(
+        r"\b(?:what|which|who)\b.{0,50}\b(?:decid\w+|settl\w+|"
+        r"cho?se|chosen|pick(?:ed)?|agree[ds]?|go(?:ing)?\s+with|"
+        r"end\s+up\s+(?:using|with)|final\s+(?:call|answer|choice))\b|"
+        r"\bremind\s+me\b.{0,40}\b(?:decid|settl|decision|choice)\b",
+        re.IGNORECASE)
+    _STATE_LOOP_Q_RE = re.compile(
+        r"\bwhat\s+happened\s+(?:with|to)\s+(?:that|the|it|this)\b|"
+        r"\bany\s+(?:update|news|progress)\s+on\b|"
+        r"\bwhere\s+(?:are|were)\s+we\s+(?:with|on)\b|"
+        r"\bhow'?s\s+(?:that|the)\s+(\w+)\s+(?:going|doing)\b",
+        re.IGNORECASE)
+    _STATE_TOPIC_Q_RE = re.compile(
+        r"\bwhere\s+were\s+we\b|"
+        r"\bwhat\s+were\s+we\s+(?:doing|working\s+on|talking\s+about)\b|"
+        r"\b(?:okay|ok|so)?\s*(?:let'?s\s+)?(?:continue|resume|"
+        r"pick\s+(?:it|that|this)\s+up|carry\s+on)\b\.?\s*$|"
+        r"\bback\s+to\s+what\s+we\s+were\s+doing\b",
+        re.IGNORECASE)
+
+    def _state_recall_reply(self, user_text: str, state_ctx,
+                            env=None):
+        """Conversation-state recall — 'what did we settle on', 'what
+        happened with that', 'where were we'. Answers from the state
+        graph's decision ledger, open loops and topic stack rather
+        than the model or raw history. → RenderedReply | None."""
+        frame = self._utterance_frame(env, user_text)
+        if frame is not None and not frame.allows("memory_recall"):
+            return None
+        text = ((frame.masked_case
+                 if frame is not None and frame.masked_case
+                 else None) or str(user_text or ""))
+        from ..workflow.conversation_memory import ConversationMemory
+        terms_of = ConversationMemory._content_terms
+        canonical = ""
+        sid = ""
+        open_loops = [l for l in (getattr(state_ctx, "open_loops", None)
+                                  or []) if l.get("status") == "open"]
+
+        if self._STATE_DECISION_Q_RE.search(text):
+            # Decision recall — newest active decision whose subject or
+            # value shares terms with the question.
+            act = [d for d in (getattr(state_ctx, "decisions", None)
+                               or []) if d.get("status") == "active"]
+            if act:
+                q_terms = terms_of(text)
+                ranked = sorted(
+                    act,
+                    key=lambda d: (
+                        len(q_terms & terms_of(str(d.get("subject", ""))
+                                               + " "
+                                               + str(d.get("value", "")))),
+                        float(d.get("ts") or 0)),
+                    reverse=True)
+                top = ranked[0]
+                hits = len(q_terms & terms_of(
+                    str(top.get("subject", "")) + " "
+                    + str(top.get("value", ""))))
+                if hits or len(act) == 1:
+                    canonical = (
+                        f"We settled on {top.get('value')}"
+                        + (f" for {top.get('subject')}"
+                           if top.get("subject") else "")
+                        + ".")
+                    sid = "state:decision_recall"
+        elif self._STATE_LOOP_Q_RE.search(text):
+            # Open-loop query — one prominent unresolved loop answers
+            # 'what happened with that'.
+            if len(open_loops) == 1:
+                canonical = (f"Still open — {open_loops[-1].get('text')}")
+                sid = "state:loop_recall"
+            elif open_loops:
+                items = [l.get("text") for l in open_loops[:3]]
+                canonical = ("There's more than one open item — "
+                             + "; ".join(items) + ".")
+                sid = "state:loop_recall"
+            else:
+                err = getattr(state_ctx, "last_error", "") or \
+                    getattr(state_ctx, "active_error", "")
+                if err:
+                    canonical = f"Last thing on record — {err}."
+                    sid = "state:loop_recall"
+        elif self._STATE_TOPIC_Q_RE.search(text):
+            topic = getattr(state_ctx, "active_topic", "")
+            if topic:
+                canonical = f"We were on {topic}."
+                if open_loops:
+                    canonical += (f" Still open: "
+                                  f"{open_loops[-1].get('text')}")
+                sid = "state:topic_recall"
+
+        if not canonical:
+            return None
+        from ..context.realize import RenderedReply, SemanticResponse
+        sem = SemanticResponse(
+            facts=[canonical], semantic_id=sid or "state:recall",
+            speech_act="answer", bare=True)
+        sp = self._speech(user_text)
+        if not sp:
+            return RenderedReply(text=canonical, speech_act="answer")
+        genome, ctx = sp
+        return _BUILTIN_RENDERER.render_semantic(
+            sem, genome, ctx, intent="state_recall",
             canonical=canonical)
 
     def _local_action_reply(self, user_text: str, task_id: str,
@@ -5530,6 +5640,50 @@ class AgentOrchestrator:
                         "a less-restrictive conversation model, or tune this model in Model Growth."
                     )
                     buffered_deltas.clear()
+                # Semantic self-audit — the reply is checked against the
+                # already-computed plan (requested slot, depth, topic)
+                # before release. A plan violation discards the draft and
+                # retries ONCE; the pipeline does not rerun.
+                if (
+                    session.audit_retries < 1
+                    and session.env is not None
+                    and session.main_content
+                ):
+                    try:
+                        from ..context.scope import audit_response
+                        violations = audit_response(
+                            session.main_content, session.scope,
+                            session.env)
+                    except Exception:
+                        violations = []
+                    if violations:
+                        session.audit_retries += 1
+                        if session.messages and \
+                                session.messages[-1] is message:
+                            session.messages.pop()
+                        audit_event = {
+                            "type": "scope_audit_retry",
+                            "model_id": session.profile.id,
+                            "violations": violations,
+                            "reason": "reply violated the semantic "
+                                      "response plan",
+                        }
+                        session.model_events.append(audit_event)
+                        self._emit(session, "model", event=audit_event)
+                        session.messages.append({
+                            "role": "system",
+                            "content": (
+                                "Your previous response was discarded by "
+                                "scope validation ("
+                                + ", ".join(violations) + "). Re-answer "
+                                "the user's exact question only — the "
+                                "requested slot, nothing else. No "
+                                "identity, family, or unrelated project "
+                                "details unless they were asked for. "
+                                "Stay within the answer-size budget."),
+                        })
+                        session.main_content = ""
+                        continue
                 if buffered_deltas:
                     self._emit(
                         session,
@@ -6233,11 +6387,6 @@ class AgentOrchestrator:
                     "event": {"spelling": _spelling_fixes[:8]}})
         except Exception:
             pass
-        conversation_intent = (
-            self.conversation_manager.classify_intent(user_text)
-            if self.conversation_manager is not None
-            else "conversation"
-        )
         attach = self._prepare_attachments(attachments)
         # Image paths pasted into the message as text ("variation of this
         # image: C:\...\foo.png") are attachments the user typed rather than
@@ -6263,6 +6412,28 @@ class AgentOrchestrator:
                     conversation_id)
         except Exception:
             active_ctx = None
+        conversation_intent = (
+            self.conversation_manager.classify_intent(
+                user_text, active=active_ctx)
+            if self.conversation_manager is not None
+            else "conversation"
+        )
+        # A running mission is a live referent — 'what's blocking it?'
+        # resolves `it` to the mission rather than a stray noun.
+        # Transient: injected into the in-memory context only, never
+        # persisted onto the row.
+        if self.current_mission_id and active_ctx is not None:
+            try:
+                import time as _t
+                active_ctx.entity_graph["mission:current"] = {
+                    "id": "mission:current", "type": "mission",
+                    "label": "the current mission",
+                    "aliases": ["the mission", "current mission",
+                                "the running task", "the mission run"],
+                    "salience": 0.7, "mentions": 1,
+                    "first_ts": _t.time(), "last_ts": _t.time()}
+            except Exception:
+                pass
         # Bind the latest real failure to active context — "fix that
         # error" resolves against the task ledger, not a guess.
         if active_ctx is not None and not getattr(
@@ -6311,16 +6482,39 @@ class AgentOrchestrator:
             env.references.setdefault(term, resolved)
         self._safe_emit(event_callback, {
             "type": "context", "event": env.to_trace()})
+        state_ctx = None
         try:
             # Only INTERACTIVE turns fold into the user's working context —
             # mission/self-repair subtask prompts share the agent lane (as
             # mode="auto" runs carrying mission_id) and must never retire
             # the user's live image task or rebind "it".
             if (self.conversation_manager is not None and not mission_id):
-                self.conversation_manager.update_active_context(
+                state_ctx = self.conversation_manager.update_active_context(
                     env, conversation_id)
         except Exception:
-            pass
+            state_ctx = None
+        # State-graph excerpt on the scope inspector — classifications,
+        # referents, decisions and open loops; never private reasoning.
+        if state_ctx is not None and turn_scope is not None:
+            try:
+                self._turn_scope[str(conversation_id or "")]["state"] = {
+                    "active_topic": state_ctx.active_topic,
+                    "topic_stack": [s.get("label") for s in
+                                    state_ctx.topic_stack[:6]],
+                    "entities": [e.get("label") for e in
+                                 list(state_ctx.entity_graph.values())[-10:]],
+                    "decisions": [
+                        {"subject": d.get("subject"),
+                         "value": d.get("value")}
+                        for d in state_ctx.decisions
+                        if d.get("status") == "active"][-6:],
+                    "open_loops": [l.get("text") for l in
+                                   state_ctx.open_loops
+                                   if l.get("status") == "open"][-6:],
+                    "goal": state_ctx.current_goal,
+                }
+            except Exception:
+                pass
         # Cognitive routing: the Nexus Brain classifies the input, consults
         # memory, and may answer deterministically before any model loads.
         persona_voice = self._persona_active()
@@ -6407,6 +6601,26 @@ class AgentOrchestrator:
                 project_id=project_id,
                 conversation_id=conversation_id,
             )
+        # User-controlled forget propagates into the state graph —
+        # entities/decisions/referents derived solely from a forgotten
+        # fact leave the live conversation state too (§71).
+        if (learned.get("forgotten")
+                and self.conversation_manager is not None):
+            try:
+                from ..context.state import forget_from_state
+                ctx = self.conversation_manager.active_context(
+                    conversation_id)
+                for row in learned["forgotten"]:
+                    forget_from_state(
+                        ctx, str(row.get("text", "")))
+                self.conversation_manager.set_context_field(
+                    conversation_id,
+                    entity_graph=ctx.entity_graph,
+                    decisions=ctx.decisions,
+                    referents=ctx.referents,
+                    open_loops=ctx.open_loops)
+            except Exception:
+                pass
         if any(learned.values()):
             # Keep Nexus Brain's durable records in lockstep — otherwise
             # superseded/forgotten facts drift out of sync until a manual
@@ -6602,7 +6816,16 @@ class AgentOrchestrator:
                 asker_is_creator=self._resolve_asker_is_creator(),
                 asker_family=self._resolve_asker_family())
             is not None)
-        builtin_reply = github_reply or sk_reply or facts_reply or recall_reply or (
+        # Conversation-state recall — 'what did we decide about X',
+        # 'what happened with that', 'where were we' answered from the
+        # state graph (decisions/open loops/topic stack), not the model.
+        state_reply = (
+            self._state_recall_reply(user_text, state_ctx, env=env)
+            if (mode == "auto" and state_ctx is not None
+                and sk_reply is None and facts_reply is None
+                and recall_reply is None)
+            else None)
+        builtin_reply = github_reply or sk_reply or facts_reply or recall_reply or state_reply or (
             self._builtin_reply(user_text)
             if mode == "auto" and (
                 not env.suppresses_canned() or identity_lane_hit)
@@ -6615,6 +6838,7 @@ class AgentOrchestrator:
             and sk_reply is None
             and facts_reply is None
             and recall_reply is None
+            and state_reply is None
             and self._persona_active()
             and not builtin_reply.genome_rendered
         ):
@@ -7056,11 +7280,26 @@ class AgentOrchestrator:
             )
             brain_behavior_context = self.nexus_brain.behavior_context(user_text)
         else:
+            # Salience focus — the state graph's active topic + live
+            # entity labels rank remembered facts so paused-topic facts
+            # decay out instead of riding the prompt on recency.
+            focus: dict[str, Any] = {}
+            if state_ctx is not None:
+                focus = {
+                    "topic": getattr(state_ctx, "active_topic", ""),
+                    "goal": getattr(state_ctx, "current_goal", ""),
+                    "entities": " ".join(
+                        str(e.get("label", ""))
+                        for e in list(
+                            getattr(state_ctx, "entity_graph", {}).values()
+                        )[-12:]),
+                }
             persistent_context = (
                 self.conversation_memory.prompt_context(
                     user_text,
                     project_id=project_id,
                     conversation_id=conversation_id,
+                    focus=focus or None,
                 )
                 if self.conversation_memory is not None
                 else ""
@@ -7569,6 +7808,8 @@ class AgentOrchestrator:
             tool_categories=_session_tool_categories(
                 env.primary_intent, user_text),
             intent=str(env.primary_intent or ""),
+            env=env,
+            scope=turn_scope,
             attachments_meta=list(attach["meta"]),
             max_tokens=(
                 int(getattr(self.config, "fast_general_long_output_tokens", 2048))

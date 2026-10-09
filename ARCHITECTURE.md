@@ -133,6 +133,20 @@ Lane contract: deterministic lanes (`capability_inventory`, `control`, `local_ac
 
 Debugging: `to_trace()` on the frame (surfaced through `/api/conversations/scope` under `semantic`) exposes structured classifier evidence — speech act, target, slot, rejected nominations with reasons — without chain-of-thought. `metrics_snapshot()` counts lane vetoes; `veto.<lane>` counters measure prevented keyword hijacks. The permanent collision corpus lives in `tests/test_semantic_frame.py`.
 
+## Conversation State Graph
+
+Between the context-free `SemanticFrame` and the model call, every interactive turn folds into a per-conversation **state graph** — the live structure of the conversation, not a replayed transcript. It lives on `ActiveContext` (persisted on the conversation row, so it survives restart and stays isolated per conversation) and is updated by `context/state.update_state` inside `record_turn`. Pipeline order: spelling normalize → `understand_turn` (frame + envelope + reference resolution against prior state) → `update_active_context` (state fold) → lane selection → memory recall with a `focus` (active topic + live entity labels) → model → `audit_response` self-check → release.
+
+The graph tracks: `active_topic` + a `topic_stack` of paused topics (explicit shifts push, `back to X` restores by label or entity alias, utility asides never displace, `okay continue` resumes only after a real displacement); an `entity_graph` of stable `type:slug` ids with aliases and salience (canonical project vocabulary + proper-noun capture + typed patterns); a `decisions` ledger with per-subject supersession (`use port 9000` → `actually 9500` supersedes; bare restatements inherit the matching-shape subject); `open_loops` for failures/promises/pending checks; `referents` binding resolved pronouns; `req_spec` accumulating multi-turn requirements per topic; `current_goal` and `speaker_attitude`. `compact_state` bounds all collections every 10 turns.
+
+Reference resolution (`context/references.py`) consults the graph after the flat active-domain labels: alias noun phrases (`her voice` → the voice entity), bare pronouns ranked by verb-domain × salience × recency, ordinals and `the other one` against mention order, open-loop binding for `what happened with that?`, an expletive-`it` guard, and an ambiguity margin — two referents within 0.18 salience ask a one-line clarification instead of guessing.
+
+Retrieval is state-aware: `conversation_memory.prompt_context(query, focus=…)` ranks facts by query overlap × focus overlap × recency rather than pure recency, so paused-topic facts decay out of the prompt. A deterministic state-recall lane answers `what did we settle on`, `what happened with that`, `where were we` from the ledger — behind the same `memory_recall` frame gate. User-controlled `forget` propagates into the graph (entities, decisions, referents, loops) via `forget_from_state`.
+
+The response self-audit (`context/scope.audit_response`) is a cheap structural check — unrequested biography, egregious overscope, reasoning narration — run on the model's reply before release; a violation discards the draft and retries once with the plan already computed. Narrow requested slots also inject an exclusion directive into the prompt so retrieved-but-irrelevant memory cannot leak into the answer.
+
+Debugging: the scope inspector (`/api/conversations/scope`) now carries a `state` excerpt — active topic, topic stack, entity labels, active decisions, open loops, goal. Tests: `tests/test_conversation_state.py` (entities, pronouns, ordinals, topic matrices, decision supersession, open loops, distractor churn, 50/100/200-turn sessions, restart round-trip).
+
 ## Transactional mutation model
 
 Filesystem edits are tracked per task. On the first mutation of a path, `CheckpointManager` records whether it existed and stores the original bytes if necessary.

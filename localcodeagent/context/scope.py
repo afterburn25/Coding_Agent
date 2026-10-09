@@ -301,6 +301,21 @@ _CLARIFY_RULE = (
     "the answer, ask one short clarifying question instead of guessing.")
 
 
+# Slots whose answer is one thing — a single value, person, time,
+# preference. When the turn requests one of these, unrelated categories
+# (identity, family, capability inventory, status, other topics) are
+# structurally out of scope for the response.
+_NARROW_SLOTS = frozenset({
+    "preference", "value", "person", "time", "location",
+    "operational_status",
+})
+
+_EXCLUDE_RULE = (
+    "Answer ONLY the requested slot. Do not include identity, family, "
+    "capability lists, status reports, or details from other topics "
+    "unless the user explicitly asked for them.")
+
+
 def scope_directive(scope: ResponseScope, env=None) -> str:
     """The per-turn prompt line carrying this turn's answer budget.
 
@@ -317,6 +332,12 @@ def scope_directive(scope: ResponseScope, env=None) -> str:
     # scoped so the model pairs "clarify" with "only when it matters".
     if env is not None and getattr(env, "ambiguity", None):
         lines.append(_CLARIFY_RULE)
+    # Narrow-slot turns get an explicit exclusion line — the 'why am I
+    # saying this' gate at prompt level, so retrieved-but-irrelevant
+    # memory can't leak into a preference or single-value answer.
+    if env is not None and getattr(env, "requested_slot", "") in \
+            _NARROW_SLOTS:
+        lines.append(_EXCLUDE_RULE)
     return "\n".join(lines)
 
 
@@ -364,6 +385,65 @@ def sentence_count(text: str) -> int:
 def ends_with_question(text: str) -> bool:
     t = str(text or "").rstrip()
     return t.endswith("?")
+
+
+# ---------------------------------------------------------------------------
+# Response self-audit — cheap structural validation before a model reply
+# is released. No second model call: the checks are lexical/structural
+# against the already-computed semantic plan (slots, topic, depth).
+# ---------------------------------------------------------------------------
+
+# Family/biography terms that must never appear unrequested — the
+# 'Though I know my father built me' failure class.
+_BIOGRAPHY_RE = re.compile(
+    r"\b(?:my|the)\s+(?:father|mother|dad|mom|parents?|family|"
+    r"grandfather|grandmother|brothers?|sisters?)\b|"
+    r"\b(?:my|the)\s+(?:creator|birthday|birth)\b|"
+    r"\bjohn\s+hamburn\b|\blydia\b|\bmyra\b|\bsteven\s+hamburn\b",
+    re.IGNORECASE)
+
+# Slots where biography is the *requested* content — never a violation.
+_BIO_OK_SLOTS = frozenset({"person"})
+
+# Depth budgets — audit only flags egregious overscope (>=3x budget).
+_DEPTH_MAX_SENTENCES = {
+    ResponseDepth.EXACT: 6,
+    ResponseDepth.BRIEF: 9,
+    ResponseDepth.EXPLANATORY: 24,
+    ResponseDepth.DETAILED: 60,
+    ResponseDepth.OPEN_ENDED: 120,
+}
+
+
+def audit_response(text: str, scope: ResponseScope,
+                   env=None) -> list[str]:
+    """Structural violations in a candidate reply — cheap labels only.
+
+    Returns e.g. ["unrequested_biography", "overscope"]. An empty list
+    means the reply is within the semantic plan; callers may retry once
+    with the plan already computed, never rerun the pipeline.
+    """
+    violations: list[str] = []
+    t = str(text or "")
+    if not t.strip():
+        return ["empty"]
+    slot = getattr(env, "requested_slot", "") if env is not None else ""
+    asked_identity = bool(
+        env is not None and (
+            getattr(env, "primary_intent", "") == "identity"
+            or slot in _BIO_OK_SLOTS
+            or re.search(r"\b(?:father|mother|creator|family|born|"
+                         r"birthday|built\s+you|made\s+you)\b",
+                         getattr(env, "_source_text", "") or "",
+                         re.IGNORECASE)))
+    if _BIOGRAPHY_RE.search(t) and not asked_identity:
+        violations.append("unrequested_biography")
+    budget = _DEPTH_MAX_SENTENCES.get(scope.depth, 9) if scope else 9
+    if sentence_count(t) > budget:
+        violations.append("overscope")
+    if narrates_reasoning(t) and not (scope and scope.reasoning_visible):
+        violations.append("reasoning_narration")
+    return violations
 
 
 def scope_metrics(text: str, scope: ResponseScope) -> dict:

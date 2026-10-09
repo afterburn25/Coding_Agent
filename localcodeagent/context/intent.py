@@ -770,6 +770,7 @@ def understand_turn(text: str, *, active: Any = None,
     the active image."""
     env = _classify_turn(text, active=active,
                          has_attachments=has_attachments)
+    env._source_text = str(text or "")[:500]  # for state-graph update
     # Topic-shift decay: an explicit forward shift ("new topic — …")
     # abandons the old subject — "it"/"that" must not silently bind to
     # the abandoned topic's entities. Topic RETURNS ("back to the

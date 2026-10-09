@@ -1049,8 +1049,13 @@ def _long_conversation_scenario(scenario_id: str) -> QaScenario:
     turns.append(QaTurn("remind me — what port did we settle on?",
                         conversation_id=cid,
                         expect={
-                            "context_contains": "9000",
-                            "context_not_contains": "8080",
+                            # State-graph decision recall answers this
+                            # deterministically now — the settled value
+                            # must appear in the response and never the
+                            # superseded one (context_contains held until
+                            # the state lane took over the recall path).
+                            "response_contains": "9000",
+                            "response_not_contains": "8080",
                         }))
     turns.append(QaTurn("how old are ya", conversation_id=cid, expect={
         "response_contains": "days old",

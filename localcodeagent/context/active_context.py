@@ -46,8 +46,25 @@ class ActiveContext:
     # [{kind, label, job, ts}] — topic-shifted artifacts stay retrievable
     # without driving routing.
     recent_entities: list[dict[str, Any]] = field(default_factory=list)
+    # --- Conversation State Graph (spec milestone) ---------------------
+    # The live structure of the conversation: topics, entities,
+    # decisions, open loops, referent bindings, accumulated requirements
+    # and the working goal. Persisted on the row alongside the fields
+    # above; see context/state.py for the extraction machinery.
+    active_topic: str = ""
+    topic_stack: list[dict[str, Any]] = field(default_factory=list)
+    entity_graph: dict[str, dict[str, Any]] = field(default_factory=dict)
+    decisions: list[dict[str, Any]] = field(default_factory=list)
+    open_loops: list[dict[str, Any]] = field(default_factory=list)
+    current_goal: str = ""
+    referents: dict[str, str] = field(default_factory=dict)
+    req_spec: dict[str, Any] = field(default_factory=dict)
+    speaker_attitude: str = ""
+    turn_index: int = 0
+    last_user_text: str = ""
+    last_topic_event: str = ""   # push|return|"" — resume gate
     updated_at: float = 0.0
-    version: int = 1
+    version: int = 2
 
     # -- queries ----------------------------------------------------------
 
@@ -128,6 +145,14 @@ class ActiveContext:
             self.active_subject = getattr(env, "subject", "")[:200]
         # conversation/question turns leave task context untouched — a
         # chat aside isn't a topic shift.
+
+        # Conversation State Graph fold — topics, entities, decisions,
+        # open loops, requirements, referents (context/state.py).
+        try:
+            from .state import update_state
+            update_state(self, env, getattr(env, "_source_text", ""))
+        except Exception:
+            pass
 
     def note_image_jobs(self, job_ids: list[str]) -> None:
         if job_ids:

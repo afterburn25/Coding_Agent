@@ -555,10 +555,10 @@ class ConversationManager:
     }
 
     @staticmethod
-    def classify_intent(text: str) -> str:
+    def classify_intent(text: str, active=None) -> str:
         t = str(text or "").lower().strip()
         from ..context.intent import understand_turn
-        env = understand_turn(t)
+        env = understand_turn(t, active=active)
         if env.primary_intent != "conversation" or env.confidence >= 0.7:
             return ConversationManager._ENV_TO_LABEL.get(
                 env.primary_intent, "conversation")
