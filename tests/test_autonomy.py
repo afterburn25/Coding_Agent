@@ -2892,6 +2892,104 @@ class EngineeringMissionTests(unittest.TestCase):
                 (m.get("metrics") or {}).get("escalations"), 1)
             sup.stop()
 
+    def test_requirement_change_propagates_to_hierarchy(self):
+        """§18 — supersession reaches nodes, workstream acceptance,
+        mission criteria, and durable decisions, with history."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(
+                objective="migrate the store layer")
+            sup.missions.mutate(
+                m["id"],
+                lambda row: row.update({
+                    "acceptance_criteria": [
+                        "data persists in postgresql",
+                        "tests stay green"]}))
+            sup.missions.record_decision(
+                m["id"], "Use postgresql for the store",
+                reason="maturity", source="user")
+            ws = sup.missions.add_workstream(
+                m["id"], "db layer",
+                acceptance=["postgresql schema migrated"])
+            def _graph(row):
+                g = TaskGraph(row)
+                g.add(new_task("schema work",
+                               "port the schema to postgresql",
+                               metadata={"workstream": ws["id"]}))
+            sup.missions.mutate(m["id"], _graph)
+            sup.missions.update(m["id"], status="executing")
+            out = sup.missions.flag_requirement_change(
+                ["store uses postgresql"])
+            self.assertTrue(out["flagged"])
+            m = sup.missions.get(m["id"])
+            node = TaskGraph(m).nodes[0]
+            self.assertTrue(node.get("stale_requirement"))
+            self.assertIn("postgresql",
+                          m.get("superseded_requirements") or [])
+            self.assertNotIn("postgresql", " ".join(
+                str(c) for c in m.get("acceptance_criteria") or []))
+            ws_row = next(w for w in m["workstreams"]
+                          if w["id"] == ws["id"])
+            self.assertTrue(ws_row.get("requirement_flags"))
+            dec = next(d for d in m["decisions"]
+                       if "postgresql" in str(d["decision"]).lower())
+            self.assertTrue(dec.get("superseded"))
+            sup.stop()
+
+    def test_review_packet_lists_upstream_evidence(self):
+        """§23 — the reviewer sees what each predecessor produced and
+        which files it touched; it never re-implements blindly."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="ship the feature")
+            ws = sup.missions.add_workstream(m["id"], "backend")
+            impl = new_task("build it", "build the backend",
+                            metadata={"workstream": ws["id"]})
+            impl["state"] = "completed"
+            impl["result"] = {"ok": True,
+                              "artifacts": ["localcodeagent/api.py",
+                                            "localcodeagent/store.py"]}
+            rev = new_task("review", "review the integrated result",
+                           kind="review")
+            def _graph(row):
+                g = TaskGraph(row)
+                g.add(impl)
+                g.add(rev)
+            sup.missions.mutate(m["id"], _graph)
+            m = sup.missions.get(m["id"])
+            pkg = sup.missions.context_package(m, rev)
+            self.assertIn("did NOT implement", pkg)
+            self.assertIn("localcodeagent/api.py", pkg)
+            self.assertIn("Lane status", pkg)
+            sup.stop()
+
+    def test_residency_batches_hot_model_tier(self):
+        """§31 — within a priority tier, the model role already hot
+        dispatches before an equal-priority node on a cold tier."""
+        with tempfile.TemporaryDirectory() as td:
+            ran = []
+            def exec_rec(m, n, cb):
+                ran.append(n["title"])
+                return {"ok": True, "output": "done"}
+            sup = make_sup(td, executor=exec_rec)
+            m = sup.create_mission(objective="batch check")
+            cold = new_task("cold task", "x", model_role="")
+            hotn = new_task("hot task", "y", model_role="deep")
+            def _graph(row):
+                g = TaskGraph(row)
+                g.add(cold)
+                g.add(hotn)
+            sup.missions.mutate(m["id"], _graph)
+            sup.missions.update(m["id"], status="executing")
+            # The deep tier is resident — without batching the older
+            # 'cold task' would dispatch first on created_at order.
+            sup._hot_model_role = "deep"
+            sup.tick()
+            time.sleep(0.3)
+            self.assertEqual(ran[0], "hot task")
+            drive(sup, m["id"], ticks=20)
+            sup.stop()
+
     def test_git_checkpoints_recorded(self):
         import subprocess as _sp
         with tempfile.TemporaryDirectory() as td:

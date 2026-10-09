@@ -169,6 +169,11 @@ class AutonomousSupervisor:
         self._bus_thread: threading.Thread | None = None
         self._bus_queue = None
         self._bus = bus
+        # §31 — model tier of the most recently finished agent node;
+        # dispatch prefers ready nodes on the same tier within a
+        # priority band so the resident model keeps working instead of
+        # churning VRAM on every dispatch.
+        self._hot_model_role = ""
         self._workers: dict[str, threading.Thread] = {}  # node_id -> thread
         self._heartbeat = {"ts": 0.0, "tick_ms": 0.0}
         self._started_once = False
@@ -1086,6 +1091,20 @@ class AutonomousSupervisor:
             return
 
         runnable = graph.runnable(limit=8)
+        # §31 model residency — inside a priority tier, prefer the model
+        # tier already hot (running or just finished). Priority still
+        # dominates; batching only breaks ties so the resident model
+        # keeps working instead of VRAM-churning on every dispatch.
+        hot = {str(n.get("model_role") or "")
+               for n in graph.running() if n.get("kind") == "agent"}
+        hot.discard("")
+        if not hot and self._hot_model_role:
+            hot = {self._hot_model_role}
+        if hot:
+            runnable.sort(key=lambda n: (
+                int(n.get("priority") or 50),
+                0 if str(n.get("model_role") or "") in hot else 1,
+                n.get("created_at", 0)))
         started = 0
         # Admission is hardware-measured, not a fixed mode→count map: each
         # node requests a reservation sized by role and the manager admits
@@ -1677,6 +1696,9 @@ class AutonomousSupervisor:
         # parked on approval frees its slot; resumption re-admits too.
         wid = str((TaskGraph(m).get(node_id) or {})
                   .get("metadata", {}).get("worker_id") or "")
+        fin_node = TaskGraph(m).get(node_id) or {}
+        if fin_node.get("kind") == "agent":
+            self._hot_model_role = str(fin_node.get("model_role") or "")
         if wid:
             obs = (result or {}).get("observed") or {}
             self.workers.release(
@@ -1739,6 +1761,9 @@ class AutonomousSupervisor:
                     # Bounded backoff — no instant hot retry.
                     node["retry_after"] = time.time() + min(
                         120.0, 10.0 * node["retries"])
+                    met = row.setdefault("metrics", {})
+                    met["repair_cycles"] = int(
+                        met.get("repair_cycles") or 0) + 1
                     # §22 thrash detection — the same logical failure
                     # repeating means the strategy isn't working. First
                     # repeat escalates the retry to the deep model;

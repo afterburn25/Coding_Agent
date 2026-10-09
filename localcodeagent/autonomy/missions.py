@@ -510,6 +510,40 @@ class MissionStore:
                     node["stale_requirement"] = True
                     node.setdefault("metadata", {}).setdefault(
                         "superseded_requirements", []).extend(matched)
+                # §18 — propagate beyond the task tier. The mission's
+                # superseded list is the audit trail; workstream
+                # acceptance rows and durable decisions that still
+                # assert the old value stop being treated as live.
+                sup = row.setdefault("superseded_requirements", [])
+                for s in stale:
+                    if s not in sup:
+                        sup.append(s)
+                row["superseded_requirements"] = sup[-20:]
+                crit = row.get("acceptance_criteria") or []
+                if crit:
+                    keep = [c for c in crit
+                            if not any(n in str(c).lower()
+                                       for n in stale)]
+                    if len(keep) != len(crit):
+                        row["acceptance_criteria"] = keep
+                for ws in (row.get("workstreams") or []):
+                    hay = (str(ws.get("title") or "") + " "
+                           + " ".join(str(a) for a in
+                                      ws.get("acceptance") or [])).lower()
+                    hit = [n for n in stale if n in hay]
+                    if hit:
+                        ws.setdefault("requirement_flags", []).append({
+                            "ts": time.time(),
+                            "superseded": hit[:4]})
+                        ws["updated_at"] = time.time()
+                for d in (row.get("decisions") or []):
+                    if d.get("superseded"):
+                        continue
+                    if any(n in str(d.get("decision") or "").lower()
+                           for n in stale):
+                        d["superseded"] = True
+                        d["superseded_by"] = "requirement change"
+                        d["superseded_at"] = time.time()
                 row.setdefault("history", []).append({
                     "ts": time.time(),
                     "event": "requirement_changed",
@@ -942,6 +976,39 @@ class MissionStore:
         if ws_failures:
             lines.append("Known failures in this workstream:")
             lines += ["- " + f for f in ws_failures[-4:]]
+        # §23-24 — review/integration nodes get the evidence packet, not
+        # a blind instruction: what each predecessor produced, which
+        # files it touched, and which lane it came from. The reviewer
+        # is a fresh worker — this is what makes the review independent
+        # in practice instead of the implementer grading itself.
+        if str(node.get("kind") or "") in {"review", "integrate"}:
+            impl = []
+            for n in (mission.get("graph") or {}).get("nodes") or []:
+                if n.get("kind") != "agent" \
+                        or n.get("state") != "completed":
+                    continue
+                res = n.get("result") or {}
+                arts = [str(a) for a in (res.get("artifacts") or [])]
+                lane = str(((n.get("metadata") or {})
+                            .get("workstream")) or "")[:14]
+                impl.append(
+                    f"- {str(n.get('title') or '')[:70]}"
+                    + (f" [{lane}]" if lane else "")
+                    + ": files "
+                    + (", ".join(arts[:8]) if arts else "not recorded"))
+            if impl:
+                lines.append(
+                    "Work under review (you did NOT implement this — "
+                    "audit it against the acceptance criteria):")
+                lines += impl[:12]
+            roll = self.workstream_rollup(mission)
+            if roll:
+                lines.append("Lane status:")
+                lines += [
+                    f"- {str(w.get('title') or '')[:60]}: "
+                    f"{w.get('status')} "
+                    f"({w.get('tasks_done', 0)}/{w.get('tasks', 0)})"
+                    for w in roll[:8]]
         if nexus_md:
             lines.append("Repository guide (NEXUS.md, excerpt):")
             lines.append(nexus_md[:1200])
