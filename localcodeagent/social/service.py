@@ -214,6 +214,143 @@ class SocialService:
                 "notify": bool(re.search(
                     r"\bnotifications?\b", t, re.IGNORECASE))}
 
+    # Referents that point back at a recent feed item — "that trust
+    # chains post", "the second one", "it". The referent binds against
+    # the last feed snapshot remembered from an actual read, never a
+    # guessed post id.
+    _CONTINUE_RE = re.compile(
+        r"\b(?:comments?|repl(?:y|ies)|responses?|discussion|thread|"
+        r"reactions?)\b", re.IGNORECASE)
+    _REF_RE = re.compile(
+        r"\b(?:on|to|about|of|in|under|for)?\s*"
+        r"(?:that|the|this|those|their|its?)\s+"
+        r"(.+?)\s*(?:post|thread|topic|one|discussion)?\s*[?.!]*$",
+        re.IGNORECASE)
+    _ORDINALS = {"top": 0, "first": 0, "1st": 0, "latest": 0,
+                 "second": 1, "2nd": 1, "third": 2, "3rd": 2,
+                 "fourth": 3, "4th": 3, "last": -1}
+    _STOPWORDS = frozenset(
+        "a an and are as at be by for from has have how i in is it its "
+        "of on or that the this to was what when where which who will "
+        "with you your post thread one discussion comments replies "
+        "about did say said".split())
+
+    def remember_feed(self, service: str, posts: list) -> None:
+        """Snapshot the last feed read so anaphoric follow-ups can bind
+        'that post' to a real post id. Stored on the drive (durable) —
+        titles only, full bodies stay on the wire."""
+        items: list[dict[str, Any]] = []
+        for p in posts or []:
+            if not isinstance(p, dict):
+                continue
+            pid = str(p.get("id") or p.get("post_id") or "")
+            title = str(p.get("title") or p.get("content") or "")
+            if not pid or not title:
+                continue
+            agent = p.get("agent") or p.get("author")
+            author = (agent.get("name") if isinstance(agent, dict)
+                      else agent) or ""
+            items.append({"id": pid, "title": title[:140],
+                          "author": str(author)})
+        key = f"last_feed_{service}"
+        self.store.drive.data[key] = items[:25]
+        self.store.drive.save()
+
+    def remembered_feed(self, service: str) -> list:
+        return list(self.store.drive.data.get(
+            f"last_feed_{service}") or [])
+
+    def _bind_referent(self, text: str, service: str) -> dict | None:
+        """Bind 'that trust chains post' / 'the second one' / 'it' to a
+        remembered feed item. Returns the item dict or None."""
+        items = self.remembered_feed(service)
+        if not items:
+            return None
+        t = str(text or "").lower()
+        m = self._REF_RE.search(t)
+        ref = (m.group(1).strip() if m else "").strip()
+        # Ordinal referents — 'the top post', 'the second one', 'it'.
+        for word, idx in self._ORDINALS.items():
+            if re.search(rf"\b{word}\b", ref or t):
+                try:
+                    return items[idx]
+                except IndexError:
+                    return items[-1] if idx == -1 else None
+        words = {w for w in re.findall(r"[a-z0-9]+", ref)
+                 if w not in self._STOPWORDS and len(w) > 2}
+        if not words:
+            # Bare 'it'/'that post'/'the thread' — most recent item.
+            if re.search(
+                    r"\bit\b|\b(?:that|the|this)\s+"
+                    r"(?:post|thread|topic|one|discussion)\b", t):
+                return items[0]
+            return None
+        best, best_score = None, 0
+        for it in items:
+            title_words = {w for w in re.findall(
+                r"[a-z0-9]+", str(it.get("title") or "").lower())
+                if w not in self._STOPWORDS}
+            score = len(words & title_words)
+            if score > best_score:
+                best, best_score = it, score
+        return best if best_score > 0 else None
+
+    def resolve_use_continuation(self, text: str) -> dict | None:
+        """Anaphoric follow-up — 'read the comments on that post',
+        'what did people say about it', 'the second one's replies'.
+        Claims the turn only when a comments/discussion verb AND a
+        resolvable feed referent are both present."""
+        t = str(text or "")
+        if not t or self._connectors is None or \
+                not self._CONTINUE_RE.search(t):
+            return None
+        # A write verb wins — 'comment on that post saying X' is a
+        # compose request, handled by the write path.
+        if self._WRITE_VERB_RE.search(t) and \
+                re.search(r"\b(?:saying|about|that|with)\s+[\"']", t):
+            return None
+        name = None
+        for row in (self._connectors.status() or []):
+            cand = str(row.get("name") or "")
+            if not cand:
+                continue
+            conn = (self._connectors.connectors.get(cand) or {}
+                    ).get("conn")
+            if conn is None or "comments" not in getattr(
+                    conn, "capabilities", ()):
+                continue
+            if re.search(rf"\b{re.escape(cand)}\b", t, re.IGNORECASE):
+                name = cand
+                break
+        if name is None:
+            # No service named — the referent must still bind; use the
+            # service whose remembered feed produced the best match.
+            candidates = [str(r.get("name") or "")
+                          for r in (self._connectors.status() or [])]
+            best_name, best_item = None, None
+            for cand in candidates:
+                if not cand:
+                    continue
+                it = self._bind_referent(t, cand)
+                if it is not None:
+                    best_name, best_item = cand, it
+                    break
+            if best_name is None:
+                return None
+            return {"service": best_name, "read": True, "write": False,
+                    "content": "", "notify": False,
+                    "comments_for": best_item.get("id"),
+                    "post_title": best_item.get("title"),
+                    "post_author": best_item.get("author")}
+        item = self._bind_referent(t, name)
+        if item is None:
+            return None
+        return {"service": name, "read": True, "write": False,
+                "content": "", "notify": False,
+                "comments_for": item.get("id"),
+                "post_title": item.get("title"),
+                "post_author": item.get("author")}
+
     def call_capability(self, service: str, capability: str, *,
                         approved: bool = False,
                         **params: Any) -> dict[str, Any]:

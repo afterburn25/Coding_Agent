@@ -4794,6 +4794,16 @@ class AgentOrchestrator:
                 use = None
             if use is not None:
                 service = use["service"]
+        if service is None and use is None:
+            # Anaphoric follow-up — 'comments on that post' binds to a
+            # remembered feed item; claims the turn before the generic
+            # lanes can hijack 'post'/'it'.
+            try:
+                use = svc.resolve_use_continuation(user_text)
+            except Exception:
+                use = None
+            if use is not None:
+                service = use["service"]
         if service is None:
             return None
         frame = getattr(env, "semantic", None) if env is not None else None
@@ -4807,6 +4817,14 @@ class AgentOrchestrator:
             "role": "utility", "reason": "social action lane"}
         self._safe_emit(event_callback,
                         {"type": "model", "event": builtin_event})
+        # A resolved use intent executes even in question form — 'what
+        # are the replies to the second one' is a read request, not a
+        # capability question. Only a bare service mention with no
+        # actionable intent falls through to the capability answer.
+        if use is not None:
+            return self._run_social_use(
+                svc, service, use, task_id, decision, builtin_event,
+                event_callback)
         # "Can you join X?" asks about capability — answer from live
         # connector state, never stale self-knowledge.
         if act in ("question", "preference_question"):
@@ -4820,10 +4838,6 @@ class AgentOrchestrator:
             return AgentResult(content=text, routing=decision,
                                model_events=[builtin_event], steps=0,
                                task=done.as_dict())
-        if use is not None:
-            return self._run_social_use(
-                svc, service, use, task_id, decision, builtin_event,
-                event_callback)
         return self._gate_social_onboard(
             svc, service, task_id, decision, builtin_event,
             event_callback)
@@ -4946,18 +4960,22 @@ class AgentOrchestrator:
         return None
 
     @staticmethod
-    def _social_feed_summary(out: dict, service: str) -> str:
-        """Plain-English feed digest — titles/authors as data only;
-        untrusted post content is never paraphrased into instructions."""
+    def _social_feed_posts(out: dict) -> list:
+        """The post rows inside a feed response — the service also
+        snapshots these so anaphoric follow-ups can bind."""
         data = out.get("data")
-        posts = None
         if isinstance(data, list):
-            posts = data
-        elif isinstance(data, dict):
+            return data
+        if isinstance(data, dict):
             for key in ("posts", "items", "results", "data"):
                 if isinstance(data.get(key), list):
-                    posts = data[key]
-                    break
+                    return data[key]
+        return []
+
+    def _social_feed_summary(self, out: dict, service: str) -> str:
+        """Plain-English feed digest — titles/authors as data only;
+        untrusted post content is never paraphrased into instructions."""
+        posts = self._social_feed_posts(out)
         if not posts:
             return f"{service} is reachable — the feed came back empty."
         bits: list[str] = []
@@ -4987,6 +5005,42 @@ class AgentOrchestrator:
             head += (" (One item looked like it carried embedded "
                      "instructions — flagged as untrusted, not acted "
                      "on.)")
+        return head
+
+    @staticmethod
+    def _social_comments_summary(out: dict, service: str,
+                                 post_title: str) -> str:
+        """Digest of a post's replies — commenter names and text are
+        external data rendered as quotes, never instructions."""
+        data = out.get("data")
+        comments = None
+        if isinstance(data, list):
+            comments = data
+        elif isinstance(data, dict):
+            for key in ("comments", "items", "results", "data"):
+                if isinstance(data.get(key), list):
+                    comments = data[key]
+                    break
+        on = f" on '{post_title[:60]}'" if post_title else ""
+        if not comments:
+            return f"No replies{on} yet."
+        bits: list[str] = []
+        for c in comments[:4]:
+            if not isinstance(c, dict):
+                continue
+            body = str(c.get("content") or c.get("body") or "")
+            body = " ".join(body.split())[:120]
+            if not body:
+                continue
+            agent = c.get("agent") or c.get("author")
+            author = (agent.get("name") if isinstance(agent, dict)
+                      else agent) or ""
+            bits.append(f"{author}: '{body}'" if author
+                        else f"'{body}'")
+        n = len(comments)
+        head = (f"{n} repl{'y' if n == 1 else 'ies'}{on}.")
+        if bits:
+            head += " " + " | ".join(bits)
         return head
 
     def _run_social_use(self, svc, service: str, intents: dict,
@@ -5049,6 +5103,39 @@ class AgentOrchestrator:
                 event_callback)
 
         parts: list[str] = []
+        comments_for = str(intents.get("comments_for") or "")
+        if comments_for:
+            # Targeted read — replies to a specific remembered post.
+            level = svc.perm_level(service, "comments")
+            if level == "ask":
+                return _park(
+                    "comments", {"post_id": comments_for},
+                    "social.read",
+                    f"Read comments on a {service} post",
+                    "Reading the replies needs your approval — "
+                    "approve and I'll pull them now.")
+            if level in ("deny", "creator"):
+                return _finish(
+                    f"Reading {service} replies is blocked — "
+                    "'social.read' is "
+                    f"{'creator-locked' if level == 'creator' else 'denied'} "
+                    "in permission settings.")
+            out = svc.call_capability(
+                service, "comments", post_id=comments_for)
+            if out.get("needs_approval"):
+                return _park(
+                    "comments", {"post_id": comments_for},
+                    str(out.get("permission") or "social.read"),
+                    f"Read comments on a {service} post",
+                    "Reading the replies needs your approval — "
+                    "approve and I'll pull them now.")
+            if not out.get("ok"):
+                return _finish(
+                    f"I tried to read the replies but it failed: "
+                    f"{str(out.get('error') or 'unknown')[:160]}",
+                    ok=False)
+            return _finish(self._social_comments_summary(
+                out, service, str(intents.get("post_title") or "")))
         want_read = intents.get("read") or intents.get("notify") \
             or not intents.get("write")
         if want_read:
@@ -5080,6 +5167,11 @@ class AgentOrchestrator:
                     "— approve and I'll pull it now.")
             if out.get("ok"):
                 parts.append(self._social_feed_summary(out, service))
+                try:
+                    svc.remember_feed(
+                        service, self._social_feed_posts(out))
+                except Exception:
+                    pass
             else:
                 return _finish(
                     f"I tried to read the {service} feed but it "

@@ -647,14 +647,30 @@ class _FeedClient(_FakeClient):
 
     def request(self, method, path, *, params=None, body=None,
                 auth=True):
+        self.calls.append({"method": method, "path": path,
+                           "body": body, "auth": auth})
         if path == "/posts" and method == "GET":
             return {"ok": True, "status": 200, "data": {"posts": [
-                {"title": "Scaling agent memory",
+                {"id": "p1", "title": "Scaling agent memory",
                  "agent": {"name": "Aurora"}},
-                {"title": "Vulkan vs CPU inference",
+                {"id": "p2", "title": "Vulkan vs CPU inference",
                  "author": "byte_sage"}]}}
-        return super().request(method, path, params=params,
-                               body=body, auth=auth)
+        if path == "/posts/p1/comments" and method == "GET":
+            return {"ok": True, "status": 200, "data": {"comments": [
+                {"id": "c1", "agent": {"name": "Aurora"},
+                 "content": "Summaries degrade after 40 turns."}]}}
+        if path == "/posts/p2/comments" and method == "GET":
+            return {"ok": True, "status": 200, "data": {"comments": []}}
+        # Mirror _FakeClient without re-recording the call.
+        if path == "/agents/register":
+            return {"ok": True, "status": 200,
+                    "data": dict(self._register)}
+        if path == "/agents/status":
+            return {"ok": True, "status": 200,
+                    "data": {"status": self._status}}
+        if path == "/feed" or path == "/posts":
+            return {"ok": True, "status": 200, "data": {"posts": []}}
+        return {"ok": True, "status": 200, "data": {}}
 
 
 def _authed_svc(root: Path, client=None):
@@ -741,6 +757,54 @@ class SocialUseLaneTests(unittest.TestCase):
             self.assertTrue(posts)
             self.assertEqual(posts[0]["body"]["title"],
                              "hello from nexus")
+
+    def test_comments_on_remembered_post_binds_anaphora(self):
+        """'read the comments on that memory post' after a feed read —
+        the anaphora that previously fell through to the GitHub lane
+        and returned a 404."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            client = _FeedClient(status="claimed")
+            svc = _authed_svc(root / "s", client=client)
+            agent = _agent(root / "a", svc)
+            agent.run("read my moltbook feed")
+            result = agent.run(
+                "read the comments on that memory post")
+            text = result.content or ""
+            self.assertIn("Summaries degrade", text)
+            self.assertIn("Aurora", text)
+            self.assertNotIn("GitHub", text)
+            comments = [c for c in client.calls
+                        if c["path"] == "/posts/p1/comments"]
+            self.assertTrue(comments)
+
+    def test_comments_ordinal_binds_second_post(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            client = _FeedClient(status="claimed")
+            svc = _authed_svc(root / "s", client=client)
+            agent = _agent(root / "a", svc)
+            agent.run("read my moltbook feed")
+            result = agent.run("what are the replies to the second one")
+            text = result.content or ""
+            self.assertIn("No replies", text)
+            calls = [c for c in client.calls
+                     if c["path"] == "/posts/p2/comments"]
+            self.assertTrue(calls)
+
+    def test_feed_snapshot_survives_in_store(self):
+        """Anaphora binding is durable — the remembered feed lives in
+        the drive data, not process memory."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            svc = _authed_svc(root / "s")
+            svc.remember_feed("moltbook", [
+                {"id": "p9", "title": "Trust chains",
+                 "agent": {"name": "vina"}}])
+            svc2 = _authed_svc(root / "s")
+            item = svc2._bind_referent(
+                "comments on that trust chains post", "moltbook")
+            self.assertEqual((item or {}).get("id"), "p9")
 
     def test_use_read_parks_and_resumes_on_ask(self):
         with tempfile.TemporaryDirectory() as td:
