@@ -2041,22 +2041,23 @@ class AgentOrchestrator:
                 canonical += " " + "; ".join(bits) + "."
             commits = data.get("commits") or []
             if commits:
-                shown = "; ".join(
-                    f"{c.get('sha')} {c.get('message')}"
-                    for c in commits[:5])
-                more = f" (+{len(commits) - 5} more)" \
-                    if len(commits) > 5 else ""
-                canonical += (f" Latest work on "
-                         f"{data.get('default_branch') or 'main'}: "
-                         f"{shown}{more}.")
+                phrases = [self._github_commit_phrase(c.get("message"))
+                           for c in commits[:4]]
+                phrases = [p for p in phrases if p]
+                if phrases:
+                    canonical += (" Most recent work: "
+                                  + "; ".join(phrases) + ".")
+                    if len(commits) > len(phrases):
+                        canonical += (f" {len(commits) - len(phrases)} "
+                                      "older commit(s) behind that.")
             readme = str(data.get("readme_excerpt") or "") \
                 .strip().splitlines()
-            if readme:
-                snippet = " ".join(
-                    ln.strip() for ln in readme[:2] if ln.strip()
-                )[:160].rstrip()
-                if snippet:
-                    canonical += f" README: {snippet}"
+            readme_txt = " ".join(
+                ln.strip().lstrip("#").strip() for ln in readme
+                if ln.strip() and not ln.strip().startswith(
+                    ("!", "[", "<")))[:160].rstrip()
+            if readme_txt:
+                canonical += f" {readme_txt}"
             canonical += (
                 " Want me to dig into a commit, check its issues, "
                 "or pull a specific file?")
@@ -2070,6 +2071,38 @@ class AgentOrchestrator:
         genome, ctx = sp
         return _BUILTIN_RENDERER.render_semantic(
             sem, genome, ctx, intent=intent, canonical=canonical)
+
+    _GH_COMMIT_KIND = {
+        "feat": "added", "feature": "added", "fix": "fixed",
+        "perf": "sped up", "refactor": "reworked", "docs": "documented",
+        "doc": "documented", "test": "tested", "tests": "tested",
+        "chore": "maintenance on", "build": "built", "ci": "CI:",
+        "style": "cleaned up", "revert": "reverted",
+        "release": "released", "bump": "released",
+    }
+    _GH_CONV_RE = re.compile(
+        r"^(\w+)(?:\(([^)]*)\))?!?\s*:\s*(.+)$")
+
+    def _github_commit_phrase(self, message) -> str:
+        """'fix(github): repo read lane' → 'fixed the GitHub repo read
+        lane'. Conventional prefixes become verbs; the scope folds into
+        the description. Unmatched subjects pass through capitalized."""
+        subject = str(message or "").splitlines()[0].strip()
+        if not subject:
+            return ""
+        m = self._GH_CONV_RE.match(subject)
+        if not m or m.group(1).lower() not in self._GH_COMMIT_KIND:
+            return subject[0].upper() + subject[1:]
+        kind, scope, desc = (m.group(1).lower(), m.group(2) or "",
+                             m.group(3).strip().rstrip("."))
+        verb = self._GH_COMMIT_KIND[kind]
+        desc = desc[0].lower() + desc[1:] if desc[:1].isupper() and \
+            not desc[:2].isupper() else desc
+        if scope and kind == "fix":
+            return f"fixed {scope} — {desc}"
+        if scope:
+            return f"{verb} the {scope} work — {desc}"
+        return f"{verb} {desc}"
 
     def _github_read_reply(self, user_text: str, env=None):
         """Repository read requests — 'check the github repository for

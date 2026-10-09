@@ -66,7 +66,9 @@ def _detect_domains(objective: str) -> list[dict]:
 def _explicit_lanes(mission: dict) -> list[dict]:
     """A caller (API, LLM planner assist, or the user) may attach explicit
     lanes — they win over keyword decomposition. Each lane needs at least
-    a title or instruction."""
+    a title or instruction. Lanes may carry ``depends`` (titles of lanes
+    that must integrate first), ``priority`` (p0..p3), and ``acceptance``
+    strings — the workstream contract."""
     lanes = []
     for raw in mission.get("decomposition") or []:
         if not isinstance(raw, dict):
@@ -79,8 +81,70 @@ def _explicit_lanes(mission: dict) -> list[dict]:
             "instruction": str(raw.get("instruction") or "")[:2000],
             "scope": [str(s)[:200] for s in (raw.get("scope") or [])][:12],
             "role": str(raw.get("role") or "coding"),
+            "depends": [str(d)[:90] for d in (raw.get("depends") or [])][:8],
+            "priority": str(raw.get("priority") or "p2").lower()[:4],
+            "acceptance": [str(a)[:300] for a in
+                           (raw.get("acceptance") or [])][:12],
         })
     return lanes[:MAX_LANES]
+
+
+def derive_acceptance_criteria(mission: dict) -> list[str]:
+    """Turn the raw request into explicit completion criteria BEFORE
+    implementation starts (§2). Deterministic extraction — criteria
+    come from what the user actually asked for, never model prose:
+      • every success_criteria row becomes a criterion sentence
+      • imperative fragments of the objective become criteria
+      • constraints are always criteria
+      • tests-green is implied when the objective says test/fix
+    Existing acceptance_criteria win — a caller-authored contract is
+    never overwritten."""
+    existing = [str(c).strip() for c in
+                (mission.get("acceptance_criteria") or []) if str(c).strip()]
+    if existing:
+        return existing[:16]
+    out: list[str] = []
+    for crit in mission.get("success_criteria") or []:
+        kind = str(crit.get("kind") or "")
+        target = str(crit.get("target") or "")
+        if kind in {"artifact_exists", "file_exists",
+                    "artifact_verified"} and target:
+            out.append(f"Deliverable exists and verifies: {target}")
+        elif kind == "verify_passed":
+            out.append("Project verification passes")
+        elif kind == "all_tasks_completed":
+            out.append("All planned work completes")
+        elif kind == "metric":
+            out.append(f"{crit.get('key', 'metric')} "
+                       f"{crit.get('op', '<=')} {crit.get('target')}")
+        elif kind == "custom" and target:
+            out.append(target)
+    # "…, write the tests, fix regressions, build the installer, and
+    # give me the artifact" — each imperative is a criterion.
+    obj = str(mission.get("objective") or "")
+    frag_verbs = re.compile(
+        r"\b(?:write|add|update|migrate|fix|build|test|verify|create|"
+        r"implement|refactor|deliver|produce|document|deploy)\b", re.I)
+    for frag in re.split(r"[,;]|\band\b", obj):
+        frag = frag.strip(" .")
+        if frag and frag_verbs.search(frag) and len(frag) >= 12:
+            out.append("Requested: " + frag[:160])
+    for c in mission.get("constraints") or []:
+        c = str(c).strip()
+        if c:
+            out.append("Constraint: " + c[:160])
+    if re.search(r"\btest", obj, re.I) and not any(
+            "test" in c.lower() for c in out):
+        out.append("Tests exist and pass for the changed area")
+    # Dedupe preserving order.
+    seen: set[str] = set()
+    deduped = []
+    for c in out:
+        key = c.lower()[:80]
+        if key not in seen:
+            seen.add(key)
+            deduped.append(c)
+    return deduped[:16]
 
 
 class MissionPlanner:
@@ -91,6 +155,13 @@ class MissionPlanner:
         objective = str(mission.get("objective") or "")
         scope = str(mission.get("scope") or "one_shot")
         tasks: list[dict] = []
+
+        # §2 — acceptance criteria exist before implementation starts.
+        # Written as a side effect on the mission row (the caller's
+        # mutate() persists it); never overwrites an authored contract.
+        if not mission.get("acceptance_criteria"):
+            mission["acceptance_criteria"] = derive_acceptance_criteria(
+                mission)
 
         if scope == "maintenance":
             return self._record_plan(mission, self._maintenance_plan(mission),
@@ -218,8 +289,47 @@ class MissionPlanner:
         lane_ids: list[str] = []
         retries = int((mission.get("budgets") or {}).get(
             "max_task_retries", 2))
+        # Durable workstream records — Mission → Workstream → Task is a
+        # real hierarchy, not prompt prose. Nodes carry the workstream id
+        # so rollups, ownership, and steering can find them after restart.
+        ws_ids: dict[str, str] = {}   # lane title → workstream id
+        import uuid as _uuid
+        lane_ws: list[dict] = []
+        for i, lane in enumerate(lanes):
+            ws = {
+                "id": f"ws-{_uuid.uuid4().hex[:10]}",
+                "title": str(lane["title"]),
+                "objective": str(lane.get("instruction") or
+                                 lane["title"])[:2000],
+                "status": "planned",
+                "priority": lane.get("priority") or "p2",
+                "role": str(lane.get("role") or "coding"),
+                "scope": list(lane.get("scope") or []),
+                "depends_on": list(lane.get("depends") or []),
+                "node_ids": [],
+                "worktree": None,
+                "acceptance": list(lane.get("acceptance") or []),
+                "blocker": "",
+                "result": "",
+                "created_at": time.time(),
+                "updated_at": time.time(),
+            }
+            lane_ws.append(ws)
+            ws_ids[lane["title"]] = ws["id"]
+        mission.setdefault("workstreams", []).extend(lane_ws)
+        mission["workstreams"] = mission["workstreams"][-40:]
+        # Workstream-level dependencies: a lane whose "depends" names
+        # another lane's title waits on that lane's final node.
+        lane_dep_ids: dict[str, list[str]] = {}
         for i, lane in enumerate(lanes):
             globs = " ".join(lane.get("scope") or [])
+            ws_id = ws_ids[lane["title"]]
+            # Priority band: p0 → 10, p1 → 16, p2 → 20, p3 → 26 + lane idx
+            band = {"p0": 10, "p1": 16, "p2": 20,
+                    "p3": 26}.get(lane.get("priority"), 20)
+            dep_node_ids = [dep
+                            for dep_title in (lane.get("depends") or [])
+                            for dep in lane_dep_ids.get(dep_title, [])]
             node = new_task(
                 f"[{lane['title']}] {str(mission.get('title') or objective)[:80]}",
                 ("Work the scoped lane of this mission. Stay inside your "
@@ -233,13 +343,17 @@ class MissionPlanner:
                  + self._project_context(mission)
                  + "\nReturn: summary, files changed, tests run + results, "
                    "unresolved issues, risks."),
-                kind="agent", deps=index_dep, priority=20 + i,
+                kind="agent", deps=(dep_node_ids or index_dep),
+                priority=band + i,
                 verify="none", max_retries=retries,
                 metadata={"worker_role": lane.get("role") or "coding",
                           "lane": lane["title"],
+                          "workstream": ws_id,
                           "scope": list(lane.get("scope") or [])})
             tasks.append(node)
             lane_ids.append(node["id"])
+            lane_dep_ids[lane["title"]] = [node["id"]]
+            lane_ws[i]["node_ids"] = [node["id"]]
 
         integrate = new_task(
             "Integrate lane outputs",

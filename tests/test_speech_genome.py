@@ -584,9 +584,10 @@ class TestBuiltinIntegration(unittest.TestCase):
         "open_issues_count": 3,
         "pushed_at": "2026-02-20T10:00:00Z",
         "commits": [
-            {"sha": "8ada602d", "message": "peer intelligence network",
+            {"sha": "8ada602d",
+             "message": "feat(social): peer intelligence network (0.39.0)",
              "author": "dev", "date": "2026-02-20T09:00:00Z"},
-            {"sha": "e49aa5c1", "message": "approval fix",
+            {"sha": "e49aa5c1", "message": "fix(social): approval fix",
              "author": "dev", "date": "2026-02-19T09:00:00Z"}],
         "readme_excerpt": "Nexus Core — the workstation.",
     }
@@ -625,8 +626,12 @@ class TestBuiltinIntegration(unittest.TestCase):
             "check the github repository for latest work")
         self.assertIsNotNone(out)
         self.assertIn("github_repo_activity", calls)
-        self.assertIn("8ada602d", out.text)
+        # Plain-English summary — no raw SHA dump, no conventional-
+        # commit prefixes read back verbatim.
         self.assertIn("peer intelligence", out.text)
+        self.assertIn("added", out.text.lower())
+        self.assertNotIn("8ada602d", out.text)
+        self.assertNotIn("feat(social):", out.text)
         self.assertNotIn("can't check github", out.text.lower())
         self.assertNotIn("Which of these", out.text)
 
@@ -675,7 +680,7 @@ class TestBuiltinIntegration(unittest.TestCase):
         out = agent._github_target_reply("afterburn25/Coding_Agent")
         self.assertIsNotNone(out)
         self.assertIn("github_repo_activity", calls)
-        self.assertIn("8ada602d", out.text)
+        self.assertIn("peer intelligence", out.text)
         self.assertNotIn("Say the word", out.text)
 
     def test_github_read_lane_permission_denied_is_honest(self):

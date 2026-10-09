@@ -32,6 +32,27 @@ MISSION_SCOPES = {
     "maintenance", "self_development",
 }
 
+# Workstream lifecycle — the durable middle tier between Mission and
+# graph Task. A workstream owns a scoped slice of the objective, a set
+# of node ids, an optional worktree, and its own acceptance criteria.
+WORKSTREAM_STATES = {
+    "planned", "ready", "active", "awaiting_review",
+    "integration_ready", "integrated", "abandoned", "failed",
+    "paused", "blocked",
+}
+LIVE_WORKSTREAM_STATES = {"ready", "active", "awaiting_review"}
+TERMINAL_WORKSTREAM_STATES = {"integrated", "abandoned", "failed"}
+# Node states that count as "done" inside a workstream progress rollup.
+TERMINAL_WORKSTREAM_NODE_STATES = {"completed", "skipped", "cancelled"}
+
+# Dynamic priority ladder (§20). Lower rank = sooner.
+WORKSTREAM_PRIORITIES = {"p0": 0, "p1": 1, "p2": 2, "p3": 3}
+
+# Engineering decision + capsule bounds — history stays raw on the
+# mission; these are the compact durable layers.
+MAX_DECISIONS = 60
+MAX_CAPSULE_ITEMS = 24
+
 MISSION_PRIORITIES = {"urgent", "interactive", "normal", "background", "maintenance"}
 _PRIORITY_RANK = {"urgent": 0, "interactive": 1, "normal": 2, "background": 3, "maintenance": 4}
 
@@ -151,6 +172,39 @@ def new_mission(objective: str, *, title: str = "", user_request: str = "",
         "history": [],          # mission-level state transition log
         "conversation": [],     # bounded mission Q&A thread
         "lease": None,          # {"owner", "expires"} — crash-detection token
+        # ---- engineering-mission layer ------------------------------
+        # Formal hierarchy: Mission → workstreams → graph nodes.
+        # Workstreams are durable records (not prompt text) so the
+        # hierarchy survives restart and context compaction.
+        "workstreams": [],
+        # Explicit completion criteria authored before implementation —
+        # distinct from success_criteria *kinds* (which the evaluator
+        # checks mechanically); these are the user-facing contract.
+        "acceptance_criteria": [],
+        # Durable engineering decisions — workers inherit these.
+        "decisions": [],
+        "superseded_requirements": [],
+        # Compact mission context — the state a fresh worker/model needs
+        # without reading full history. Rebuilt by capsule refresh;
+        # raw history stays intact on the mission.
+        "context_capsule": {},
+        # Path/symbol reservations: {id, owner(node/worker), patterns,
+        # state, claimed_at, lease_expires} — parallel workers never
+        # silently overwrite the same code.
+        "ownership": [],
+        # Git checkpoints: {id, label, ref, commit, at} — rollback points
+        # at baseline / per-workstream-complete / integrated / final.
+        "git_checkpoints": [],
+        "unresolved_questions": [],
+        # Mission quality metrics (§44) — counters accumulate across the
+        # whole run for post-hoc scheduling improvement.
+        "metrics": {
+            "repair_cycles": 0, "replans": 0, "escalations": 0,
+            "compactions": 0, "worker_crashes": 0, "ownership_conflicts": 0,
+            "approval_wait_s": 0.0, "verification_failures": 0,
+            "duplicate_work": 0, "model_calls": 0, "tokens_est": 0,
+            "checkpoints": 0, "restart_recoveries": 0,
+        },
     }
 
 
@@ -471,3 +525,264 @@ class MissionStore:
                     "nodes": [n.get("id") for n, _ in hits],
                 })
         return {"flagged": flagged}
+
+    # -- workstreams (durable hierarchy tier) ---------------------------
+
+    def add_workstream(self, mission_id: str, title: str, *,
+                       objective: str = "", scope: list[str] | None = None,
+                       role: str = "", priority: str = "p2",
+                       depends_on: list[str] | None = None,
+                       acceptance: list[str] | None = None,
+                       node_ids: list[str] | None = None) -> dict | None:
+        """Attach a durable workstream record. Nodes link back via
+        metadata["workstream"]; the workstream's own status is derived
+        by ``workstream_rollup`` plus explicit lifecycle transitions."""
+        ws = {
+            "id": f"ws-{uuid.uuid4().hex[:10]}",
+            "title": str(title or "workstream")[:140],
+            "objective": str(objective)[:2000],
+            "status": "planned",
+            "priority": priority if priority in WORKSTREAM_PRIORITIES
+                        else "p2",
+            "role": str(role or "coding")[:40],
+            "scope": [str(s)[:200] for s in (scope or [])][:16],
+            "depends_on": [str(d) for d in (depends_on or [])][:16],
+            "node_ids": [str(n) for n in (node_ids or [])][:64],
+            "worktree": None,   # {"path", "branch", "state"}
+            "acceptance": [str(a)[:300] for a in (acceptance or [])][:16],
+            "blocker": "",
+            "result": "",
+            "created_at": time.time(),
+            "updated_at": time.time(),
+        }
+
+        def _fn(m: dict) -> None:
+            m.setdefault("workstreams", []).append(ws)
+            m["workstreams"] = m["workstreams"][-40:]
+        return self.mutate(mission_id, _fn) and ws or None
+
+    def _ws_mut(self, m: dict, ws_id: str) -> dict | None:
+        for ws in m.get("workstreams") or []:
+            if ws.get("id") == ws_id:
+                return ws
+        return None
+
+    def update_workstream(self, mission_id: str, ws_id: str,
+                          **fields: Any) -> dict | None:
+        def _fn(m: dict) -> None:
+            ws = self._ws_mut(m, ws_id)
+            if ws is not None:
+                for k, v in fields.items():
+                    ws[k] = v
+                ws["updated_at"] = time.time()
+        return self.mutate(mission_id, _fn)
+
+    def workstream_status(self, mission_id: str, ws_id: str,
+                          status: str, *, detail: str = "") -> dict | None:
+        if status not in WORKSTREAM_STATES:
+            return None
+        out = self.update_workstream(
+            mission_id, ws_id, status=status,
+            blocker=detail if status in {"blocked", "failed"} else "")
+        if out is not None:
+            self.append_history(mission_id, "workstream",
+                                f"{ws_id} -> {status}"
+                                + (f" · {detail}" if detail else ""))
+        return out
+
+    def workstream_rollup(self, mission: dict) -> list[dict]:
+        """Workstream rows with live node progress folded in — the UI's
+        default mission view (§34). Node counts come from metadata
+        ["workstream"] links plus explicit node_ids."""
+        nodes = (mission.get("graph") or {}).get("nodes") or []
+        rows = []
+        for ws in mission.get("workstreams") or []:
+            ids = set(ws.get("node_ids") or [])
+            linked = [n for n in nodes
+                      if n.get("id") in ids
+                      or (n.get("metadata") or {}).get("workstream")
+                      == ws.get("id")]
+            states = [str(n.get("state") or "") for n in linked]
+            done = sum(s in TERMINAL_WORKSTREAM_NODE_STATES
+                       for s in states)
+            running = sum(s in {"running", "verifying"} for s in states)
+            failed = sum(s == "failed" for s in states)
+            rows.append({
+                **{k: ws.get(k) for k in
+                   ("id", "title", "objective", "status", "priority",
+                    "role", "scope", "depends_on", "worktree",
+                    "acceptance", "blocker", "result")},
+                "tasks": len(linked), "tasks_done": done,
+                "tasks_running": running, "tasks_failed": failed,
+                "node_ids": [n.get("id") for n in linked],
+                "progress": round(done / len(linked), 2)
+                            if linked else 0.0,
+            })
+        return rows
+
+    # -- engineering decisions -------------------------------------------
+
+    def record_decision(self, mission_id: str, decision: str, *,
+                        reason: str = "", source: str = "",
+                        supersedes: str = "") -> dict | None:
+        """Durable project decision — workers inherit active decisions.
+        ``supersedes`` retires an earlier decision id."""
+        rec = {
+            "id": f"dec-{uuid.uuid4().hex[:8]}",
+            "decision": str(decision)[:600],
+            "reason": str(reason)[:600],
+            "source": str(source or "mission")[:60],
+            "superseded": False,
+            "ts": time.time(),
+        }
+
+        def _fn(m: dict) -> None:
+            if supersedes:
+                for d in m.get("decisions") or []:
+                    if d.get("id") == supersedes:
+                        d["superseded"] = True
+            m.setdefault("decisions", []).append(rec)
+            m["decisions"] = m["decisions"][-MAX_DECISIONS:]
+        out = self.mutate(mission_id, _fn)
+        return rec if out is not None else None
+
+    def active_decisions(self, mission: dict) -> list[dict]:
+        return [d for d in (mission.get("decisions") or [])
+                if not d.get("superseded")]
+
+    # -- ownership reservations -------------------------------------------
+
+    OWNERSHIP_LEASE_S = 600.0
+
+    def ownership_conflicts(self, mission: dict,
+                            patterns: list[str]) -> list[dict]:
+        """Live reservations overlapping `patterns` — a glob overlaps
+        when either pattern prefixes the other or they share a path
+        literal. Owner-agnostic: callers exclude themselves."""
+        hits: list[dict] = []
+        now = time.time()
+        for res in mission.get("ownership") or []:
+            if res.get("state") != "held":
+                continue
+            if float(res.get("lease_expires") or 0) < now:
+                continue
+            for have in res.get("patterns") or []:
+                for want in patterns or []:
+                    h, w = str(have).rstrip("*"), str(want).rstrip("*")
+                    if h == w or h.startswith(w) or w.startswith(h):
+                        hits.append(res)
+                        break
+        return hits
+
+    def reserve_paths(self, mission_id: str, owner: str,
+                      patterns: list[str], *,
+                      lease_s: float = 0.0) -> dict:
+        """Reserve path patterns for a node/worker. Returns
+        {"ok": True, "reservation": rec} or {"ok": False,
+        "conflicts": [...]} — callers park/wait, never overwrite."""
+        pats = [str(p)[:200] for p in (patterns or []) if str(p).strip()]
+        if not pats:
+            return {"ok": True, "reservation": None}
+        lease = time.time() + (lease_s or self.OWNERSHIP_LEASE_S)
+        rec = {
+            "id": f"own-{uuid.uuid4().hex[:8]}",
+            "owner": str(owner),
+            "patterns": pats[:16],
+            "state": "held",
+            "claimed_at": time.time(),
+            "lease_expires": lease,
+        }
+        with self._lock:
+            m = self._get_mut(mission_id)
+            if m is None:
+                return {"ok": False, "conflicts": []}
+            conflicts = self.ownership_conflicts(m, pats)
+            conflicts = [c for c in conflicts
+                         if c.get("owner") != owner]
+            if conflicts:
+                return {"ok": False, "conflicts": conflicts}
+            # Same owner renewing/re-widening is fine — drop their stale
+            # holds for these patterns and record the fresh claim.
+            m.setdefault("ownership", [])
+            m["ownership"] = [
+                r for r in m["ownership"]
+                if not (r.get("owner") == owner and r.get("state") == "held"
+                        and set(r.get("patterns") or []) & set(pats))]
+            m["ownership"].append(rec)
+            m["ownership"] = m["ownership"][-80:]
+            m["updated_at"] = time.time()
+            self._save()
+        self._emit(m, "mission_updated")
+        return {"ok": True, "reservation": rec}
+
+    def release_paths(self, mission_id: str, owner: str = "",
+                      reservation_id: str = "") -> None:
+        def _fn(m: dict) -> None:
+            for r in m.get("ownership") or []:
+                if r.get("state") != "held":
+                    continue
+                if (reservation_id and r.get("id") == reservation_id) \
+                        or (owner and r.get("owner") == owner):
+                    r["state"] = "released"
+                    r["released_at"] = time.time()
+        self.mutate(mission_id, _fn)
+
+    def sweep_ownership(self, mission_id: str) -> list[str]:
+        """Expire dead leases — a crashed worker's claim must not fence
+        off its files forever (§12). Returns owners released."""
+        released: list[str] = []
+        now = time.time()
+
+        def _fn(m: dict) -> None:
+            for r in m.get("ownership") or []:
+                if r.get("state") == "held" and float(
+                        r.get("lease_expires") or 0) < now:
+                    r["state"] = "expired"
+                    released.append(str(r.get("owner") or ""))
+        self.mutate(mission_id, _fn)
+        return released
+
+    # -- checkpoints + metrics --------------------------------------------
+
+    def record_checkpoint(self, mission_id: str, label: str, *,
+                          commit: str = "", ref: str = "",
+                          detail: str = "") -> dict | None:
+        rec = {
+            "id": f"ckpt-{uuid.uuid4().hex[:8]}",
+            "label": str(label)[:80],
+            "commit": str(commit)[:80],
+            "ref": str(ref)[:160],
+            "detail": str(detail)[:300],
+            "ts": time.time(),
+        }
+
+        def _fn(m: dict) -> None:
+            m.setdefault("git_checkpoints", []).append(rec)
+            m["git_checkpoints"] = m["git_checkpoints"][-60:]
+            met = m.setdefault("metrics", {})
+            met["checkpoints"] = int(met.get("checkpoints") or 0) + 1
+        out = self.mutate(mission_id, _fn)
+        return rec if out is not None else None
+
+    def bump_metric(self, mission_id: str, key: str,
+                    delta: float = 1.0) -> None:
+        def _fn(m: dict) -> None:
+            met = m.setdefault("metrics", {})
+            met[key] = round(float(met.get(key) or 0) + delta, 3)
+        self.mutate(mission_id, _fn)
+
+    # -- unresolved questions / steering ------------------------------------
+
+    def add_question(self, mission_id: str, question: str,
+                     *, source: str = "") -> dict | None:
+        rec = {"id": f"q-{uuid.uuid4().hex[:8]}",
+               "question": str(question)[:600],
+               "source": str(source)[:60],
+               "resolved": False, "ts": time.time()}
+
+        def _fn(m: dict) -> None:
+            m.setdefault("unresolved_questions", []).append(rec)
+            m["unresolved_questions"] = \
+                m["unresolved_questions"][-30:]
+        out = self.mutate(mission_id, _fn)
+        return rec if out is not None else None
