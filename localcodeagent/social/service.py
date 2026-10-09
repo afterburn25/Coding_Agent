@@ -467,9 +467,12 @@ class SocialService:
             re.IGNORECASE)),
         ("red_team", re.compile(
             r"\b(?:red[ -]?team|adversarial(?:ly)?\s+review|"
-            r"attack|stress[ -]?test|poke\s+holes\s+in|"
+            r"stress[ -]?test|poke\s+holes\s+in|"
             r"critique)\s+(?:the\s+|this\s+|my\s+|our\s+)?"
-            r"(.+?)\s*$",
+            r"(.+?)\s*$|"
+            r"\battack\s+(?:the\s+|this\s+|my\s+|our\s+)?"
+            r"((?:design|architecture|plan|approach|system|code)"
+            r".*?)\s*$",
             re.IGNORECASE)),
         ("ask_peer", re.compile(
             r"\b(?:ask|consult|pose\s+(?:this|that|it)\s+to|"
@@ -487,7 +490,8 @@ class SocialService:
         for kind, rx in self._SOCIAL_QUERY_RES:
             m = rx.search(t)
             if m:
-                return kind, (m.group(1).strip() if m.groups() else "")
+                subject = next((g for g in m.groups() if g), "")
+                return kind, subject.strip()
         # State-gated shorthands — 'resend it', 'have you joined?',
         # 'where's the link?' only claim the turn when a live account
         # state makes the referent unambiguous. The gate is connector
