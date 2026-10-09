@@ -86,6 +86,11 @@ class AgentConfig:
     # MCP servers: [{"id","name","command":[...],"env":{},"cwd":"","enabled":true,"auto_start":true,"permission":"shell.execute"}]
     mcp_servers: list = field(default_factory=list)
     max_agent_steps: int = 12
+    # Delegated mission work orders get a bigger hard cap — a coding lane
+    # (read→edit→verify→repair) legitimately needs far more steps than a
+    # chat turn, and dying at the chat budget produces zero-artifact
+    # step_limit failures that thrash mission retries.
+    work_order_max_steps: int = 48
     review_after_changes: bool = True
     auto_verify_after_changes: bool = True
     max_review_chars: int = 16000
@@ -681,6 +686,8 @@ def load_config(path: Path | None) -> AgentConfig:
     cfg.preferred_tools = [str(x) for x in raw.get("preferred_tools", cfg.preferred_tools)]
     cfg.mcp_servers = list(raw.get("mcp_servers", cfg.mcp_servers) or [])
     cfg.max_agent_steps = int(raw.get("max_agent_steps", cfg.max_agent_steps))
+    cfg.work_order_max_steps = max(
+        1, int(raw.get("work_order_max_steps", cfg.work_order_max_steps)))
     cfg.review_after_changes = bool(raw.get("review_after_changes", cfg.review_after_changes))
     cfg.auto_verify_after_changes = bool(raw.get("auto_verify_after_changes", cfg.auto_verify_after_changes))
     cfg.max_review_chars = max(2000, int(raw.get("max_review_chars", cfg.max_review_chars)))

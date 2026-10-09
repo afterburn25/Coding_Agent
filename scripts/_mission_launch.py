@@ -52,7 +52,7 @@ body = {
 }
 
 req = urllib.request.Request(
-    "http://127.0.0.1:54332/api/missions",
+    "http://127.0.0.1:61849/api/missions",
     data=json.dumps(body).encode("utf-8"),
     headers={"Content-Type": "application/json"},
     method="POST",

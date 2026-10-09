@@ -34,8 +34,12 @@ _JOB_KILL_ON_CLOSE = 0x00002000
 
 
 def _assign_job_limits(proc: subprocess.Popen, mem_mb: int) -> Any:
-    """Put the child in a kill-on-close Job with a memory ceiling."""
-    if os.name != "nt" or mem_mb <= 0:
+    """Put the child in a kill-on-close Job with a memory ceiling.
+
+    ``mem_mb <= 0`` means kill-on-close only — no memory limit — used
+    for trusted-but-heavy commands (e.g. the repo selftest) whose whole
+    process tree must still die with the backend."""
+    if os.name != "nt":
         return None
     try:
         import ctypes
@@ -72,9 +76,10 @@ def _assign_job_limits(proc: subprocess.Popen, mem_mb: int) -> Any:
         if not job:
             return None
         info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-        info.BasicLimitInformation.LimitFlags = (
-            _JOB_LIMIT_MEMORY | _JOB_KILL_ON_CLOSE)
-        info.JobMemoryLimit = mem_mb * 1024 * 1024
+        info.BasicLimitInformation.LimitFlags = _JOB_KILL_ON_CLOSE
+        if mem_mb > 0:
+            info.BasicLimitInformation.LimitFlags |= _JOB_LIMIT_MEMORY
+            info.JobMemoryLimit = mem_mb * 1024 * 1024
         if not kernel.SetInformationJobObject(
                 job, 9, ctypes.byref(info), ctypes.sizeof(info)):
             kernel.CloseHandle(job)

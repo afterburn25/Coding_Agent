@@ -2811,16 +2811,34 @@ class AutonomousSupervisor:
                 return {"ok": False, "output": f"{name}: sandbox failed — {exc}"}
         try:
             from ..procutil import no_window_flags
-            proc = subprocess.run(
+            from ..sandbox import _assign_job_limits
+            # Kill-on-close Job (no memory cap): if the backend dies or
+            # restarts mid-verify, the whole command tree — cmd, selftest,
+            # its unittest children — is reaped with it instead of
+            # orphaning and holding workspace locks / RAM (observed live).
+            proc = subprocess.Popen(
                 command, shell=True, cwd=str(self.workspace),
-                capture_output=True, text=True, timeout=900,
-                errors="replace",
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, errors="replace",
                 creationflags=no_window_flags())
+            job = _assign_job_limits(proc, mem_mb=0)
+            try:
+                out, err = proc.communicate(timeout=900)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                out, err = proc.communicate()
+                return {"ok": False,
+                        "output": f"{name}: timed out after 900s"}
+            finally:
+                if job:
+                    try:
+                        import ctypes
+                        ctypes.windll.kernel32.CloseHandle(job)
+                    except Exception:
+                        pass
             ok = proc.returncode == 0
-            tail = (proc.stdout or "")[-3000:] + (proc.stderr or "")[-1500:]
+            tail = (out or "")[-3000:] + (err or "")[-1500:]
             return {"ok": ok, "output": f"{name}: rc={proc.returncode}\n{tail}"}
-        except subprocess.TimeoutExpired:
-            return {"ok": False, "output": f"{name}: timed out after 900s"}
         except OSError as exc:
             return {"ok": False, "output": f"{name}: {exc}"}
 

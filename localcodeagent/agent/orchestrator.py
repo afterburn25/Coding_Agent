@@ -315,6 +315,11 @@ class _AgentSession:
     # subtracts this from the char budget so schemas + messages jointly
     # fit the model window.
     tool_schema_chars: int = 0
+    # 0 → config.max_agent_steps. Work orders set a bigger budget — a
+    # delegated coding lane (read→edit→verify→repair) needs far more
+    # than the chat-sized 12-step default (observed live: lanes dying
+    # at step_limit with zero files changed).
+    max_steps: int = 0
     started_at: float = field(default_factory=time.time)
 
 
@@ -6561,7 +6566,8 @@ class AgentOrchestrator:
                              summary="approved — continuing", callback=session.event_callback)
         session.pending_approval = None
 
-        while session.steps < self.config.max_agent_steps:
+        step_budget = session.max_steps or self.config.max_agent_steps
+        while session.steps < step_budget:
             if self._task_cancelled(session):
                 return self._cancel_result(session)
             paused = self._process_pending_calls(session)
@@ -9098,6 +9104,8 @@ class AgentOrchestrator:
             tool_categories=_session_tool_categories(
                 "tool_action", instruction),
             intent="tool_action",
+            max_steps=max(
+                1, int(getattr(self.config, "work_order_max_steps", 48))),
         )
         self._sessions[task.id] = session
         routed_task = self.tasks.update(
