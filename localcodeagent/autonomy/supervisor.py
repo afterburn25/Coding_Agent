@@ -1816,8 +1816,8 @@ class AutonomousSupervisor:
                         meta["fail_sig"] = sig
                         meta["fail_sig_count"] = 1
                     if int(meta.get("fail_sig_count") or 0) >= 2 \
-                            and node.get("model_role") != "deep":
-                        node["model_role"] = "deep"
+                            and node.get("model_role") != "deep_reasoner":
+                        node["model_role"] = "deep_reasoner"
                         met = row.setdefault("metrics", {})
                         met["escalations"] = int(
                             met.get("escalations") or 0) + 1

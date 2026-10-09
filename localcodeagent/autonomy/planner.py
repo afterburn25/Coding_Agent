@@ -376,7 +376,7 @@ class MissionPlanner:
              "Objective: " + objective),
             kind="review", deps=[integrate["id"]], priority=39,
             verify="none", max_retries=1,
-            model_role="deep",
+            model_role="deep_reasoner",
             metadata={"worker_role": "reviewer"})
         tasks += [integrate, review]
 

@@ -2981,10 +2981,15 @@ class AppState:
                     + (f": {prev}" if prev else ".")
                     + " Do not assert completed actions — actually invoke "
                       "the required tools.")
+            # §10 — model escalation is real: a node's model_role (set
+            # by the planner or thrash escalation) overrides routing to
+            # that tier via the router, without disturbing mode=="auto"
+            # behavior elsewhere in the run.
             result = self.agent.run(
                 instruction, history=[], mode="auto",
                 event_callback=emit_cb,
                 mission_id=str(mission.get("id") or "") or None,
+                model_role=str(node.get("model_role") or "") or None,
             )
             return _mission_node_out(mission, node, result)
 

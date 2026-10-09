@@ -7369,6 +7369,7 @@ class AgentOrchestrator:
         event_callback: Callable[[dict[str, Any]], None] | None = None,
         attachments: list[dict[str, Any]] | None = None,
         mission_id: str | None = None,
+        model_role: str | None = None,
     ) -> AgentResult:
         # Resolve "option 1" / "the first option" style replies against the
         # assistant's most recent numbered proposal before anything else
@@ -8265,7 +8266,11 @@ class AgentOrchestrator:
         )
         decision = self.router.choose(
             user_text,
-            override="utility" if evidence_lane else vision_override)
+            override=str(model_role or "")
+            or ("utility" if evidence_lane else vision_override))
+        if model_role:
+            decision.reasons.append(
+                f"mission worker role override: {model_role}")
         if evidence_lane:
             decision.reasons.append(
                 "research/current-information request routed to the "

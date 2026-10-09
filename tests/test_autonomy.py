@@ -2886,7 +2886,7 @@ class EngineeringMissionTests(unittest.TestCase):
                                  {"ok": False, "error": "same boom"})
             node = TaskGraph(sup.missions.get(m["id"])).nodes[0]
             self.assertEqual(node["state"], "ready")
-            self.assertEqual(node.get("model_role"), "deep")
+            self.assertEqual(node.get("model_role"), "deep_reasoner")
             m = sup.missions.get(m["id"])
             self.assertEqual(
                 (m.get("metrics") or {}).get("escalations"), 1)
@@ -2974,7 +2974,7 @@ class EngineeringMissionTests(unittest.TestCase):
             sup = make_sup(td, executor=exec_rec)
             m = sup.create_mission(objective="batch check")
             cold = new_task("cold task", "x", model_role="")
-            hotn = new_task("hot task", "y", model_role="deep")
+            hotn = new_task("hot task", "y", model_role="deep_reasoner")
             def _graph(row):
                 g = TaskGraph(row)
                 g.add(cold)
@@ -2983,7 +2983,7 @@ class EngineeringMissionTests(unittest.TestCase):
             sup.missions.update(m["id"], status="executing")
             # The deep tier is resident — without batching the older
             # 'cold task' would dispatch first on created_at order.
-            sup._hot_model_role = "deep"
+            sup._hot_model_role = "deep_reasoner"
             sup.tick()
             time.sleep(0.3)
             self.assertEqual(ran[0], "hot task")
