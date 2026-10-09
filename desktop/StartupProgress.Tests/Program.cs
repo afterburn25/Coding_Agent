@@ -455,12 +455,16 @@ Console.WriteLine("narrator gate — holds quiet buffer after real playback end"
     // Simulate a posted line that starts and ends ~now.
     var play = n.Play(new byte[] { 1, 2, 3 }, "online");
     await Task.Delay(30);
+    // The stopwatch covers playback-end → gate-return in absolute time:
+    // awaiting `play` before starting it loses correctness on a starved
+    // pool — the await's resumption delay shrinks the buffer that remains
+    // when the gate starts, and the 47ms CI flake came from exactly that.
+    var sw = System.Diagnostics.Stopwatch.StartNew();
     n.NotifyVoiceResult("online", true, 0.05);
     n.NotifyVoiceEnded("online");
     await play;
-    var sw = System.Diagnostics.Stopwatch.StartNew();
     await n.VoiceGateAsync(TimeSpan.FromSeconds(5));
-    Check(sw.ElapsedMilliseconds >= 150,
+    Check(sw.ElapsedMilliseconds >= 190,
         $"gate holds the quiet buffer after playback end ({sw.ElapsedMilliseconds}ms)");
     Check(sw.ElapsedMilliseconds < 2000,
         $"gate does not overstay ({sw.ElapsedMilliseconds}ms)");
