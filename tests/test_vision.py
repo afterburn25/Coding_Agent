@@ -21,6 +21,18 @@ def _vision_profile(**kw):
     return ModelProfile(**kw)
 
 
+def _write_fake_exe(path: Path) -> Path:
+    """Write a stub that passes _validate_executable: >=4 KiB with a
+    plausible PE header (MZ, PE\\0\\0 signature at e_lfanew, x64 machine)."""
+    data = bytearray(4096)
+    data[0:2] = b"MZ"
+    data[0x3C:0x40] = (0x80).to_bytes(4, "little")
+    data[0x80:0x84] = b"PE\x00\x00"
+    data[0x84:0x86] = (0x8664).to_bytes(2, "little")
+    path.write_bytes(bytes(data))
+    return path
+
+
 class SuggestionTests(unittest.TestCase):
     def test_mmproj_files_are_not_suggested_as_chat_models(self):
         sugs = suggest_model_profiles([
@@ -41,7 +53,8 @@ class LaunchCommandTests(unittest.TestCase):
         rm.base_dir = root
         rm.config = AgentConfig()
         rm.tuner = types.SimpleNamespace(tuned_flags=lambda *a, **k: [])
-        rm.discover_llama_server = lambda profile=None: "llama-server"
+        exe = _write_fake_exe(root / "llama-server.exe")
+        rm.discover_llama_server = lambda profile=None: str(exe)
         rm._is_unified_llama = lambda exe: False
         return rm
 

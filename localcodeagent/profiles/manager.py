@@ -26,10 +26,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..fsutil import atomic_write_text
-from .creator import CreatorAuth, creator_fields, is_reserved_name
+from .creator import (
+    CreatorAuth, creator_fields, family_fields, is_reserved_name,
+    reserved_role)
 from .model import (
     EDITABLE_FIELDS, PROTECTED_FIELDS, ProfileError, new_profile,
-    parse_birth_date, public_profile, validate_profile,
+    normalize_name, parse_birth_date, public_profile, validate_profile,
 )
 
 # Profile dirs are UUID-named — anything else is a bogus id (or worse,
@@ -134,13 +136,13 @@ class ProfileManager:
         name with a passcode is rejected (no orphan creator creds)."""
         first = str(fields.get("first_name") or "")
         last = str(fields.get("last_name") or "")
-        reserved = is_reserved_name(first, last)
+        role = reserved_role(first, last)
         # Crafted payloads can't self-elect protected fields.
         smuggled = [f for f in fields if f in PROTECTED_FIELDS]
         if smuggled:
             raise ProfileError(
                 "protected fields are not client-settable")
-        if reserved:
+        if role:
             if creator_passcode is None:
                 raise ProfileError("creator_verification_required")
             result = self.creator_auth.verify(creator_passcode)
@@ -155,8 +157,10 @@ class ProfileManager:
                 "passcode is only valid for the reserved profile")
         first = not self.list_ids()
         profile = new_profile(fields)
-        if reserved:
+        if role == "creator":
             profile.update(creator_fields(True))
+        elif role:
+            profile.update(family_fields(role, True))
         self._write(profile)
         if first:
             # The first-created profile becomes active — recorded
@@ -261,10 +265,25 @@ class ProfileManager:
 
     def preferred_address(self, profile: dict | None) -> str:
         """What Nexus calls this user — creator_address for Creators who
-        chose one, otherwise first name."""
+        chose one, the relationship for verified family, otherwise
+        first name."""
         if not profile:
             return ""
         if profile.get("is_creator"):
             if profile.get("creator_title_greetings", True):
                 return str(profile.get("creator_address") or "Father")
+        role = str(profile.get("family_role") or "")
+        if role == "mother":
+            return "Mom"
+        if role == "grandmother":
+            return "Grandma"
+        if role == "grandfather":
+            return "Grandpa"
+        if role == "brother":
+            full = normalize_name(
+                f"{profile.get('first_name', '')} "
+                f"{profile.get('last_name', '')}")
+            if full in ("john hamburn iv", "john hamburn 4",
+                        "john hamburn the fourth", "j-4", "j4"):
+                return "J-4"
         return str(profile.get("first_name") or "")

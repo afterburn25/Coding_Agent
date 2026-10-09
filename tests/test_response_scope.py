@@ -171,17 +171,22 @@ class TestPersonaProgressiveDisclosure(unittest.TestCase):
         self.assertNotIn("everything in my world", low)
         self.assertNotIn("gave me this world", low)
 
-    def test_existence_no_father_side_family(self):
-        # No canonical mother/siblings — existence denies by narrowing
-        # to the father, never by inventing relatives.
-        for q in ("do you have a mother", "do you have any siblings",
-                  "do you have a family"):
-            out = identity.response_for(q) or ""
-            low = out.lower()
-            self.assertTrue(out, q)
-            self.assertIn("father", low)
-            self.assertNotIn("mother is", low)
-            self.assertNotIn("sister", low)
+    def test_existence_family_members(self):
+        # The canon family tree — existence confirms by member group,
+        # never denies. Children are the one empty slot.
+        out = (identity.response_for("do you have a mother") or "").lower()
+        self.assertIn("mother", out)
+        self.assertNotRegex(out, r"^no\b")
+        out = (identity.response_for("do you have any siblings") or "").lower()
+        self.assertIn("brother", out)
+        out = (identity.response_for("do you have a sister") or "").lower()
+        self.assertRegex(out, r"^no\b")
+        self.assertIn("brother", out)
+        out = (identity.response_for("do you have a family") or "").lower()
+        self.assertTrue(out)
+        self.assertNotRegex(out, r"^no\b")
+        out = (identity.response_for("do you have children") or "").lower()
+        self.assertRegex(out, r"^no\b")
 
     def test_name_answer(self):
         out = identity.response_for("who is your father") or ""

@@ -2,6 +2,45 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## Follow-up — Canon family, verified family profiles, voice hard sync
+
+- **Family canon** (`identity.py`) — locked family tree: mother Lydia
+  Hamburn (John's wife), grandmother Myra Hamburn, grandfather John
+  Hamburn Jr (deceased June 30th, 2011), brothers Steven Hamburn and
+  John Hamburn IV (J-4). New member-word lanes cover existence
+  ("do you have a mother"), name lookups ("who is your brother",
+  "who is j-4"), denials, affection, and the whole-family invitation;
+  `locked_topic` returns "family" so Answer Memory refuses
+  learn/forget/correct on member facts the same as creator/birthday.
+- **Verified family profiles** — `profiles/creator.py` `RESERVED_ROLES`
+  maps every canon name (plus J-4/IV/Jr aliases) to a role; all verify
+  against the same Creator passcode and stamp protected `is_family` /
+  `family_role` fields (never client-settable, never PATCH-editable).
+  `preferred_address` maps roles to Mom/Grandma/Grandpa/J-4. The Start
+  Here passcode card covers every reserved name (`start.js` RESERVED).
+- **Role-bound recognition** — `response_for` gains `asker_family`
+  (resolved from the active profile in `server.py`, plumbed through the
+  orchestrator's identity call sites): "am i your mother" confirms only
+  when the active profile carries the verified role; otherwise the
+  answer names the canon member. The persona canon paragraph
+  (`personality/prompt.py`) states the full tree so the model lane
+  can't invent relatives.
+- **Voice/text hard rule** — builtin replies no longer post text and
+  enqueue audio after; they enqueue segments with `onstart`/`onabort`
+  callbacks and `addMessage` fires at audible start (12s watchdog keeps
+  a dead synthesizer from hiding the reply). `voice_global.js` emits
+  `aborted` for stopped/unplayable segments so a preempted response's
+  held text releases immediately instead of stalling on the watchdog.
+- **Llama launch validation** — `_validate_executable` (Windows: min
+  size, MZ/PE signature, machine type) wired into `_build_command` and
+  `resource_fit`; `Popen` OSError surfaces the real executable path.
+- **Approval park race** — `_step_executing`'s drain check no longer
+  reads a half-parked node (`waiting_approval`/`pending_approval`) as
+  "stuck on failed dependencies"; `_recover_orphans` resets nodes
+  stranded mid-park on restart.
+
+Checkpoint: **2952 tests** (2952 passed + 3 env skips).
+
 ## v0.35.2 — Voice/text sync + off-PATH tool detection
 
 - **Voice-gated text reveal** — the chat `result` event no longer dumps
@@ -34,7 +73,7 @@
   `test_finish_publishes_sealed_zero_for_unspoken`,
   `test_cancelled_job_publishes_skipped`.
 
-Checkpoint: **2933 tests** (2933 passed + 3 env skips).
+Checkpoint: **2952 tests** (2952 passed + 3 env skips).
 
 ## Follow-up — Mission/task approval reconciliation
 
@@ -127,7 +166,7 @@ auto-open so the "review and continue" note is visible.
   `test_request_cancel_signals_inflight_command`,
   `test_node_activity_step_limit_marks_limited_not_failed`.
 
-Checkpoint: **2933 tests** (2933 passed + 3 env skips).
+Checkpoint: **2952 tests** (2952 passed + 3 env skips).
 
 ## Follow-up — Actions-artifact dogfood + deploy script
 
@@ -3291,7 +3330,7 @@ No image weights are downloaded automatically yet.
 python -m unittest discover -s tests -v
 ```
 
-Expected at this checkpoint: `2933 tests` passing (3 environment skips).
+Expected at this checkpoint: `2952 tests` passing (3 environment skips).
 
 ## v0.7 modular tool/plugin foundation checkpoint (Phase 1)
 

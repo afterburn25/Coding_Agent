@@ -25,6 +25,18 @@ def hardware(*, free_vram_mb: int = 10240, available_ram_gb: float = 48.0) -> Ha
     )
 
 
+def _write_fake_exe(path: Path) -> Path:
+    """Write a stub that passes _validate_executable: >=4 KiB with a
+    plausible PE header (MZ, PE\\0\\0 signature at e_lfanew, x64 machine)."""
+    data = bytearray(4096)
+    data[0:2] = b"MZ"
+    data[0x3C:0x40] = (0x80).to_bytes(4, "little")
+    data[0x80:0x84] = b"PE\x00\x00"
+    data[0x84:0x86] = (0x8664).to_bytes(2, "little")
+    path.write_bytes(bytes(data))
+    return path
+
+
 class CodingReadinessTests(unittest.TestCase):
     def test_healthy_external_coding_endpoint_is_ready(self):
         profile = ModelProfile(
@@ -74,7 +86,7 @@ class CodingReadinessTests(unittest.TestCase):
             model = root / "models" / "coder.gguf"
             model.write_bytes(b"GGUF")
             server = root / "llama-server"
-            server.write_text("placeholder", encoding="utf-8")
+            _write_fake_exe(server)
             profile = ModelProfile(
                 id="managed-coder",
                 endpoint="",
@@ -104,7 +116,7 @@ class CodingReadinessTests(unittest.TestCase):
         ):
             root = Path(td)
             server = root / ("llama-server.exe" if __import__("os").name == "nt" else "llama-server")
-            server.write_text("placeholder", encoding="utf-8")
+            _write_fake_exe(server)
             profile = ModelProfile(
                 id="missing-coder",
                 endpoint="",

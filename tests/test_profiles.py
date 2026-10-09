@@ -128,6 +128,58 @@ class TestCreatorAuth(unittest.TestCase):
         self.assertFalse(is_reserved_name("John", "Smith"))
         self.assertFalse(is_reserved_name("Johnny", "Hamburn"))
 
+    def test_family_names_reserved(self):
+        for name in (("Lydia", "Hamburn"), ("Myra", "Hamburn"),
+                     ("Steven", "Hamburn"), ("John", "Hamburn IV"),
+                     ("John", "Hamburn Jr"), ("J-4", ""), ("J4", "")):
+            self.assertTrue(is_reserved_name(*name), name)
+        # Near-misses stay ordinary.
+        self.assertFalse(is_reserved_name("Lydia", "Smith"))
+        self.assertFalse(is_reserved_name("Stephen", "Hamburn"))
+
+    def test_family_profile_requires_passcode(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = ProfileManager(Path(td))
+            for name in (("Lydia", "Hamburn"), ("Steven", "Hamburn"),
+                         ("John", "Hamburn IV"), ("Myra", "Hamburn")):
+                with self.assertRaises(ProfileError, msg=name):
+                    m.create(_fields(first_name=name[0],
+                                     last_name=name[1]))
+                with self.assertRaises(ProfileError, msg=name):
+                    m.create(_fields(first_name=name[0],
+                                     last_name=name[1]),
+                             creator_passcode="nope")
+            self.assertEqual(m.list_ids(), [])
+
+    def test_family_profile_stamps_role(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = ProfileManager(Path(td))
+            cases = ((("Lydia", "Hamburn"), "mother", "Mom"),
+                     (("Myra", "Hamburn"), "grandmother", "Grandma"),
+                     (("Steven", "Hamburn"), "brother", "Steven"),
+                     (("John", "Hamburn IV"), "brother", "J-4"))
+            for name, role, address in cases:
+                p = m.create(_fields(first_name=name[0],
+                                     last_name=name[1],
+                                     sex="male" if role == "brother"
+                                     else "female"),
+                             creator_passcode=_PASS)
+                self.assertTrue(p["is_family"], name)
+                self.assertEqual(p["family_role"], role, name)
+                self.assertFalse(p["is_creator"], name)
+                self.assertNotIn(_PASS, json.dumps(p))
+                self.assertEqual(m.preferred_address(p), address, name)
+
+    def test_family_fields_not_smuggleable(self):
+        with tempfile.TemporaryDirectory() as td:
+            m = ProfileManager(Path(td))
+            for smuggle in ("is_family", "family_role"):
+                with self.assertRaises(ProfileError):
+                    m.create(_fields(**{smuggle: "mother"}))
+            p = m.create(_fields())
+            with self.assertRaises(ProfileError):
+                m.patch(p["profile_id"], {"family_role": "mother"})
+
     def test_wrong_passcode_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             auth = CreatorAuth(Path(td))

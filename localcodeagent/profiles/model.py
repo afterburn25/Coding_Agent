@@ -30,14 +30,16 @@ REQUIRED_FIELDS = (IDENTITY_FIELDS + CONTACT_FIELDS + LOCATION_FIELDS)
 # the protected fields are established only through Creator verification.
 IMMUTABLE_FIELDS = frozenset(
     IDENTITY_FIELDS
-    + ("profile_id", "created_at", "is_creator", "creator_role"))
+    + ("profile_id", "created_at", "is_creator", "creator_role",
+       "is_family", "family_role"))
 
-# is_creator / creator_address / creator_title_* are protected: they can
-# only be set by the creator-auth path, never via profile PATCH.
+# is_creator / creator_address / creator_title_* / is_family /
+# family_role are protected: they can only be set by the reserved-name
+# verification path, never via profile PATCH.
 PROTECTED_FIELDS = frozenset(
     ("is_creator", "creator_role", "creator_address",
      "creator_title_greetings", "creator_title_conversation",
-     "creator_title_notifications"))
+     "creator_title_notifications", "is_family", "family_role"))
 
 EDITABLE_FIELDS = frozenset(
     CONTACT_FIELDS + LOCATION_FIELDS
@@ -162,6 +164,8 @@ def new_profile(fields: dict[str, Any]) -> dict[str, Any]:
         "updated_at": now,
         "has_completed_intro": False,
         "is_creator": False,
+        "is_family": False,
+        "family_role": "",
         "creator_role": "",
         "creator_address": "",
         "creator_title_greetings": True,
@@ -190,4 +194,7 @@ def public_profile(p: dict[str, Any]) -> dict[str, Any]:
         out.pop("creator_title_conversation", None)
         out.pop("creator_title_notifications", None)
         out.pop("creator_role", None)
+    if not out.get("is_family"):
+        out.pop("is_family", None)
+        out.pop("family_role", None)
     return out

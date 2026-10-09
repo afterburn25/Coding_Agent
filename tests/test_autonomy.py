@@ -2335,6 +2335,45 @@ class SupervisorLifecycleTests(unittest.TestCase):
             self.assertEqual(rows[0]["state"], "timed_out")
             sup.stop()
 
+    def test_park_window_does_not_drain_block_mission(self):
+        # Regression: _finish_node stamps node=waiting_approval and
+        # row["pending_approval"] in one mutation, then transitions the
+        # mission. A tick landing between those writes saw 'executing'
+        # with no runnable nodes and blocked the mission as "tasks stuck
+        # on failed dependencies". Delay _create_approval to hold the
+        # window open — the mission must park, never block.
+        with tempfile.TemporaryDirectory() as td:
+            calls = {"n": 0}
+
+            def executor(m, n, cb):
+                calls["n"] += 1
+                if calls["n"] >= 2:
+                    return {"ok": False,
+                            "pending_approval": {"name": "x",
+                                                 "kind": "autonomy"}}
+                return {"ok": True, "output": "ok"}
+
+            sup = make_sup(td, executor=executor,
+                           approval_timeout_seconds=lambda:
+                           self._APPROVAL_TIMEOUT_S)
+            orig_create = sup._create_approval
+
+            def slow_create(*a, **k):
+                time.sleep(0.05)
+                return orig_create(*a, **k)
+
+            sup._create_approval = slow_create
+            m = sup.create_mission(
+                objective="x",
+                budgets={"max_approval_retries": 2},
+                success_criteria=[{"kind": "all_tasks_completed"}])
+            sup.start_mission(m["id"])
+            final = drive(sup, m["id"], ticks=30, settle=0.02)
+            self.assertEqual(final["status"], "waiting_approval")
+            self.assertEqual(final.get("approval_retries") or 0, 0)
+            self.assertEqual(len(sup.approvals(pending_only=True)), 1)
+            sup.stop()
+
     def test_mission_approval_timeouts_are_bounded(self):
         with tempfile.TemporaryDirectory() as td:
             calls = {"n": 0}

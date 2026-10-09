@@ -43,8 +43,14 @@
   };
 
   NV.stop = function () {
+    const abort = (it) => {
+      try { if (it && it.meta && it.meta.onabort) it.meta.onabort(); } catch (e) {}
+      if (it && it.meta) NV._emit({ event: 'aborted', meta: it.meta });
+    };
+    for (const it of NV.queue) abort(it);
     NV.queue.length = 0;
     if (NV.current) {
+      abort(NV.current.__item);
       try { NV.current.pause(); NV.current.src = ''; } catch (e) {}
       NV.current = null;
       NV._lastEnd = Date.now();
@@ -72,7 +78,12 @@
 
   NV._seenSegments = new Set();
   NV.enqueue = function (url, meta) {
-    if (NV.muted || !NV.enabled || NV._draining) return;
+    if (NV.muted || !NV.enabled || NV._draining) {
+      // Never-playable segment — let a text/voice hold release instead
+      // of sitting on its watchdog.
+      try { meta && meta.onabort && meta.onabort(); } catch (e) {}
+      return;
+    }
     const sid = meta && meta.segment_id;
     if (sid && NV._seenSegments.has(sid)) return;  // bus + stream dedupe
     if (sid) {
@@ -106,16 +117,25 @@
     }
     const item = NV.queue.shift();
     const audio = new Audio(item.url);
+    audio.__item = item;
     audio.volume = Math.min(1, Math.max(0, NV.volume));
     const seq = ++NV._playSeq;
     // Text/voice sync: announce when the segment AUDIBLY starts so the
     // chat page releases its held text at that moment — segment events
     // fire on synthesis-complete (audio ready), not on playback start.
     audio.onplaying = () => {
-      if (NV.current === audio) NV._emit({ event: 'play', meta: item.meta || {} });
+      if (NV.current === audio) {
+        NV._emit({ event: 'play', meta: item.meta || {} });
+        try { item.meta && item.meta.onstart && item.meta.onstart(); } catch (e) {}
+      }
     };
     audio.onended = () => { if (NV.current === audio) { NV.current = null; NV._lastEnd = Date.now(); NV._lastTaskId = (item.meta && item.meta.task_id) || null; NV._playNext(); NV._emit(); } };
-    audio.onerror = () => { if (NV.current === audio) { NV.current = null; NV._playNext(); NV._emit(); } };
+    audio.onerror = () => {
+      if (NV.current === audio) {
+        try { item.meta && item.meta.onabort && item.meta.onabort(); } catch (e) {}
+        NV.current = null; NV._playNext(); NV._emit();
+      }
+    };
     NV.current = audio;
     audio.play().catch(err => {
       if (err && err.name === 'NotAllowedError') {

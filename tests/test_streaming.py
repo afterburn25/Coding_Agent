@@ -232,6 +232,26 @@ class ModelStreamingTests(unittest.TestCase):
         voice_js = (ROOT / "web" / "voice_global.js").read_text(encoding="utf-8")
         self.assertIn("NotAllowedError", voice_js)
 
+    def test_voice_text_sync_hard_rule(self):
+        """Voice hard rule: a reply's text must not appear before its
+        audio audibly starts. The streamed lane gates reveal on the
+        segment 'play' event; the builtin lane holds addMessage behind
+        the same audible start. Aborted/dropped/muted segments must
+        release the text — never deadlock the reply."""
+        app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        voice_js = (ROOT / "web" / "voice_global.js").read_text(encoding="utf-8")
+        # Builtin replies post inside the segment's audible-start /
+        # abort callbacks, not before enqueue.
+        self.assertIn("onstart:post", app)
+        self.assertIn("onabort:post", app)
+        # The voice client fires the callbacks at playback start and on
+        # every drop path (mute/drain/stop/decode error).
+        self.assertIn("meta.onstart", voice_js)
+        self.assertIn("meta.onabort", voice_js)
+        self.assertIn("'aborted'", voice_js)
+        # The streamed hold releases on abort, not just the watchdog.
+        self.assertIn("e.event==='aborted'", app)
+
     def test_main_ui_uses_agent_sse_endpoint(self):
         app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         server = (ROOT / "localcodeagent" / "server.py").read_text(encoding="utf-8")

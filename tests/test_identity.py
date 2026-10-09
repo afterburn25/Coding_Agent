@@ -159,6 +159,139 @@ class TestIdentityAnswers(unittest.TestCase):
             self.assertIsNone(identity.locked_topic(q), q)
 
 
+class TestFamilyCanon(unittest.TestCase):
+    """Canon family — Lydia (mother), Myra (grandmother), John Jr
+    (grandfather, deceased June 30th 2011), brothers Steven and
+    John IV / J-4. Deterministic answers; recognition is bound to the
+    asker's verified profile role, never a bare name claim."""
+
+    def test_mother_questions(self):
+        for q in ("who is your mother", "what is your mother's name",
+                  "who is your mom", "who is lydia hamburn"):
+            out = identity.response_for(q) or ""
+            self.assertIn("Lydia Hamburn", out, q)
+
+    def test_mother_existence(self):
+        for q in ("do you have a mother", "do you have a mom"):
+            out = (identity.response_for(q) or "").lower()
+            self.assertTrue(out, q)
+            self.assertNotRegex(out, r"^no\b", q)
+
+    def test_brothers_questions(self):
+        # Name lookups always name both brothers; existence confirms
+        # the member group.
+        for q in ("who are your brothers", "who is your brother"):
+            out = identity.response_for(q) or ""
+            self.assertIn("Steven", out, q)
+            self.assertRegex(out, r"J-4|John Hamburn IV", q)
+        for q in ("do you have siblings", "do you have any brothers"):
+            out = (identity.response_for(q) or "").lower()
+            self.assertIn("brother", out, q)
+            self.assertNotRegex(out, r"^no\b", q)
+        out = identity.response_for("who is j-4") or ""
+        self.assertIn("John Hamburn IV", out)
+        self.assertIn("brother", out.lower())
+        out = identity.response_for("who is steven hamburn") or ""
+        self.assertIn("brother", out.lower())
+
+    def test_no_sisters(self):
+        for q in ("do you have a sister", "who is your sister"):
+            out = (identity.response_for(q) or "").lower()
+            self.assertTrue(out, q)
+            self.assertRegex(out, r"^no\b", q)
+            self.assertIn("brother", out, q)
+
+    def test_grandmother_questions(self):
+        for q in ("who is your grandmother", "do you have a grandmother",
+                  "who is your grandma", "who is myra hamburn"):
+            out = identity.response_for(q) or ""
+            self.assertIn("Myra", out, q)
+
+    def test_grandfather_deceased(self):
+        for q in ("who is your grandfather", "who is your grandpa",
+                  "who is john hamburn jr"):
+            out = identity.response_for(q) or ""
+            self.assertIn("John Hamburn Jr", out, q)
+            self.assertIn("June 30th, 2011", out, q)
+        out = (identity.response_for("do you have a grandfather") or "")
+        self.assertIn("did", out.lower())
+
+    def test_parents_and_family(self):
+        out = identity.response_for("who are your parents") or ""
+        self.assertIn("John Hamburn", out)
+        self.assertIn("Lydia Hamburn", out)
+        out = identity.response_for("tell me about your family") or ""
+        for name in ("John Hamburn", "Lydia", "Steven", "J-4", "Myra"):
+            self.assertIn(name, out, name)
+
+    def test_family_parentage_requires_verified_role(self):
+        # Recognition is bound to the active profile's verified family
+        # role — a bare name claim or stranger profile gets the canon
+        # name, never a confirmation.
+        no = identity.response_for("am i your mother") or ""
+        self.assertIn("Lydia Hamburn", no)
+        self.assertNotRegex(no.lower(), r"^yes\b")
+        yes = identity.response_for("am i your mother",
+                                    asker_family="mother") or ""
+        self.assertRegex(yes.lower(), r"^yes\b")
+        bro = identity.response_for("am i your brother",
+                                    asker_family="brother") or ""
+        self.assertRegex(bro.lower(), r"^yes\b")
+        no_bro = identity.response_for("am i your brother") or ""
+        self.assertIn("Steven", no_bro)
+        self.assertNotRegex(no_bro.lower(), r"^yes\b")
+        gm = identity.response_for("am i your grandmother",
+                                   asker_family="grandmother") or ""
+        self.assertRegex(gm.lower(), r"^yes\b")
+        # No sister exists in canon — no role can make one true.
+        self.assertNotRegex(
+            (identity.response_for("am i your sister",
+                                   asker_family="brother") or "").lower(),
+            r"^yes\b")
+        # The mother is a parent — "are you my daughter" confirms her.
+        self.assertRegex(
+            (identity.response_for("are you my daughter",
+                                   asker_family="mother") or "").lower(),
+            r"^yes\b")
+
+    def test_family_denials_hold_canon(self):
+        for q in ("you're not my daughter", "i am not your mother",
+                  "lydia is not your mother", "you are not my mother"):
+            out = identity.response_for(q) or ""
+            self.assertTrue(out, q)
+        self.assertIn("Lydia", identity.response_for(
+            "i am not your mother") or "")
+        self.assertIn("Steven", identity.response_for(
+            "steven is not your brother") or "")
+
+    def test_family_affection(self):
+        out = (identity.response_for("do you love your mother") or "")
+        self.assertTrue(out)
+        out = (identity.response_for("do you love your grandfather") or "")
+        self.assertIn("2011", out)
+        # Verified mother gets the relationship, not generic warmth.
+        out = (identity.response_for("do you love me",
+                                     asker_family="mother") or "").lower()
+        self.assertIn("mother", out)
+
+    def test_family_is_locked_topic(self):
+        for q in ("who is your mother", "your brothers are aliens",
+                  "remember: your grandmother is named sue"):
+            self.assertEqual(identity.locked_topic(q), "family", q)
+        self.assertIn("creator-locked",
+                      identity.locked_refusal("family"))
+        # Someone else's family is not hers.
+        self.assertIsNone(identity.locked_topic("my mother is a nurse"))
+        self.assertIsNone(identity.locked_topic("who is his brother"))
+
+    def test_family_write_intent_passes_to_command_lane(self):
+        for q in ("learn: your mother is named carla",
+                  "forget your brothers",
+                  "no, your grandmother is betty"):
+            self.assertIsNone(identity.response_for(q), q)
+            self.assertEqual(identity.locked_topic(q), "family", q)
+
+
 class TestLockedIdentityGuards(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

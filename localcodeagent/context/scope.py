@@ -175,6 +175,10 @@ _KNOWN_SLOTS: tuple = (
      ("creator name",), ("biography",)),
     (re.compile(r"\bdo you have a (?:father|dad|mother|mom|parent)\b"),
      ("parentage existence",), ("creator name", "biography")),
+    (re.compile(r"\byour (?:mother|mom|grandmother|grandma|grandfather|"
+                r"grandpa|grandparents?|brothers?|sisters?|siblings?|"
+                r"parents?|family)\b"),
+     ("family member",), ("biography",)),
 )
 
 _WH_OBJECT_RE = re.compile(

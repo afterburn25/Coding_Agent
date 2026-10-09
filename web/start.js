@@ -13,7 +13,14 @@
   }).then((r) => r.json().then((d) => (r.ok ? d
     : Promise.reject(new Error(d.error || r.status)))));
 
-  const RESERVED = "john hamburn";
+  // Reserved canon names — every family name verifies with the same
+  // Creator passcode (mirrors profiles/creator.py RESERVED_ROLES).
+  const RESERVED = new Set([
+    "john hamburn", "lydia hamburn", "myra hamburn",
+    "john hamburn jr", "john hamburn junior", "steven hamburn",
+    "john hamburn iv", "john hamburn 4", "john hamburn the fourth",
+    "j-4", "j4", "j-4 hamburn", "j4 hamburn",
+  ]);
 
   // ---------- birthdate ----------
   const MONTHS = ["January","February","March","April","May","June",
@@ -161,7 +168,7 @@
 
   // ---------- creator flow ----------
   function reserved() {
-    return norm(`${$("firstName").value} ${$("lastName").value}`) === RESERVED;
+    return RESERVED.has(norm(`${$("firstName").value} ${$("lastName").value}`));
   }
   function syncCreator() {
     $("creatorCard").hidden = !reserved();

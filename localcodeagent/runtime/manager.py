@@ -65,6 +65,52 @@ class _ManagedProcess:
     status: RuntimeStatus
 
 
+_EXE_MIN_BYTES = 4096
+# PE machine types accepted on Windows: x86, x64, ARM32, ARM64.
+_PE_MACHINES = {0x014C, 0x8664, 0x01C0, 0xAA64, 0x01C4}
+
+
+def _validate_executable(path: str) -> str:
+    """Return "" when *path* is a plausible spawnable binary, else a reason.
+
+    Windows reports "unsupported 16-bit application" for truncated or
+    malformed binaries (a partial download, or a placeholder file named
+    like the real exe). Validating before CreateProcess turns that
+    misleading dialog into a precise error naming the offending path.
+    POSIX launchers are often small wrapper scripts, so the size floor
+    and PE-header checks run on Windows only.
+    """
+    p = Path(path)
+    if not p.is_file():
+        return f"not a file: {p}"
+    if os.name != "nt":
+        return ""
+    try:
+        size = p.stat().st_size
+    except OSError as exc:
+        return f"cannot stat: {exc}"
+    if size < _EXE_MIN_BYTES:
+        return f"file is only {size} bytes — truncated or a placeholder, not a binary"
+    try:
+        with p.open("rb") as fh:
+            head = fh.read(0x40)
+            if len(head) < 0x40 or head[:2] != b"MZ":
+                return "not a PE executable (missing MZ header)"
+            e_lfanew = int.from_bytes(head[0x3C:0x40], "little")
+            if e_lfanew <= 0 or e_lfanew + 6 > size:
+                return f"truncated PE header (e_lfanew={e_lfanew}, size={size})"
+            fh.seek(e_lfanew)
+            sig = fh.read(6)
+        if len(sig) < 6 or sig[:4] != b"PE\x00\x00":
+            return "invalid PE signature — file is corrupt or not a Windows binary"
+        machine = int.from_bytes(sig[4:6], "little")
+        if machine not in _PE_MACHINES:
+            return f"unsupported PE machine type 0x{machine:04X}"
+    except OSError as exc:
+        return f"unreadable: {exc}"
+    return ""
+
+
 class _OrphanProcess:
     """Duck-typed stand-in for a llama-server this manager didn't spawn —
     lets a healthy survivor of a previous backend be adopted into
@@ -362,8 +408,12 @@ class RuntimeManager:
     def resource_fit(self, profile: ModelProfile) -> tuple[bool, int, str]:
         """Return availability/resource fit for routing before a model is selected."""
         if profile.runtime == "llama_cpp":
-            if not self.discover_llama_server(profile):
+            exe = self.discover_llama_server(profile)
+            if not exe:
                 return False, -200, "managed runtime executable is unavailable"
+            bad = _validate_executable(exe)
+            if bad:
+                return False, -200, f"managed runtime executable invalid: {bad} ({exe})"
             if not profile.model_path:
                 return False, -200, "managed GGUF path is not configured"
             model_path = self._resolve(profile.model_path)
@@ -475,6 +525,12 @@ class RuntimeManager:
             raise RuntimeError(
                 "llama.cpp server was not found. Set llama_cpp_executable or the model profile executable, "
                 "or add llama-server / the unified llama command to PATH."
+            )
+        bad = _validate_executable(exe)
+        if bad:
+            raise RuntimeError(
+                f"llama.cpp executable is not a valid program: {exe} — {bad}. "
+                "Reinstall the runtime or point llama_cpp_executable at a working binary."
             )
         if not profile.model_path:
             raise RuntimeError(f"Model profile '{profile.id}' has runtime=llama_cpp but no model_path.")
@@ -1518,21 +1574,35 @@ class RuntimeManager:
                 log_path.write_bytes(log_path.read_bytes()[-4 * 1024 * 1024:])
         except OSError:
             pass
-        log_handle = open(log_path, "a", encoding="utf-8", buffering=1)
         command = self._build_command(
             profile, port, apply_tuning=apply_tuning,
             extra_args=extra_args, ctx_override=ctx_override)
+        log_handle = open(log_path, "a", encoding="utf-8", buffering=1)
         creationflags = 0
         if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
             creationflags = subprocess.CREATE_NO_WINDOW
-        process = subprocess.Popen(
-            command,
-            cwd=str(self.base_dir),
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            text=True,
-            creationflags=creationflags,
-        )
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=str(self.base_dir),
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                text=True,
+                creationflags=creationflags,
+            )
+        except OSError as exc:
+            try:
+                log_handle.close()
+            except Exception:
+                pass
+            winerr = getattr(exc, "winerror", None)
+            detail = (f"WinError {winerr}" if winerr is not None
+                      else f"{type(exc).__name__}: {exc}")
+            raise RuntimeError(
+                f"Windows refused to start {command[0]} ({detail}). "
+                "The binary may be corrupt or for the wrong architecture — "
+                "reinstall the managed runtime."
+            ) from exc
         with self._lock:
             status = self._status[profile.id]
             status.state = "loading"

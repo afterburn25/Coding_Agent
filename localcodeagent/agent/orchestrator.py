@@ -371,6 +371,7 @@ class AgentOrchestrator:
         self_knowledge=None,
         creator_address=None,
         asker_is_creator=None,
+        asker_family=None,
         learning=None,
         action_ledger=None,
         artifacts=None,
@@ -494,6 +495,10 @@ class AgentOrchestrator:
         # creator? Parentage identity answers ("are you my daughter")
         # acknowledge vs. correct based on who is actually asking.
         self._asker_is_creator = asker_is_creator
+        # Zero-arg resolver returning the active profile's verified
+        # family role ("mother"/"grandmother"/"brother"/"grandfather")
+        # or None — family claims only confirm against the locked name.
+        self._asker_family = asker_family
         # Set by the mission executor while an autonomous node owns the agent
         # lane — stamps mission_id onto every activity row it opens.
         self.current_mission_id: str | None = None
@@ -1378,9 +1383,22 @@ class AgentOrchestrator:
             pass
         return None
 
+    def _resolve_asker_family(self) -> str | None:
+        """Resolve the active profile's verified family role — None when
+        no resolver is wired or the profile is not a family member."""
+        try:
+            resolver = self._asker_family
+            if callable(resolver):
+                role = resolver()
+                return str(role) if role else None
+        except Exception:
+            pass
+        return None
+
     @classmethod
     def builtin_semantic(cls, user_text: str,
-                         asker_is_creator: bool | None = None):
+                         asker_is_creator: bool | None = None,
+                         asker_family: str | None = None):
         """Deterministic local lanes expressed as WHAT-to-say —
         ``(SemanticResponse, canonical_text) | None``. The persona
         genome layer renders the surface; callers without one use the
@@ -1442,7 +1460,8 @@ class AgentOrchestrator:
         # padding it with acknowledgements or closings.
         from .. import identity
         identity_answer = identity.response_for(
-            normalized, asker_is_creator=asker_is_creator)
+            normalized, asker_is_creator=asker_is_creator,
+            asker_family=asker_family)
         if identity_answer is not None:
             return _sem(f"identity:{normalized[:40]}", "answer",
                         identity_answer, bare=True)
@@ -2295,7 +2314,8 @@ class AgentOrchestrator:
         if github_lane is not None:
             return github_lane
         pair = self.builtin_semantic(
-            user_text, self._resolve_asker_is_creator())
+            user_text, self._resolve_asker_is_creator(),
+            self._resolve_asker_family())
         if pair is None:
             return None
         sem, canonical = pair
@@ -6371,7 +6391,8 @@ class AgentOrchestrator:
                 and sk_reply is None
                 and _identity_guard.response_for(
                     user_text,
-                    asker_is_creator=self._resolve_asker_is_creator())
+                    asker_is_creator=self._resolve_asker_is_creator(),
+                    asker_family=self._resolve_asker_family())
                 is None)
             else None)
         # Deterministic local-action lane — bounded computer tasks
@@ -6402,7 +6423,8 @@ class AgentOrchestrator:
             and env.suppresses_canned()
             and _identity_lane.response_for(
                 user_text,
-                asker_is_creator=self._resolve_asker_is_creator())
+                asker_is_creator=self._resolve_asker_is_creator(),
+                asker_family=self._resolve_asker_family())
             is not None)
         builtin_reply = github_reply or sk_reply or facts_reply or recall_reply or (
             self._builtin_reply(user_text)
@@ -6431,7 +6453,8 @@ class AgentOrchestrator:
             from .. import identity
             if identity.response_for(
                     user_text,
-                    asker_is_creator=self._resolve_asker_is_creator()
+                    asker_is_creator=self._resolve_asker_is_creator(),
+                    asker_family=self._resolve_asker_family()
                     ) is None:
                 builtin_response = None
         brain_blocked_response = (

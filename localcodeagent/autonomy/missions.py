@@ -244,6 +244,19 @@ class MissionStore:
                         node["state"] = "ready"
                         node["lease"] = None
                         changed = True
+                    elif node.get("state") == "waiting_approval":
+                        # Park interrupted mid-flight: the mission stayed
+                        # in a drive state, so the gate is unowned — the
+                        # approval row may never have been written. Requeue
+                        # the node to re-run and re-ask; a surviving pending
+                        # row is superseded when the node parks again.
+                        node["state"] = "ready"
+                        changed = True
+                if m.get("pending_approval") or \
+                        m.get("waiting_for") == "approval":
+                    m["pending_approval"] = None
+                    m["waiting_for"] = ""
+                    changed = True
             if changed:
                 self._save()
 

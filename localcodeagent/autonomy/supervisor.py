@@ -1132,9 +1132,16 @@ class AutonomousSupervisor:
             # nodes stranded behind a failed dependency. A node parked in
             # waiting_dependency is a retry on cooldown (the only writer
             # of that node state), not a dead end — stay executing and
-            # let the cooldown unpark at the top of the next tick.
-            if any(n.get("state") == "waiting_dependency"
-                   for n in graph.nodes):
+            # let the cooldown unpark at the top of the next tick. Same
+            # for a node mid-park on an approval gate: _finish_node stamps
+            # the node + row["pending_approval"] in one mutation and the
+            # mission-level transition lands a moment later — a tick in
+            # between would read a half-parked graph as drained and block
+            # the mission on "stuck" nodes that are simply dep-waiting.
+            if m.get("pending_approval") or any(
+                    n.get("state") in {"waiting_dependency",
+                                       "waiting_approval"}
+                    for n in graph.nodes):
                 return
             if graph.is_done():
                 self.missions.transition(mission_id, "evaluating")

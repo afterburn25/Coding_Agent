@@ -1005,6 +1005,9 @@ class AppState:
                 self.profiles.active()),
             asker_is_creator=lambda: bool(
                 (self.profiles.active() or {}).get("is_creator")),
+            asker_family=lambda: (
+                (self.profiles.active() or {}).get("family_role")
+                or None),
             learning=self.learning,
             action_ledger=self.action_ledger,
             artifacts=self.artifacts,

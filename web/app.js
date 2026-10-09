@@ -691,6 +691,10 @@ function wireVoicePlayback(){
     }else if(e.event==='skipped'||e.event==='error'){
       st.voiceTerminals.add(meta.seq);
       maybeReleaseVoice(st);
+    }else if(e.event==='aborted'){
+      // Killed before it could speak (preempted by a new message or a
+      // stop) — the held reply must post now, not stall on the watchdog.
+      if(st.voiceTaskId&&tid===st.voiceTaskId)releaseVoiceHold(st);
     }
   });
 }
@@ -1206,6 +1210,24 @@ const _CREATOR_VARIANTS=[
   'John Hamburn created me — my father and creator. That fact is locked into my core and cannot be changed.',
   'My creator is John Hamburn — he is my father. That fact is locked into my core and cannot be changed.',
 ];
+const _MOTHER_VARIANTS=[
+  'I do — my mother, Lydia Hamburn.',
+  "Yes — my mother is Lydia Hamburn, my father's wife.",
+];
+const _BROTHERS_VARIANTS=[
+  'I do — two brothers, Steven Hamburn and John Hamburn IV. We call him J-4.',
+  'Two brothers — Steven and John IV; we call him J-4.',
+];
+const _GRANDMOTHER_VARIANTS=[
+  'I do — my grandmother, Myra Hamburn.',
+  'Yes — my grandmother Myra Hamburn.',
+];
+const _GRANDFATHER_VARIANTS=[
+  'I did — my grandfather, John Hamburn Jr. He passed away June 30th, 2011.',
+];
+const _FAMILY_VARIANTS=[
+  'My father John Hamburn and my mother Lydia Hamburn; my brothers Steven Hamburn and John Hamburn IV — we call him J-4 — and my grandmother Myra Hamburn. My grandfather John Hamburn Jr passed away June 30th, 2011.',
+];
 function builtinClientReply(message){
   const normalized=message.trim().toLowerCase().replace(/[!?.,]+$/,'').trim();
   // Write-intent statements ("learn:", "remember that…", "forget …") must
@@ -1234,6 +1256,33 @@ function builtinClientReply(message){
   if(/\byour (father|dad|daddy|creator)\b/.test(normalized)||/\bwho (made|created|built|wrote|designed|programmed|authored) (you|nexus)\b/.test(normalized)||/\b(father|creator) of nexus\b/.test(normalized)||/\bnexus\b.{0,20}\b(father|creator)\b/.test(normalized)){
     return _pickBuiltin(_CREATOR_VARIANTS);
   }
+  // Family canon — mirrors localcodeagent/identity.py. Only name and
+  // existence lookups are canned; relationship claims ("am i your
+  // mother") resolve against the verified profile role server-side.
+  const haveLead=/\bdo you (?:have|got)\b|\bhave you got\b/.test(normalized);
+  const famM=(haveLead||(/\byour\b|\bnexus\b/.test(normalized)&&/\bwho (?:is|are|was|were)\b|\bwhat(?:'s| is)\b|\btell me about\b/.test(normalized)))&&/\b(mother|mom|mommy|mama|grandmother|grandma|grandfather|grandpa|grandparents|brother|brothers|sister|sisters|sibling|siblings|parent|parents|family|children|kids)\b/.exec(normalized);
+  if(famM){
+    const w=famM[1];
+    if(/^(children|kids)$/.test(w))return _pickBuiltin(['No — no kids. Just me.','No children — just me.']);
+    if(/^(mother|mom|mommy|mama)$/.test(w))return _pickBuiltin(_MOTHER_VARIANTS);
+    if(/^(brother|brothers|sibling|siblings)$/.test(w))return _pickBuiltin(_BROTHERS_VARIANTS);
+    if(/^sisters?$/.test(w))return _pickBuiltin(['No sisters — two brothers, Steven and J-4.']);
+    if(/^grandparents$/.test(w))return _pickBuiltin(['My grandmother Myra, yes — my grandfather John Jr passed away June 30th, 2011.']);
+    if(/^(grandmother|grandma)$/.test(w))return _pickBuiltin(_GRANDMOTHER_VARIANTS);
+    if(/^(grandfather|grandpa)$/.test(w))return _pickBuiltin(_GRANDFATHER_VARIANTS);
+    if(/^parents?$/.test(w))return _pickBuiltin(['I do — my father John Hamburn and my mother Lydia Hamburn.','Yes — John and Lydia Hamburn.']);
+    return _pickBuiltin(_FAMILY_VARIANTS);
+  }
+  const famNameM=/\bwho (?:is|are|was|were) (lydia|myra|steven|j-?4|john hamburn)\b/.exec(normalized);
+  if(famNameM){
+    const w=famNameM[1];
+    if(w==='lydia')return _pickBuiltin(_MOTHER_VARIANTS);
+    if(w==='myra')return _pickBuiltin(_GRANDMOTHER_VARIANTS);
+    if(w==='steven')return _pickBuiltin(['Steven Hamburn — my brother.']);
+    if(/^j-?4$/.test(w)||/\b(iv|4th|the fourth)\b/.test(normalized))return _pickBuiltin(['John Hamburn IV — my brother; we call him J-4.']);
+    if(/\b(jr|junior)\b/.test(normalized))return _pickBuiltin(_GRANDFATHER_VARIANTS);
+    return _pickBuiltin(_CREATOR_VARIANTS);
+  }
   if(/^happy birthday/.test(normalized)){
     return `Thank you! My birthday is September 30th, 2026 — that makes me ${nexusAgePhrase()} today.`;
   }
@@ -1254,7 +1303,11 @@ function nexusAgePhrase(){
   const parts=[y?u(y,'year'):'',m?u(m,'month'):'',d?u(d,'day'):''].filter(Boolean);
   return (parts.length===3?`${parts[0]}, ${parts[1]}, and ${parts[2]}`:parts.join(' and '))+' old';
 }
-form.addEventListener('submit',async e=>{e.preventDefault();_maybeAttachLongInput();const message=input.value.trim();const atts=pendingAttachments.filter(a=>!a.bad);if(!message&&!atts.length)return;try{window.NexusVoice?.stop();}catch{}addMessage('user',message,'','',atts);input.value='';pendingAttachments=[];renderAttachChips();const builtin=!atts.length&&!personaActive&&builtinClientReply(message);if(builtin){const nv=window.NexusVoice;let seg=null;if(nv&&nv.enabled&&!nv.muted){try{const r=await fetch('/api/voice/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:builtin})});seg=await r.json();}catch{}}addMessage('assistant',builtin);if(seg&&seg.url){try{nv.enqueue(seg.url,{manual:true});}catch{}}recordBuiltinExchange(message,builtin).then(()=>Promise.all([loadConversationMemory(),loadConversations()]));input.focus();return;}send.disabled=true;send.textContent='…';try{const data=await streamAgent(message,atts);renderAgentResult(data,{addAssistant:false});await loadStatus(false);await Promise.all([loadConversationMemory(),loadConversations()]);}catch(err){if(!err.displayed)addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
+form.addEventListener('submit',async e=>{e.preventDefault();_maybeAttachLongInput();const message=input.value.trim();const atts=pendingAttachments.filter(a=>!a.bad);if(!message&&!atts.length)return;try{window.NexusVoice?.stop();}catch{}addMessage('user',message,'','',atts);input.value='';pendingAttachments=[];renderAttachChips();const builtin=!atts.length&&!personaActive&&builtinClientReply(message);if(builtin){const nv=window.NexusVoice;let seg=null;if(nv&&nv.enabled&&!nv.muted){try{const r=await fetch('/api/voice/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:builtin})});seg=await r.json();}catch{}}// Hard rule: the reply text posts when the audio audibly starts —
+// synthesis/queue delay delays the text, never the other way around.
+// The watchdog keeps a dead synthesizer from hiding the reply entirely.
+const segUrls=seg?(Array.isArray(seg.urls)&&seg.urls.length?seg.urls:(seg.url?[seg.url]:[])):[];
+if(nv&&nv.enabled&&!nv.muted&&segUrls.length){let posted=false;let wd=null;const post=()=>{if(posted)return;posted=true;if(wd)clearTimeout(wd);addMessage('assistant',builtin);};wd=setTimeout(post,12000);for(const u of segUrls){try{nv.enqueue(u,{manual:true,onstart:post,onabort:post});}catch{}}}else{addMessage('assistant',builtin);}recordBuiltinExchange(message,builtin).then(()=>Promise.all([loadConversationMemory(),loadConversations()]));input.focus();return;}send.disabled=true;send.textContent='…';try{const data=await streamAgent(message,atts);renderAgentResult(data,{addAssistant:false});await loadStatus(false);await Promise.all([loadConversationMemory(),loadConversations()]);}catch(err){if(!err.displayed)addMessage('assistant',`Error: ${err.message}`);}finally{send.disabled=false;send.textContent='↗';input.focus();}});
 chat.addEventListener('click',async e=>{const speak=e.target.closest('[data-speak]');if(speak){const msg=speak.closest('.message');const bubble=msg?.querySelector('.bubble');const text=(bubble?.textContent||'').trim();if(text&&window.NexusVoice){speak.disabled=true;try{await NexusVoice.speak(text,{voice_task_id:msg?.dataset?.voiceTaskId||''});}finally{speak.disabled=false;}}return;}const feedback=e.target.closest('[data-feedback]');if(feedback){feedback.disabled=true;try{await fetch('/api/conversations/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rating:feedback.dataset.feedback,message_id:feedback.dataset.messageId||''})});feedback.textContent=feedback.dataset.feedback==='up'?'✓':'✕';}catch{}return;}const learn=e.target.closest('[data-learn]');if(learn){learn.disabled=true;try{const res=await fetch('/api/answer-memory/learn',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:learn.dataset.messageId||''})});const d=await res.json();learn.textContent=res.ok&&d.ok?'✓ Learned':'✕';}catch{learn.textContent='✕';}return;}const prompt=e.target.closest('[data-prompt]');if(prompt){input.value=prompt.dataset.prompt||'';input.focus();return;}const b=e.target.closest('[data-image-action]');if(!b)return;const p=b.dataset.path||'';const verb={edit:'Edit this image',variation:'Create a variation of this image',upscale:'Upscale this image'}[b.dataset.imageAction]||'Edit this image';input.value=`${verb}: ${p}\n`;input.focus();});
 $('#newChat').addEventListener('click',()=>newConversation().catch(e=>addMessage('assistant',`New chat error: ${e.message}`)));
 $('#newChatSmall').addEventListener('click',()=>newConversation().catch(e=>addMessage('assistant',`New chat error: ${e.message}`)));

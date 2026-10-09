@@ -26,10 +26,44 @@ from pathlib import Path
 from typing import Any
 
 from ..fsutil import atomic_write_text
-from ..identity import NEXUS_CREATOR
+from ..identity import (
+    NEXUS_BROTHER_JOHN4, NEXUS_BROTHER_JOHN4_NICKNAME, NEXUS_BROTHER_STEVEN,
+    NEXUS_CREATOR, NEXUS_GRANDFATHER, NEXUS_GRANDMOTHER, NEXUS_MOTHER)
 from .model import normalize_name
 
 RESERVED_NAME = normalize_name(NEXUS_CREATOR)
+
+# The whole canon family is reserved — every name maps to the family
+# role Nexus recognizes, and all of them verify against the same Creator
+# passcode. A locked name can never become an ordinary profile.
+RESERVED_ROLES = {
+    normalize_name(NEXUS_CREATOR): "creator",
+    normalize_name(NEXUS_MOTHER): "mother",
+    normalize_name(NEXUS_GRANDMOTHER): "grandmother",
+    normalize_name(NEXUS_GRANDFATHER): "grandfather",
+    "john hamburn junior": "grandfather",
+    normalize_name(NEXUS_BROTHER_STEVEN): "brother",
+    normalize_name(NEXUS_BROTHER_JOHN4): "brother",
+    "john hamburn 4": "brother",
+    "john hamburn the fourth": "brother",
+    normalize_name(NEXUS_BROTHER_JOHN4_NICKNAME): "brother",
+    "j4": "brother",
+    "j-4 hamburn": "brother",
+    "j4 hamburn": "brother",
+}
+FAMILY_ROLES = frozenset({"mother", "grandmother", "grandfather",
+                          "brother"})
+
+
+def reserved_role(first_name: str, last_name: str) -> str | None:
+    """The locked role a name maps to, or None for ordinary names."""
+    return RESERVED_ROLES.get(normalize_name(f"{first_name} {last_name}"))
+
+
+def is_reserved_name(first_name: str, last_name: str) -> bool:
+    """Normalized full-name match — 'john  hamburn', 'JOHN HAMBURN',
+    whitespace/unicode tricks all collapse to the reserved name."""
+    return reserved_role(first_name, last_name) is not None
 
 KDF = "pbkdf2-sha256"
 ITERATIONS = 600_000
@@ -43,10 +77,7 @@ _BOOTSTRAP = {
 }
 
 
-def is_reserved_name(first_name: str, last_name: str) -> bool:
-    """Normalized full-name match — 'john  hamburn', 'JOHN HAMBURN',
-    whitespace/unicode tricks all collapse to the reserved name."""
-    return normalize_name(f"{first_name} {last_name}") == RESERVED_NAME
+
 
 
 def _pbkdf2(passcode: str, salt_hex: str, iterations: int) -> bytes:
@@ -146,3 +177,13 @@ def creator_fields(passcode_ok: bool) -> dict[str, Any]:
         raise PermissionError("creator identity requires verification")
     return {"is_creator": True, "creator_role": "nexus_creator",
             "creator_address": "Father"}
+
+
+def family_fields(role: str, passcode_ok: bool) -> dict[str, Any]:
+    """Protected identity for a verified family profile — same gate as
+    ``creator_fields``: produced only after passcode verification."""
+    if not passcode_ok:
+        raise PermissionError("family identity requires verification")
+    if role not in FAMILY_ROLES:
+        raise ValueError(f"unknown family role: {role}")
+    return {"is_family": True, "family_role": role}

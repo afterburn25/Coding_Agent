@@ -46,6 +46,18 @@ def _attach_fake_managed(manager: RuntimeManager, profile: ModelProfile, *, last
     return proc
 
 
+def _write_fake_exe(path: Path) -> Path:
+    """Write a stub that passes _validate_executable: >=4 KiB with a
+    plausible PE header (MZ, PE\\0\\0 signature at e_lfanew, x64 machine)."""
+    data = bytearray(4096)
+    data[0:2] = b"MZ"
+    data[0x3C:0x40] = (0x80).to_bytes(4, "little")
+    data[0x80:0x84] = b"PE\x00\x00"
+    data[0x84:0x86] = (0x8664).to_bytes(2, "little")
+    path.write_bytes(bytes(data))
+    return path
+
+
 class HardwareTests(unittest.TestCase):
     def test_parse_nvidia_smi(self):
         rows = parse_nvidia_smi_csv("0, NVIDIA GeForce RTX 3080, 12288, 2048, 10240, 7, 55\n")
@@ -102,7 +114,7 @@ class RuntimeManagerTests(unittest.TestCase):
             models.mkdir()
             (models / "coder.gguf").write_bytes(b"GGUF")
             fake_server = root / "llama-server"
-            fake_server.write_text("fake", encoding="utf-8")
+            _write_fake_exe(fake_server)
             cfg = AgentConfig(models=[self._profile(executable=str(fake_server))])
             manager = RuntimeManager(cfg, base_dir=root)
             cmd = manager._build_command(cfg.models[0], 9123)
@@ -112,6 +124,28 @@ class RuntimeManagerTests(unittest.TestCase):
             self.assertIn("auto", cmd)
             self.assertIn("9123", cmd)
 
+    @unittest.skipIf(os.name != "nt", "PE validation is Windows-only")
+    def test_build_command_rejects_placeholder_executable(self):
+        # Live defect: a few-byte placeholder sitting where llama-server.exe
+        # should be surfaced as Windows' "unsupported 16-bit application"
+        # dialog. The manager must reject it up front, naming the path.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            models = root / "models"
+            models.mkdir()
+            (models / "coder.gguf").write_bytes(b"GGUF")
+            fake_server = root / "llama-server.exe"
+            fake_server.write_bytes(b"not a real exe")
+            cfg = AgentConfig(models=[self._profile(executable=str(fake_server))])
+            manager = RuntimeManager(cfg, base_dir=root)
+            with self.assertRaises(RuntimeError) as ctx:
+                manager._build_command(cfg.models[0], 9123)
+            self.assertIn("not a valid program", str(ctx.exception))
+            self.assertIn(str(fake_server), str(ctx.exception))
+            fits, _, reason = manager.resource_fit(cfg.models[0])
+            self.assertFalse(fits)
+            self.assertIn(str(fake_server), reason)
+
     def test_qwen3_14b_defaults_to_non_thinking_runtime_for_old_configs(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -119,7 +153,7 @@ class RuntimeManagerTests(unittest.TestCase):
             models.mkdir()
             (models / "Qwen3-14B-Q4_K_M.gguf").write_bytes(b"GGUF")
             fake_server = root / "llama-server.exe"
-            fake_server.write_text("placeholder", encoding="utf-8")
+            _write_fake_exe(fake_server)
             profile = self._profile(
                 id="qwen3-14b",
                 endpoint="",
@@ -141,7 +175,7 @@ class RuntimeManagerTests(unittest.TestCase):
             models.mkdir()
             (models / "Qwen3-14B-Q4_K_M.gguf").write_bytes(b"GGUF")
             fake_server = root / "llama-server.exe"
-            fake_server.write_text("placeholder", encoding="utf-8")
+            _write_fake_exe(fake_server)
             profile = self._profile(
                 id="qwen3-14b",
                 endpoint="",
@@ -166,7 +200,7 @@ class RuntimeManagerTests(unittest.TestCase):
             models.mkdir()
             (models / "coder.gguf").write_bytes(b"GGUF")
             fake_server = root / "llama-server"
-            fake_server.write_text("fake", encoding="utf-8")
+            _write_fake_exe(fake_server)
             profile = self._profile(
                 model_path="models/coder.gguf",
                 executable=str(fake_server),
@@ -184,7 +218,7 @@ class RuntimeManagerTests(unittest.TestCase):
             models.mkdir()
             (models / "coder.gguf").write_bytes(b"GGUF")
             fake_server = root / "llama-server"
-            fake_server.write_text("fake", encoding="utf-8")
+            _write_fake_exe(fake_server)
             profile = self._profile(
                 model_path="models/coder.gguf",
                 executable=str(fake_server),
@@ -202,7 +236,7 @@ class RuntimeManagerTests(unittest.TestCase):
             models.mkdir()
             (models / "coder.gguf").write_bytes(b"GGUF")
             fake_server = root / "llama-server"
-            fake_server.write_text("fake", encoding="utf-8")
+            _write_fake_exe(fake_server)
             profile = self._profile(
                 model_path="models/coder.gguf",
                 executable=str(fake_server),
@@ -224,7 +258,7 @@ class RuntimeManagerTests(unittest.TestCase):
             models.mkdir()
             (models / "coder.gguf").write_bytes(b"GGUF")
             fake_server = root / "llama-server"
-            fake_server.write_text("fake", encoding="utf-8")
+            _write_fake_exe(fake_server)
             profile = self._profile(
                 model_path="models/coder.gguf",
                 executable=str(fake_server),
@@ -251,7 +285,7 @@ class RuntimeManagerTests(unittest.TestCase):
                 executable=str(root / "llama-server"),
                 estimated_vram_gb=8.0, estimated_ram_gb=6.0,
                 keep_loaded=False)
-            (root / "llama-server").write_text("fake", encoding="utf-8")
+            _write_fake_exe(root / "llama-server")
             cfg = AgentConfig(models=[victim])
             manager = RuntimeManager(cfg, base_dir=root)
             manager.refresh_hardware = lambda: manager.hardware
@@ -291,7 +325,7 @@ class RuntimeManagerTests(unittest.TestCase):
                 id="victim", model_path="models/victim.gguf",
                 executable=str(root / "llama-server"),
                 estimated_vram_gb=8.0, estimated_ram_gb=6.0)
-            (root / "llama-server").write_text("fake", encoding="utf-8")
+            _write_fake_exe(root / "llama-server")
             cfg = AgentConfig(models=[victim], demand_eviction_cooldown_s=0)
             manager = RuntimeManager(cfg, base_dir=root)
             manager.refresh_hardware = lambda: manager.hardware
@@ -400,7 +434,7 @@ class RuntimeManagerTests(unittest.TestCase):
             models.mkdir()
             (models / "deep.gguf").write_bytes(b"GGUF")
             fake_server = root / "llama-server.exe"
-            fake_server.write_text("placeholder", encoding="utf-8")
+            _write_fake_exe(fake_server)
             deep = self._profile(
                 id="qwen3-coder-30b",
                 endpoint="",
@@ -436,7 +470,7 @@ class RuntimeManagerTests(unittest.TestCase):
             models.mkdir()
             (models / "huge.gguf").write_bytes(b"GGUF")
             fake_server = root / "llama-server.exe"
-            fake_server.write_text("placeholder", encoding="utf-8")
+            _write_fake_exe(fake_server)
             huge = self._profile(
                 id="huge",
                 endpoint="",
@@ -471,7 +505,7 @@ class RuntimeManagerTests(unittest.TestCase):
             gguf = root / "models" / "big.gguf"
             gguf.write_bytes(b"GGUF")
             fake_server = root / "llama-server.exe"
-            fake_server.write_text("placeholder", encoding="utf-8")
+            _write_fake_exe(fake_server)
             big = self._profile(
                 id="big", endpoint="", executable=str(fake_server),
                 model_path="models/big.gguf",
@@ -546,7 +580,7 @@ class RuntimeManagerTests(unittest.TestCase):
             (models / "fast.gguf").write_bytes(b"GGUF")
             (models / "deep.gguf").write_bytes(b"GGUF")
             fake_server = root / "llama-server.exe"
-            fake_server.write_text("placeholder", encoding="utf-8")
+            _write_fake_exe(fake_server)
             fast = self._profile(
                 id="fast",
                 endpoint="",
@@ -1325,7 +1359,7 @@ class UnifiedLlamaRuntimeTests(unittest.TestCase):
             model = root / "model.gguf"
             model.write_bytes(b"GGUF")
             llama = root / "llama"
-            llama.write_text("placeholder", encoding="utf-8")
+            _write_fake_exe(llama)
             profile = ModelProfile(
                 id="local",
                 runtime="llama_cpp",
