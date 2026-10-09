@@ -151,14 +151,17 @@ class SocialService:
         return None
 
     def join(self, service: str = "moltbook", *,
-             name: str = "", description: str = "") -> dict[str, Any]:
+             name: str = "", description: str = "",
+             approved: bool = False) -> dict[str, Any]:
         """The whole onboarding flow — inspect state, register if needed,
         return the claim link. Caller handles the permission gate before
-        invoking this."""
+        invoking this; ``approved`` carries a granted user approval so the
+        connector's own gate treats it as the authorization (one-shot)."""
         conn = self.connector(service)
         if conn is None:
             return {"ok": False, "error": f"no connector for '{service}'"}
-        out = conn.call("onboard", name=name, description=description)
+        out = conn.call("onboard", name=name, description=description,
+                        _approved=approved)
         self.drive.record("onboard", ref=service,
                           score=1.0, reason="user-requested join")
         self._event("social", {"event": "onboard", "service": service,

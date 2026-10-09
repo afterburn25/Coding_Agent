@@ -302,13 +302,19 @@ class MoltbookConnector(Connector):
         out["data"] = tag_untrusted(data)
         return out
 
-    def call(self, capability: str, **params: Any) -> dict[str, Any]:
+    def call(self, capability: str, _approved: bool = False,
+             **params: Any) -> dict[str, Any]:
         if capability not in self.capabilities:
             return {"ok": False,
                     "error": f"unknown capability '{capability}'"}
-        denied = self._check_perm(capability)
-        if denied is not None:
-            return denied
+        # ``_approved`` carries a granted user approval through the resume
+        # path — the approval itself is the authorization for this call
+        # (mirrors local_action's session-less executor). Internal callers
+        # only; it never reaches the wire.
+        if not _approved:
+            denied = self._check_perm(capability)
+            if denied is not None:
+                return denied
         handler = getattr(self, f"_cap_{capability}", None)
         if handler is None:
             return {"ok": False,

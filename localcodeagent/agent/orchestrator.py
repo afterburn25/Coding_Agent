@@ -4523,7 +4523,7 @@ class AgentOrchestrator:
             except Exception:
                 ledger_entry = None
         try:
-            out = svc.join(service)
+            out = svc.join(service, approved=approved)
         except Exception as exc:
             out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         ok = bool(out.get("ok"))
