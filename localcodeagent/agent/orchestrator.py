@@ -2649,12 +2649,19 @@ class AgentOrchestrator:
             q_terms -= {"time", "when", "date", "day", "days"}
             if not q_terms:
                 return None
+            def _terms_hit(terms: set, row) -> bool:
+                ft = self.conversation_memory._fact_query_terms(
+                    str(row.get("text", "")), str(row.get("slot") or ""))
+                # Plural-tolerant: 'backups' matches a fact holding
+                # 'backup' (the fold adds base forms; requiring the
+                # exact token starves plural phrasings).
+                return all(
+                    t in ft or (len(t) >= 4 and t.endswith("s")
+                                and not t.endswith(("ss", "us", "is"))
+                                and t[:-1] in ft)
+                    for t in terms)
             pre_gate = rows
-            rows = [
-                r for r in rows
-                if q_terms <= self.conversation_memory._fact_query_terms(
-                    str(r.get("text", "")), str(r.get("slot") or ""))
-            ]
+            rows = [r for r in rows if _terms_hit(q_terms, r)]
             if not rows and len(q_terms) > 1:
                 # The probe's own verb isn't a fact term — "when do the
                 # backups run" asks about 'backups', so a strict subset
@@ -2665,12 +2672,7 @@ class AgentOrchestrator:
                            ._content_terms(trimmed)
                            - {"time", "when", "date", "day", "days"})
                 if t_terms and t_terms != q_terms:
-                    rows = [
-                        r for r in pre_gate
-                        if t_terms <= self.conversation_memory
-                        ._fact_query_terms(str(r.get("text", "")),
-                                           str(r.get("slot") or ""))
-                    ]
+                    rows = [r for r in pre_gate if _terms_hit(t_terms, r)]
             if not rows:
                 return None
         items = [self._recalled_fact_sentence(r) for r in rows[:4]]

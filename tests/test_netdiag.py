@@ -721,6 +721,23 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNone(agent._single_fact_recall_reply(
                 "when does the comet arrive", "conv", "proj"))
 
+    def test_when_do_plural_probe_matches_singular_fact(self):
+        # "when do the backups run" — the plural probe binds the
+        # singular 'backup schedule is …' fact (fold-tolerant terms)
+        # and the trailing 'run' verb retries dropped.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "backup schedule is every day at 3am")
+            reply = agent._single_fact_recall_reply(
+                "when do the backups run", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("3am", reply.text)
+
     def test_remind_me_probe_uses_recall_lane(self):
         # "remind me about my editor" is a memory recall request — the
         # frame must not classify 'remind' as an assertion and veto

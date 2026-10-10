@@ -4693,7 +4693,10 @@ class AppState:
                     r"\bwhat'?s\s+running\b|\bwhat\s+is\s+running\b|"
                     r"\b(?:is\s+)?anything\s+running\b", low)
                 or re.search(
-                    r"\bwhen\s+(?:do|does|will|should)\b.{0,50}\bruns?\b",
+                    r"\bwhen\s+(?:do|does|will|should)\s+"
+                    r"(?:things?|anything|everything|they|it|these|those|"
+                    r"the\s+(?:scheduled|regular|recurring)\s+\w+)\b"
+                    r".{0,40}\bruns?\b",
                     low)):
             goals = [g for g in (sup.standing_goals() or [])
                      if g.get("enabled", True)]
