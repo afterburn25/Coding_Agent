@@ -973,6 +973,33 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertTrue(all(
                 r["active"] for r in memory.snapshot()["facts"]))
 
+    def test_questionless_interrogative_never_banks_fact(self):
+        """'y do ppl use rust over c++' has no '?' but is a question —
+        interrogative-lead subjects must not parse as fact subjects."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for junk in ("y do ppl use rust over c++",
+                         "why do people use rust",
+                         "nm that last thing"):
+                out = memory.learn_from_user(junk)
+                self.assertEqual(out["facts"], [], junk)
+            self.assertEqual(memory.snapshot()["facts"], [])
+            # A genuine declarative still banks.
+            out = memory.learn_from_user("the build uses cmake")
+            self.assertEqual(out["facts"], ["build uses cmake"])
+
+    def test_abortive_marker_with_statement_tail_reenters_learning(self):
+        """'nm, my editor is vim' is nevermind + a fresh statement —
+        the tail must learn, not become a forget target. Abortive +
+        referent tail ('nm that last thing') still attempts forget."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            out = memory.learn_from_user("nm, my editor is vim")
+            self.assertEqual(out["facts"], ["my editor is vim"])
+            out = memory.learn_from_user("nm that last thing")
+            self.assertEqual(out["forgotten"], [])
+            self.assertTrue(out.get("forgotten_miss"))
+
     def test_ephemeral_stop_is_not_a_durable_rule(self):
         """'stop whatever you're doing right now' is a cease-the-
         current-activity request — banking 'Never whatever you're

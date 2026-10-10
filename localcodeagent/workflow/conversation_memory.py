@@ -402,11 +402,12 @@ class ConversationMemory:
             return False
         return subj.split()[0].casefold() not in {
             "i", "we", "you", "they", "he", "she", "it",
-            "what", "which", "who", "why", "how", "when", "where",
-            "does", "do", "did", "can", "could", "should", "would",
+            "what", "which", "who", "whom", "whose", "why", "how",
+            "when", "where", "y", "does", "do", "did", "can", "could",
+            "should", "would", "shall", "may", "might",
             "is", "are", "was", "were", "will", "this", "that",
             "tell", "show", "if", "let",
-            "isnt", "arent", "doesnt"}
+            "nm", "isnt", "arent", "doesnt"}
 
     @staticmethod
     def _fact_slot(text: str) -> str:
@@ -701,7 +702,7 @@ class ConversationMemory:
             return []
         marker = re.compile(
             r"^(?:actually|no|wait|instead|sorry|never\s*mind|nevermind|"
-            r"scratch\s+that|on\s+second\s+thought|i\s+mean|i\s+meant|"
+            r"nm|scratch\s+that|on\s+second\s+thought|i\s+mean|i\s+meant|"
             r"correction)\b", re.IGNORECASE)
         if not any(marker.search(p) for p in parts[1:]):
             return []
@@ -773,19 +774,31 @@ class ConversationMemory:
 
         forget_match = re.match(
             r"^(?:forget(?:\s+(?:that|about))?|nevermind(?:\s+about)?|"
+            r"nm(?:\s+about)?|"
             r"stop\s+remembering|delete\s+(?:the\s+)?facts?"
             r"(?:\s+about)?)[,:]?\s*(.+)$",
             raw, flags=re.IGNORECASE)
         if forget_match:
-            forgotten = self.forget(forget_match.group(1))
-            result["forgotten"].extend(forgotten)
-            if not forgotten:
-                # Surface the miss so the reply lane can say so
-                # honestly instead of handing a memory command to the
-                # model lane (which may not even be running).
-                result["forgotten_miss"] = [
-                    forget_match.group(1).strip()]
-            return result
+            forget_body = forget_match.group(1).strip()
+            # "nm, my editor is vim" — an abortive marker followed by a
+            # fresh statement is a correction, not a forget: the tail
+            # re-enters the learning pipeline. True forget verbs keep
+            # statement-shaped targets ('forget that my editor is
+            # emacs' deletes that verbatim fact).
+            abortive = bool(re.match(r"^(?:nm|nevermind)\b", raw,
+                                     flags=re.IGNORECASE))
+            if not abortive or not re.search(
+                    r"\b(?:is|are|was|were|use|uses|go\s+with|set)\b",
+                    forget_body, flags=re.IGNORECASE):
+                forgotten = self.forget(forget_body)
+                result["forgotten"].extend(forgotten)
+                if not forgotten:
+                    # Surface the miss so the reply lane can say so
+                    # honestly instead of handing a memory command to the
+                    # model lane (which may not even be running).
+                    result["forgotten_miss"] = [forget_body]
+                return result
+            raw = forget_body
 
         # Credentials are never persisted — "remember my passcode is X"
         # must not bank the secret into facts/rules, sync it to the
@@ -838,7 +851,7 @@ class ConversationMemory:
             body = re.sub(
                 r"^(?:(?:actually|by\s+the\s+way|btw|also|so|fyi|note|"
                 r"quick\s+note|for\s+the\s+record|just\s+so\s+you\s+know|"
-                r"no|wait|sorry|i\s+mean(?:t)?)[,:\s]+)+",
+                r"no|wait|sorry|nm|i\s+mean(?:t)?)[,:\s]+)+",
                 "", raw, flags=re.IGNORECASE)
             for pattern in (
                 r"^remember\s+that\s+(.+)$",
