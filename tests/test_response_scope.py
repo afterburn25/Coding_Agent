@@ -699,6 +699,16 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertFalse(
             cm2.learn_from_user("the movie is great")["facts"])
 
+    def test_is_now_strips_leading_adverb(self):
+        # "my editor is now vscode" banks 'vscode' — the 'now' marks the
+        # change, it isn't part of the value. The my-X-is-Y fast-path
+        # must not bank the clause verbatim.
+        cm = self._mem()
+        learned = cm.learn_from_user("my editor is now vscode")
+        self.assertEqual(learned["facts"], ["my editor is vscode"])
+        learned = cm.learn_from_user("the deadline is now friday")
+        self.assertEqual(learned["facts"], ["deadline is friday"])
+
     def test_my_scoped_change_mints_is_not_uses(self):
         # "my timezone changed to pst" — a personal attribute change is
         # not a tool migration; 'uses' is for switched/moved/migrated.

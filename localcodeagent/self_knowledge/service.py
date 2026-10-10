@@ -199,8 +199,26 @@ class SelfKnowledgeService:
                 r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s*"
                 r"(?:change|edit|update|rename|move|switch|fix|"
                 r"modification)\b", t)
+            ref_text = referent.group(1).strip() if referent else ""
+            if not ref_text:
+                # Looser referential forms — "undo the correction to
+                # the editor" names a target without the `X change`
+                # template. Drop the operation words and keep whatever
+                # entity terms remain; "undo the change" / "undo the
+                # last edit" reduce to nothing and stay generic.
+                broad = re.search(
+                    r"\b(?:undo|revert)\s+(?:that|the)\s+(.+?)\s*$", t)
+                if broad:
+                    words = [w for w in re.findall(
+                        r"[a-z0-9]{3,}", broad.group(1))
+                        if w not in {"the", "that", "last", "recent",
+                                     "change", "edit", "update",
+                                     "rename", "move", "switch", "fix",
+                                     "modification", "correction",
+                                     "adjustment", "tweak"}]
+                    ref_text = " ".join(words)
             undo = (last or {}).get("undo")
-            if undo and referent:
+            if undo and ref_text:
                 # Session undo only applies when the referent actually
                 # names it — otherwise the scoped resolver owns the turn.
                 parts = [last.get("setting"), last.get("action")]
@@ -214,11 +232,11 @@ class SelfKnowledgeService:
                     r"[a-z0-9]{3,}",
                     " ".join(str(x or "") for x in parts).lower()))
                 ref_terms = {x for x in re.findall(r"[a-z0-9]{3,}",
-                             referent.group(1).lower())
+                             ref_text)
                              if x not in {"the", "that", "last",
                                           "recent"}}
                 if not (ref_terms & subj_terms):
-                    return self._scoped_undo(referent.group(1).strip())
+                    return self._scoped_undo(ref_text)
             if undo:
                 if undo.get("action") == "_set":
                     spec_s = self.settings.get(undo["params"]["key"])
@@ -241,8 +259,8 @@ class SelfKnowledgeService:
             # superseded memory fact restores when the referent names
             # a taught entity. No referent match → honest miss; the
             # latest journaled row is never reverted on a guess.
-            if referent:
-                return self._scoped_undo(referent.group(1).strip())
+            if ref_text:
+                return self._scoped_undo(ref_text)
             return self._journal_undo()
         if re.search(r"\bopen it\b|\bopen that\b|\btake me\b", t):
             route = (proposed or {}).get("route") or \

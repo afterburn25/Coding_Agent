@@ -170,6 +170,12 @@ class ConversationMemory:
         "just", "also", "still", "really", "meanwhile", "anyway",
         "again",
     })
+    # Leading position is tighter — 'still'/'already' read as genuine
+    # value words in some slots ("the answer is still TBD") — keep the
+    # strip set to pure temporal/discourse markers.
+    _LEADING_VALUE_ADVERBS = frozenset({
+        "now", "currently", "today", "actually", "just",
+    })
 
     _CLAUSE_BOUNDARY_RE = re.compile(
         r"(?<=[.!?])\s|\s*[—;]\s*|\s+--\s+")
@@ -265,6 +271,13 @@ class ConversationMemory:
         words = value.split()
         while words and words[-1].lower() in cls._SUBJECT_ADVERBS:
             words.pop()
+        # Leading discourse adverbs — "my editor is now vscode" banks
+        # 'vscode', not 'now vscode'. Only strip when more words
+        # follow — "deadline is today"/"launch is now" keep a lone
+        # adverb that IS the value.
+        while (len(words) > 1
+               and words[0].lower() in cls._LEADING_VALUE_ADVERBS):
+            words.pop(0)
         return " ".join(words).strip()
 
     # Preference-class facts — a restated preference ("i prefer green")
@@ -1814,11 +1827,13 @@ class ConversationMemory:
                 fact = self._first_clause(fact) or fact
                 # Emphatic adverbs inside the captured statement aren't
                 # part of the value — "my editor is actually emacs"
-                # stores 'emacs', not 'actually emacs'. ('now'/'today'
-                # stay — they can BE the value: "deadline is today".)
+                # stores 'emacs', not 'actually emacs'. The trailing
+                # \s+ guards lone-adverb values — "deadline is today"
+                # keeps 'today' (nothing follows it), while "my editor
+                # is now vscode" drops the 'now'.
                 fact = re.sub(
                     r"\b(is|are|was|were)\s+"
-                    r"(?:actually|really|just|currently|simply)\s+",
+                    r"(?:actually|really|just|currently|simply|now)\s+",
                     r"\1 ", fact, flags=re.IGNORECASE)
             if fact and locked_topic(fact):
                 result.setdefault("locked", []).append(

@@ -319,6 +319,32 @@ class TestServiceControl(unittest.TestCase):
             # The session undo was not consumed — the referent owned it.
             self.assertIsNotNone(svc._context["last_executed"])
 
+    def test_undo_loose_referent_still_scopes(self):
+        # "undo the correction to the editor" — a referential undo that
+        # doesn't fit the strict '<X> change' template still scopes to
+        # the named entity, never the generic journal fallback.
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.changes import ChangeJournal
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        svc, store, _ = make_service()
+        with tempfile.TemporaryDirectory() as td:
+            journal = ChangeJournal(Path(td) / "journal.json")
+            cm = ConversationMemory(Path(td) / "cm.json")
+            svc._env["change_journal"] = lambda: journal
+            svc._env["conversation_memory"] = lambda: cm
+            cm.learn_from_user("my editor is emacs")
+            cm.learn_from_user("actually the editor is vim")
+            journal.record("setting", "worker_ceiling", actor="user",
+                           before=8, after=4, reversible=True,
+                           undo={"kind": "setting",
+                                 "key": "worker_ceiling", "value": 8})
+            res = svc.respond("undo the correction to the editor")
+            self.assertIsNotNone(res)
+            self.assertIn("emacs", res.text)
+            self.assertFalse(journal.recent(5)[0].get("undone"))
+
     def test_mute_uses_voice_action(self):
         svc, store, _ = make_service()
         res = svc.respond("mute yourself")
