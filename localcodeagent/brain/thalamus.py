@@ -254,11 +254,20 @@ class Thalamus(BrainRegion):
         else:
             cand = low.rstrip(" ?.!=")
             # Bare expressions need an unmistakable operator — an unspaced
-            # hyphen alone would eat phone-number-shaped strings.
-            if not re.search(r"[+*/%^]|\d\s*[x×]\s*\d|\s-\s", cand):
+            # hyphen alone would eat phone-number-shaped strings. A
+            # spelled operator word qualifies too; every remaining token
+            # still must translate, so prose can't form an expression.
+            if not re.search(r"[+*/%^]|\d\s*[x×]\s*\d|\s-\s", cand) \
+                    and not self._SPELL_OP_WORD_RE.search(cand):
                 return ""
         expr = re.sub(r"(\d)\s*[x×]\s*(\d)", r"\1*\2", cand)
         expr = expr.replace("−", "-").replace("×", "*").replace("÷", "/")
+        # Spelled-out arithmetic — same class as digit math: an operator
+        # word ("plus", "times", "divided by") marks intent, then every
+        # token must translate. Unknown words bail, so "how many files
+        # are left over" can never become an expression.
+        if not re.fullmatch(r"[0-9\s()+\-*/%.^]+", expr):
+            expr = self._spelled_math(expr)
         if not re.fullmatch(r"[0-9\s()+\-*/%.^]+", expr):
             return ""
         stripped = expr.lstrip("(").lstrip()
@@ -267,6 +276,100 @@ class Thalamus(BrainRegion):
         if len(re.findall(r"\d", expr)) < 2 or not re.search(r"[+\-*/%^]", stripped):
             return ""
         return expr
+
+    _SPELL_NUM = {
+        "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+        "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+        "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40,
+        "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80,
+        "ninety": 90,
+    }
+    _SPELL_OP = {
+        "plus": "+", "minus": "-", "times": "*", "mod": "%",
+        "modulo": "%", "power": "**",
+    }
+    _SPELL_OP_WORD_RE = re.compile(
+        r"\b(?:plus|minus|times|mod|modulo|power|multiplied|divided|"
+        r"over|squared|cubed)\b")
+
+    @classmethod
+    def _spelled_math(cls, cand: str) -> str:
+        """Translate spelled arithmetic to an operator string, or ''.
+        Only attempted when an operator word is present; every token
+        must map — an unknown word disqualifies the whole candidate."""
+        if not cls._SPELL_OP_WORD_RE.search(cand):
+            return ""
+        out: list[str] = []
+        num: float | int | None = None
+        neg = False
+        toks = cand.replace("-", " ").split()  # "twenty-three" → two words
+
+        def flush() -> None:
+            nonlocal num, neg
+            if num is not None:
+                if neg:
+                    num = -num
+                neg = False
+                out.append(str(num))
+                num = None
+
+        i = 0
+        while i < len(toks):
+            w = toks[i]
+            if w in ("a", "an") and num is None:
+                num = 1
+            elif w in cls._SPELL_NUM:
+                num = (num or 0) + cls._SPELL_NUM[w]
+            elif w in ("hundred", "thousand") and num is not None:
+                num *= 100 if w == "hundred" else 1000
+            elif w == "negative":
+                if num is not None:
+                    num = -num
+                else:
+                    neg = True
+            elif w in cls._SPELL_OP:
+                flush()
+                out.append(cls._SPELL_OP[w])
+            elif w in ("multiplied", "divided"):
+                flush()
+                out.append("*" if w == "multiplied" else "/")
+                if i + 1 < len(toks) and toks[i + 1] == "by":
+                    i += 1
+            elif w == "over":
+                flush()
+                out.append("/")
+            elif w == "squared":
+                flush()
+                out.append("** 2")
+            elif w == "cubed":
+                flush()
+                out.append("** 3")
+            elif w == "to" and toks[i + 1:i + 3] == ["the", "power"]:
+                # "to the power of" — consume the whole phrase.
+                flush()
+                out.append("**")
+                i += 2
+                if i + 1 < len(toks) and toks[i + 1] == "of":
+                    i += 1
+            elif re.fullmatch(r"[0-9+\-*/()%^.]+", w):
+                flush()
+                out.append(w)
+            elif w == "point" and num is not None:
+                # "three point five" → accumulate the decimal tail
+                tail = ""
+                while i + 1 < len(toks) and toks[i + 1] in cls._SPELL_NUM:
+                    tail += str(cls._SPELL_NUM[toks[i + 1]])
+                    i += 1
+                if not tail:
+                    return ""
+                num = float(f"{num}.{tail}")
+            else:
+                return ""
+            i += 1
+        flush()
+        return " ".join(out)
 
     def answer_fast_path(self, kind: str, arg: str = "") -> str:
         """Deterministic response bodies for fast-path routes."""

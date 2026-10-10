@@ -350,10 +350,30 @@ class ThalamusTests(unittest.TestCase):
         self.assertIn("division by zero",
                       t.answer_fast_path("math", d.fast_arg))
 
+    def test_math_spelled_out(self):
+        t = self._thalamus()
+        for msg, expected in [
+                ("what's 8 plus 4?", "12"),
+                ("what is eight plus four", "12"),
+                ("two times three", "6"),
+                ("twenty minus five", "15"),
+                ("what's two to the power of eight", "256"),
+                ("5 squared", "25"),
+                ("one hundred plus twenty three", "123"),
+                ("six divided by two", "3"),
+                ("nine mod two", "1"),
+                ("negative five plus ten", "5")]:
+            d = t.route(msg)
+            self.assertFalse(d.needs_model, msg)
+            self.assertEqual(d.fast_path, "math", msg)
+            self.assertIn(expected, t.answer_fast_path("math", d.fast_arg), msg)
+
     def test_math_false_positives_not_caught(self):
         t = self._thalamus()
         for msg in ["555-1234", "what is the plan", "how many files are there",
-                    "what is your name", "call me at 555-0142"]:
+                    "what is your name", "call me at 555-0142",
+                    "is it over yet", "times are hard", "twenty questions",
+                    "the plan is over budget", "one two three"]:
             d = t.route(msg)
             self.assertNotEqual(d.fast_path, "math", msg)
 
