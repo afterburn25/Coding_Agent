@@ -955,12 +955,20 @@ class RuntimeManager:
         """
         adopted: list[str] = []
         killed: list[str] = []
-        with self._lock:
-            managed_pids = {getattr(item.process, "pid", None)
-                            for item in self._managed.values()} - {None}
         for proc in self._our_runtime_processes():
             pid = int(proc.get("pid") or 0)
-            if not pid or pid in managed_pids or pid == os.getpid():
+            if not pid or pid == os.getpid():
+                continue
+            with self._lock:
+                # Re-read under the lock on every pid: _our_runtime_processes()
+                # spawns a slow process-list probe, so a snapshot taken before
+                # it returns goes stale when a launch/prewarm registers a new
+                # managed server mid-sweep — it would read as an orphan and be
+                # killed below. Membership is checked fresh each iteration.
+                owned = pid in {
+                    getattr(item.process, "pid", None)
+                    for item in self._managed.values()}
+            if owned:
                 continue
             model_path, port = self._orphan_cmdline_model_port(
                 str(proc.get("cmdline") or ""))
@@ -978,8 +986,6 @@ class RuntimeManager:
                         adopted_profile = False
             if adopted_profile and profile is not None:
                 adopted.append(profile.id)
-                with self._lock:
-                    managed_pids.add(pid)
             else:
                 self._kill_pid(pid)
                 killed.append(str(pid))

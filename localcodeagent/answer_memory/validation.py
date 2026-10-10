@@ -102,6 +102,44 @@ _SECRET_PATTERNS = [
     re.compile(r"\b(?:recovery|backup)\s+codes?\b\s*[:=]", re.I),
 ]
 
+# Assistant-side failure text — "I couldn't reach GitHub — unknown tool
+# 'x'", permission/infra refusals, tool errors. These are runtime events,
+# not knowledge: storing them learns "the answer to 'explain github' is a
+# connection error", which then replays to unrelated questions.
+_ANSWER_FAILURE_RE = re.compile(
+    r"\bunknown tool\b|"
+    r"\bi\s*(?:'m|am)?\s*(?:sorry\s*,?\s*|unfortunately\s*,?\s*)?"
+    r"(?:couldn['’]?t|could not|can['’]?t|cannot|wasn['’]?t able|"
+    r"was not able|failed|am unable)\s*(?:to\s+)?"
+    r"(?:reach|connect|contact|fetch|retrieve|load|access|open|"
+    r"run|execute|download|pull|complete|perform)\b|"
+    r"\bthe (?:request|tool call|command|operation|lookup) "
+    r"(?:failed|errored|timed out)\b|"
+    r"^\s*(?:error[:\s]|ap(?:proval_required)|permission_denied|"
+    r"creator_|tool_)\b",
+    re.I)
+
+
+def is_error_answer(text: str) -> bool:
+    """True when the text is an assistant failure report rather than an
+    answer — infra errors, permission refusals, 'couldn't reach X'. These
+    must never be learned or replayed: the failure is transient, and a
+    cached error parrots forever."""
+    return bool(_ANSWER_FAILURE_RE.search(str(text or "")))
+
+
+# Capability probes — "can you see my screen", "can you browse websites",
+# "can you hear me". The truthful answer lives in live capability state;
+# a cached answer goes stale the moment a subsystem toggles. Classify as
+# volatile so they are neither learned nor replayed from memory.
+_CAPABILITY_PROBE_RE = re.compile(
+    r"^\s*(?:can|could|are|do|did|will|would|is|were)\s+(?:you|u)\s+"
+    r"(?:currently\s+|still\s+|actually\s+|really\s+|able\s+to\s+)?"
+    r"(?:see|browse|surf|visit|access|open|hear|view|watch|listen|"
+    r"read|use|connect|control|click|type|look|check|execute|edit|"
+    r"remember|record|monitor|speak|talk|generate|draw|search)\b",
+    re.I)
+
 _LIVE_MARKERS = (
     "weather", "forecast", "stock price", "share price", "crypto price",
     "bitcoin price", "score of", "who won", "game score", "traffic",
@@ -174,6 +212,8 @@ def classify_cacheability(text: str) -> str:
         return "task_specific"
     if is_context_dependent(text):
         return "task_specific"
+    if _CAPABILITY_PROBE_RE.search(str(text or "")):
+        return "volatile"
     if any(m in t for m in _LIVE_MARKERS):
         return "live"
     raw = str(text)

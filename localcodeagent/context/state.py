@@ -503,6 +503,50 @@ def extract_requirement(text: str, env: Any = None) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Spec edits inside an active requirements session — imperative adds
+# ('make the font monospace', 'use a manual save button') and retirements
+# ('no auto-save', 'drop the markdown rendering').
+# ---------------------------------------------------------------------------
+
+_SPEC_DROP_RE = re.compile(
+    r"\b(?:no|drop|remove|skip|cut|lose|forget|don'?t\s+need|"
+    r"do\s+not\s+need|without|get\s+rid\s+of)\s+"
+    r"(?:the\s+|a\s+|an\s+|that\s+)?([^,.;?!]{2,80})",
+    re.IGNORECASE)
+
+_SPEC_ADD_RE = re.compile(
+    r"\b(?:make|add|use|keep|include|support|render|show|enable|allow|"
+    r"give|have)\s+(?:it\s+|the\s+|a\s+|an\s+|us\s+)?([^,.;?!]{2,80})",
+    re.IGNORECASE)
+
+_SPEC_VALUE_TAIL_RE = re.compile(
+    r"\s+(?:instead|now|this\s+time|please)\s*$", re.IGNORECASE)
+
+
+def extract_spec_edits(text: str, env: Any = None) -> list[dict]:
+    """Imperative requirement edits — applied only while a spec session
+    is active for the topic (the caller gates on an existing req_spec
+    entry) so ordinary commands never bank as requirements. One turn can
+    retire and add in the same breath: 'no auto-save, use a manual save
+    button instead' returns both edits."""
+    frame = getattr(env, "semantic", None)
+    if frame is not None and frame.speech_act in (
+            "question", "hypothetical", "offer", "preference_question"):
+        return []
+    t = str(text or "")
+    edits: list[dict] = []
+    for m in _SPEC_DROP_RE.finditer(t):
+        val = _SPEC_VALUE_TAIL_RE.sub("", m.group(1)).strip(" .,;'\"")
+        if val:
+            edits.append({"requirement": val[:140], "retire": True})
+    for m in _SPEC_ADD_RE.finditer(t):
+        val = _SPEC_VALUE_TAIL_RE.sub("", m.group(1)).strip(" .,;'\"")
+        if val:
+            edits.append({"requirement": val[:140], "retire": False})
+    return edits
+
+
+# ---------------------------------------------------------------------------
 # Attitude — cheap affect signal for response styling.
 # ---------------------------------------------------------------------------
 
@@ -756,12 +800,55 @@ def update_state(ctx: Any, env: Any, text: str,
 
     # ---- requirement accumulation ---------------------------------------
     req = extract_requirement(text, env)
-    if req and ctx.active_topic:
-        spec = ctx.req_spec.setdefault(_slug(ctx.active_topic), {})
-        key = _slug(req["requirement"].split(" ", 1)[0] or "req")
+    topic_slug = _slug(ctx.active_topic) if ctx.active_topic else ""
+    if req:
+        # No active topic yet — the spec still seeds under a default
+        # bucket; a topic-less opener like "let's spec a feature" must
+        # not drop the first requirement.
+        spec = ctx.req_spec.setdefault(topic_slug or "_default", {})
         spec.setdefault("requirements", []).append(req["requirement"])
         spec["requirements"] = spec["requirements"][-24:]
         spec["updated_at"] = now
+    elif ctx.req_spec:
+        # Imperative spec edits — gated on a spec session so ordinary
+        # commands never bank as requirements. Targets the active topic's
+        # spec; topic labels drift mid-session ('make the font monospace'
+        # retitles the topic), so fall back to the spec touched within
+        # the last hour — a stale spec from an old session stays sealed.
+        spec = ctx.req_spec.get(topic_slug)
+        if spec is None:
+            cand = max(ctx.req_spec.values(),
+                       key=lambda s: float(s.get("updated_at") or 0.0))
+            if now - float(cand.get("updated_at") or 0.0) < 3600:
+                spec = cand
+        if spec is not None:
+            reqs = spec.setdefault("requirements", [])
+            retired = spec.setdefault("retired", [])
+            changed = False
+            for edit in extract_spec_edits(text, env):
+                val = str(edit.get("requirement") or "")
+                if not val:
+                    continue
+                if edit.get("retire"):
+                    q = set(re.findall(r"[a-z0-9]+", val.lower()))
+                    keep = []
+                    for r in reqs:
+                        rt = set(re.findall(r"[a-z0-9]+", r.lower()))
+                        if q and q <= rt:
+                            retired.append(r)
+                        else:
+                            keep.append(r)
+                    if len(keep) != len(reqs):
+                        spec["requirements"] = keep
+                        reqs = spec["requirements"]
+                        spec["retired"] = retired[-24:]
+                        changed = True
+                else:
+                    reqs.append(val)
+                    spec["requirements"] = reqs[-24:]
+                    changed = True
+            if changed:
+                spec["updated_at"] = now
 
     # ---- attitude -------------------------------------------------------
     att = detect_attitude(text)

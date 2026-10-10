@@ -1995,19 +1995,42 @@ class AgentOrchestrator:
             return []
         return messages[-limit:]
 
+    # Slash idioms that are never repo identifiers — "light/dark",
+    # "and/or" mint phantom referents when a reply mentions them.
+    _GITHUB_SLUG_IDIOMS = {
+        "and/or", "yes/no", "on/off", "true/false", "input/output",
+        "light/dark", "dark/light", "read/write", "either/or", "n/a",
+        "black/white", "he/she", "him/her", "i/o", "r/w", "24/7",
+        "client/server", "front/back", "left/right", "up/down",
+        "pass/fail", "win/loss", "enable/disable", "on/offline",
+    }
+
     def _github_context_repo(self, skip_text: str = "") -> str | None:
         """Most recent owner/repo mentioned in the conversation — the
-        referent for 'it', 'the repo', 'that one'. Prefers a message
-        whose only slug is the selected repo over a picker list."""
+        referent for 'it', 'the repo', 'that one'. User-authored slugs
+        are the real referent; assistant prose ("light/dark", "and/or")
+        mints phantom repos and must not make a later 'read the file'
+        turn hit the GitHub lane."""
         messages = self._convo_messages()
+        assistant_slug = None
         for msg in reversed(messages[-10:]):
             body = str(msg.get("content") or "")
             if skip_text and body.strip().rstrip(".,!?") == skip_text:
                 continue
-            slugs = self._GITHUB_REPO_SLUG_RE.findall(body)
-            if slugs:
+            slugs = [s for s in self._GITHUB_REPO_SLUG_RE.findall(body)
+                     if s.lower() not in self._GITHUB_SLUG_IDIOMS]
+            if not slugs:
+                continue
+            if msg.get("role") == "user":
                 return slugs[0]
-        return None
+            low = body.lower()
+            if assistant_slug is None and (
+                    "github" in low
+                    or re.search(r"\brepos?(?:itory|itories)?\b", low)):
+                # Assistant named a slug while talking about repos —
+                # a suggested referent, weaker than a user-authored one.
+                assistant_slug = slugs[0]
+        return assistant_slug
 
     def _github_repo_names(self) -> list[str]:
         """Live repo list for the connected account — [] on any
@@ -2451,10 +2474,14 @@ class AgentOrchestrator:
 
     _FACT_RECALL_RE = re.compile(
         r"^\s*(?:remind me\s+(?:of|about)\s+|what(?:'s|\s+s)?\s+|"
-        r"whats\s+|which\s+|whichever\s+|do you remember\s+)",
+        r"whats\s+|which\s+|whichever\s+|who'?s?\s+|whos\s+|whose\s+|"
+        r"who\s+(?:is|are|was|were)\s+|when\s+(?:is|are|was|were)\s+|"
+        r"where\s+(?:is|are|was|were)\s+|do you remember\s+)",
         re.IGNORECASE)
     _FACT_RECALL_SKIP_RE = re.compile(
-        r"^\s*what\s+(?:do you|should|would|could|can|did|does|will|"
+        r"^\s*what\s+(?:do you|should|would|could|can|"
+        r"did\s+(?:you|we|they|he|she|it|that|this)|"
+        r"does\s+(?:it|that|this|he|she|they)|will|"
         r"happens|happened|time|day|else|if)\b|\byou know\b|"
         r"\babout me\b",
         re.IGNORECASE)
@@ -2617,6 +2644,12 @@ class AgentOrchestrator:
         r"pick\s+(?:it|that|this)\s+up|carry\s+on)\b\.?\s*$|"
         r"\bback\s+to\s+what\s+we\s+were\s+doing\b",
         re.IGNORECASE)
+    _STATE_SPEC_Q_RE = re.compile(
+        r"\b(?:what'?s|what\s+is|where'?s|show|give|recap|summari[sz]e|"
+        r"list)\b.{0,40}\b(?:spec|requirements?)\b|"
+        r"\bspec\s+so\s+far\b|\brequirements?\s+so\s+far\b|"
+        r"\b(?:current|full|whole|entire)\s+spec\b",
+        re.IGNORECASE)
 
     def _state_recall_reply(self, user_text: str, state_ctx,
                             env=None):
@@ -2680,6 +2713,28 @@ class AgentOrchestrator:
                 if err:
                     canonical = f"Last thing on record — {err}."
                     sid = "state:loop_recall"
+        elif self._STATE_SPEC_Q_RE.search(text):
+            # Spec recall — 'what's the spec so far' answers from the
+            # requirements ledger for the active topic (or the most
+            # recently updated spec), never from the transcript model.
+            spec_map = getattr(state_ctx, "req_spec", None) or {}
+            topic_key = re.sub(
+                r"[^a-z0-9]+", "-",
+                str(getattr(state_ctx, "active_topic", "") or "").lower()
+            ).strip("-")
+            spec = spec_map.get(topic_key)
+            if spec is None and spec_map:
+                spec = max(
+                    spec_map.values(),
+                    key=lambda s: float(s.get("updated_at") or 0.0))
+            reqs = [str(r) for r in
+                    ((spec or {}).get("requirements") or []) if r]
+            if reqs:
+                label = getattr(state_ctx, "active_topic", "") \
+                    or "the feature"
+                canonical = (f"Spec for {label} — "
+                             + "; ".join(reqs[:8]) + ".")
+                sid = "state:spec_recall"
         elif self._STATE_TOPIC_Q_RE.search(text):
             topic = getattr(state_ctx, "active_topic", "")
             if topic:
@@ -8011,7 +8066,8 @@ class AgentOrchestrator:
                 try:
                     from ..answer_memory import validation as _amv
                     if _amv.classify_cacheability(user_text) in {
-                            "task_specific", "live", "transformation"}:
+                            "task_specific", "live", "volatile",
+                            "transformation"}:
                         # An action/live/transform request is never
                         # answered by a stored reply — not even as a
                         # "hint" the small model would parrot.

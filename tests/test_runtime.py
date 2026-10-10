@@ -1638,6 +1638,35 @@ class OrphanSweepTests(unittest.TestCase):
                 manager.sweep_orphan_runtimes()
             self.assertEqual(killed, [])
 
+    def test_process_managed_mid_enumeration_is_not_killed(self):
+        # Regression: _our_runtime_processes() is a slow external probe —
+        # a launch registering _managed between enumeration and the
+        # per-pid ownership check used to read as an orphan and fall
+        # through to _kill_pid, killing the just-launched server (seen as
+        # repeated llama-server deaths seconds after boot). Membership is
+        # re-read under the lock on every pid now.
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            profile = manager.config.models[0]
+            model_path = str(manager.models_dir / "coder.gguf")
+            orphan = {"pid": 5555, "exe": "llama-server",
+                      "cmdline": f"llama-server --model {model_path} "
+                                 "--port 51234"}
+
+            def enumerate_then_register():
+                fake = _attach_fake_managed(manager, profile)
+                fake.pid = 5555
+                return [orphan]
+
+            killed = []
+            with patch.object(manager, "_our_runtime_processes",
+                              side_effect=enumerate_then_register), \
+                 patch.object(manager, "_kill_pid",
+                              side_effect=lambda p: killed.append(p)):
+                result = manager.sweep_orphan_runtimes()
+            self.assertEqual(killed, [])
+            self.assertEqual(result["adopted"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

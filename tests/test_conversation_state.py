@@ -376,6 +376,32 @@ class ReqSpecTests(unittest.TestCase):
         drive(ctx, "it should verify dll copies")
         self.assertTrue(any("installer" in k for k in ctx.req_spec))
 
+    def test_spec_imperative_edits(self):
+        # Imperative adds/retires inside an active spec session —
+        # "make X", "no Y, use Z instead", "drop W" (dogfood 'requirements'
+        # pack regression: 'manual save button' must land, 'auto-save'
+        # and 'markdown' must retire).
+        ctx = ActiveContext()
+        drive(ctx, "let's spec a small feature: a notes widget")
+        drive(ctx, "it should auto-save every 30 seconds")
+        drive(ctx, "make the font monospace")
+        drive(ctx, "add markdown rendering")
+        drive(ctx, "actually — no auto-save, use a manual save button instead")
+        drive(ctx, "drop the markdown rendering, plain text is fine")
+        spec = next(iter(ctx.req_spec.values()))
+        reqs = spec["requirements"]
+        self.assertTrue(any("manual save button" in r for r in reqs))
+        self.assertFalse(any("auto-save" in r for r in reqs))
+        self.assertFalse(any("markdown" in r for r in reqs))
+        self.assertTrue(any("auto-save" in r for r in spec["retired"]))
+
+    def test_spec_edits_ignored_without_session(self):
+        # Imperatives outside a spec session must not bank requirements.
+        ctx = ActiveContext()
+        drive(ctx, "use port 9000")
+        drive(ctx, "make it fast")
+        self.assertFalse(ctx.req_spec)
+
 
 # ---------------------------------------------------------------------------
 # Persistence / restart

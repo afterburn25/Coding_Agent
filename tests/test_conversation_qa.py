@@ -180,7 +180,10 @@ class HandAuthoredScenarioTests(unittest.TestCase):
                            "system_not_contains": ["Whiskers", "PostgreSQL"],
                        }),
                 QaTurn("what did I name my cat?", conversation_id="chat-b",
-                       expect={"system_contains": "Whiskers"}),
+                       # First-person recall ('what did i …') is owned by
+                       # the deterministic fact lane now — assert the
+                       # answer, not the (absent) model prompt.
+                       expect={"response_contains": "Whiskers"}),
             ])
             run = runner.run(scenario)
             self.assertTrue(run.ok, run.failures)
@@ -316,7 +319,10 @@ class ToolUseQaTests(unittest.TestCase):
                 QaTurn("back to coding — add a test for the login handler",
                        expect={"tool_calls": True}),
                 QaTurn("what token type does the auth module use?",
-                       expect={"system_contains": "JWT",
+                       # Deterministic fact recall owns 'what X does Y
+                       # use' now — assert the answer, not the (absent)
+                       # model prompt.
+                       expect={"response_contains": "JWT",
                                "no_tool_calls": True}),
             ])
             run = runner.run(scenario)
@@ -818,3 +824,48 @@ class SettingsAssertionGateTests(unittest.TestCase):
             r = svc.respond(t)
             self.assertIsNotNone(r, t)
             self.assertTrue(r.text, t)
+
+
+class GithubContextRepoTests(unittest.TestCase):
+    """Slash idioms in assistant prose ('light/dark', 'and/or') must not
+    mint a phantom owner/repo referent — the dogfood defect where an
+    assistant reply mentioning 'light/dark' made 'which file did i just
+    say…' fire the GitHub read lane and emit 'unknown tool'."""
+
+    def _orch(self, messages):
+        class _Mgr:
+            def active(self):
+                return {"messages": messages}
+        orch = AgentOrchestrator.__new__(AgentOrchestrator)
+        orch.conversation_manager = _Mgr()
+        return orch
+
+    def test_assistant_slash_idiom_is_not_a_repo(self):
+        orch = self._orch([
+            {"role": "user", "content":
+             "i have two config files open: settings.json for the "
+             "backend and settings.json for the ui"},
+            {"role": "assistant", "content":
+             "I'll add a theme field — light/dark or auto?"},
+            {"role": "user", "content":
+             "which file did i just say needs the theme field?"},
+        ])
+        self.assertIsNone(orch._github_context_repo(
+            skip_text="which file did i just say needs the theme "
+                      "field?"))
+
+    def test_user_slug_is_the_referent(self):
+        orch = self._orch([
+            {"role": "user", "content": "check acme/widgets for issues"},
+            {"role": "assistant", "content":
+             "Here's acme/widgets — light/dark theme in the README."},
+        ])
+        self.assertEqual(orch._github_context_repo(), "acme/widgets")
+
+    def test_assistant_slug_needs_repo_context(self):
+        orch = self._orch([
+            {"role": "assistant", "content":
+             "Which repo — acme/widgets or acme/site?"},
+            {"role": "user", "content": "check it"},
+        ])
+        self.assertEqual(orch._github_context_repo(), "acme/widgets")

@@ -169,7 +169,8 @@ class AnswerMemory:
         started = time.monotonic()
         try:
             cacheability = validation.classify_cacheability(question)
-            if cacheability in {"live", "task_specific", "transformation"}:
+            if cacheability in {"live", "volatile", "task_specific",
+                                "transformation"}:
                 return MemoryMatch(
                     kind="no_match", reason=f"cacheability={cacheability}",
                     latency_ms=(time.monotonic() - started) * 1000,
@@ -177,6 +178,30 @@ class AnswerMemory:
             match = self.retriever.lookup(
                 question, project_id=project_id, profile_id=_safe(self._profile_id_fn)
             )
+            # Error outputs learned as answers ("I couldn't reach GitHub —
+            # unknown tool …") are poison: a transient failure replaying as
+            # knowledge. Invalidate them in place — at the service level so
+            # replay, hint, and readiness paths all see them gone.
+            bad = [
+                r for r in ([match.answer] + list(match.context_answers or []))
+                if isinstance(r, dict)
+                and validation.is_error_answer(str(r.get("answer_text") or ""))
+            ]
+            for r in bad:
+                try:
+                    learning.invalidate_answer(
+                        self.store, str(r.get("id") or ""),
+                        "error output stored as answer")
+                except Exception:
+                    pass
+            if bad:
+                match = MemoryMatch(
+                    kind="no_match", reason="error-answer",
+                    context_answers=[
+                        r for r in (match.context_answers or [])
+                        if r not in bad],
+                    similarity=match.similarity,
+                    latency_ms=match.latency_ms)
             if match.answer is not None:
                 match = self._resolve_dependency(match, project_id)
                 if match.hit and not confidence.may_bypass(match.answer):
@@ -310,6 +335,12 @@ class AnswerMemory:
         if response_source == "answer_memory":
             return out  # a memory hit is not new evidence
         if validation.contains_secret(question) or validation.contains_secret(answer):
+            out["suppressed"] = True
+            self.store.bump("suppressed_experiences")
+            return out
+        # A failure report ("I couldn't reach GitHub — unknown tool …")
+        # is not evidence of a good answer — never let it become one.
+        if validation.is_error_answer(answer):
             out["suppressed"] = True
             self.store.bump("suppressed_experiences")
             return out
