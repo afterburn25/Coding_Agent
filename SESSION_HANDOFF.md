@@ -5152,3 +5152,41 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
 - Kill backend by LISTENING PORT only — a filter containing 'localcodeagent' self-kills the powershell; `Start-Process` detaches fine.
 - Live dogfood store: `.dogfood/.dogfood/runtime/data/conversation_memory.json` (nested — workspace `.dogfood` + config-relative path).
 - Answer Memory: `.dogfood/data/nexus_brain/answer_memory.db` (SQLite, `answers` table).
+
+### BUG-073..079 round (hearsay, AM gates, temporal facts, naming)
+- **BUG-073** reported speech (`i heard…`, `someone said…`, `they say…`)
+  acks deterministically as *unverified*, never banks (`242a11ef`).
+- **BUG-075** `scratch that, <stmt>` correction marker; ack-shaped AM
+  poison gate at learn + lookup self-heal; `rotates` predicate (`4ec7f196`).
+- **BUG-076** P0: AM hit-replay gated on speech act — conditional/command
+  turns (`if the build fails, ping me`) never replay cached answers;
+  `i thought X was A but it was B` belief-correction lane banks the true
+  value (`50668afd` era).
+- **BUG-077** standalone `was`/`were` declaratives bank as historical
+  facts; recall demotes them under a live `is`/`are` same-subject row.
+- **BUG-078** `call/name/dub <thing> <name>` naming lane (pronoun
+  referents retarget, idioms/phone-calls excluded); `called|named|known`
+  are slot-filler in the recall precision gate (`70407019`).
+- **BUG-079** P0: prefix-hint retargets onto *more qualified* subjects
+  (`deploy` ⊂ `deploy region`) now require value-type compatibility —
+  `fyi the deploy is at noon tomorrow` no longer clobbers a region slot;
+  `don't forget <declarative>` learns the tail (`698bd796`).
+- **Merge-damage repair** (`0aaa0c21`): commit `2987f187` pushed by the
+  deployed instance had server.py's stdlib header replaced by a 9-line
+  repair-worktree stub + dangling `>>>>>>>` marker — module wouldn't
+  import. Restored byte-identical to `50668afd`. **Root cause worth
+  following up**: a `repair-worktrees/ri-41109fbe50/
+  epistemic_step_diagnosis.py` artifact apparently overwrote the deployed
+  instance's own server.py — an autonomous repair wrote to the wrong
+  path. If that instance restarts before pulling `0aaa0c21`, it will
+  fail the same way.
+- Batteries: 262 + 66 green. Live-verified: naming, `called` probes,
+  don't-forget learn, deploy/region isolation.
+
+### Watch items
+- Complaint turns (`the api times out after 30 seconds`) stall ~180s
+  when the shared GPU leaves <1GB free for llama load — expected churn,
+  but a complaint should arguably get a deterministic empathize+
+  evidence-capture ack instead of blocking on the model.
+- The deployed instance (:56071) self-corrupted server.py once — audit
+  which repair/self-edit lane can write outside its worktree.
