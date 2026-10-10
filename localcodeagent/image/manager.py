@@ -1683,7 +1683,38 @@ class ImageManager:
                 if (required and self.runtime.hardware.free_vram_gb < required) or \
                         (required_ram and self.runtime.hardware.available_ram_gb < headroom):
                     job.stage = "freeing memory"; self._save_jobs(job)
-                    self._evict_peer_image_backend(job, "invokeai")
+                    evicted_peer = self._evict_peer_image_backend(job, "invokeai")
+                else:
+                    evicted_peer = False
+                # Eviction teardown is async — a just-stopped model can take
+                # a few seconds to return its VRAM to nvidia-smi. Poll briefly
+                # before condemning the job, but only when something actually
+                # got evicted (otherwise the wait just delays the honest no).
+                self.runtime.refresh_hardware()
+                if (stopped or evicted_peer) and \
+                        ((required and self.runtime.hardware.free_vram_gb < required) or
+                         (required_ram and self.runtime.hardware.available_ram_gb < headroom)):
+                    for _ in range(3):
+                        time.sleep(1.0)
+                        self.runtime.refresh_hardware()
+                        if (not required or self.runtime.hardware.free_vram_gb >= required) and \
+                                (not required_ram or self.runtime.hardware.available_ram_gb >= headroom):
+                            break
+                # Same fail-fast as the ComfyUI lane — submitting into a
+                # card still short of the estimate burns minutes and ends
+                # in a backend CUDA fault instead of an honest error.
+                if required and self.runtime.hardware.free_vram_gb < required:
+                    raise RuntimeError(
+                        f"insufficient VRAM for '{profile.display_name or profile.id}': "
+                        f"need {required:.1f} GB free, have "
+                        f"{self.runtime.hardware.free_vram_gb:.1f} GB"
+                        + (f" after evicting {', '.join(stopped)}" if stopped else
+                           " — no managed models to evict"))
+                if required_ram and self.runtime.hardware.available_ram_gb < headroom:
+                    raise RuntimeError(
+                        f"insufficient RAM for '{profile.display_name or profile.id}': "
+                        f"need {headroom:.1f} GB available, have "
+                        f"{self.runtime.hardware.available_ram_gb:.1f} GB")
 
             job.stage = "starting InvokeAI" if job.backend_starting else "connecting to InvokeAI"
             job.progress = max(job.progress, 0.10); self._save_jobs(job)
@@ -1836,7 +1867,39 @@ class ImageManager:
                 if (required and self.runtime.hardware.free_vram_gb < required) or \
                         (required_ram and self.runtime.hardware.available_ram_gb < headroom):
                     job.stage="freeing memory"; self._save_jobs(job)
-                    self._evict_peer_image_backend(job, "comfyui")
+                    evicted_peer=self._evict_peer_image_backend(job, "comfyui")
+                else:
+                    evicted_peer=False
+                # Eviction teardown is async — a just-stopped model can take
+                # a few seconds to return its VRAM to nvidia-smi. Poll briefly
+                # before condemning the job, but only when something actually
+                # got evicted (otherwise the wait just delays the honest no).
+                self.runtime.refresh_hardware()
+                if (stopped or evicted_peer) and \
+                        ((required and self.runtime.hardware.free_vram_gb < required) or
+                         (required_ram and self.runtime.hardware.available_ram_gb < headroom)):
+                    for _ in range(3):
+                        time.sleep(1.0)
+                        self.runtime.refresh_hardware()
+                        if (not required or self.runtime.hardware.free_vram_gb >= required) and \
+                                (not required_ram or self.runtime.hardware.available_ram_gb >= headroom):
+                            break
+                # Fail fast rather than submit into a known-short card —
+                # a starved ComfyUI survives sampling then dies at
+                # VAEDecode with cudaErrorUnknown (observed live: SDXL
+                # sampled fine, VAE hit 'Memory allocation failure').
+                if required and self.runtime.hardware.free_vram_gb < required:
+                    raise RuntimeError(
+                        f"insufficient VRAM for '{profile.display_name or profile.id}': "
+                        f"need {required:.1f} GB free, have "
+                        f"{self.runtime.hardware.free_vram_gb:.1f} GB"
+                        + (f" after evicting {', '.join(stopped)}" if stopped else
+                           " — no managed models to evict"))
+                if required_ram and self.runtime.hardware.available_ram_gb < headroom:
+                    raise RuntimeError(
+                        f"insufficient RAM for '{profile.display_name or profile.id}': "
+                        f"need {headroom:.1f} GB available, have "
+                        f"{self.runtime.hardware.available_ram_gb:.1f} GB")
             self._save_jobs(job)
             job.stage="starting ComfyUI" if job.backend_starting else "connecting to ComfyUI"
             job.progress=max(job.progress,0.10); self._save_jobs(job)

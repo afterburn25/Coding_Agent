@@ -44,6 +44,11 @@ class ImageErrorTests(unittest.TestCase):
             (RuntimeError("ComfyUI is missing required node(s): Foo"), "failed_dependency"),
             (OSError("No space left on device"), "insufficient_disk_space"),
             (TimeoutError("Timed out waiting for ComfyUI"), "timeout"),
+            (RuntimeError("insufficient VRAM for 'sdxl': need 10.0 GB free, "
+                          "have 3.0 GB — no managed models to evict"),
+             "insufficient_resources"),
+            (RuntimeError("CUDA error: unknown error\n (node: VAEDecode)"),
+             "cuda_out_of_memory"),
         ]
         for exc, code in cases:
             with self.subTest(code=code):
@@ -1025,6 +1030,111 @@ class DedicatedUpscalerTests(unittest.TestCase):
                           finished.outputs[0].replace("\\", "/"))
             self.assertTrue(any("refinement" in r
                                 for r in finished.routing_reasons))
+
+
+class ComfyResourceAdmissionTests(unittest.TestCase):
+    """Fail-fast admission on the ComfyUI lane: a job that still cannot
+    fit after arbitration must die at admission with insufficient_resources
+    — not at VAEDecode with cudaErrorUnknown (observed live on the 12 GB
+    card with LLMs resident)."""
+
+    def _manager(self, root: Path, **profile_kw) -> ImageManager:
+        (root / "models/image/gen").mkdir(parents=True)
+        (root / "models/image/gen/model.bin").write_bytes(b"model")
+        workflows = root / "workflows/image"
+        workflows.mkdir(parents=True)
+        (workflows / "gen.json").write_text(json.dumps({
+            "1": {"class_type": "ExampleGenerate",
+                  "inputs": {"prompt": "${prompt}"}},
+            "2": {"class_type": "SaveImage",
+                  "inputs": {"images": ["1", 0]}},
+        }), encoding="utf-8")
+        profile = ImageModelProfile(
+            id="sdxl", family="test",
+            model_path="models/image/gen/model.bin",
+            capabilities=["text_to_image"],
+            workflows={"text_to_image": "gen.json"}, **profile_kw)
+        config = SimpleNamespace(
+            image_models_dir="models/image", image_data_dir="data/image",
+            image_workflows_dir="workflows/image",
+            comfyui_endpoint="http://127.0.0.1:8188",
+            invokeai_endpoint="http://127.0.0.1:9",
+            comfyui_auto_start=False, image_resource_mode="balanced",
+            image_auto_run_jobs=False)
+        _stub_comfy(root)
+        manager = ImageManager(base_dir=root, models=[profile], config=config,
+                               workspace=root / "workspace")
+        manager.backend = SimpleNamespace(health=lambda: (False, "down"))
+        return manager
+
+    def test_insufficient_vram_fails_before_backend_start(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td), estimated_vram_gb=10.0)
+            ensure_calls: list = []
+            manager.backend_runtime.ensure_ready = lambda: ensure_calls.append(1)
+            hw = SimpleNamespace(free_vram_gb=3.0, available_ram_gb=64.0)
+            releases = {"vram": 0, "ram": 0}
+            manager.runtime = SimpleNamespace(
+                hardware=hw, refresh_hardware=lambda: None,
+                release_managed_models_for_vram=lambda **kw: releases.__setitem__("vram", releases["vram"] + 1) or [],
+                release_managed_models_for_ram=lambda **kw: releases.__setitem__("ram", releases["ram"] + 1) or [],
+                restore_managed_models=lambda s: None)
+            job = manager.create_job(ImageRequest(prompt="a cat"))
+            manager._run_job(job.id)
+            finished = manager.get_job(job.id)
+            self.assertEqual(finished.state, "failed")
+            self.assertEqual(finished.error_code, "insufficient_resources")
+            self.assertIn("insufficient VRAM", finished.error_message)
+            self.assertEqual(releases["vram"], 1)
+            self.assertEqual(ensure_calls, [])
+
+    def test_insufficient_ram_fails_before_backend_start(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td), estimated_ram_gb=30.0)
+            ensure_calls: list = []
+            manager.backend_runtime.ensure_ready = lambda: ensure_calls.append(1)
+            hw = SimpleNamespace(free_vram_gb=12.0, available_ram_gb=10.0)
+            manager.runtime = SimpleNamespace(
+                hardware=hw, refresh_hardware=lambda: None,
+                release_managed_models_for_vram=lambda **kw: [],
+                release_managed_models_for_ram=lambda **kw: [],
+                restore_managed_models=lambda s: None)
+            job = manager.create_job(ImageRequest(prompt="a cat"))
+            manager._run_job(job.id)
+            finished = manager.get_job(job.id)
+            self.assertEqual(finished.state, "failed")
+            self.assertEqual(finished.error_code, "insufficient_resources")
+            self.assertIn("insufficient RAM", finished.error_message)
+            self.assertEqual(ensure_calls, [])
+
+    def test_job_proceeds_when_eviction_frees_enough(self):
+        # Managed LLM eviction actually frees the VRAM → admission passes
+        # and the backend start is attempted (which then fails only
+        # because the stubbed ComfyUI is offline).
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td), estimated_vram_gb=10.0)
+            ensure_calls: list = []
+            manager.backend_runtime.ensure_ready = (
+                lambda: ensure_calls.append(1)
+                or (_ for _ in ()).throw(RuntimeError("backend offline")))
+            hw = SimpleNamespace(free_vram_gb=3.0, available_ram_gb=64.0)
+
+            def _release(**kw):
+                hw.free_vram_gb = 12.0
+                return ["chat"]
+
+            manager.runtime = SimpleNamespace(
+                hardware=hw, refresh_hardware=lambda: None,
+                release_managed_models_for_vram=_release,
+                release_managed_models_for_ram=lambda **kw: [],
+                restore_managed_models=lambda s: None)
+            job = manager.create_job(ImageRequest(prompt="a cat"))
+            manager._run_job(job.id)
+            finished = manager.get_job(job.id)
+            self.assertEqual(finished.state, "failed")
+            self.assertEqual(ensure_calls, [1])
+            self.assertEqual(finished.error_code, "backend_offline")
+            self.assertNotEqual(finished.error_code, "insufficient_resources")
 
 
 class MultiPromptToolTests(unittest.TestCase):

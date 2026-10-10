@@ -1162,6 +1162,37 @@ class RuntimeManager:
         except Exception:
             pass
 
+    def _adopt_orphans_for_pressure(self) -> None:
+        """Adopt surviving llama-server orphans so pressure eviction sees them.
+
+        A backend restart leaves previously-launched servers running but
+        absent from ``_managed`` — invisible to ``resident_model_ids()``
+        until a request happens to adopt them. On a saturated card that
+        blind spot means the image arbiter finds nothing to evict and the
+        job proceeds into an OOM. Sweep only runs when memory is already
+        short, so the per-port health probes never sit on a hot path.
+        """
+        for profile in self.config.models:
+            if getattr(profile, "runtime", "") != "llama_cpp":
+                continue
+            with self._lock:
+                item = self._managed.get(profile.id)
+                if item is not None and item.process.poll() is None:
+                    continue
+                endpoint = self._profile_endpoint(profile)
+                port = int(getattr(profile, "port", 0) or 0)
+            if port <= 0:
+                try:
+                    port = int(urlsplit(endpoint).port or 0)
+                except Exception:
+                    port = 0
+            if not port:
+                continue
+            try:
+                self._adopt_healthy_orphan(profile, port, endpoint, None)
+            except Exception:
+                pass
+
     def release_managed_models_for_vram(self, *, required_vram_gb: float, mode: str = "balanced",
                                         busy_models: set[str] | None = None) -> list[str]:
         """Stop managed LLM runtimes when an image job needs GPU memory.
@@ -1173,6 +1204,12 @@ class RuntimeManager:
         with self._lock:
             self.refresh_hardware()
             if required_vram_gb <= 0 or self.hardware.free_vram_gb >= required_vram_gb:
+                return []
+            # Claim restart-orphaned servers before deciding what to evict —
+            # they hold VRAM but are not yet in _managed.
+            self._adopt_orphans_for_pressure()
+            self.refresh_hardware()
+            if self.hardware.free_vram_gb >= required_vram_gb:
                 return []
             profiles = {m.id: m for m in self.config.models}
             resident = [mid for mid in self.resident_model_ids() if mid not in busy]
@@ -1211,6 +1248,10 @@ class RuntimeManager:
         with self._lock:
             self.refresh_hardware()
             if required_ram_gb <= 0 or self.hardware.available_ram_gb >= required_ram_gb:
+                return []
+            self._adopt_orphans_for_pressure()
+            self.refresh_hardware()
+            if self.hardware.available_ram_gb >= required_ram_gb:
                 return []
             profiles = {m.id: m for m in self.config.models}
             resident = [mid for mid in self.resident_model_ids() if mid not in busy]
