@@ -43,7 +43,7 @@ class Localizer:
         return subprocess.run(
             ["git", "-C", str(self.repo_root), *args],
             capture_output=True, text=True, timeout=15,
-            creationflags=no_window_flags())
+            creationflags=no_window_flags(), encoding="utf-8", errors="replace")
 
     def _in_repo(self, path: str) -> str:
         """Map a traceback path to a repo-relative path, or ''.

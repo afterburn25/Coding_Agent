@@ -2759,7 +2759,7 @@ class AppState:
                 return subprocess.run(
                     ["git", "-C", str(self.workspace), *args],
                     capture_output=True, text=True, timeout=120,
-                    creationflags=no_window_flags())
+                    creationflags=no_window_flags(), encoding="utf-8", errors="replace")
             try:
                 head = git("rev-parse", "--abbrev-ref", "HEAD")
                 if head.returncode != 0 or head.stdout.strip() != "main":
@@ -3429,7 +3429,7 @@ class AppState:
             try:
                 head = _sp.run(
                     ["git", "rev-parse", "HEAD"], cwd=str(self.workspace),
-                    capture_output=True, text=True, timeout=10)
+                    capture_output=True, text=True, timeout=10, encoding="utf-8", errors="replace")
                 head_sha = head.stdout.strip() if head.returncode == 0 else ""
             except Exception:
                 head_sha = ""
@@ -5381,7 +5381,7 @@ class AppState:
             def check() -> dict:
                 if shutil.which(executable):
                     try:
-                        proc = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=10, creationflags=no_window_flags())
+                        proc = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=10, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
                         version = (proc.stdout or proc.stderr or "").strip().splitlines()[0] if (proc.stdout or proc.stderr) else "ok"
                     except Exception:
                         version = "ok"
@@ -7165,7 +7165,7 @@ class AppState:
             import subprocess
             self.jobs.update(job.id, state="running", detail=" ".join(cmd[:3]))
             try:
-                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, creationflags=no_window_flags())
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
                 if proc.returncode == 0:
                     self.jobs.update(job.id, state="completed", detail=(proc.stdout or "")[-300:])
                 else:
@@ -7235,7 +7235,7 @@ class AppState:
                     out = subprocess.run(
                         probe_args + ["-c", "import sys; print(sys.executable)"],
                         capture_output=True, text=True, timeout=30,
-                        creationflags=no_window_flags())
+                        creationflags=no_window_flags(), encoding="utf-8", errors="replace")
                     exe = (out.stdout or "").strip()
                     if exe and Path(exe).is_file():
                         return exe
@@ -7253,7 +7253,7 @@ class AppState:
                                  detail=f"creating virtualenv at {root} (python: {py})")
                 proc = subprocess.run([py, "-m", "venv", str(root)],
                                       capture_output=True, text=True, timeout=600,
-                                      creationflags=no_window_flags())
+                                      creationflags=no_window_flags(), encoding="utf-8", errors="replace")
                 if proc.returncode != 0:
                     self.jobs.update(job.id, state="failed",
                                      error=(proc.stderr or "venv creation failed")[-300:])
@@ -7262,7 +7262,7 @@ class AppState:
                 proc = subprocess.run(
                     [str(pip), "install"] + pip_args + [package],
                     capture_output=True, text=True, timeout=7200,
-                    creationflags=no_window_flags())
+                    creationflags=no_window_flags(), encoding="utf-8", errors="replace")
                 if proc.returncode == 0:
                     self.jobs.update(job.id, state="completed",
                                      detail=(proc.stdout or "")[-300:])
@@ -7383,7 +7383,7 @@ class AppState:
             self.jobs.update(job.id, state="running", status="removing",
                              detail=" ".join(cmd[:3]))
             try:
-                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, creationflags=no_window_flags())
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
                 if proc.returncode == 0:
                     self.jobs.update(job.id, state="completed", status="finished",
                                      progress=1.0, detail=(proc.stdout or "")[-300:])
@@ -10562,7 +10562,7 @@ class Handler(BaseHTTPRequestHandler):
                     argv.append(rel)
                 try:
                     proc = _sp.run(argv, capture_output=True, text=True,
-                                   timeout=30)
+                                   timeout=30, encoding="utf-8", errors="replace")
                     self._json({"diff": (proc.stdout or "")[-60000:],
                                 "error": (proc.stderr or "")[-2000:],
                                 "exit_code": proc.returncode})
@@ -12884,7 +12884,7 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         proc = _sp.run(cmd, cwd=str(cwd), shell=True,
                                        capture_output=True, text=True,
-                                       timeout=timeout, creationflags=flags)
+                                       timeout=timeout, creationflags=flags, encoding="utf-8", errors="replace")
                         self._json({
                             "exit_code": proc.returncode,
                             "stdout": (proc.stdout or "")[-60000:],

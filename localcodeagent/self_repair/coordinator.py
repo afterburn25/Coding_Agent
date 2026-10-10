@@ -572,7 +572,7 @@ class SelfRepairCoordinator:
         try:
             diff = __import__("subprocess").run(
                 ["git", "-C", str(wt), "diff", "HEAD"],
-                capture_output=True, text=True, timeout=20).stdout
+                capture_output=True, text=True, timeout=20, encoding="utf-8", errors="replace").stdout
         except Exception:
             pass
         if self.reviewer is not self._default_review or not diff:

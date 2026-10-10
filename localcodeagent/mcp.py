@@ -125,7 +125,7 @@ class MCPClient:
                 env=env,
                 cwd=cwd,
                 creationflags=flags,
-            )
+                encoding="utf-8", errors="replace")
         except OSError as exc:
             self._proc = None
             raise MCPError(f"failed to launch MCP server '{self.config.id}': {exc}") from exc

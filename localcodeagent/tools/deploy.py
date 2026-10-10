@@ -23,7 +23,7 @@ from .base import ToolRegistry, ToolSpec
 def _git(root: Path, *argv: str, timeout: int = 120) -> tuple[int, str]:
     proc = subprocess.run(["git", *argv], cwd=str(root), text=True,
                           capture_output=True, timeout=timeout,
-                          creationflags=no_window_flags())
+                          creationflags=no_window_flags(), encoding="utf-8", errors="replace")
     return proc.returncode, (proc.stdout + proc.stderr).strip()
 
 
@@ -227,7 +227,7 @@ def register_deploy_tools(registry: ToolRegistry, workspace: Path, *,
         try:
             proc = subprocess.run(cmd, cwd=str(probe), capture_output=True,
                                   text=True, timeout=180,
-                                  creationflags=no_window_flags())
+                                  creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         except subprocess.TimeoutExpired:
             return json.dumps({"error": "gh release create timed out"})
         if proc.returncode:

@@ -108,7 +108,7 @@ def _resolve_lnk(path: Path, timeout_s: float = 8.0) -> str:
         r = subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps],
             capture_output=True, text=True, timeout=timeout_s,
-            creationflags=no_window_flags())
+            creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         target = (r.stdout or "").strip().splitlines()
         return target[0].strip() if target else ""
     except Exception:
@@ -209,7 +209,7 @@ def find_processes(image_or_path: str, *, timeout_s: float = 15.0
             ["tasklist", "/FO", "CSV", "/NH", "/FI",
              f"IMAGENAME eq {name}"],
             capture_output=True, text=True, timeout=timeout_s,
-            creationflags=no_window_flags())
+            creationflags=no_window_flags(), encoding="utf-8", errors="replace")
     except Exception:
         return []
     out = []

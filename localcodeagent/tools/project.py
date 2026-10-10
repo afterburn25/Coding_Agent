@@ -26,7 +26,7 @@ def _run_step(root: Path, cmd: str, timeout: int = 600) -> dict:
     try:
         proc = subprocess.run(cmd, cwd=str(root), shell=True, text=True,
                               capture_output=True, timeout=timeout,
-                              creationflags=no_window_flags())
+                              creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         return {"command": cmd, "exit_code": proc.returncode,
                 "tail": ((proc.stdout or "") + "\n" + (proc.stderr or ""))
                 .strip()[-MAX_OUT:],

@@ -88,7 +88,7 @@ class InvokeAIBackend(ImageBackend):
     display_name = "InvokeAI"
 
     def __init__(self, endpoint: str = "http://127.0.0.1:9090",
-                 *, timeout: float = 4.0) -> None:
+                 *, timeout: float = 15.0) -> None:
         self.endpoint = endpoint.rstrip("/")
         self.timeout = timeout
         self.client_id = str(uuid.uuid4())

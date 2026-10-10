@@ -6,6 +6,11 @@ desktop shell. Any console-subsystem child spawned without
 installs, git probes, ``nvidia-smi``, version checks. Pass
 :func:`no_window_flags` as ``creationflags`` everywhere so helper
 processes stay hidden. The flag is a no-op on POSIX.
+
+Text-mode captures must also pass ``encoding="utf-8", errors="replace"``.
+The Windows default (cp1252) crashes the stdlib ``_readerthread`` on any
+UTF-8 byte it cannot map — e.g. winget's progress output — killing the
+read and silently losing all captured output.
 """
 from __future__ import annotations
 

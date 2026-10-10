@@ -36,7 +36,7 @@ def _run_ps(script: str, timeout_s: float = 20.0) -> dict[str, Any]:
             ["powershell", "-NoProfile", "-NonInteractive",
              "-ExecutionPolicy", "Bypass", "-Command", script],
             capture_output=True, text=True, timeout=timeout_s,
-            creationflags=no_window_flags())
+            creationflags=no_window_flags(), encoding="utf-8", errors="replace")
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "UIA query timed out"}
     except Exception as exc:  # noqa: BLE001 — report, never raise

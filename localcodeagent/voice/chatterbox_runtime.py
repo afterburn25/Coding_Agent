@@ -100,7 +100,7 @@ def _run(py: Path, args: list[str], timeout: float) -> subprocess.CompletedProce
         [str(py), "-u", *args], capture_output=True, text=True,
         timeout=timeout,
         creationflags=(subprocess.CREATE_NO_WINDOW
-                       if os.name == "nt" else 0))
+                       if os.name == "nt" else 0), encoding="utf-8", errors="replace")
 
 
 def _packages_ok(py: Path) -> tuple[bool, str]:

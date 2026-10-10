@@ -14,7 +14,7 @@ WORKTREE_ROOT = ".agent/worktrees"
 def _run(workspace: Path, argv: list[str], timeout: int = 60) -> tuple[int, str]:
     proc = subprocess.run(["git", *argv], cwd=workspace, text=True,
                           capture_output=True, timeout=timeout,
-                          creationflags=no_window_flags())
+                          creationflags=no_window_flags(), encoding="utf-8", errors="replace")
     # rstrip only — leading whitespace is meaningful in porcelain output
     # (" M file" marks unstaged modification).
     return proc.returncode, (proc.stdout + proc.stderr).rstrip()
@@ -65,7 +65,7 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
         root = _root_for(args)
         proc = subprocess.run(["git", "status", "--short", "--branch"],
                               cwd=root, text=True, capture_output=True,
-                              creationflags=no_window_flags())
+                              creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         return proc.stdout.strip() or proc.stderr.strip() or "(clean)"
 
     def git_diff(args: dict) -> str:
@@ -74,7 +74,7 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
             cmd.append("--staged")
         proc = subprocess.run(cmd, cwd=_root_for(args), text=True,
                               capture_output=True,
-                              creationflags=no_window_flags())
+                              creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         return (proc.stdout + proc.stderr)[-30000:] or "no diff"
 
     def _worktree_path(raw: str) -> Path | None:

@@ -377,6 +377,112 @@ class RuntimeManagerTests(unittest.TestCase):
                 required_vram_gb=4.0, busy_models={"serving", "idle"})
             self.assertEqual(stopped2, [])
 
+    def test_pressure_sweep_adopts_orphan_then_evicts(self):
+        # A llama-server surviving a backend restart is absent from
+        # _managed — invisible to resident_model_ids(). The pressure sweep
+        # adopts it so VRAM eviction can see and stop it (the live
+        # cudaErrorUnknown incident had exactly this blind spot).
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "victim.gguf").write_bytes(b"GGUF")
+            victim = self._profile(
+                id="victim", model_path="models/victim.gguf",
+                executable=str(root / "llama-server"), port=8081)
+            _write_fake_exe(root / "llama-server")
+            manager = RuntimeManager(AgentConfig(models=[victim]), base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=2048, used_vram_mb=10240)])
+            adopted: list[tuple[str, int]] = []
+
+            def _fake_adopt(profile, port, endpoint, ctx_override):
+                adopted.append((profile.id, port))
+                _attach_fake_managed(manager, profile)
+                return True
+
+            manager._adopt_healthy_orphan = _fake_adopt
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(adopted, [("victim", 8081)])
+            self.assertEqual(stopped, ["victim"])
+            self.assertEqual(manager.resident_model_ids(), [])
+
+    def test_pressure_sweep_uses_endpoint_port_when_profile_port_unset(self):
+        # Profiles can leave .port=0 with the bind port living in the
+        # endpoint URL — the sweep must still locate the orphan.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "victim.gguf").write_bytes(b"GGUF")
+            victim = self._profile(
+                id="victim", model_path="models/victim.gguf",
+                executable=str(root / "llama-server"),
+                endpoint="http://127.0.0.1:8099/v1", port=0)
+            _write_fake_exe(root / "llama-server")
+            manager = RuntimeManager(AgentConfig(models=[victim]), base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=2048, used_vram_mb=10240)])
+            adopted: list[tuple[str, int]] = []
+            manager._adopt_healthy_orphan = (
+                lambda profile, port, endpoint, ctx: adopted.append((profile.id, port)) or False)
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(adopted, [("victim", 8099)])
+            # Adoption refused (nothing to claim) → nothing to evict.
+            self.assertEqual(stopped, [])
+
+    def test_pressure_sweep_skipped_when_vram_sufficient(self):
+        # The sweep only runs under pressure — per-port health probes must
+        # never sit on a hot path when memory already fits.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "victim.gguf").write_bytes(b"GGUF")
+            victim = self._profile(
+                id="victim", model_path="models/victim.gguf",
+                executable=str(root / "llama-server"), port=8081)
+            _write_fake_exe(root / "llama-server")
+            manager = RuntimeManager(AgentConfig(models=[victim]), base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=12288, used_vram_mb=0)])
+            calls: list = []
+            manager._adopt_healthy_orphan = lambda *a: calls.append(a)
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(stopped, [])
+            self.assertEqual(calls, [])
+
+    def test_pressure_sweep_skipped_when_ram_sufficient(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "victim.gguf").write_bytes(b"GGUF")
+            victim = self._profile(
+                id="victim", model_path="models/victim.gguf",
+                executable=str(root / "llama-server"), port=8081)
+            _write_fake_exe(root / "llama-server")
+            manager = RuntimeManager(AgentConfig(models=[victim]), base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=2048, used_vram_mb=10240)])
+            calls: list = []
+            manager._adopt_healthy_orphan = lambda *a: calls.append(a)
+            stopped = manager.release_managed_models_for_ram(required_ram_gb=20.0)
+            self.assertEqual(stopped, [])
+            self.assertEqual(calls, [])
+
     def test_fresh_hardware_reprobes_stale_snapshot(self):
         # Regression: budget auto-resume read runtime.hardware — a cached
         # snapshot taken during a RAM dip stayed stale forever when nothing

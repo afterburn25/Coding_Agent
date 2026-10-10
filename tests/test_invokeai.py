@@ -635,15 +635,20 @@ class SweptStateRecoveryTests(unittest.TestCase):
         # free → arbitration parks the managed peer before submitting.
         with tempfile.TemporaryDirectory() as td:
             m, job, calls = self._job_manager(td, [{"state": "finished"}])
+            hw = SimpleNamespace(free_vram_gb=3.0, available_ram_gb=64.0)
+
+            def _evict():
+                hw.free_vram_gb = 12.0  # parking ComfyUI actually frees VRAM
+                return True
+
             evictions = {"n": 0}
             m.backend_runtime = SimpleNamespace(
                 probe=lambda: {"healthy": True},
-                evict_if_managed=lambda: evictions.__setitem__("n", evictions["n"] + 1) or True)
+                evict_if_managed=lambda: evictions.__setitem__("n", evictions["n"] + 1) or _evict())
             m.router.get_profile = lambda mid: ImageModelProfile(
                 id="invokeai:m1", family="sdxl", backend="invokeai",
                 capabilities=["text_to_image"], workflows={},
                 estimated_vram_gb=8.0, estimated_ram_gb=4.0)
-            hw = SimpleNamespace(free_vram_gb=3.0, available_ram_gb=64.0)
             m.runtime = SimpleNamespace(
                 hardware=hw, refresh_hardware=lambda: None,
                 release_managed_models_for_vram=lambda **kw: [],
@@ -657,7 +662,9 @@ class SweptStateRecoveryTests(unittest.TestCase):
 
     def test_external_peer_never_evicted(self):
         # A user-owned external ComfyUI (evict_if_managed → False) is
-        # never killed — the job just proceeds under pressure.
+        # never killed — and with VRAM still short the job now fails fast
+        # instead of submitting into a card that cannot fit it (the old
+        # proceed-and-hope path ended in cudaErrorUnknown at VAEDecode).
         with tempfile.TemporaryDirectory() as td:
             m, job, calls = self._job_manager(td, [{"state": "finished"}])
             evictions = {"n": 0}
@@ -675,10 +682,39 @@ class SweptStateRecoveryTests(unittest.TestCase):
                 release_managed_models_for_ram=lambda **kw: None,
                 restore_managed_models=lambda s: None)
             m._run_invokeai_job(job)
-            self.assertEqual(job.state, "finished")
+            self.assertEqual(job.state, "failed")
+            self.assertEqual(job.error_code, "insufficient_resources")
+            self.assertIn("insufficient VRAM", job.error_message)
+            self.assertEqual(calls["submit"], 0)
+            self.assertEqual(calls["ensure"], 0)
             self.assertEqual(evictions["n"], 1)
             self.assertFalse(any("resource arbitration" in r
                                  for r in job.routing_reasons))
+
+    def test_insufficient_vram_fails_fast_without_evictable_models(self):
+        # Nothing to evict and the card cannot fit the estimate → the job
+        # dies at admission with an honest error, not mid-decode.
+        with tempfile.TemporaryDirectory() as td:
+            m, job, calls = self._job_manager(td, [{"state": "finished"}])
+            m.router.get_profile = lambda mid: ImageModelProfile(
+                id="invokeai:m1", family="sdxl", backend="invokeai",
+                capabilities=["text_to_image"], workflows={},
+                estimated_vram_gb=10.0, estimated_ram_gb=0.0)
+            hw = SimpleNamespace(free_vram_gb=2.0, available_ram_gb=64.0)
+            releases = {"n": 0}
+            m.runtime = SimpleNamespace(
+                hardware=hw, refresh_hardware=lambda: None,
+                release_managed_models_for_vram=lambda **kw: releases.__setitem__("n", releases["n"] + 1) or [],
+                release_managed_models_for_ram=lambda **kw: None,
+                restore_managed_models=lambda s: None)
+            m.backend_runtime = SimpleNamespace(probe=lambda: {"healthy": False})
+            m._run_invokeai_job(job)
+            self.assertEqual(job.state, "failed")
+            self.assertEqual(job.error_code, "insufficient_resources")
+            self.assertIn("no managed models to evict", job.error_message)
+            self.assertEqual(releases["n"], 1)
+            self.assertEqual(calls["submit"], 0)
+            self.assertEqual(calls["ensure"], 0)
 
 
 class ClassificationTests(unittest.TestCase):

@@ -238,7 +238,7 @@ class ComputerUse:
                 from ..procutil import no_window_flags
                 r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
                                    capture_output=True, text=True, timeout=30,
-                                   creationflags=no_window_flags())
+                                   creationflags=no_window_flags(), encoding="utf-8", errors="replace")
             except Exception as exc:
                 return self._fail(record, f"powershell capture: {exc}")
             if out_path.is_file() and out_path.stat().st_size > 0:

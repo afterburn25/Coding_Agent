@@ -100,7 +100,7 @@ def _git(repo: Path, *args: str) -> tuple[int, str]:
     from ..procutil import no_window_flags
     out = subprocess.run(["git", "-C", str(repo), *args],
                          capture_output=True, text=True, timeout=120,
-                         creationflags=no_window_flags())
+                         creationflags=no_window_flags(), encoding="utf-8", errors="replace")
     return out.returncode, (out.stdout + out.stderr).strip()
 
 

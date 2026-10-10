@@ -23,6 +23,14 @@ def describe_image_error(exc: BaseException) -> dict[str, Any]:
         out["diagnostic"] = exc.diagnostic()
         return out
 
+    if any(x in low for x in ("insufficient vram", "insufficient ram")):
+        return result("insufficient_resources", raw[:360])
+    if any(x in low for x in ("cudaerrorunknown", "cuda error: unknown error",
+                              "cuda error: unknown")):
+        # WDDM surfaces device-allocation failure as cudaErrorUnknown when
+        # VRAM is exhausted and the driver cannot page to system RAM —
+        # observed live at VAEDecode with two LLMs resident on a 12 GB card.
+        return result("cuda_out_of_memory", "The GPU hit a memory fault while processing this image — usually VRAM exhaustion when another model is resident. Nexus will retry after freeing memory, or try a smaller model/resolution.")
     if any(x in low for x in ("cuda out of memory", "outofmemoryerror", "cudnn_status_alloc_failed", "hip out of memory")):
         return result("cuda_out_of_memory", "The GPU ran out of memory while processing this image. Try a lower resolution, fewer images, a smaller/quantized model, or a more aggressive VRAM cleanup mode.")
     if any(x in low for x in ("hostbuffer", "read_file_slice", "cannot allocate memory", "memoryerror", "bad alloc")):

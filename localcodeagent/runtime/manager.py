@@ -781,7 +781,7 @@ class RuntimeManager:
                 out = subprocess.run(
                     ["netstat", "-ano", "-p", "tcp"],
                     capture_output=True, text=True, timeout=15,
-                ).stdout
+                encoding="utf-8", errors="replace").stdout
                 for line in out.splitlines():
                     parts = line.split()
                     if (len(parts) >= 5 and parts[0].upper() == "TCP"
@@ -792,7 +792,7 @@ class RuntimeManager:
                 out = subprocess.run(
                     ["lsof", "-nP", "-ti", f":{port}", "-sTCP:LISTEN"],
                     capture_output=True, text=True, timeout=15,
-                ).stdout
+                encoding="utf-8", errors="replace").stdout
                 for line in out.splitlines():
                     if line.strip().isdigit():
                         pids.add(int(line.strip()))
@@ -866,7 +866,7 @@ class RuntimeManager:
                      "\"Name like 'llama%'\" | Select-Object ProcessId,"
                      "ExecutablePath,CommandLine | ConvertTo-Json -Compress"],
                     capture_output=True, text=True, timeout=30,
-                    creationflags=no_window_flags())
+                    creationflags=no_window_flags(), encoding="utf-8", errors="replace")
                 rows = json.loads(ps.stdout.strip() or "[]")
                 if isinstance(rows, dict):
                     rows = [rows]
@@ -999,7 +999,7 @@ class RuntimeManager:
                     ["netstat", "-ano", "-p", "tcp"],
                     capture_output=True, text=True, timeout=15,
                     creationflags=no_window_flags(),
-                ).stdout
+                encoding="utf-8", errors="replace").stdout
                 for line in out.splitlines():
                     parts = line.split()
                     if (len(parts) >= 5 and parts[0].upper() == "TCP"
@@ -1010,7 +1010,7 @@ class RuntimeManager:
                 out = subprocess.run(
                     ["lsof", "-nP", "-ti", f":{port}", "-sTCP:LISTEN"],
                     capture_output=True, text=True, timeout=15,
-                ).stdout
+                encoding="utf-8", errors="replace").stdout
                 for line in out.splitlines():
                     if line.strip().isdigit():
                         pids.add(int(line.strip()))
@@ -1027,7 +1027,7 @@ class RuntimeManager:
                     ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
                     capture_output=True, text=True, timeout=10,
                     creationflags=no_window_flags(),
-                ).stdout.strip()
+                encoding="utf-8", errors="replace").stdout.strip()
                 if out.startswith('"'):
                     return out.split('","')[0].strip('"')
             else:
@@ -1127,7 +1127,7 @@ class RuntimeManager:
                     ["powershell", "-NoProfile", "-Command",
                      f"(Get-Process -Id {pid}).WorkingSet64"],
                     capture_output=True, text=True, timeout=5,
-                    creationflags=no_window_flags())
+                    creationflags=no_window_flags(), encoding="utf-8", errors="replace")
                 if r.returncode == 0 and r.stdout.strip().isdigit():
                     out["ram_used_gb"] = round(int(r.stdout.strip()) / 1e9, 2)
             else:
@@ -1142,7 +1142,7 @@ class RuntimeManager:
                 ["nvidia-smi", "--query-compute-apps=pid,used_memory",
                  "--format=csv,noheader,nounits"],
                 capture_output=True, text=True, timeout=5,
-                creationflags=no_window_flags())
+                creationflags=no_window_flags(), encoding="utf-8", errors="replace")
             if r.returncode == 0:
                 for line in r.stdout.splitlines():
                     parts = [p.strip() for p in line.split(",")]
@@ -1162,6 +1162,37 @@ class RuntimeManager:
         except Exception:
             pass
 
+    def _adopt_orphans_for_pressure(self) -> None:
+        """Adopt surviving llama-server orphans so pressure eviction sees them.
+
+        A backend restart leaves previously-launched servers running but
+        absent from ``_managed`` — invisible to ``resident_model_ids()``
+        until a request happens to adopt them. On a saturated card that
+        blind spot means the image arbiter finds nothing to evict and the
+        job proceeds into an OOM. Sweep only runs when memory is already
+        short, so the per-port health probes never sit on a hot path.
+        """
+        for profile in self.config.models:
+            if getattr(profile, "runtime", "") != "llama_cpp":
+                continue
+            with self._lock:
+                item = self._managed.get(profile.id)
+                if item is not None and item.process.poll() is None:
+                    continue
+                endpoint = self._profile_endpoint(profile)
+                port = int(getattr(profile, "port", 0) or 0)
+            if port <= 0:
+                try:
+                    port = int(urlsplit(endpoint).port or 0)
+                except Exception:
+                    port = 0
+            if not port:
+                continue
+            try:
+                self._adopt_healthy_orphan(profile, port, endpoint, None)
+            except Exception:
+                pass
+
     def release_managed_models_for_vram(self, *, required_vram_gb: float, mode: str = "balanced",
                                         busy_models: set[str] | None = None) -> list[str]:
         """Stop managed LLM runtimes when an image job needs GPU memory.
@@ -1173,6 +1204,12 @@ class RuntimeManager:
         with self._lock:
             self.refresh_hardware()
             if required_vram_gb <= 0 or self.hardware.free_vram_gb >= required_vram_gb:
+                return []
+            # Claim restart-orphaned servers before deciding what to evict —
+            # they hold VRAM but are not yet in _managed.
+            self._adopt_orphans_for_pressure()
+            self.refresh_hardware()
+            if self.hardware.free_vram_gb >= required_vram_gb:
                 return []
             profiles = {m.id: m for m in self.config.models}
             resident = [mid for mid in self.resident_model_ids() if mid not in busy]
@@ -1211,6 +1248,10 @@ class RuntimeManager:
         with self._lock:
             self.refresh_hardware()
             if required_ram_gb <= 0 or self.hardware.available_ram_gb >= required_ram_gb:
+                return []
+            self._adopt_orphans_for_pressure()
+            self.refresh_hardware()
+            if self.hardware.available_ram_gb >= required_ram_gb:
                 return []
             profiles = {m.id: m for m in self.config.models}
             resident = [mid for mid in self.resident_model_ids() if mid not in busy]
@@ -1589,7 +1630,7 @@ class RuntimeManager:
                 stderr=subprocess.STDOUT,
                 text=True,
                 creationflags=creationflags,
-            )
+                encoding="utf-8", errors="replace")
         except OSError as exc:
             try:
                 log_handle.close()
@@ -1755,7 +1796,7 @@ class RuntimeManager:
             stderr=subprocess.STDOUT,
             text=True,
             creationflags=creationflags,
-        )
+            encoding="utf-8", errors="replace")
         # The probe MUST use its own port — _profile_endpoint would return the
         # profile's configured endpoint, silently measuring a resident server
         # (or polling a dead port) instead of the candidate under test.

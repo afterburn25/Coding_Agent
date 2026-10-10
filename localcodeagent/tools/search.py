@@ -36,7 +36,7 @@ def _run_rg(workspace: Path, argv: list[str]) -> tuple[list[str], int]:
     if not rg:
         return [], -1
     try:
-        proc = subprocess.run([rg, *argv], cwd=str(workspace), capture_output=True, text=True, timeout=60, creationflags=no_window_flags())
+        proc = subprocess.run([rg, *argv], cwd=str(workspace), capture_output=True, text=True, timeout=60, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired):
         return [], -1
     return proc.stdout.splitlines(), proc.returncode

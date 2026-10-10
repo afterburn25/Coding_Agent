@@ -131,7 +131,7 @@ class ComfyUIRuntime:
                      f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
                     capture_output=True, text=True, timeout=10,
                     creationflags=no_window_flags(),
-                ).stdout
+                encoding="utf-8", errors="replace").stdout
             else:
                 raw = Path(f"/proc/{pid}/cmdline").read_bytes()
                 out = raw.replace(b"\0", b" ").decode("utf-8", "replace")
@@ -225,7 +225,7 @@ class ComfyUIRuntime:
         flags = 0
         if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
             flags = subprocess.CREATE_NO_WINDOW
-        self._process = subprocess.Popen(cmd, cwd=str(cwd), stdout=self._log_handle, stderr=subprocess.STDOUT, text=True, creationflags=flags)
+        self._process = subprocess.Popen(cmd, cwd=str(cwd), stdout=self._log_handle, stderr=subprocess.STDOUT, text=True, creationflags=flags, encoding="utf-8", errors="replace")
         try:
             # Marker lets a restarted backend recognize this process as our
             # orphan (exe path ties the pid to this install's ComfyUI).
