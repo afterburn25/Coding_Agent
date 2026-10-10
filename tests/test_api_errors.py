@@ -139,6 +139,46 @@ class TestApiErrors(unittest.TestCase):
             self.state.agent.run = orig_run
             self.state.runtime.readiness = orig_ready
 
+    def test_statement_cadence_does_not_create_standing_goal(self):
+        # BUG-027 — "the review cadence is weekly" is a statement, not a
+        # scheduling imperative. Autonomy triggers must come from the
+        # user's own request-shaped words, not substring matches.
+        goals = self.state.autonomy.store.standing_goals.data["goals"]
+        before = len(goals)
+        try:
+            code, raw = self._post(
+                "/api/chat",
+                {"message": "the review cadence is weekly — also, "
+                            "what is a hash map?"})
+            payload = json.loads(raw)
+            self.assertNotIn("Standing goal",
+                             str(payload.get("content") or ""))
+            self.assertEqual(len(goals), before)
+        finally:
+            del goals[before:]
+
+    def test_reported_intent_does_not_create_mission(self):
+        # BUG-027 tail — "she told me to keep working on this" reports
+        # someone else's request; the embedded imperative phrase must
+        # not spawn a mission. Mission creation is reserved for
+        # phrases that lead the user's own clause.
+        store = self.state.autonomy.store
+        missions = getattr(store, "missions", None)
+        rows = missions.data.get("missions", []) if missions else []
+        before = len(rows)
+        try:
+            code, raw = self._post(
+                "/api/chat",
+                {"message": "she told me to keep working on this"})
+            payload = json.loads(raw)
+            self.assertNotIn("Mission created",
+                             str(payload.get("content") or ""))
+            if missions:
+                self.assertEqual(len(rows), before)
+        finally:
+            if missions:
+                del rows[before:]
+
     def test_patch_outside_profiles_is_405(self):
         code, raw = self._raw("/api/decisions", b"{}", method="PATCH")
         self.assertEqual(code, 405)

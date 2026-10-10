@@ -409,6 +409,22 @@ class _AgentSession:
 # the notices appended below.
 UNVERIFIED_CLAIMS_MARKER = "Unverified action claims"
 
+# The notice below is UI furniture appended by the truth gate — but it
+# sits verbatim in stored assistant history, so small models learn to
+# parrot "reply ✅ + ⚠ Unverified action claims" as part of their own
+# voice. Strip it wherever content becomes model-facing or gets stored:
+# in injected history, and in fresh model output before the real scan.
+_UNVERIFIED_NOTICE_RE = re.compile(
+    r"\n{1,3}⚠\s*\*\*" + re.escape(UNVERIFIED_CLAIMS_MARKER)
+    + r"\*\*[^\n]*")
+
+
+def _strip_unverified_notice(text: str) -> str:
+    """Remove a truth-gate annotation block from content that is about
+    to be shown to a model or persisted as clean output. A genuinely
+    appended notice is always trailing; a parroted one may sit anywhere
+    — both are furniture, never semantic content."""
+    return _UNVERIFIED_NOTICE_RE.sub("", str(text or "")).rstrip()
 
 
 # Shared surface renderer for deterministic/builtin replies — the
@@ -2525,8 +2541,12 @@ class AgentOrchestrator:
         text = str(row.get("text", "")).strip().rstrip(".")
         if str(row.get("slot") or "").startswith("my:"):
             return AgentOrchestrator._second_person_fact(text)
+        # Prohibitions/imperatives stored as facts ("never use port
+        # 3000") aren't noun phrases — a definite article garbles them
+        # ("the never use port 3000").
         if not text[:1].isupper() and not re.match(
-                r"^(?:the|a|an|my|your|our)\b", text, re.IGNORECASE):
+                r"^(?:the|a|an|my|your|our|never|don'?t|do not|stop|avoid|always)\b",
+                text, re.IGNORECASE):
             text = "the " + text
         return text[:1].upper() + text[1:]
 
@@ -3299,20 +3319,43 @@ class AgentOrchestrator:
         + _CLAIM_ADVERBS +
         r"(?:connecting|syncing|pulling|cloning|pushing|committing|"
         r"applying|patching|deploying|installing|executing|verifying|"
-        r"testing|merging|checking|inspecting|scanning|reviewing|fixing|"
+        r"merging|fixing|"
         r"repairing|restarting|building|generating|regenerating|"
-        r"reprocessing|sending|queuing|preparing|setting up|"
-        r"working on|pulling|uploading|downloading|"
-        r"fetching|watching|flagging|running|updating|creating|writing|"
+        r"reprocessing|sending|queuing|"
+        r"pulling|uploading|downloading|"
+        r"fetching|flagging|updating|creating|writing|"
         r"modifying|editing|deleting|removing|saving|adding|renaming|"
         r"moving|copying|implementing|refactoring|reverting|migrating|"
         r"configuring|enabling|disabling|stopping|cleaning|wiping|"
         r"changing|rewriting|reworking)\b"
+        # Intransitive-capable progressive verbs ("I'm running", "I'm
+        # still working on it", "I'm watching") only claim work when a
+        # concrete object follows — bare self-state and stall shapes are
+        # persona color, the same class as the phrasal-verb guards above.
+        + r"|\b(?:i['’]m|i am|i['’]ve been|i have been)\s+"
+        + _CLAIM_ADVERBS +
+        r"(?:running|watching|checking|inspecting|scanning|reviewing|"
+        r"verifying|testing|preparing|setting up|working on)\s+"
+        r"(?!now\b|then\b|here\b|there\b|today\b|currently\b|still\b|"
+        r"already\b|again\b|away\b|too\b|as\b|fine\b|well\b|smoothly\b|"
+        r"slowly\b|right\b|just\b|anyway\b|anyways\b|with\b|on\b|at\b|"
+        r"in\b|for\b|up\b|out\b|through\b|over\b|off\b|by\b|into\b|"
+        r"down\b|it\b|that\b|this\b|these\b|those\b|things?\b|"
+        r"everything\b|something\b)\w"
         # Vaguer "I did it/that/what you asked" — still an execution claim
         # when nothing actually ran.
         + r"|\bi did\s+" + _CLAIM_ADVERBS +
         r"(?:it|that|all|everything|what you \w+|so|the \w+)\b"
-        r"|✅|☑|☒|✔"
+        # Checkmark emoji is a claim only next to an execution word
+        # ("Done ✅") or as the whole message — decorative emoji after
+        # honest prose ("we're holding off ✅") is not a work claim.
+        r"|\b(?:done|complete|finished|applied|pushed|committed|merged|"
+        r"deployed|fixed|synced|updated|installed|built|all set|"
+        r"ready to go|sorted)\b[^\n]{0,12}[✅☑☒✔]"
+        r"|[✅☑☒✔][^\n]{0,12}\b(?:done|complete|finished|applied|pushed|"
+        r"committed|merged|deployed|fixed|synced|updated|installed|"
+        r"built|all set|ready to go|sorted)\b"
+        r"|^\s*[✅☑☒✔]+\s*$"
         r"|\b(?:patch|fix|commit|changes?|update|build|code|bug|error|"
         r"issue|files?|config(?:uration)?|module|migration|feature)\s+"
         r"(?:has been |is |was |are )?(?:successfully\s+)?"
@@ -3327,7 +3370,7 @@ class AgentOrchestrator:
         r"in\s+(?:version|release|v\d)))"
         r"|\ball\s+(?:the\s+)?tests?\s+(?:suite\s+)?(?:now\s+)?"
         r"pass(?:es|ed|ing)?\b"
-        r"|\btests?\s+(?:suite\s+)?(?:now\s+)?pass(?:es|ed)\b"
+        r"|\btests?\s+(?:suite\s+)?(?:now\s+)?pass(?:es|ed)?\b"
         r"|\b(?:successfully|confirmed|verified)\s+"
         r"(?:applied|connected|synced|pushed|committed|installed|fixed|"
         r"created|updated|saved|removed|added|deleted|built|deployed)\b",
@@ -7452,6 +7495,12 @@ class AgentOrchestrator:
                 # unambiguously wrong and safe to repair deterministically.
                 session.main_content = self._fix_address_inversion(
                     session.main_content)
+                # A reply parroting the truth-gate notice itself (it sits
+                # verbatim in history) stores the furniture, dodges the
+                # unverified gate, and lands in Answer Memory — strip the
+                # echo before the real claim scan below.
+                session.main_content = _strip_unverified_notice(
+                    session.main_content)
                 # HARD TRUTH RULE: a reply asserting executed actions while
                 # zero tools ran this turn is fabrication. The text may
                 # already have streamed, so enforcement appends a visible
@@ -8616,13 +8665,16 @@ class AgentOrchestrator:
         # Single-fact recall ("whats my favorite color") answers from
         # stored memory directly — right attribution, no model call.
         # Identity questions ("what's YOUR name") keep precedence even
-        # when a stored fact happens to overlap the phrasing.
+        # when a stored fact happens to overlap the phrasing. A question
+        # whose terms match a STORED FACT outranks a feature-alias card:
+        # "what's the deploy tag?" asks about the user's declared value,
+        # not the deployment feature (observed live: the self-knowledge
+        # lane answered with the experimental-deploy capability blurb).
         from .. import identity as _identity_guard
         recall_reply = (
             self._single_fact_recall_reply(user_text, conversation_id,
                                            project_id, env=env)
             if (mode == "auto" and facts_reply is None
-                and sk_reply is None
                 and _identity_guard.response_for(
                     user_text,
                     asker_is_creator=self._resolve_asker_is_creator(),
@@ -8637,7 +8689,8 @@ class AgentOrchestrator:
         # denial/failure verbatim. Anything outside the bounded grammar
         # returns None so the model lane still owns ambiguous requests.
         if (mode == "auto" and not attach["image_paths"]
-                and sk_reply is None and not mission_id):
+                and sk_reply is None and recall_reply is None
+                and not mission_id):
             # Missions always take the model/worker pipeline — a
             # deterministic one-shot reply can't drive a workstream.
             action_reply = self._local_action_reply(
@@ -8669,7 +8722,7 @@ class AgentOrchestrator:
                 and sk_reply is None and facts_reply is None
                 and recall_reply is None)
             else None)
-        builtin_reply = github_reply or sk_reply or facts_reply or recall_reply or state_reply or (
+        builtin_reply = github_reply or recall_reply or sk_reply or facts_reply or state_reply or (
             self._builtin_reply(user_text)
             if mode == "auto" and (
                 not env.suppresses_canned() or identity_lane_hit)
@@ -8718,7 +8771,7 @@ class AgentOrchestrator:
             # short-circuit the model lanes. The fact stays banked.
             _first = ConversationMemory._first_clause(user_text)
             _rest = str(user_text).strip()[len(_first):].strip(" ,.!?—;")
-            if _rest:
+            if _rest and not ConversationMemory._update_tail(_rest):
                 training_response = None
         memory_command = (
             self._answer_memory_command(user_text, conversation_id, project_id)
@@ -9542,6 +9595,8 @@ class AgentOrchestrator:
                 kept: list[dict[str, Any]] = []
                 for msg in reversed(history[-history_turns:]):
                     content = str(msg.get("content") or "")
+                    if str(msg.get("role") or "") == "assistant":
+                        content = _strip_unverified_notice(content)
                     if not content or budget[0] <= 0:
                         continue
                     if len(content) > budget[0]:
@@ -9673,6 +9728,8 @@ class AgentOrchestrator:
                 kept = []
                 for msg in reversed(history[-24:]):
                     content = str(msg.get("content") or "")
+                    if str(msg.get("role") or "") == "assistant":
+                        content = _strip_unverified_notice(content)
                     if not content or budget[0] <= 0:
                         continue
                     if len(content) > budget[0]:

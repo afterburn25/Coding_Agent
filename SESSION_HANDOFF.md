@@ -4922,5 +4922,64 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   Chatterbox worker 180s model-load timeout under load). One real
   conflict: BUG-023's element re-add violated the intentional-removal
   test → reverted.
+- **BUG-024** (`cf19e59f`, P1 secrets): corrupt master key → silent
+  re-key wiped the vault. Key write is atomic; corrupt-but-readable
+  keys quarantine (`InvalidToken`/bad-key → `needs_rekey`, never
+  regenerate over ciphertext).
+- **Tier-2 persistence** (`4cb1507b`, `496ebba2`): atomic writes for
+  image profiles + sidecars, runtime catalog metadata, research stats,
+  image-manager job output sidecars (library reads them).
+- **BUG-025** (`6260846`/`852588cb`, P1 learning): imperative questions
+  ("explain what a mutex is") were banked as facts — the ack swallowed
+  the real question. Subject-absorbing matchers gate on
+  `_ACTION_LEAD_RE`; compound turns bound facts to their first clause
+  (`_first_clause`) and the ack no longer short-circuits when a
+  second clause carries its own intent.
+- **BUG-026** (`2b7925ac`/`9b2674a2`, P1 chat lane): model exhaustion →
+  raw 500 + silently lost turn. `ModelUnavailableError` (ValueError
+  subclass w/ friendly+diagnostic contract); chat/SSE/queue lanes
+  record the degraded exchange + 503 `model_unavailable`.
+- **BUG-027** (`a8fa2663`, P1 autonomy): "the review cadence is weekly"
+  created a standing goal titled by a PREVIOUS turn. `_mission_command`
+  phrase-matches on the semantic frame's quote-masked text and requires
+  the trigger to modify the requested work; quoted imperatives and
+  reported intent can't trigger; non-referential scheduling requests
+  use their own message as objective. Plus `also` → discourse prefix,
+  `--` → fact clause boundary.
+- **BUG-028** (`fa59e4fb`, P0 runtime): boot orphan-sweep identified
+  processes by exe path — two installs share one llama binary, so each
+  could adopt/kill the other's live servers. Ownership is now a
+  persistent spawn registry (`spawned_pids.json`): only registered
+  pids still alive + running the recorded port/model are touched;
+  PID-reuse/foreign/stale records drop untouched. Live-verified:
+  booted with deployed's :8080/:8084 servers running — zero kills.
+- **BUG-029** (`88f6b67c`/`f907862d`, P1 truth gate): the
+  `⚠ Unverified action claims` notice lives verbatim in stored
+  assistant history → small models parroted it as their own sign-off,
+  and the echoed marker rode `main_content` into the transcript AND
+  Answer Memory (echo isn't a real claim → `unverified_claims` stayed
+  False → banked as trusted, live row `e88dc3cc086248f0`).
+  `_strip_unverified_notice` now removes the marker wherever content
+  becomes model-facing (both history-injection lanes) or gets persisted
+  (pre-scan on fresh model output). Detector tail: intransitive
+  progressive self-state ("I'm already running", "I'm working on it")
+  no longer badges — object-required lookahead. Live-verified clean.
+  NB: the 8391 "vanished server" mystery is resolved as our own
+  `release_managed_models_for_vram` balanced-policy eviction under
+  shared-GPU pressure — not a foreign kill.
+- **BUG-030** (P1 conversation memory / lane precedence): fact slots
+  split-brain — `my deploy tag is v10` and `deploy tag is v9` keyed
+  different slots (`my:<noun>` vs `<noun>:is`) → supersession skipped,
+  both live. `_slot_canonical` now unifies `my X`/`the X`/`X is` to one
+  slot at write AND read (`recall_facts`, `prompt_context`,
+  `active_facts` — latest wins, so pre-fix stores self-heal). Lane
+  precedence: stored-fact recall now beats the self-knowledge
+  capability card (`sk_reply` no longer short-circuits `recall_reply`)
+  — `"what's the deploy tag?"` returns v10, not the adapters blurb.
+  Referential update tails (`overwrite the old one`, `forget that`)
+  stay with the learning clause instead of kicking to a model refusal;
+  tails carrying a NEW value (`update it to v12`) still split as real
+  clauses. Live-verified: ack + recall both correct.
 - Still open: UI click-dogfood (needs interactive browser), installer
-  cycle execution, external llama:8391 intermittent disconnects.
+  cycle execution, model-lane churn under shared-GPU contention
+  (environmental — balanced-policy eviction + deployed instance).

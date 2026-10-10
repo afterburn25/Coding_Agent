@@ -766,6 +766,9 @@ class RuntimeManager:
                 status.started_at = time.time()
                 self._managed[profile.id] = _ManagedProcess(
                     profile, _OrphanProcess(pid, self), endpoint, None, status)
+            self._register_spawn(
+                pid, profile.id, endpoint,
+                str(getattr(profile, "model_path", "") or ""))
             self._emit_residency(
                 "adopted", profile.id,
                 f"adopted surviving llama-server (pid {pid}) — no reload needed")
@@ -938,50 +941,160 @@ class RuntimeManager:
                 return profile
         return None
 
-    def sweep_orphan_runtimes(self) -> dict[str, list[str]]:
-        """Reclaim llama-server processes a previous Nexus backend left
-        running. Launch ports are chosen at random, so an orphan on a
-        random port is invisible to the per-spawn port-collision adoption
-        path — it pins VRAM and RAM forever, invisible to every capacity
-        probe (observed: four orphaned 8B servers left <2 GB free VRAM,
-        pushing the Chatterbox voice worker to CPU where synthesis timed
-        out for four minutes before kokoro fallback).
+    # -- spawn registry --------------------------------------------------
+    #
+    # Executable-path identity cannot tell two Nexus installs sharing one
+    # llama binary apart (observed: this repo's dogfood and the deployed
+    # D:\Nexus_Core install run the same llama-server.exe — an image-path
+    # sweep would adopt or kill the OTHER install's servers). The
+    # registry is the ownership boundary: only pids this backend recorded
+    # spawning are sweep candidates.
 
-        Runs at backend boot: a healthy orphan serving a configured
-        profile's checkpoint is adopted (no multi-GB reload); anything
-        else carrying our runtime image is killed. Only processes whose
-        executable resolves to our managed runtime are touched — foreign
-        llama-server installs are left alone.
+    def _spawn_registry_path(self) -> Path:
+        return self.logs_dir / "spawned_pids.json"
+
+    def _spawn_registry(self) -> dict:
+        try:
+            data = json.loads(
+                self._spawn_registry_path().read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _write_spawn_registry(self, data: dict) -> None:
+        try:
+            from ..fsutil import atomic_write_text
+            atomic_write_text(self._spawn_registry_path(),
+                              json.dumps(data, indent=1))
+        except Exception:
+            pass
+
+    def _register_spawn(self, pid: int | None, model_id: str,
+                        endpoint: str, model_path: str = "") -> None:
+        if not pid:
+            return
+        try:
+            port = None
+            m = re.search(r":(\d+)(?:/|$)", str(endpoint or ""))
+            if m:
+                port = int(m.group(1))
+            data = self._spawn_registry()
+            data[str(int(pid))] = {
+                "model_id": str(model_id or ""),
+                "port": port,
+                "model_path": str(model_path or ""),
+                "spawned_at": time.time(),
+            }
+            self._write_spawn_registry(data)
+        except Exception:
+            pass
+
+    def _unregister_spawn(self, pid: int | None) -> None:
+        if not pid:
+            return
+        try:
+            data = self._spawn_registry()
+            if data.pop(str(int(pid)), None) is not None:
+                self._write_spawn_registry(data)
+        except Exception:
+            pass
+
+    def _pid_image_cmdline(self, pid: int) -> tuple[str, str]:
+        """(exe path, cmdline) for one pid — best-effort, ("","") on
+        failure or when the pid is gone."""
+        try:
+            if os.name == "nt":
+                ps = subprocess.run(
+                    ["powershell", "-NoProfile", "-NonInteractive",
+                     "-Command",
+                     "Get-CimInstance Win32_Process -Filter "
+                     f"\"ProcessId={int(pid)}\" | Select-Object "
+                     "ExecutablePath,CommandLine | ConvertTo-Json -Compress"],
+                    capture_output=True, text=True, timeout=15,
+                    creationflags=no_window_flags(), encoding="utf-8",
+                    errors="replace")
+                row = json.loads(ps.stdout.strip() or "{}")
+                return (str(row.get("ExecutablePath") or ""),
+                        str(row.get("CommandLine") or ""))
+            exe = os.readlink(f"/proc/{int(pid)}/exe")
+            cmd = Path(f"/proc/{int(pid)}/cmdline").read_bytes() \
+                .replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+            return exe, cmd
+        except Exception:
+            return "", ""
+
+    def _pid_matches_spawn_record(self, pid: int, meta: dict) -> bool:
+        """True only when pid is alive, looks like our runtime image, and
+        its cmdline still carries the recorded --port/--model. A dead pid
+        or a reused one hosting different arguments is NOT ours to kill."""
+        exe, cmdline = self._pid_image_cmdline(pid)
+        if not exe or "llama" not in Path(exe).name.lower():
+            return False
+        if not self._exe_is_ours(exe, cmdline):
+            return False
+        model, port = self._orphan_cmdline_model_port(cmdline)
+        want_port = meta.get("port")
+        if want_port and port != int(want_port):
+            return False
+        want_model = str(meta.get("model_path") or "")
+        if want_model and model and \
+                Path(model).name.lower() != Path(want_model).name.lower():
+            return False
+        return True
+
+    def sweep_orphan_runtimes(self) -> dict[str, list[str]]:
+        """Reclaim llama-server orphans a previous backend left running —
+        an orphan pins VRAM/RAM invisibly (observed: four orphaned 8B
+        servers left <2 GB free VRAM, pushing the Chatterbox voice worker
+        to CPU where synthesis timed out for four minutes before the
+        kokoro fallback).
+
+        Ownership is the persistent spawn registry, not the executable
+        path: only pids this install recorded spawning — still alive,
+        still a llama image, still running the recorded port/model —
+        are adopted or killed. A foreign install's server on the same
+        binary is never in our registry and is never touched.
         """
         adopted: list[str] = []
         killed: list[str] = []
-        for proc in self._our_runtime_processes():
-            pid = int(proc.get("pid") or 0)
-            if not pid or pid == os.getpid():
+        registry = self._spawn_registry()
+        changed = False
+        for pid_s, meta in list(registry.items()):
+            try:
+                pid = int(pid_s)
+            except (TypeError, ValueError):
+                del registry[pid_s]
+                changed = True
+                continue
+            if pid == os.getpid():
+                del registry[pid_s]
+                changed = True
                 continue
             with self._lock:
-                # Re-read under the lock on every pid: _our_runtime_processes()
-                # spawns a slow process-list probe, so a snapshot taken before
-                # it returns goes stale when a launch/prewarm registers a new
-                # managed server mid-sweep — it would read as an orphan and be
-                # killed below. Membership is checked fresh each iteration.
                 owned = pid in {
                     getattr(item.process, "pid", None)
                     for item in self._managed.values()}
             if owned:
                 continue
-            model_path, port = self._orphan_cmdline_model_port(
-                str(proc.get("cmdline") or ""))
-            profile = self._orphan_profile(model_path) if model_path else None
+            if not self._pid_matches_spawn_record(pid, meta or {}):
+                # Dead, reused, or foreign — the record is stale either
+                # way; drop it without touching the process.
+                del registry[pid_s]
+                changed = True
+                continue
+            model_path = str((meta or {}).get("model_path") or "")
+            port = (meta or {}).get("port")
+            profile = self._orphan_profile(model_path) \
+                if model_path else None
             adopted_profile = False
             if profile is not None and port:
                 with self._lock:
                     already = profile.id in self._managed
                 if not already:
-                    endpoint = self._profile_endpoint(profile, port)
+                    endpoint = self._profile_endpoint(profile, int(port))
                     try:
                         adopted_profile = self._adopt_healthy_orphan(
-                            profile, port, endpoint, None)
+                            profile, int(port), endpoint, None)
                     except Exception:
                         adopted_profile = False
             if adopted_profile and profile is not None:
@@ -989,6 +1102,10 @@ class RuntimeManager:
             else:
                 self._kill_pid(pid)
                 killed.append(str(pid))
+            del registry[pid_s]
+            changed = True
+        if changed:
+            self._write_spawn_registry(registry)
         if adopted or killed:
             self._emit_residency(
                 "orphan_sweep", "",
@@ -1044,6 +1161,10 @@ class RuntimeManager:
 
     def _kill_pid(self, pid: int) -> None:
         try:
+            self._unregister_spawn(pid)
+        except Exception:
+            pass
+        try:
             if os.name == "nt":
                 subprocess.run(
                     ["taskkill", "/F", "/T", "/PID", str(pid)],
@@ -1079,6 +1200,7 @@ class RuntimeManager:
         item.status.state = "stopped"
         item.status.healthy = False
         item.status.pid = None
+        self._unregister_spawn(getattr(process, "pid", None))
 
     def stop_model(self, model_id: str) -> RuntimeStatus:
         with self._lock:
@@ -1698,6 +1820,9 @@ class RuntimeManager:
             status.error = ""
             status.log_path = str(log_path)
             self._managed[profile.id] = _ManagedProcess(profile, process, endpoint, log_handle, status)
+            self._register_spawn(
+                process.pid, profile.id, endpoint,
+                str(getattr(profile, "model_path", "") or ""))
             # Remember the tuned arg-set this process launched with — if it dies
             # mid-run the recovery path can mark exactly this config bad instead
             # of relaunching it identically forever.
@@ -1720,6 +1845,7 @@ class RuntimeManager:
                     status.error = f"llama-server exited with code {process.returncode}; see {log_path}"
                     status.pid = None
                     self._managed.pop(profile.id, None)
+                    self._unregister_spawn(process.pid)
                     try:
                         log_handle.close()
                     except Exception:

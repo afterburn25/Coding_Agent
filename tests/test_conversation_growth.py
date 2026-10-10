@@ -926,6 +926,46 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertTrue(all(
                 r["active"] for r in memory.snapshot()["behavior_rules"]))
 
+    def test_ephemeral_stop_is_not_a_durable_rule(self):
+        """'stop whatever you're doing right now' is a cease-the-
+        current-activity request — banking 'Never whatever you're
+        doing…' as a durable rule corrupts every future prompt."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            out = memory.learn_from_user(
+                "stop whatever you're doing with the files right now")
+            rules = [r["text"] for r in memory.snapshot()["behavior_rules"]]
+            self.assertEqual(rules, [])
+            self.assertEqual(out.get("behavior_rules") or [], [])
+            # A concrete prohibition still banks.
+            out = memory.learn_from_user("stop responding in JSON")
+            rules = [r["text"] for r in memory.snapshot()["behavior_rules"]]
+            self.assertEqual(rules, ["Never responding in JSON"])
+
+    def test_recall_facts_drops_subset_overlap_noise(self):
+        """A fact sharing one incidental query term must not ride a
+        recall answer when another row matches strictly more terms —
+        'what port did I tell you not to use' overlapping {port} on
+        'staging port is 9100' is noise next to the {port, use} hit."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("my staging port is 9100")
+            memory.learn_from_user("never use port 3000 for anything")
+            rows = memory.recall_facts(
+                "what port did I just tell you not to use?")
+            texts = [r["text"] for r in rows]
+            self.assertTrue(any("3000" in t for t in texts))
+            self.assertFalse(any("9100" in t for t in texts))
+            # Disjoint overlaps each stay maximal — a two-part question
+            # still recalls both facts.
+            memory.learn_from_user("my editor is neovim")
+            memory.learn_from_user("my favorite color is teal")
+            rows = memory.recall_facts(
+                "what's my editor and favorite color?")
+            texts = [r["text"] for r in rows]
+            self.assertTrue(any("editor" in t for t in texts))
+            self.assertTrue(any("color" in t for t in texts))
+
     def test_definite_is_facts_capture_with_value_gate(self):
         """'the port is 5433'-style technical facts capture and supersede;
         adjective/interjection values must not."""
@@ -1152,3 +1192,54 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertEqual(
                 memory2.learn_from_user("the version is 1.2.3")
                 ["facts"], ["version is 1.2.3"])
+
+    def test_possessive_slot_unifies_supersession(self):
+        # "my deploy tag is v10" and "deploy tag is v9" describe the
+        # same attribute — the possessive lead must not split the
+        # supersession slot (live split-brain: both stayed active).
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("the deploy tag is v9")
+            memory.learn_from_user(
+                "my deploy tag is v10 — overwrite the old one")
+            rows = memory.snapshot()["facts"]
+            active = [r for r in rows if r["active"]]
+            self.assertEqual(len(active), 1)
+            self.assertIn("v10", active[0]["text"])
+            self.assertFalse(rows[0]["active"])
+            # Recall collapses pre-existing split rows too — the
+            # canonical slot keeps only the newest live value.
+            memory2 = ConversationMemory(Path(td) / "m2.json")
+            memory2._data["facts"] = [
+                {"text": "deploy tag is v9", "slot": "deploy tag:is",
+                 "active": True, "scope": "global", "scope_id": "",
+                 "created_at": 1.0},
+                {"text": "my deploy tag is v10", "slot": "my:deploy tag",
+                 "active": True, "scope": "global", "scope_id": "",
+                 "created_at": 2.0},
+            ]
+            recalled = memory2.recall_facts("what is the deploy tag")
+            self.assertEqual(len(recalled), 1)
+            self.assertIn("v10", recalled[0]["text"])
+
+    def test_update_tail_keeps_ack(self):
+        # A compound tail that only manages the banked fact — mutation
+        # verb + anaphoric object — is the same teach act, not a second
+        # ask the model lane must handle.
+        self.assertTrue(ConversationMemory._update_tail(
+            "overwrite the old one"))
+        self.assertTrue(ConversationMemory._update_tail("forget that"))
+        self.assertTrue(ConversationMemory._update_tail(
+            "use it instead"))
+        self.assertTrue(ConversationMemory._update_tail(
+            "replace it, please"))
+        self.assertTrue(ConversationMemory._update_tail(
+            "and also, just remember it"))
+        # Independent asks and new-value updates are real remainders —
+        # they must reach the model/learning lanes.
+        self.assertFalse(ConversationMemory._update_tail(
+            "what is a mutex"))
+        self.assertFalse(ConversationMemory._update_tail(
+            "update it to v12"))
+        self.assertFalse(ConversationMemory._update_tail(
+            "also, tell me a joke"))
