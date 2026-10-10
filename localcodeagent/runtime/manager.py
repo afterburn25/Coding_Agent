@@ -1892,7 +1892,7 @@ class RuntimeManager:
             # is a stale socket, not a bad config.
             item = self._managed.get(profile.id)
             died = item is not None and item.process.poll() is not None
-            if died:
+            if died and status.restarts >= 2:
                 tail = self._log_tail(status.log_path) if status.log_path else ""
                 cause = ""
                 for pattern, label in self._CRASH_SIGNATURES:
