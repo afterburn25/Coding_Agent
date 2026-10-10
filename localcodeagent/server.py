@@ -6071,7 +6071,7 @@ class AppState:
         if event_type == "worker_capacity_restored":
             ceiling = payload.get("ceiling")
             # Next reduction lands at ceiling-1 — let it speak again.
-            self._queue_announced.discard(f"cap-{int(ceiling or 0) - 1}")
+            self._queue_announced.discard(f"cap-{ceiling}")
             self._speak_notice(
                 f"cap-up-{ceiling}", "status",
                 "Workers are recovering — capacity is back up.",
