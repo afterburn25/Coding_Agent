@@ -2,6 +2,28 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## Resilience Foundation 1 → Cognitive Phase 1 (in flight)
+
+- **F1 landed** (`4eb73559`): `state_db.py` WAL SQLite + DocStore; all
+  Tier-1 stores migrated; `/api/state/health`; silent-corruption-reset
+  eliminated. Next foundations per the resilience milestone:
+  F2 Recovery Center/verified backups → F3 A/B self-update →
+  F4 exactly-once ops (`operations` table groundwork in place).
+- **Cognitive Phase 1** (this branch): Strategy Router inside the
+  existing IntelligenceGovernor (`metacognition.classify_strategy` →
+  `MetaAssessment.strategy/strategies` + strategy→op injection),
+  `governor/solvers.py` safe-AST arithmetic + `_math_reply` lane,
+  `requirements.compile_requirement_spec`/`compile_to_store`
+  (MUST/SHOULD/MAY/MUST_NOT/ASSUMPTION/QUESTION/ACCEPTANCE), and
+  `assumptions.py` AssumptionLedger with invalidation→dependents +
+  `weakest()` probe. `/api/assumptions*` live. Docs: `docs/REASONING.md`.
+  Reuse map for later phases: EvalLab (`eval/`), HypothesisStore,
+  CausalMemory, DecisionJournal, RequirementStore, LearningGovernor,
+  multiagent/swarm, ExperimentStore — do not duplicate.
+- **Open fragility**: scratch-backend llama-server dies under VRAM
+  contention during long dogfood runs (HTTP 500s, not semantic
+  failures). Distinguish runtime availability from product defects.
+
 ## 0.42.0 — Adaptive Intelligence Phase A
 
 Umbrella milestone "Adaptive Intelligence + Persistent Nexus Identity",

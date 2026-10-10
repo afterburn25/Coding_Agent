@@ -223,6 +223,9 @@ class AppState:
                                    db=self.state_db)
         self.decisions = DecisionJournal(runtime_root / "data" / "decisions.json",
                                          db=self.state_db)
+        from .assumptions import AssumptionLedger
+        self.assumptions = AssumptionLedger(
+            runtime_root / "data" / "assumptions.json", db=self.state_db)
         from .promotion import PromotionPipeline
         self.promotions = PromotionPipeline(runtime_root / "data" / "promotions.json")
         from .evidence import EvidenceBoard
@@ -9952,6 +9955,17 @@ class Handler(BaseHTTPRequestHandler):
                 actor=str((q.get("actor") or [""])[0])),
                 "summary": self.state.decisions.summary()})
             return
+        if path == "/api/assumptions":
+            q = parse_qs(urlparse(self.path).query)
+            self._json({"assumptions": self.state.assumptions.list(
+                scope_type=str((q.get("scope_type") or [""])[0]),
+                scope_id=str((q.get("scope_id") or [""])[0]),
+                state=str((q.get("state") or [""])[0])),
+                "summary": self.state.assumptions.summary(),
+                "weakest": self.state.assumptions.weakest(
+                    scope_type=str((q.get("scope_type") or [""])[0]),
+                    scope_id=str((q.get("scope_id") or [""])[0]))})
+            return
         if path == "/api/promotions":
             q = parse_qs(urlparse(self.path).query)
             self._json({"candidates": self.state.promotions.list(
@@ -11977,6 +11991,52 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "unknown decision"}, 404)
                     return
                 self._json({"ok": True, "decision": row})
+                return
+
+            if path == "/api/assumptions":
+                text = str(body.get("text") or body.get("assumption") or "")
+                if not text.strip():
+                    self._json({"error": "text is required"}, 400)
+                    return
+                row = self.state.assumptions.add(
+                    text,
+                    scope_type=str(body.get("scope_type") or "global"),
+                    scope_id=str(body.get("scope_id") or ""),
+                    dependents=body.get("dependents")
+                    if isinstance(body.get("dependents"), dict) else None,
+                    confidence=float(body.get("confidence") or 0.5),
+                    test=str(body.get("test") or ""))
+                self._json({"ok": True, "assumption": row})
+                return
+
+            if path == "/api/assumptions/state":
+                aid = str(body.get("id") or "")
+                action = str(body.get("action") or "")
+                if action == "invalidate":
+                    out = self.state.assumptions.invalidate(
+                        aid, evidence=str(body.get("evidence") or ""))
+                    if out is None:
+                        self._json({"error": "unknown assumption"}, 404)
+                        return
+                    self._json({"ok": True, **out})
+                    return
+                if action == "supersede":
+                    out = self.state.assumptions.supersede(
+                        aid, str(body.get("text") or ""))
+                    if out is None:
+                        self._json({"error": "unknown assumption"}, 404)
+                        return
+                    self._json({"ok": True, "assumption": out})
+                    return
+                row = self.state.assumptions.set_state(
+                    aid, str(body.get("state") or action or ""),
+                    evidence=str(body.get("evidence") or ""),
+                    ref=str(body.get("ref") or ""))
+                if row is None:
+                    self._json({"error": "unknown assumption or state"},
+                               404)
+                    return
+                self._json({"ok": True, "assumption": row})
                 return
 
             if path == "/api/promotions":
