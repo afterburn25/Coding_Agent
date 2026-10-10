@@ -7918,7 +7918,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
-        data = json.loads(self.rfile.read(length) or b"{}")
+        raw = self.rfile.read(length) or b"{}"
+        try:
+            data = json.loads(raw)
+        except UnicodeDecodeError:
+            # cp1252/smart punctuation from Windows clients — decode
+            # losslessly rather than failing the request.
+            data = json.loads(raw.decode("cp1252", errors="replace"))
         # Every route uses body.get(...) — a non-object JSON body would
         # AttributeError into a 500. It's a client error: 400.
         if not isinstance(data, dict):

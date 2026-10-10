@@ -781,6 +781,16 @@ class ConversationMemory:
             scope_id = conversation_id
             raw = conversation_match.group(1).strip()
 
+        # "my notes say 'never use port 4000' — remember that" — the
+        # quoted span is the referent of the learning request; feed its
+        # content through the normal pipeline so it banks like the
+        # bare statement would.
+        if re.search(r"\bremember\s+(?:that|this)\b", raw,
+                     flags=re.IGNORECASE):
+            quoted = re.findall(r"[\"']([^\"']{3,400})[\"']", raw)
+            if quoted:
+                raw = quoted[-1].strip()
+
         # Creator-locked identity facts (birthday/age/creator) cannot be
         # taught, overridden, or forgotten — drop them before any storage.
         # The refusal only surfaces for an actual write attempt; a plain
