@@ -1158,22 +1158,30 @@ class ConversationMemory:
         # parrots whatever it last saw. Same honest ack, same zero
         # writes, distinct marker so the reply can say "hunch" instead
         # of "secondhand".
-        hedged = re.match(
-            r"^(?:i\s+(?:don'?t\s+|do\s+not\s+)?"
-            r"(?:think|believe|guess|suppose|reckon|figure|"
-            r"feel\s+like|suspect)|i'?d\s+say|imo\b|imho\b|"
-            r"in\s+my\s+(?:opinion|view)|my\s+(?:guess|hunch|"
-            r"understanding|impression)\s+is)\s*[,:—-]*\s*"
-            r"(?:that\s+)?(.+?)[.!?]?$",
-            raw, flags=re.IGNORECASE)
-        if hedged:
-            claim = hedged.group(1).strip()
-            # "i think so" / "i think not" carry no claim — and a
+        def _hedged(text: str) -> bool:
+            m = re.match(
+                r"^(?:i\s+(?:don'?t\s+|do\s+not\s+)?"
+                r"(?:think|believe|guess|suppose|reckon|figure|"
+                r"feel\s+like|suspect)|i'?m\s+(?:(?:pretty|fairly|"
+                r"quite|really|not)\s+)?(?:sure|certain)|"
+                r"i'?d\s+(?:say|guess|bet|imagine)|imo\b|imho\b|"
+                r"in\s+my\s+(?:opinion|view)|my\s+(?:guess|hunch|"
+                r"understanding|impression)\s+is)\s*[,:—-]*\s*"
+                r"(?:that\s+)?(.+?)[.!?]?$",
+                text, flags=re.IGNORECASE)
+            if not m:
+                return False
+            claim = m.group(1).strip()
+            # "i think so" / "i'm sure" alone carry no claim — and a
             # hedged refusal ("i don't think we should") is still a
             # claim worth noting, so only the length guard applies.
             if len(claim.split()) >= 2:
                 result["hedged"] = [claim]
-                return result
+                return True
+            return False
+
+        if _hedged(raw):
+            return result
 
         with self._lock:
             fact: str | None = None
@@ -1187,6 +1195,11 @@ class ConversationMemory:
                 r"no|wait|sorry|nm|never\s*mind|scratch\s+that|"
                 r"on\s+second\s+thought|i\s+mean(?:t)?)[,:\s]+)+",
                 "", raw, flags=re.IGNORECASE)
+            # Marker-prefixed hedges — "actually, i think the port is
+            # 9090" — strip the discourse marker first, then the same
+            # hedged-claim rule applies.
+            if body != raw and _hedged(body):
+                return result
             for pattern in (
                 r"^remember\s+that\s+(.+)$",
                 r"^remember\s*:\s*(.+)$",

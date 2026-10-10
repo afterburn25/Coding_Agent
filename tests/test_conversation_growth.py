@@ -1519,6 +1519,10 @@ class CrossChatMemoryTests(unittest.TestCase):
                 "i guess the cache is stale",
                 "i don't think the build is broken",
                 "imo the api is slow",
+                "i'm pretty sure the port is 9090",
+                "i'm not sure the backup ran",
+                "i'd bet the cache is stale",
+                "actually, i think the port is 9090",
             ):
                 learned = memory.learn_from_user(utterance)
                 self.assertFalse(learned["facts"], utterance)
