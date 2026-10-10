@@ -4015,8 +4015,9 @@ class AgentOrchestrator:
         locked = learned.get("locked") or []
         restated = learned.get("restated") or []
         miss = learned.get("forgotten_miss") or []
+        hearsay = learned.get("hearsay") or []
         if not (facts or rules or examples or forgotten or locked or restated
-                or miss):
+                or miss or hearsay):
             return None
         parts = []
         if locked:
@@ -4032,6 +4033,13 @@ class AgentOrchestrator:
                 parts.append(f"Got it — noted {len(facts)} things.")
         elif restated:
             parts.append(f"Already noted — {restated[0]}.")
+        elif hearsay:
+            # Secondhand claims are acknowledged but never banked —
+            # the ack says so plainly instead of pretending either a
+            # learned fact or a verified report.
+            parts.append(
+                f"Noted — {hearsay[0]} — though that's secondhand, "
+                "so I'll treat it as unverified.")
         elif not parts and not miss:
             parts.append("Got it.")
         if rules:

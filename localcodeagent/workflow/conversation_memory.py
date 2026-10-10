@@ -1034,6 +1034,27 @@ class ConversationMemory:
                         result.setdefault(key, []).extend(value)
                 return result
 
+        # Reported speech / hearsay — "i heard the port is 9090",
+        # "someone said the build is green" — is acknowledged but never
+        # banked: a secondhand claim is unverified by definition, and
+        # treating rumor as fact would let it outrank evidence. The
+        # marker surfaces an honest "noted, unverified" ack instead of
+        # handing the turn to a model that might riff one.
+        hear = re.match(
+            r"^(?:i\s+heard|i\s+was\s+told|i'?m\s+hearing|"
+            r"some(?:one|body)\s+(?:said|told\s+me)|"
+            r"they\s+say|people\s+say|word\s+is|rumou?r\s+has\s+it|"
+            r"apparently|supposedly|reportedly)\s*[,:—-]*\s*"
+            r"(?:that\s+)?(.+)$",
+            raw, flags=re.IGNORECASE)
+        if hear:
+            claim = re.sub(r"[.!?]+$", "", hear.group(1).strip())
+            # "i heard you" is comprehension, not a reported claim —
+            # require a real clause before calling it hearsay.
+            if len(claim.split()) >= 2:
+                result["hearsay"] = [claim]
+                return result
+
         with self._lock:
             fact: str | None = None
             # Discourse/correction marker prefixes ride the front of a

@@ -1273,6 +1273,33 @@ class CrossChatMemoryTests(unittest.TestCase):
                 self.assertTrue(
                     any(fragment in f for f in learned["facts"]), utterance)
 
+    def test_hearsay_acknowledged_never_banked(self):
+        # BUG-073 — reported speech ("i heard the port is 9090",
+        # "someone said the build is green") is a secondhand claim:
+        # banked as fact it would let rumor outrank evidence; dropped
+        # entirely it falls to a model that may riff an ack. The
+        # `hearsay` marker yields an honest "noted, unverified" ack
+        # with zero writes.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for utterance in (
+                "i heard the port is 9090",
+                "someone said the backup is broken",
+                "they say the build is green",
+                "apparently the cache is stale",
+                "rumor has it the deploy is friday",
+            ):
+                learned = memory.learn_from_user(utterance)
+                self.assertFalse(learned["facts"], utterance)
+                self.assertEqual(len(learned.get("hearsay") or []), 1,
+                                 utterance)
+            self.assertFalse(
+                [r for r in memory._data["facts"] if r.get("active")])
+            # First-person statements still bank — the hearsay lead is
+            # the discriminator, not the declarative shape.
+            learned = memory.learn_from_user("the port is 9090")
+            self.assertTrue(learned["facts"])
+
     def test_compound_turns_learn_first_clause_only(self):
         # A compound turn's second clause is a separate intent, not part
         # of the value — "the port is 8080 — also, what is a mutex?"
