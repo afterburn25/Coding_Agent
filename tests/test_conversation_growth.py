@@ -946,6 +946,33 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertEqual(by_slot.get("my:favorite color"),
                              ["my favorite color is teal"])
 
+    def test_forget_trailing_noun_and_miss_marker(self):
+        """'forget the staging port fact' must find the port fact —
+        the trailing 'fact' names the container, not the referent. A
+        no-match forget reports the miss so the reply lane stays
+        deterministic instead of delegating to the model."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("my staging port is 9100")
+            out = memory.learn_from_user("forget the staging port fact")
+            self.assertEqual([r["text"] for r in out["forgotten"]],
+                             ["my staging port is 9100"])
+
+            out = memory.learn_from_user("forget the deploy tag")
+            self.assertEqual(out["forgotten"], [])
+            self.assertTrue(out.get("forgotten_miss"))
+
+    def test_forget_referential_probe_is_noop(self):
+        """'forget it' must not substring-match facts containing 'it'
+        ('edITor') — referential forget probes need real content."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("my editor is neovim")
+            out = memory.learn_from_user("forget it")
+            self.assertEqual(out["forgotten"], [])
+            self.assertTrue(all(
+                r["active"] for r in memory.snapshot()["facts"]))
+
     def test_ephemeral_stop_is_not_a_durable_rule(self):
         """'stop whatever you're doing right now' is a cease-the-
         current-activity request — banking 'Never whatever you're

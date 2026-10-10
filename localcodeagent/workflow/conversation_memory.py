@@ -779,6 +779,12 @@ class ConversationMemory:
         if forget_match:
             forgotten = self.forget(forget_match.group(1))
             result["forgotten"].extend(forgotten)
+            if not forgotten:
+                # Surface the miss so the reply lane can say so
+                # honestly instead of handing a memory command to the
+                # model lane (which may not even be running).
+                result["forgotten_miss"] = [
+                    forget_match.group(1).strip()]
             return result
 
         # Credentials are never persisted — "remember my passcode is X"
@@ -1458,7 +1464,19 @@ class ConversationMemory:
         normalized = re.sub(
             r"^(?:(?:the|that|about|my|our|a|an|fact|facts|memory)\s+)+",
             "", target).strip()
+        # Trailing memory-nouns name the container, not the fact —
+        # "forget the staging port fact" refers to "staging port".
+        normalized = re.sub(
+            r"(?:\s+(?:fact|facts|memory|rule|preference|detail|thing|"
+            r"item|entry|bit))+[.!?]*$", "", normalized).strip()
         probes = [p for p in (target, normalized) if p]
+        # Substring matching makes tiny/referential probes dangerous —
+        # "forget it" would match every fact containing the letters
+        # "it" ('edITor'). Referents need real content.
+        probes = [p for p in probes
+                  if len(p) >= 3 and p not in self._BARE_CORRECTION_STOPWORDS
+                  and p not in {"it", "that", "this", "everything",
+                                "all", "them", "those"}]
         if not probes:
             return []
         forgotten: list[dict[str, Any]] = []

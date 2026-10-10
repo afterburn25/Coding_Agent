@@ -3904,7 +3904,9 @@ class AgentOrchestrator:
         forgotten = learned.get("forgotten") or []
         locked = learned.get("locked") or []
         restated = learned.get("restated") or []
-        if not (facts or rules or examples or forgotten or locked or restated):
+        miss = learned.get("forgotten_miss") or []
+        if not (facts or rules or examples or forgotten or locked or restated
+                or miss):
             return None
         parts = []
         if locked:
@@ -3920,7 +3922,7 @@ class AgentOrchestrator:
                 parts.append(f"Got it — noted {len(facts)} things.")
         elif restated:
             parts.append(f"Already noted — {restated[0]}.")
-        elif not parts:
+        elif not parts and not miss:
             parts.append("Got it.")
         if rules:
             parts.append("I'll apply that as an operating rule going "
@@ -3929,6 +3931,10 @@ class AgentOrchestrator:
             parts.append("Saved your correction for review.")
         if forgotten:
             parts.append(f"Forgot {len(forgotten)} matching item(s).")
+        if miss and not parts:
+            parts.append(
+                f"I don't have anything stored matching "
+                f"\"{miss[0]}\" — nothing to forget.")
         return " ".join(parts)
 
     @staticmethod
@@ -8495,7 +8501,7 @@ class AgentOrchestrator:
                     open_loops=ctx.open_loops)
             except Exception:
                 pass
-        if any(learned.values()):
+        if any(v for k, v in learned.items() if k != "forgotten_miss"):
             # Keep Nexus Brain's durable records in lockstep — otherwise
             # superseded/forgotten facts drift out of sync until a manual
             # sync endpoint call.
