@@ -65,6 +65,7 @@ families, not every suffix route.
 | Assumption ledger | `assumptions.py` | `/api/assumptions*` | — | `data/assumptions.json` (db) | test_cognitive, test_api_errors | verified |
 | Requirements compiler | `requirements.py` | `/api/requirements*` | — | `data/requirements.json` (db) | test_requirements, test_cognitive | verified |
 | State DB | `state_db.py` | `/api/state/health` | — | `data/state.db` | test_state_db | verified |
+| Backups/Recovery | `backups.py` | `/api/backups*` (create/list/restore incl. `paths=` selective, `/api/backups/restore_test`) | — | `data/backups/` | test_platform_foundations | verified |
 | Primary UI pages | `web/` | static + api | — | — | e2e smokes | partially_verified |
 
 ## Honest gaps this inventory exposes
