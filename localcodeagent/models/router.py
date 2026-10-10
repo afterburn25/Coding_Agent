@@ -12,6 +12,25 @@ ROLES = ("utility", "lightweight_reasoner", "fast_coder", "primary_coder",
          "deep_reasoner", "reviewer", "vision")
 
 
+class ModelUnavailableError(ValueError):
+    """Every enabled model candidate was excluded or failed — no configured
+    runtime can serve the request right now. Subclasses ValueError so
+    existing callers keep working, and carries the netdiag-style
+    friendly/diagnostic contract the stream lane renders as an honest
+    degradation instead of a bare 500."""
+
+    def __init__(self, message: str, *, diagnostic: dict | None = None):
+        super().__init__(message)
+        self.friendly = (
+            "I couldn't reach a working model right now — every enabled "
+            "runtime failed to answer. Check the model runtime under "
+            "Local system → Models, then send the message again.")
+        self._diagnostic = dict(diagnostic or {})
+
+    def diagnostic(self) -> dict:
+        return dict(self._diagnostic)
+
+
 def _role_matches(model: ModelProfile, role: str) -> bool:
     """Canonical-role matching: a 'lightweight_reasoner' request is served by
     models configured with any tier-2 role (light_coder, general_assistant…),
@@ -235,7 +254,13 @@ class ModelRouter:
         excluded = set(exclude_model_ids or ())
         available_models = [model for model in self.enabled_models if model.id not in excluded]
         if not available_models:
-            raise ValueError("No enabled model remains after excluding failed candidates")
+            raise ModelUnavailableError(
+                "No enabled model remains after excluding failed candidates",
+                diagnostic={
+                    "reason": "all_candidates_failed",
+                    "excluded": sorted(excluded),
+                    "enabled": [m.id for m in self.enabled_models],
+                })
 
         if override and override != "auto":
             role = override if override in ROLES else "primary_coder"

@@ -108,6 +108,37 @@ class TestApiErrors(unittest.TestCase):
         finally:
             self.state.decisions.list = orig
 
+    def test_chat_model_unavailable_is_503_not_500_and_records(self):
+        # BUG-026 — when every enabled runtime fails, the chat lane must
+        # degrade honestly (503 + friendly text + code), not leak a raw
+        # 500 while the user's turn vanishes from history.
+        from localcodeagent.models.router import ModelUnavailableError
+        orig_run = self.state.agent.run
+        orig_ready = self.state.runtime.readiness
+        try:
+            def boom(*_a, **_k):
+                raise ModelUnavailableError(
+                    "No enabled model remains after excluding failed candidates")
+            self.state.agent.run = boom
+            self.state.runtime.readiness = (
+                lambda **_: {"ready_to_code": True})
+            code, raw = self._post("/api/chat", {"message": "ping the model"})
+            self.assertEqual(code, 503, raw)
+            payload = json.loads(raw)
+            self.assertEqual(payload.get("code"), "model_unavailable")
+            self.assertTrue(payload.get("degraded"))
+            self.assertIn("couldn't reach", payload["content"])
+            # The exchange is recorded — the turn is not lost.
+            msgs = self.state.conversation_manager.active().get("messages", [])
+            self.assertGreaterEqual(len(msgs), 2)
+            self.assertEqual(msgs[-1]["role"], "assistant")
+            self.assertIn("couldn't reach", msgs[-1]["content"])
+            self.assertEqual(msgs[-2]["role"], "user")
+            self.assertEqual(msgs[-2]["content"], "ping the model")
+        finally:
+            self.state.agent.run = orig_run
+            self.state.runtime.readiness = orig_ready
+
     def test_patch_outside_profiles_is_405(self):
         code, raw = self._raw("/api/decisions", b"{}", method="PATCH")
         self.assertEqual(code, 405)

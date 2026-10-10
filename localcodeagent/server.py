@@ -31,7 +31,7 @@ from .agent.orchestrator import (
 )
 from .image.manager import ImageManager
 from .config import AgentConfig, ModelProfile, load_config
-from .models.router import ModelRouter
+from .models.router import ModelRouter, ModelUnavailableError
 from .models.telemetry import ModelPerformanceTelemetry
 from .runtime.manager import RuntimeManager
 from .runtime.setup import apply_detected_models, suggest_model_profiles, write_suggested_models
@@ -11212,6 +11212,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json({"error": "unknown answer-memory endpoint"}, 404)
 
+    def _record_degraded_exchange(self, message: str, assistant_text: str) -> None:
+        """Record an honest degradation turn (model unavailable, etc.) into
+        the active conversation so the user's message isn't lost — the reply
+        is honest text, never a fabricated success. Best-effort."""
+        try:
+            self.state.conversation_manager.record_exchange(
+                message,
+                self.state._persona_notice("failed", assistant_text),
+                intent="conversation",
+                response_source="model_unavailable")
+            self.state.history = self.state.conversation_manager.history(limit=32)
+        except Exception:
+            pass
+
     def _agent_payload(self, result, *, voice_task_id: str = "") -> dict:
         payload = {
             "content": result.content,
@@ -12784,6 +12798,11 @@ class Handler(BaseHTTPRequestHandler):
                         events.put({"type": "result", **payload})
                     except Exception as exc:
                         self.state._voice_finish(voice_rid)
+                        if isinstance(exc, ModelUnavailableError):
+                            # The turn must not vanish: record the honest
+                            # reply so the user's message stays in history.
+                            self._record_degraded_exchange(
+                                message, str(getattr(exc, "friendly", "") or exc))
                         err = f"{type(exc).__name__}: {exc}"
                         # Transport-classified failures carry a friendly
                         # message + structured diagnostic so the chat UI can
@@ -12953,6 +12972,25 @@ class Handler(BaseHTTPRequestHandler):
                     self.state._voice_finish(voice_rid, result.content,
                         delivery=getattr(result, "delivery", None))
                     self.state._persona_note_turn(message, result.content)
+                except ModelUnavailableError as exc:
+                    # Honest degradation, not a lost turn: record the exchange
+                    # so the user's message stays in history and reply 503 with
+                    # the same friendly text the stream lane would render.
+                    self.state._voice_finish(voice_rid)
+                    honest = str(getattr(exc, "friendly", "") or
+                                 "No usable model is currently available.")
+                    self._record_degraded_exchange(message, honest)
+                    self._json({
+                        "content": self.state._persona_notice("failed", honest),
+                        "error": honest,
+                        "code": "model_unavailable",
+                        "degraded": True,
+                        "diagnostic": exc.diagnostic() if callable(
+                            getattr(exc, "diagnostic", None)) else {},
+                        "queued": False, "tool_events": [], "model_events": [],
+                        "pending_approval": None, "verification": [], "steps": 0,
+                    }, 503)
+                    return
                 except Exception:
                     self.state._voice_finish(voice_rid)
                     raise
