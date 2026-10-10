@@ -645,6 +645,26 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertTrue(learned["forgotten_miss"])
         self.assertEqual(self._active(cm), [])
 
+    def test_disuse_retracts_usage_fact(self):
+        # "i no longer use slack for comms" — the 'for comms' tail is
+        # context; the usage fact mentioning slack retracts.
+        cm = self._mem()
+        cm.learn_from_user("i use slack for comms")
+        cm.learn_from_user("my editor is vim")
+        learned = cm.learn_from_user("i no longer use slack for comms")
+        self.assertTrue(learned["forgotten"])
+        self.assertIn("my editor is vim", self._active(cm))
+
+    def test_disuse_ambiguous_never_guesses(self):
+        # Two facts mentioning the object → no retract, honest miss.
+        cm = self._mem()
+        cm.learn_from_user("i use slack for comms")
+        cm.learn_from_user("slack webhook is wh-8842")
+        learned = cm.learn_from_user("i no longer use slack")
+        self.assertFalse(learned["forgotten"])
+        self.assertTrue(learned["forgotten_miss"])
+        self.assertEqual(len(self._active(cm)), 2)
+
     def test_negated_my_fact_retracts_not_banks(self):
         # "my editor is not emacs" retracts the unique emacs fact — it
         # must never bank the negation verbatim ('your editor is not

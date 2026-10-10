@@ -439,6 +439,28 @@ class ConversationMemory:
             self._save()
             return [dict(hits[0])]
 
+    def _retract_fact_contains(self, needle: str) -> list[dict[str, Any]]:
+        """Retract the unique active fact that MENTIONS `needle` as a
+        whole word — 'i use slack for comms' doesn't end in 'slack' but
+        still names it. Same precision rule: exactly one hit or none."""
+        n = str(needle or "").strip().lower()
+        if not n:
+            return []
+        word = re.compile(
+            r"(?<![a-z0-9])" + re.escape(n) + r"(?![a-z0-9])")
+        with self._lock:
+            hits = [
+                row for row in self._data.get("facts", [])
+                if isinstance(row, dict) and row.get("active", True)
+                and word.search(str(row.get("text", "")).lower())
+            ]
+            if len(hits) != 1:
+                return []
+            hits[0]["active"] = False
+            hits[0]["updated_at"] = time.time()
+            self._save()
+            return [dict(hits[0])]
+
     @staticmethod
     def _fact_subject_ok(subj: str) -> bool:
         """Question/command-shaped openings are not fact subjects."""
@@ -1108,6 +1130,28 @@ class ConversationMemory:
                             # missed, never let a downstream matcher
                             # bank "X is not Y" verbatim.
                             body = ""
+                    elif not imperative_body and (disuse := re.match(
+                            r"^i\s+(?:no\s+longer|don't|do\s+not|dont|"
+                            r"stopped|quit)\s+"
+                            r"(?:use|using|run|running|like|liking|"
+                            r"want|needing?|work\s+with)\s+"
+                            r"(.+?)\s*(?:anymore|any\s+more)?[.!?]?$",
+                            body, flags=re.IGNORECASE)):
+                        # "i no longer use slack for comms" retracts
+                        # the unique fact ending in the tool — the
+                        # purpose tail ('for comms') is context, not
+                        # part of the denied value.
+                        obj = self._clean_value(re.sub(
+                            r"\s+(?:for|as|in|on)\s+.+$", "",
+                            disuse.group(1), flags=re.IGNORECASE))
+                        retracted = self._retract_fact_value(obj)
+                        if not retracted:
+                            retracted = self._retract_fact_contains(obj)
+                        result["forgotten"].extend(retracted)
+                        if not retracted:
+                            result["forgotten_miss"] = [
+                                f"i use {obj or disuse.group(1)}"]
+                        body = ""
                     elif corr:
                         inner = corr.group(1).strip()
                         inner_nyc = re.match(

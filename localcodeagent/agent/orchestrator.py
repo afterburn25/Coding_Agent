@@ -2532,6 +2532,7 @@ class AgentOrchestrator:
         r"whats\s+|which\s+|whichever\s+|who'?s?\s+|whos\s+|whose\s+|"
         r"who\s+(?:is|are|was|were)\s+|when\s+(?:is|are|was|were)\s+|"
         r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
+        r"do\s+i\s+(?:use|have|like|prefer|run|need)\s+|"
         r"(?:did|have|had)\s+i\s+(?:tell|told|mention)\w*\s+you\s+"
         r"(?:about\s+)?)",
         re.IGNORECASE)
@@ -2606,11 +2607,17 @@ class AgentOrchestrator:
             # port") can only be answered by taught facts — an empty
             # store is itself the honest answer; don't fall to the
             # model to improvise a denial or a guess.
-            if re.search(r"\bmy\b", match_text, re.IGNORECASE):
+            if re.search(
+                    r"\bmy\b|(?:^|\b)do\s+i\s+(?:use|have|like|prefer|"
+                    r"run|need)\b", match_text, re.IGNORECASE):
                 topic = self._FACT_RECALL_RE.sub(
                     "", match_text).strip().rstrip("?.!")
                 topic = re.sub(
                     r"^(?:is|are|was|were|do|does|did)\s+|^about\s+",
+                    "", topic, flags=re.IGNORECASE).strip()
+                topic = re.sub(
+                    r"\s+(?:now|anymore|any\s+more|any\s+longer|"
+                    r"today|currently|these\s+days)\s*$",
                     "", topic, flags=re.IGNORECASE).strip()
                 topic = re.sub(r"\bmy\b", "your", topic,
                                flags=re.IGNORECASE).strip()
