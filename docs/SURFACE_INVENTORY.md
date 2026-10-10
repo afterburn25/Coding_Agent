@@ -74,6 +74,13 @@ families, not every suffix route.
   assumptions API, approvals/permissions invariants, StateDB health,
   cognitive stores). Everything else is suite-only — the mandate's
   live-dogfood column is the real gap, not unit coverage.
+- Live GET sweep (this pass, round 2): all 104 literal no-param GET
+  routes probed against the running backend — **zero 500s/errors**;
+  every handler returns a well-formed response (200/400/404 as
+  appropriate). Two slow endpoints: `/api/diagnostics` ~2.2s,
+  `/api/storage/audit` ~6.2s (full recursive JSON scan of a bloated
+  dogfood runtime root; scratch dirs now skipped). 8 primary UI pages
+  all serve 200.
 - `?`-method routes above are dispatched inside handler helpers whose
   method detection the extractor could not attribute — most are GET+POST
   pairs in the shared dispatch helpers (`_handle_*_post`, profile API).
