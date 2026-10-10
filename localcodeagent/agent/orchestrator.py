@@ -3315,15 +3315,29 @@ class AgentOrchestrator:
         + _CLAIM_ADVERBS +
         r"(?:connecting|syncing|pulling|cloning|pushing|committing|"
         r"applying|patching|deploying|installing|executing|verifying|"
-        r"testing|merging|checking|inspecting|scanning|reviewing|fixing|"
+        r"merging|fixing|"
         r"repairing|restarting|building|generating|regenerating|"
-        r"reprocessing|sending|queuing|preparing|setting up|"
-        r"working on|pulling|uploading|downloading|"
-        r"fetching|watching|flagging|running|updating|creating|writing|"
+        r"reprocessing|sending|queuing|"
+        r"pulling|uploading|downloading|"
+        r"fetching|flagging|updating|creating|writing|"
         r"modifying|editing|deleting|removing|saving|adding|renaming|"
         r"moving|copying|implementing|refactoring|reverting|migrating|"
         r"configuring|enabling|disabling|stopping|cleaning|wiping|"
         r"changing|rewriting|reworking)\b"
+        # Intransitive-capable progressive verbs ("I'm running", "I'm
+        # still working on it", "I'm watching") only claim work when a
+        # concrete object follows — bare self-state and stall shapes are
+        # persona color, the same class as the phrasal-verb guards above.
+        + r"|\b(?:i['’]m|i am|i['’]ve been|i have been)\s+"
+        + _CLAIM_ADVERBS +
+        r"(?:running|watching|checking|inspecting|scanning|reviewing|"
+        r"verifying|testing|preparing|setting up|working on)\s+"
+        r"(?!now\b|then\b|here\b|there\b|today\b|currently\b|still\b|"
+        r"already\b|again\b|away\b|too\b|as\b|fine\b|well\b|smoothly\b|"
+        r"slowly\b|right\b|just\b|anyway\b|anyways\b|with\b|on\b|at\b|"
+        r"in\b|for\b|up\b|out\b|through\b|over\b|off\b|by\b|into\b|"
+        r"down\b|it\b|that\b|this\b|these\b|those\b|things?\b|"
+        r"everything\b|something\b)\w"
         # Vaguer "I did it/that/what you asked" — still an execution claim
         # when nothing actually ran.
         + r"|\bi did\s+" + _CLAIM_ADVERBS +

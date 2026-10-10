@@ -620,8 +620,25 @@ class TruthGateTests(RecoveryLoopTests):
                 "It says the file was deleted last week.",
                 "The bug was fixed upstream in v2.",
                 "Patches are applied by the vendor.",
+                # Intransitive progressive self-state — persona color,
+                # not a work claim (BUG-029 tail, live FP: "I'm already
+                # running with what's here" badged).
+                "I'm already running with what's here.",
+                "I'm still working on it.",
+                "I'm running now.",
+                "I'm watching.",
+                "I'm checking it for you.",
+                "I'm just preparing.",
             ):
                 self.assertFalse(det(text), text)
+            for claim in (
+                "I'm running the tests.",
+                "I'm checking the logs.",
+                "I'm working on the fix.",
+                "I'm setting up the server.",
+                "I'm verifying the deploy.",
+            ):
+                self.assertTrue(det(claim), claim)
 
     def test_echoed_notice_stripped_from_stored_reply(self):
         # BUG-029: the badge lives verbatim in stored history, so small
