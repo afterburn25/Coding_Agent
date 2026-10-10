@@ -28,6 +28,18 @@ map in `docs/SURFACE_INVENTORY.md`:
   the last 6 task summaries verbatim into every chat turn → casual
   questions echoed mission-failure text. New `context_for()` token-overlap
   gate; chat lane skips the block on no match; work lanes keep recency.
+- **BUG-010 (P1, GitHub lane)** — `github_enabled=false` envs executed
+  unregistered `github_*` tools → raw `unknown tool` prose. Lane now
+  gates on `config.github_enabled` → honest "isn't connected".
+- **BUG-011 (P1, conversation isolation)** — mission/autonomy work
+  orders were recorded into conversation history as user/assistant
+  turns (live-verified: model echoed mission failures into unrelated
+  questions). `_mission_attributed()` now gates `record_exchange` on
+  conversation_memory, conversation_manager AND answer_memory at both
+  completion paths. NOTE: pre-fix contaminated exchanges persist in
+  existing conversations.json — new traffic is isolated.
+- **Queued-notice polish** — no more machine-authored mission work
+  orders pasted as status detail; user prompts cut on word boundaries.
 
 Live dogfood verified this pass: fast_path math ~280ms, `and of Japan?`
 ellipsis → Tokyo, `don't open Chrome` preempted a mission drive
@@ -58,9 +70,12 @@ dead-code sweep, remaining audit parts (see BUG_LEDGER discovery queue).
   Reuse map for later phases: EvalLab (`eval/`), HypothesisStore,
   CausalMemory, DecisionJournal, RequirementStore, LearningGovernor,
   multiagent/swarm, ExperimentStore — do not duplicate.
-- **Open fragility**: scratch-backend llama-server dies under VRAM
-  contention during long dogfood runs (HTTP 500s, not semantic
-  failures). Distinguish runtime availability from product defects.
+- **Open fragility**: external llama-server dies during dogfood —
+  root-caused: process stays ALIVE but its listen socket disappears
+  (zombie; curl refused while PID resident). Externally-managed in the
+  scratch env — the backend's degradation path (503 + task `error`,
+  no phantom) is verified correct. Distinguish runtime availability
+  from product defects.
 
 ## 0.42.0 — Adaptive Intelligence Phase A
 
