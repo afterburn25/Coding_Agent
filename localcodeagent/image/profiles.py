@@ -5,6 +5,8 @@ from pathlib import Path
 from time import time
 from typing import Any
 
+from ..fsutil import atomic_write_text
+
 
 class SubjectProfileStore:
     def __init__(self, root: Path) -> None:
@@ -46,5 +48,5 @@ class SubjectProfileStore:
         merged.setdefault("reference_images", [])
         merged.setdefault("saved_prompts", [])
         merged.setdefault("loras", [])
-        self._path(profile_id).write_text(json.dumps(merged, indent=2), encoding="utf-8")
+        atomic_write_text(self._path(profile_id), json.dumps(merged, indent=2), encoding="utf-8")
         return merged
