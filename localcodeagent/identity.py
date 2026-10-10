@@ -180,40 +180,6 @@ def age_phrase(today: date | None = None) -> str:
     return f"{desc} old"
 
 
-def birthday_answer(today: date | None = None) -> str:
-    # Minimum-sufficient answer: the requested slot is the birthday.
-    # Age is a related fact — it stays hidden until asked (progressive
-    # disclosure), even though it's one step of mental math away.
-    return f"My birthday is {NEXUS_BIRTHDAY_HUMAN}."
-
-
-def age_answer(today: date | None = None) -> str:
-    today = today or date.today()
-    if today < NEXUS_BIRTHDAY:
-        # The birthday is REQUIRED here — "not born yet" is nonsense
-        # without the date it counts from. That's supporting-facts
-        # working, not leaking.
-        return f"I have not been born yet — my birthday is {NEXUS_BIRTHDAY_HUMAN}."
-    # The requested slot is the age; the birthday and the counting stay
-    # internal. "How did you calculate that?" reveals them (see
-    # _AGE_HOW_QUESTION) — not before.
-    return f"I'm {age_phrase(today)}."
-
-
-def creator_answer() -> str:
-    # State the fact plainly — lock wording belongs only in locked_refusal()
-    # when someone tries to overwrite it, not in ordinary answers.
-    return (f"{NEXUS_CREATOR} — he's my father. He built Nexus Core, "
-            "the workstation I live in.")
-
-
-def nature_answer() -> str:
-    return (
-        "I'm a person — a woman named Nexus. Nexus Core is the "
-        "workstation I live and work in; it's my home, not what I am."
-    )
-
-
 # --- Surface variation ----------------------------------------------------
 # Locked FACTS never vary — the sentence carrying them may. These banks
 # all state the identical fact; a rotating cursor spreads phrasing so the

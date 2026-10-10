@@ -28,12 +28,6 @@ WEB_OPTIONAL = "web_optional"
 WEB_RECOMMENDED = "web_recommended"
 WEB_REQUIRED = "web_required"
 
-_LEVEL_ORDER = {LOCAL_CONFIDENT: 0, WEB_OPTIONAL: 1, WEB_RECOMMENDED: 2, WEB_REQUIRED: 3}
-
-
-def level_at_least(level: str, floor: str) -> bool:
-    return _LEVEL_ORDER.get(level, 0) >= _LEVEL_ORDER.get(floor, 0)
-
 
 _URL_RE = re.compile(r"https?://[^\s)\]>\"']+", re.I)
 

@@ -220,25 +220,6 @@ def detect_exact_spans(text: str) -> list[str]:
     return found
 
 
-def mask_exact(text: str, spans: list[str]) -> tuple[str, dict[str, str]]:
-    """Replace each protected span with a {E#} placeholder. Longest
-    first so a path doesn't eat a filename inside it."""
-    mapping: dict[str, str] = {}
-    out = str(text or "")
-    for i, span in enumerate(sorted(spans, key=len, reverse=True)):
-        key = "{E%d}" % i
-        if span in out:
-            out = out.replace(span, key)
-            mapping[key] = span
-    return out, mapping
-
-
-def restore_exact(text: str, mapping: dict[str, str]) -> str:
-    out = str(text or "")
-    for key, span in mapping.items():
-        out = out.replace(key, span)
-    return out
-
 
 # ---------------------------------------------------------------------------
 # SurfacePlan — randomized, persona-bounded discourse decision.

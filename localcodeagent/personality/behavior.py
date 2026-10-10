@@ -793,14 +793,6 @@ def _sig_cue(label: str, v: float) -> str | None:
     return None
 
 
-def family_for(preset: dict | None, personality: dict | None) -> str:
-    """Behavior family = preset greeting_style (customs inherit their
-    base preset's)."""
-    fam = str((preset or {}).get("greeting_style")
-              or (personality or {}).get("greeting_style") or "default")
-    return fam if fam in _FAMILIES else "default"
-
-
 def behavior_for(preset_id: str, greeting_style: str = "") -> dict:
     """Merged behavior profile: family defaults + extras + preset
     overrides. Returns a fresh dict — callers may annotate freely."""

@@ -214,11 +214,6 @@ def proper_tokens(raw: str) -> set[str]:
     return out
 
 
-def hard_content(tokens_: set[str]) -> set[str]:
-    """Content tokens that are NOT part of the known concept vocabulary —
-    uncovered ones represent a genuine semantic conflict."""
-    return {t for t in tokens_ if t not in _CONCEPT_VOCAB}
-
 
 def canonical_tokens(text: str) -> set[str]:
     """Content tokens collapsed to canonical concept forms.
