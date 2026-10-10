@@ -1333,13 +1333,21 @@ class ConversationMemory:
                             r"^(?:(?:actually|no|wait|instead|sorry|"
                             r"never\s*mind|nm)[,]?\s+)*"
                             r"(?:not|nope|nah|not\s+really)\s+"
-                            r"[^,;]{1,40}?[,;—]?\s+"
+                            r"([^,;—]{1,40}?)[,;—]\s*"
                             r"(?:it'?s|it\s+is|the\s+\w+\s+is)\s+"
                             r"(.+?)[.!?]?$",
                             raw, flags=re.IGNORECASE)
                         if nyc:
-                            fact = self._retarget_latest_fact(
-                                nyc.group(1), result["superseded"])
+                            # The negated value names its own fact —
+                            # "not cobalt, it's onyx" corrects the
+                            # cobalt row, not whatever happens to be
+                            # newest.
+                            fact = self._correct_fact_value(
+                                self._clean_value(nyc.group(1)),
+                                nyc.group(2))
+                            if fact is None:
+                                fact = self._retarget_latest_fact(
+                                    nyc.group(2), result["superseded"])
                     if not reset and fact is None:
                         # Referential "it's X" after a correction marker —
                         # "never mind, it's 60" re-states the latest
