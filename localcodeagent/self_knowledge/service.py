@@ -208,6 +208,18 @@ class SelfKnowledgeService:
             if m_back:
                 return Resolution("answer", "undo",
                     text="The last change can't be undone from chat.")
+            # A named referent ("undo that laptop change") scopes the
+            # undo — journal rows are matched by subject, and a
+            # superseded memory fact restores when the referent names
+            # a taught entity. No referent match → honest miss; the
+            # latest journaled row is never reverted on a guess.
+            referent = re.search(
+                r"\b(?:undo|revert)\s+(?:that|the)\s+"
+                r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s*"
+                r"(?:change|edit|update|rename|move|switch|fix|"
+                r"modification)\b", t)
+            if referent:
+                return self._scoped_undo(referent.group(1).strip())
             return self._journal_undo()
         if re.search(r"\bopen it\b|\bopen that\b|\btake me\b", t):
             route = (proposed or {}).get("route") or \
@@ -222,6 +234,66 @@ class SelfKnowledgeService:
             return fn() if callable(fn) else None
         except Exception:
             return None
+
+    def _scoped_undo(self, referent: str) -> Resolution:
+        """'undo that <referent> change' — bind the journal row or
+        memory fact the referent names. A named referent that matches
+        nothing gets an honest miss, never a guess-revert."""
+        ref_terms = [t for t in re.findall(r"[a-z0-9]{3,}", referent)
+                     if t not in {"the", "that", "last", "recent"}]
+        cj = self._journal()
+        if cj is not None and ref_terms:
+            try:
+                for row in cj.recent(50):
+                    if row.get("undone"):
+                        continue
+                    subject = str(row.get("subject") or "").lower()
+                    if any(t in subject for t in ref_terms):
+                        res = cj.undo(str(row.get("id") or ""))
+                        if res.get("ok"):
+                            return Resolution(
+                                "execute", "undo",
+                                text=str(res.get("message")
+                                         or "Undone."),
+                                result=ActionResult(
+                                    True,
+                                    verified=bool(res.get("verified")),
+                                    detail=str(res.get("detail") or "")),
+                                truth={"kind": "journal",
+                                       "subject": res.get("subject")})
+                        return Resolution(
+                            "answer", "undo",
+                            text=str(res.get("message")
+                                     or "I couldn't undo that."),
+                            truth={"kind": "journal",
+                                   "subject": res.get("subject")})
+            except Exception:
+                pass
+        # Memory-fact revert — "undo that laptop change" while
+        # 'my laptop is pulsar' superseded 'my laptop is quasar'
+        # restores the prior value.
+        cm = self._env.get("conversation_memory")
+        try:
+            store = cm() if callable(cm) else cm
+        except Exception:
+            store = None
+        if store is not None and ref_terms:
+            try:
+                restored = store.revert_fact(referent)
+            except Exception:
+                restored = None
+            if restored:
+                return Resolution(
+                    "execute", "undo",
+                    text=(f"Reverted — {restored}."),
+                    result=ActionResult(True, verified=True),
+                    truth={"kind": "memory", "subject": referent})
+        what = referent or "that"
+        return Resolution(
+            "answer", "undo",
+            text=(f"I don't have a journaled or remembered change "
+                  f"matching \"{what}\" — nothing to undo."),
+            truth={"kind": "none", "subject": referent})
 
     def _journal_undo(self) -> Resolution:
         cj = self._journal()

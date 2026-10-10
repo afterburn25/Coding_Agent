@@ -1770,6 +1770,10 @@ class AppState:
             # to the durable ledger for "undo that" and record every
             # registry-mediated settings write.
             "change_journal": lambda: getattr(self, "changes", None),
+            # Scoped-undo needs the fact store — "undo that laptop
+            # change" can restore a superseded memory fact.
+            "conversation_memory": lambda: getattr(
+                self, "conversation_memory", None),
             "on_change": self._journal_setting,
         }
         return SelfKnowledgeService(env)

@@ -419,6 +419,61 @@ class ConversationMemory:
         text = str(hits[0].get("text", "")).strip()
         return text[: len(text) - len(old)].rstrip() + " " + new
 
+    def revert_fact(self, referent: str) -> str | None:
+        """'undo that <referent> change' — restore the most recently
+        superseded fact whose subject matches the referent. The current
+        active row in that slot is retired; the prior value goes live
+        again. Returns the restored fact text, or None when nothing in
+        the slot's history matches (a named referent never guesses)."""
+        ref = str(referent or "").strip().lower()
+        ref = re.sub(r"^(?:my|the|our)\s+", "", ref)
+        if not ref:
+            return None
+        with self._lock:
+            rows = [r for r in self._data.get("facts", [])
+                    if isinstance(r, dict)]
+
+            def _subj(row: dict) -> str:
+                m = self._RETARGET_PREDICATE_RE.match(
+                    str(row.get("text") or ""))
+                if not m:
+                    return ""
+                return re.sub(r"^(?:my|the|our)\s+", "",
+                              m.group(1).strip().lower())
+
+            def _hit(row: dict) -> bool:
+                s = _subj(row)
+                return bool(s) and (ref in s or s in ref)
+
+            superseded = sorted(
+                (r for r in rows
+                 if not r.get("active", True) and r.get("superseded")
+                 and _hit(r)),
+                key=lambda r: float(r.get("superseded_at") or 0),
+                reverse=True)
+            if not superseded:
+                return None
+            old = superseded[0]
+            old_slot = self._slot_canonical(str(old.get("slot") or ""))
+            now = time.time()
+            # Retire whatever currently holds the slot (if anything).
+            for r in rows:
+                if (r.get("active", True)
+                        and self._slot_canonical(str(r.get("slot") or ""))
+                        == old_slot and old_slot):
+                    r["active"] = False
+                    r["superseded"] = True
+                    r["superseded_at"] = now
+                    r["superseded_by"] = old.get("id")
+                    r["updated_at"] = now
+            old["active"] = True
+            old["superseded"] = False
+            old.pop("superseded_by", None)
+            old.pop("superseded_at", None)
+            old["updated_at"] = now
+            self._save()
+            return str(old.get("text") or "") or None
+
     def _retract_fact_value(self, old_value: str) -> list[dict[str, Any]]:
         """'X isn't Y (anymore)' with no replacement — retire the unique
         active fact whose value tail is Y. Same precision rule as
@@ -1316,6 +1371,7 @@ class ConversationMemory:
                             r"scheduled for|due (?:on|by|in)|"
                             r"expires?|ends?|starts?|runs?|"
                             r"lifts?|holds?|begins?|resumes?|"
+                            r"pass(?:es)?|fails?|ships?|lands?|"
                             r"hosted (?:at|on)|serves?|costs?|lasts?|"
                             r"is|are)\s+(.+)$",
                             body, flags=re.IGNORECASE,
