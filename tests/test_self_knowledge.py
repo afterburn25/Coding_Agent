@@ -345,6 +345,29 @@ class TestServiceControl(unittest.TestCase):
             self.assertIn("emacs", res.text)
             self.assertFalse(journal.recent(5)[0].get("undone"))
 
+    def test_put_back_shapes_scope_the_referent(self):
+        # "put the scooter back" / "roll back the scooter" name a
+        # referent without an undo keyword — same scoped restore as
+        # 'undo that scooter change'. Bare pronouns ('put it back')
+        # capture nothing and stay generic.
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        for shape in ("put the scooter back",
+                      "switch that scooter back",
+                      "roll back the scooter"):
+            svc, store, _ = make_service()
+            with tempfile.TemporaryDirectory() as td:
+                cm = ConversationMemory(Path(td) / "cm.json")
+                svc._env["conversation_memory"] = lambda: cm
+                svc._env["change_journal"] = lambda: None
+                cm.learn_from_user("my scooter is named dart")
+                cm.learn_from_user("actually the scooter is wisp")
+                res = svc.respond(shape)
+                self.assertIsNotNone(res, shape)
+                self.assertIn("dart", res.text, shape)
+
     def test_mute_uses_voice_action(self):
         svc, store, _ = make_service()
         res = svc.respond("mute yourself")

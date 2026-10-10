@@ -186,10 +186,18 @@ class SelfKnowledgeService:
         # an unrelated journaled change.
         m_undo = re.search(r"\bundo\b|\bundo that\b|\bput it back\b|"
                            r"\brevert\b|\bchange it back\b", t)
+        # "put the scooter back" / "roll back the migration" name a
+        # referent without an undo keyword — the same scoped restore.
+        # Bare pronouns/quantifiers (it/things/everything) capture
+        # nothing and stay generic.
+        m_putback = re.search(
+            r"\b(?:put|switch|change|take|move)\s+"
+            r"(?:the|that|it|things|everything)\s*(.*?)\s*\bback\b|"
+            r"\broll(?:ed)?\s+back\s+(?:the|that)\s+(.+?)\s*$", t)
         m_back = re.search(r"\b(turn|switch|set|put)\b.{0,15}\bback\b"
                            r".{0,5}\bon\b|\bback to (normal|before|"
                            r"how it was)\b|\bturn it back\b", t)
-        if m_undo or (m_back and last):
+        if m_undo or m_putback or (m_back and last):
             # A named referent ("undo that laptop change") scopes the
             # undo — it must bind before the session's last_executed,
             # or "revert the printer change" would silently revert an
@@ -226,6 +234,17 @@ class SelfKnowledgeService:
                                      "modification", "correction",
                                      "adjustment", "tweak"}]
                     ref_text = " ".join(words)
+            if not ref_text and m_putback:
+                # "put the scooter back" — the captured span between
+                # the pronoun and `back` names the referent; pronouns
+                # and filler reduce to nothing and stay generic.
+                span = m_putback.group(1) or m_putback.group(2) or ""
+                words = [w for w in re.findall(r"[a-z0-9]{3,}", span)
+                         if w not in {"the", "that", "it", "all",
+                                      "last", "recent", "how", "was",
+                                      "before", "way", "normal",
+                                      "were"}]
+                ref_text = " ".join(words)
             undo = (last or {}).get("undo")
             if undo and ref_text:
                 # Session undo only applies when the referent actually
