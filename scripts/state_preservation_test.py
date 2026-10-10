@@ -7,6 +7,9 @@ state under every protected location, then repeatedly:
     build -> deploy -> restart -> update -> failed/partial deploy
         -> retry deploy -> restart
 
+A final phase hard-kills deploy mid-mirror (fat bundle file widens the
+copy window) and verifies state survives and the next deploy converges.
+
 verifying after every cycle that no persistent state was silently lost.
 The governing invariant:
 
@@ -247,8 +250,77 @@ def run(cycles: int, keep: bool) -> int:
         if last.get("cycle") != cycles:
             raise PreservationFailure("final config.json lost user edits")
 
-        print(f"\n{'PASS' if failures == 0 else 'FAIL'} — {cycles} cycles, "
-              f"{len(manifest)} state files preserved throughout"
+        # ---- hard kill mid-mirror (power loss / crash analogue) --------
+        # A fat bundle file widens the robocopy window so the kill lands
+        # mid-copy. Contract: state files untouched, dest binary usable,
+        # uncommitted Source work either restored or recoverable from
+        # the orphaned %TEMP% backup — and the next deploy converges.
+        _build_bundle(bundle, cycles + 1)
+        fat = bundle / "resources" / "app" / "fat.bin"
+        fat.parent.mkdir(parents=True, exist_ok=True)
+        fat.write_bytes(os.urandom(160 * 1024 * 1024))
+        dirty = dest / "Source" / "deliverable.md"
+        dirty.write_text("mission output kill-cycle\n")
+        backup_marker = time.time()
+        proc = subprocess.Popen(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-File", str(ROOT / "scripts" / "deploy_local.ps1"),
+             "-Source", str(bundle), "-Dest", str(dest)],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True)
+        # Wait for the fat file to start landing, then hard-kill the
+        # whole tree (taskkill /T kills robocopy children too).
+        fat_dest = dest / "resources" / "app" / "fat.bin"
+        deadline = time.time() + 90
+        killed_mid_copy = False
+        while time.time() < deadline:
+            if fat_dest.exists() and fat_dest.stat().st_size > 0:
+                killed_mid_copy = True
+                break
+            if proc.poll() is not None:
+                break
+            time.sleep(0.05)
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+            capture_output=True)
+        proc.wait()
+        print(f"kill-cycle: mid-copy kill "
+              f"{'landed' if killed_mid_copy else 'missed (deploy finished first)'}")
+
+        _verify(dest, manifest, "kill-cycle post-kill")
+        if not (dest / "NexusCore.exe").is_file():
+            raise PreservationFailure(
+                "kill-cycle: NexusCore.exe missing after aborted deploy")
+        # Source work: restored in place, or stranded in a %TEMP%
+        # backup — either is recoverable; silently losing it is not.
+        if not (dirty.is_file()
+                and dirty.read_text() == "mission output kill-cycle\n"):
+            stranded = [
+                p for p in Path(os.environ.get("TEMP", ".")).glob(
+                    "nexus-source-backup-*")
+                if p.stat().st_mtime >= backup_marker
+                and (p / "deliverable.md").is_file()
+            ]
+            if not stranded:
+                raise PreservationFailure(
+                    "kill-cycle: uncommitted Source work lost AND no "
+                    "orphaned backup found — unrecoverable")
+            print("kill-cycle: dirty file stranded in "
+                  f"{stranded[0].name} (recoverable)")
+        # Next deploy must converge — a half-mirrored tree is repaired
+        # by /MIR; state must survive both phases.
+        rc3, out3 = _deploy(bundle, dest)
+        _verify(dest, manifest, f"kill-cycle recovery rc={rc3}")
+        new_ver = (dest / "resources" / "app" / "version.txt")
+        if rc3 != 0 or not new_ver.is_file() or \
+                new_ver.read_text().strip() != str(cycles + 1):
+            raise PreservationFailure(
+                f"kill-cycle: recovery deploy failed to converge "
+                f"(rc={rc3})\n{out3[-800:]}")
+
+        print(f"\n{'PASS' if failures == 0 else 'FAIL'} — {cycles} cycles "
+              f"+ mid-copy kill, {len(manifest)} state files preserved "
+              f"throughout"
               + (f" ({failures} retry failures)" if failures else ""))
         return 1 if failures else 0
     except PreservationFailure as e:

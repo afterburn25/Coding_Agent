@@ -4584,3 +4584,43 @@ Conversation semantic convergence — live dogfood fully green (commit 8d5c3889)
   restored the 4548-line f1f60fb7 version).
 - Open next: 150+/300+ turn long-session dogfood, reliability
   state-preservation closeout, Adaptive Intelligence Phase B.
+
+Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (commit afc0d579):
+- The 231-turn live dogfood (all packs + long-150) surfaced five
+  assertion failures after the infra fixes; three were real defects,
+  all structural:
+- Requirements ledger: imperative spec edits ('make the font
+  monospace', 'add markdown rendering', 'use a manual save button
+  instead') and retirements ('no auto-save', 'drop the markdown
+  rendering') now fold into req_spec via extract_spec_edits; specs seed
+  under a _default bucket when no topic is set, and edits target the
+  topic's spec or the freshest one within the session window (topic
+  labels drift mid-session). '_STATE_SPEC_Q_RE' + state:spec_recall
+  answer 'what's the spec so far?' deterministically — retired
+  requirements never surface.
+- Answer Memory poison: 'I couldn't reach GitHub — unknown tool …'
+  (an honest blocked reply) was learned and replayed verbatim to
+  unrelated questions. is_error_answer() now suppresses failure reports
+  at record time and invalidates poisoned rows in place at lookup time
+  — covers replay, hippocampus hints, and the readiness peek.
+- Capability probes ('can you browse websites/see my screen/hear me')
+  classify volatile: never stored, never replayed (lookup rejects
+  volatile; brain-envelope drops it too). REPEAT_ACKS lost the two
+  'No…'-leading openers that prefixed affirmative answers.
+- Phantom referent: assistant prose 'light/dark' matched
+  _GITHUB_REPO_SLUG_RE, so _github_context_repo claimed 'which file
+  did i just say…' for the repo-read lane → 'unknown tool'. Now only
+  user-authored slugs bind the referent; slash idioms denylisted;
+  assistant slugs need a repo-mentioning turn.
+- Fact memory: copula decisions ('we decided the cache ttl is 300'),
+  attribute predicates ('the build id ends in xq72'), and
+  want-as-format preferences now learn; gentle singular fold in
+  _content_terms ('ends'/'end'); who's/when/where recall stems and
+  'what did the X end in' no longer rejected.
+- Runtime: orphan sweep re-reads _managed per pid under the lock — a
+  managed llama-server registered mid-enumeration can no longer be
+  killed as an orphan (test_process_managed_mid_enumeration…).
+- Tests: full suite 3612 passed / 530 subtests (skipped=4); 8 new
+  regressions in test_answer_memory, test_conversation_qa,
+  test_conversation_state, test_runtime.
+- Ledger: .dogfood/CONVERSATION_DEFECTS.md round-6 table.
