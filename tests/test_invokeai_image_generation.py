@@ -1,7 +1,7 @@
-import unittest
-from localcodeagent.image.invokeai import InvokeAIBackend
+from invokeai import InvokeAIBackend
+from invokeai.backend import InvokeAIBackend
 
-class TestInvokeAIImageGeneration(unittest.TestCase):
+class TestInvokeAIImageGenerationTimeout(unittest.TestCase):
     def test_invokeai_image_generation_timeout(self):
         backend = InvokeAIBackend()
         try:

@@ -328,6 +328,7 @@ def run_process_streaming(
     proc = subprocess.Popen(
         argv, cwd=str(cwd), env=env, shell=shell, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creationflags,
+        encoding="utf-8", errors="replace",
         # Own process group on POSIX so _kill_tree can killpg the wrapper and
         # every child it spawned.
         start_new_session=not sys.platform.startswith("win"),
