@@ -1336,6 +1336,19 @@ class ConversationMemory:
                                 value = self._clean_value(decl.group(3))
                                 if value:
                                     fact = f"{subj} {pred} {value}"
+                                if (value and body != raw
+                                        and not naming):
+                                    # Marker-led restatement of a
+                                    # tracked entity ("actually the
+                                    # laptop is pulsar" while 'my
+                                    # laptop is named quasar' lives) —
+                                    # retarget the entity's slot rather
+                                    # than forking a parallel fact.
+                                    tgt = self._retarget_latest_fact(
+                                        value, result["superseded"],
+                                        subject_hint=subj)
+                                    if tgt is not None:
+                                        fact = tgt
                                 if naming and value:
                                     # "the render box is now named
                                     # titan" restates the entity's name
@@ -1350,6 +1363,13 @@ class ConversationMemory:
                                         fact = tgt
                                 if (pred in {"is", "are"} and value
                                         and not naming
+                                        # Marker context legitimizes a
+                                        # short value — "actually the
+                                        # laptop is pulsar" restates the
+                                        # slot deliberately; the
+                                        # adjective guard only gates
+                                        # unmarked statements.
+                                        and body == raw
                                         and not (
                                             re.search(
                                                 r"[\dA-Z/\\]|(?:^|\s)v\d",

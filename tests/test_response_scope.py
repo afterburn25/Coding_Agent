@@ -673,6 +673,22 @@ class TestCorrectionChains(unittest.TestCase):
         learned = cm2.learn_from_user("the label used to be blue")
         self.assertFalse(learned["facts"])
 
+    def test_marker_led_decl_retargets_entity_slot(self):
+        # "actually the laptop is pulsar" — the correction marker
+        # legitimizes the short value AND binds the same-entity slot
+        # ('my laptop is named quasar'), never forking a parallel fact.
+        cm = self._mem()
+        cm.learn_from_user("my laptop is named quasar")
+        learned = cm.learn_from_user("actually the laptop is pulsar")
+        self.assertIn("my laptop is pulsar", learned["facts"])
+        active = self._active(cm)
+        self.assertNotIn("my laptop is named quasar", active)
+        self.assertNotIn("laptop is pulsar", active)
+        # Without the marker the adjective guard still holds.
+        cm2 = self._mem()
+        self.assertFalse(
+            cm2.learn_from_user("the movie is great")["facts"])
+
     def test_my_scoped_change_mints_is_not_uses(self):
         # "my timezone changed to pst" — a personal attribute change is
         # not a tool migration; 'uses' is for switched/moved/migrated.
@@ -779,6 +795,16 @@ class TestFactsRecallLane(unittest.TestCase):
         for q in ("did i tell you my editor",
                   "did i tell you about the port",
                   "have i told you my timezone"):
+            self.assertTrue(rx.match(q), q)
+
+    def test_when_does_probes_match_recall_regex(self):
+        # "when does the freeze lift" probes stored memory — the
+        # copular 'when is' lead missed aux-verb forms (BUG-063).
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        rx = AgentOrchestrator._FACT_RECALL_RE
+        for q in ("when does the freeze lift",
+                  "when do the backups run",
+                  "when is the deadline"):
             self.assertTrue(rx.match(q), q)
 
     def test_second_person_conversion(self):
