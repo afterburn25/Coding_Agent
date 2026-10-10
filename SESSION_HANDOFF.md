@@ -90,6 +90,26 @@ honest `error`/`done` + friendly message, malformed input → 400,
 malformed query int → 200 fallback. Suite: **3685 passed, 4 skipped,
 530 subtests**.
 
+Latest round (BUG-064..066, commits through `3ca4cbf8`):
+- **Persistence split-brain** — `reload_model_configuration` spawned a
+  second `ConversationMemory` on the same file whose snapshot-save
+  clobbered newly banked facts; reload now reuses the live store and
+  re-points the agent + hippocampus refs.
+- **Referent-scoped undo** — `undo that laptop change` used to revert
+  the newest journal row regardless of referent (reverted
+  `worker_ceiling` instead); now binds the named journal row or
+  restores the superseded memory fact on that slot, honest-misses
+  otherwise. Generic `undo that` still falls back to the journal.
+- **Dry-run undo hazard** — `would_answer` probes run
+  `respond(execute=False)`; `_scoped_undo` mutated during the probe so
+  the real pass reverted a different row (live: `Reverted — pulsar`
+  while quasar was supposed to be restored). Both branches now honor
+  `_execute`; `peek_revert_fact` gives dry-runs a read-only check.
+- Status-verb predicates (`pass/fail/ship/land`) bank declaratively —
+  `the tests pass on main` no longer falls to a model that riffs a
+  fake `Got it` ack (the truth-gate badge was correct output for a
+  model reply; the fix removes the fall-through).
+
 Still open: UI click-dogfood, voice/image/browser live workflows, soak,
 dead-code sweep, remaining audit parts (see BUG_LEDGER discovery queue).
 

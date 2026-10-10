@@ -190,7 +190,35 @@ class SelfKnowledgeService:
                            r".{0,5}\bon\b|\bback to (normal|before|"
                            r"how it was)\b|\bturn it back\b", t)
         if m_undo or (m_back and last):
+            # A named referent ("undo that laptop change") scopes the
+            # undo — it must bind before the session's last_executed,
+            # or "revert the printer change" would silently revert an
+            # unrelated setting just because it ran most recently.
+            referent = re.search(
+                r"\b(?:undo|revert)\s+(?:that|the)\s+"
+                r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s*"
+                r"(?:change|edit|update|rename|move|switch|fix|"
+                r"modification)\b", t)
             undo = (last or {}).get("undo")
+            if undo and referent:
+                # Session undo only applies when the referent actually
+                # names it — otherwise the scoped resolver owns the turn.
+                parts = [last.get("setting"), last.get("action")]
+                for src in (last.get("params"), undo.get("params"),
+                            undo.get("action")):
+                    if isinstance(src, dict):
+                        parts.extend(src.values())
+                    else:
+                        parts.append(src)
+                subj_terms = set(re.findall(
+                    r"[a-z0-9]{3,}",
+                    " ".join(str(x or "") for x in parts).lower()))
+                ref_terms = {x for x in re.findall(r"[a-z0-9]{3,}",
+                             referent.group(1).lower())
+                             if x not in {"the", "that", "last",
+                                          "recent"}}
+                if not (ref_terms & subj_terms):
+                    return self._scoped_undo(referent.group(1).strip())
             if undo:
                 if undo.get("action") == "_set":
                     spec_s = self.settings.get(undo["params"]["key"])
@@ -208,16 +236,11 @@ class SelfKnowledgeService:
             if m_back:
                 return Resolution("answer", "undo",
                     text="The last change can't be undone from chat.")
-            # A named referent ("undo that laptop change") scopes the
-            # undo — journal rows are matched by subject, and a
+            # Referent extracted above — a named target scopes the
+            # undo; journal rows are matched by subject, and a
             # superseded memory fact restores when the referent names
             # a taught entity. No referent match → honest miss; the
             # latest journaled row is never reverted on a guess.
-            referent = re.search(
-                r"\b(?:undo|revert)\s+(?:that|the)\s+"
-                r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s*"
-                r"(?:change|edit|update|rename|move|switch|fix|"
-                r"modification)\b", t)
             if referent:
                 return self._scoped_undo(referent.group(1).strip())
             return self._journal_undo()

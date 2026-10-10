@@ -294,6 +294,31 @@ class TestServiceControl(unittest.TestCase):
                       if r.get("active")]
             self.assertEqual(active, ["my laptop is named quasar"])
 
+    def test_undo_named_referent_beats_session_last_executed(self):
+        # 'revert the printer change' with a live session undo for
+        # worker_ceiling must not revert the setting — the named
+        # referent owns the turn.
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        svc, store, _ = make_service()
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            svc._env["conversation_memory"] = lambda: cm
+            cm.learn_from_user("my printer is named epson")
+            cm.learn_from_user("actually the printer is hp")
+            svc._context["last_executed"] = {
+                "setting": "worker_ceiling",
+                "undo": {"action": "_set",
+                         "params": {"key": "worker_ceiling",
+                                    "value": 8}}}
+            res = svc.respond("revert the printer change")
+            self.assertIsNotNone(res)
+            self.assertIn("epson", res.text)
+            # The session undo was not consumed — the referent owned it.
+            self.assertIsNotNone(svc._context["last_executed"])
+
     def test_mute_uses_voice_action(self):
         svc, store, _ = make_service()
         res = svc.respond("mute yourself")
