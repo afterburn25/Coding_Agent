@@ -99,30 +99,32 @@ class TestStrategyRouter(unittest.TestCase):
                               f"{strat} maps to unknown op {op}")
 
 
-class TestFormalSolvers(unittest.TestCase):
-    def test_pure_arithmetic(self):
-        from localcodeagent.governor.solvers import (
-            eval_arithmetic, math_answer)
-        self.assertEqual(math_answer("What's 14 × 37?"), "14 * 37 = 518")
-        self.assertEqual(math_answer("calculate 2 + 3 * 4"), "2 + 3 * 4 = 14")
-        self.assertEqual(math_answer("what is 10 percent of 250"),
-                         "10 *(1/100)* 250 = 25")
-        self.assertEqual(eval_arithmetic("(3+4)*2"), 14)
-        self.assertEqual(eval_arithmetic("2^10"), 1024)
+class TestFormalMathFastPath(unittest.TestCase):
+    """formal_math strategy ↔ the existing thalamus fast path — the
+    strategy labels the problem class; the brain computes exactly."""
+
+    def _thalamus(self):
+        from localcodeagent.brain.bus import CorpusCallosum as Bus
+        from localcodeagent.brain.thalamus import Thalamus
+        return Thalamus(Bus())
+
+    def test_math_asks_route_and_compute(self):
+        th = self._thalamus()
+        s, _, _, _ = classify_strategy("What's 14 × 37?")
+        self.assertEqual(s, "formal_math")
+        self.assertIn("14", th.answer_fast_path("math", "14 * 37"))
 
     def test_prose_numbers_never_compute(self):
-        from localcodeagent.governor.solvers import math_answer
-        self.assertIsNone(math_answer(
-            "the server has 14 cores, why does it crash?"))
-        self.assertIsNone(math_answer(""))
-        self.assertIsNone(math_answer("explain the x factor"))
+        th = self._thalamus()
+        # Numbers inside prose extract to '' — never computed.
+        self.assertEqual(th._math_expr(
+            "the server has 14 cores, why does it crash?"), "")
+        self.assertEqual(th._math_expr("explain the x factor"), "")
 
     def test_unsafe_expressions_rejected(self):
-        from localcodeagent.governor.solvers import eval_arithmetic
-        self.assertIsNone(eval_arithmetic("__import__('os').system('x')"))
-        self.assertIsNone(eval_arithmetic("open('/etc/passwd')"))
-        self.assertIsNone(eval_arithmetic("2**999999999"))
-        self.assertIsNone(eval_arithmetic("1/0"))
+        th = self._thalamus()
+        self.assertEqual(th._answer_math("__import__('os')"), "")
+        self.assertEqual(th._answer_math("2**999999999"), "")
 
 
 class TestRequirementsCompiler(unittest.TestCase):

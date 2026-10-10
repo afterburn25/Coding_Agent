@@ -603,7 +603,6 @@ class AgentOrchestrator:
         if self.research is not None:
             caps.add("research")
         caps.add("verify")
-        caps.add("solvers")   # governor.solvers — safe arithmetic eval
         if self.tools is not None:
             caps.add("tools")
         self.governor = IntelligenceGovernor(capabilities=caps)
@@ -3063,17 +3062,6 @@ class AgentOrchestrator:
         """Artifact card payloads resolved by execute_plan — attached to
         ui so the chat renderer draws download cards under the reply."""
         return {"artifacts": list(cards)} if cards else {}
-
-    def _math_reply(self, user_text: str):
-        """formal_math lane — a pure arithmetic ask is answered by
-        computation, never by model approximation. → RenderedReply|None."""
-        from ..context.realize import RenderedReply
-        from ..governor.solvers import math_answer
-        answer = math_answer(user_text)
-        if answer is None:
-            return None
-        return RenderedReply(text=answer, speech_act="answer",
-                             body=answer)
 
     def _builtin_reply(self, user_text: str):
         """The instance-level persona path: SemanticResponse through the
@@ -8391,12 +8379,7 @@ class AgentOrchestrator:
                 and sk_reply is None and facts_reply is None
                 and recall_reply is None)
             else None)
-        math_reply = (
-            self._math_reply(user_text)
-            if (mode == "auto" and sk_reply is None
-                and facts_reply is None and recall_reply is None)
-            else None)
-        builtin_reply = github_reply or sk_reply or facts_reply or recall_reply or state_reply or math_reply or (
+        builtin_reply = github_reply or sk_reply or facts_reply or recall_reply or state_reply or (
             self._builtin_reply(user_text)
             if mode == "auto" and (
                 not env.suppresses_canned() or identity_lane_hit)
@@ -8410,7 +8393,6 @@ class AgentOrchestrator:
             and facts_reply is None
             and recall_reply is None
             and state_reply is None
-            and math_reply is None
             and self._persona_active()
             and not builtin_reply.genome_rendered
         ):

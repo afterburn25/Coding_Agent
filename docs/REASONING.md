@@ -103,15 +103,16 @@ The strategy rides the same `IntelPlan` (`assessment.as_dict()`), flows
 through `task.intel` and the `intel` SSE event — visible in the
 Intelligence Inspector, never hidden reasoning.
 
-## Formal solvers (`localcodeagent/governor/solvers.py`)
+## Formal solvers
 
-First `run_formal_solver` instrument: a whitelist-AST arithmetic
-evaluator (no `eval`; literals + `+−*/%^` + percent-of only, depth and
-magnitude bounded). `math_answer()` fires only when the *entire* ask
-reduces to arithmetic — numbers inside prose are never computed. The
-orchestrator's `_math_reply` lane answers `What's 14 × 37?` exactly,
-persona-exempt like identity facts, and the orchestrator declares the
-`solvers` capability so the scheduler may actually schedule the op.
+`formal_math` maps to `run_formal_solver`. The install's existing
+instrument is the thalamus math fast path (`brain/thalamus.py` —
+whitelist-AST evaluation, exponent/finite guards, honest
+division-by-zero), which already answers pure arithmetic asks
+deterministically before any model lane. `run_formal_solver` stays
+declared in the op catalog for heavier formal tooling (Z3/OR-Tools/
+SymPy) and schedules once an execution lane declares the `solvers`
+capability — it degrades cleanly until then.
 
 ## Requirements Compiler (`localcodeagent/requirements.py`)
 

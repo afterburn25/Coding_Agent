@@ -524,6 +524,28 @@ class SessionGrantLifecycleTests(unittest.TestCase):
         mgr2 = PermissionManager({"filesystem.write": "session"})
         self.assertEqual(mgr2.effective("filesystem.write"), "ask")
 
+    def test_session_grant_is_key_scoped(self):
+        """Approving A must never authorize B — a session grant for
+        filesystem.write leaves github.write and identity.* asking."""
+        mgr = PermissionManager({
+            "filesystem.write": "session",
+            "github.write": "session",
+            "identity.account_create": "ask"})
+        mgr.grant_session("filesystem.write")
+        self.assertEqual(mgr.effective("filesystem.write"), "allow")
+        self.assertEqual(mgr.effective("github.write"), "ask")
+        self.assertEqual(mgr.effective("identity.account_create"), "ask")
+
+    def test_autonomous_never_auto_grants_guarded_keys(self):
+        """Even in autonomous mode, NEVER_AUTO keys (identity, secrets,
+        destructive) can never be auto-granted."""
+        mgr = PermissionManager({})
+        mgr.set_autonomous(True)
+        for perm in AUTONOMY_NEVER_AUTO:
+            self.assertNotEqual(mgr.effective(perm), "allow", perm)
+        # ...while ordinary ask-level keys do auto-grant.
+        self.assertEqual(mgr.effective("filesystem.write"), "allow")
+
 
 if __name__ == "__main__":
     unittest.main()

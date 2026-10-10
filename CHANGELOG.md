@@ -26,10 +26,9 @@ Compiler + Assumption Ledger on the existing Governor substrate:
   ops (diagnostic→hypothesis ops, constraint_solving→`run_formal_solver`,
   counterfactual→`simulate_plan`, …). Simple asks stay
   `direct_retrieval`.
-- **Formal solvers** (`governor/solvers.py`) — whitelist-AST arithmetic
-  evaluator; `_math_reply` orchestrator lane answers pure math asks
-  exactly (persona-exempt like identity facts); `solvers` capability
-  declared so `run_formal_solver` is schedulable.
+- **Formal math** — `formal_math` routes to `run_formal_solver`; the
+  install's existing thalamus math fast path already answers pure
+  arithmetic exactly, so no duplicate lane was added.
 - **Requirements Compiler** (`requirements.py`) —
   `compile_requirement_spec` classifies clauses into
   MUST/SHOULD/MAY/MUST_NOT/ASSUMPTION/QUESTION/ACCEPTANCE;

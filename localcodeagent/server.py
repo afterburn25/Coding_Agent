@@ -7723,6 +7723,10 @@ def _queueable_message(message: str, attachments: list[dict]) -> str:
     return message + "\n\nAttached context:\n" + "\n\n".join(blocks)
 
 
+class _ApiBodyError(ValueError):
+    """Valid JSON but not an object — a client 400, never a 500."""
+
+
 def _queued_notice(current, position: int) -> str:
     """Describe what owns the lane so a queued user isn't left guessing —
     self-repair/background work is named as such, user tasks by prompt."""
@@ -7755,7 +7759,75 @@ class Handler(BaseHTTPRequestHandler):
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
-        return json.loads(self.rfile.read(length) or b"{}")
+        data = json.loads(self.rfile.read(length) or b"{}")
+        # Every route uses body.get(...) — a non-object JSON body would
+        # AttributeError into a 500. It's a client error: 400.
+        if not isinstance(data, dict):
+            raise _ApiBodyError("body must be a JSON object")
+        return data
+
+    @staticmethod
+    def _qint(q: dict, key: str, default: int, *,
+              lo: int | None = None, hi: int | None = None) -> int:
+        """Bounded integer query param — garbage input gets the
+        default, never a ValueError 500."""
+        raw = (q.get(key) or [""])[0]
+        try:
+            value = int(raw) if str(raw).strip() else default
+        except (TypeError, ValueError):
+            value = default
+        if lo is not None:
+            value = max(lo, value)
+        if hi is not None:
+            value = min(hi, value)
+        return value
+
+    @staticmethod
+    def _bnum(body: dict, key: str, default: float, *,
+              lo: float | None = None, hi: float | None = None) -> float:
+        """Bounded numeric body field — garbage input gets the default,
+        never a ValueError 500."""
+        raw = body.get(key)
+        try:
+            value = float(raw) if raw not in (None, "") else default
+        except (TypeError, ValueError):
+            value = default
+        if lo is not None:
+            value = max(lo, value)
+        if hi is not None:
+            value = min(hi, value)
+        return value
+
+    def _api_error(self, exc: Exception) -> None:
+        """Shared top-level API exception mapping for do_GET/do_POST/
+        do_PATCH. Malformed client input maps to a real 4xx — 500 is
+        reserved for genuine server faults, and the raw traceback goes
+        to stderr (backend-host.log), never the client."""
+        import traceback
+        if isinstance(exc, (json.JSONDecodeError, _ApiBodyError)):
+            self._json({"error": "invalid JSON body"}, 400)
+            return
+        if isinstance(exc, KeyError):
+            # An escaping KeyError is a latent bug — print the traceback
+            # so post-mortem logs can identify it.
+            traceback.print_exc()
+            self._json({"error": f"Not found: {exc}"}, 404)
+            return
+        if isinstance(exc, PermissionError):
+            # Creator-session gates raise PermissionError — 403, not an
+            # opaque 500.
+            self._json({"error": str(exc) or "permission denied"}, 403)
+            return
+        traceback.print_exc()
+        diag_fn = getattr(exc, "diagnostic", None)
+        friendly = getattr(exc, "friendly", "")
+        payload: dict[str, Any] = {
+            "error": friendly or f"{type(exc).__name__}: {exc}"
+        }
+        if callable(diag_fn):
+            payload["technical"] = f"{type(exc).__name__}: {exc}"
+            payload["diagnostic"] = diag_fn()
+        self._json(payload, 500)
 
     def _sse_begin(self) -> None:
         self.send_response(200)
@@ -7991,7 +8063,7 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if path == "/api/changes":
             journal = getattr(self.state, "changes", None)
-            limit = int((q.get("limit") or ["40"])[0] or 40)
+            limit = self._qint(q, "limit", 40)
             self._json({"changes": journal.recent(limit)
                         if journal is not None else []})
             return True
@@ -8005,7 +8077,7 @@ class Handler(BaseHTTPRequestHandler):
                 gs = self.state._global_search = GlobalSearch(self.state)
             self._json(gs.query(
                 (q.get("q") or [""])[0],
-                limit=min(int((q.get("limit") or ["40"])[0] or 40), 100)))
+                limit=self._qint(q, "limit", 40, hi=100)))
             return True
         if path == "/api/update/status":
             # Status is a fast read — no network fetch; apply() plans fresh.
@@ -8017,7 +8089,7 @@ class Handler(BaseHTTPRequestHandler):
             from .search import GlobalSearch
             self._json(GlobalSearch(self.state).query(
                 (q.get("q") or [""])[0],
-                limit=min(int((q.get("limit") or ["40"])[0] or 40), 100)))
+                limit=self._qint(q, "limit", 40, hi=100)))
             return True
         if path.startswith("/api/lkg/verify/"):
             name = unquote(path[len("/api/lkg/verify/"):]).strip("/")
@@ -8329,7 +8401,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(social.consult(
                 question=str(body.get("question") or ""),
                 domain=str(body.get("domain") or ""),
-                importance=float(body.get("importance") or 0.6)))
+                importance=self._bnum(body, "importance", 0.6)))
             return True
         if path == "/api/social/consult/dispatch":
             social = getattr(self.state, "social", None)
@@ -8470,7 +8542,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/trends/record":
             self.state.trends.record(
                 str(body.get("metric") or ""),
-                float(body.get("value") or 0))
+                self._bnum(body, "value", 0))
             self._json({"ok": True})
             return True
         if path == "/api/cleanup/run":
@@ -8480,10 +8552,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/benchmarks/record":
             row = self.state.benchmarks.record_result(
                 str(body.get("name") or ""),
-                latency_ms=float(body.get("latency_ms") or 0),
-                throughput=float(body.get("throughput") or 0),
-                memory_mb=float(body.get("memory_mb") or 0),
-                vram_mb=float(body.get("vram_mb") or 0),
+                latency_ms=self._bnum(body, "latency_ms", 0),
+                throughput=self._bnum(body, "throughput", 0),
+                memory_mb=self._bnum(body, "memory_mb", 0),
+                vram_mb=self._bnum(body, "vram_mb", 0),
                 success=bool(body.get("success", True)),
                 quality=body.get("quality"),
                 detail=str(body.get("detail") or ""))
@@ -9038,7 +9110,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/policies/override":
             row = self.state.policies.add_override(
                 str(body.get("key") or ""), body.get("value"),
-                ttl_seconds=float(body.get("ttl_seconds") or 0),
+                ttl_seconds=self._bnum(body, "ttl_seconds", 0),
                 source="api",
                 description=str(body.get("description") or ""))
             self._json({"ok": True, "override": row})
@@ -9065,7 +9137,7 @@ class Handler(BaseHTTPRequestHandler):
             row = sup.policy.grant(
                 str(body.get("action") or ""),
                 scope=str(body.get("scope") or ""),
-                expires_in_s=float(body.get("expires_in_s") or 0),
+                expires_in_s=self._bnum(body, "expires_in_s", 0),
                 note=str(body.get("note") or ""))
             self._json({"ok": True, "grant": row})
             return True
@@ -9214,7 +9286,7 @@ class Handler(BaseHTTPRequestHandler):
                         if isinstance(body.get("conditions"), dict) else None,
                     action=body.get("action")
                         if isinstance(body.get("action"), dict) else None,
-                    debounce_s=float(body.get("debounce_s") or 60.0),
+                    debounce_s=self._bnum(body, "debounce_s", 60.0),
                     watch=str(body.get("watch") or ""),
                     enabled=bool(body.get("enabled", True)))
             except ValueError as exc:
@@ -9242,9 +9314,9 @@ class Handler(BaseHTTPRequestHandler):
                     str(body.get("name") or "schedule"),
                     str(body.get("kind") or "once"),
                     at=body.get("at"),
-                    interval_s=float(body.get("interval_s") or 0),
-                    hour=int(body.get("hour") or 3),
-                    minute=int(body.get("minute") or 0),
+                    interval_s=self._bnum(body, "interval_s", 0),
+                    hour=int(self._bnum(body, "hour", 3)),
+                    minute=int(self._bnum(body, "minute", 0)),
                     weekday=body.get("weekday"),
                     action=body.get("action")
                         if isinstance(body.get("action"), dict) else None,
@@ -9456,7 +9528,7 @@ class Handler(BaseHTTPRequestHandler):
                     out = voice.speak_text(
                         text[:20000],
                         preset_id=body.get("preset_id") or None,
-                        speed=max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                        speed=self._bnum(body, "speed", 1.0, lo=0.5, hi=2.0),
                         auto_filter=bool(body.get("auto_filter", True)),
                     )
                 except Exception as exc:
@@ -9497,7 +9569,7 @@ class Handler(BaseHTTPRequestHandler):
                     voice._sync_adapter(preset.engine)
                     pcm, sr, seg = voice._synthesize(
                         voice.resolve_speech(text, task_id="preview"), preset,
-                        max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                        self._bnum(body, "speed", 1.0, lo=0.5, hi=2.0),
                         apply_personality=False,
                         delivery=body.get("delivery"))
                     seg_id = voice._register_segment(seg, "preview")
@@ -9539,7 +9611,7 @@ class Handler(BaseHTTPRequestHandler):
                     voice._sync_adapter(preset.engine)
                     pcm, sr, seg = voice._synthesize(
                         voice.resolve_speech(text, task_id="preview"), preset,
-                        max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                        self._bnum(body, "speed", 1.0, lo=0.5, hi=2.0),
                         apply_personality=False,
                         delivery=body.get("delivery"))
                     seg_id = voice._register_segment(seg, "preview")
@@ -9884,6 +9956,12 @@ class Handler(BaseHTTPRequestHandler):
         return out[:12]
 
     def do_GET(self) -> None:
+        try:
+            self._do_GET()
+        except Exception as exc:
+            self._api_error(exc)
+
+    def _do_GET(self) -> None:
         path = urlparse(self.path).path
         # Onboarding lock: until a profile exists, only onboarding-safe
         # APIs + static assets pass — everything else is gated
@@ -9912,7 +9990,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/github/repos":
             q = parse_qs(urlparse(self.path).query)
             self._json(self.state.github_account.list_repos(
-                limit=int((q.get("limit") or ["20"])[0] or 20),
+                limit=self._qint(q, "limit", 20),
                 visibility=str((q.get("visibility") or ["all"])[0])))
             return
         if path == "/api/conversation-memory":
@@ -10452,7 +10530,7 @@ class Handler(BaseHTTPRequestHandler):
             brain = getattr(self.state, "brain", None)
             q = parse_qs(urlparse(self.path).query)
             corr = str(q.get("correlation_id", [""])[0])
-            limit = int(q.get("limit", ["100"])[0])
+            limit = self._qint(q, "limit", 100)
             if brain is None:
                 self._json({"events": []})
                 return
@@ -10562,7 +10640,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/devservers/logs":
             q = parse_qs(urlparse(self.path).query)
             sid = str((q.get("id") or [""])[0])
-            limit = int((q.get("limit") or ["80"])[0])
+            limit = self._qint(q, "limit", 80)
             if not sid:
                 self._json({"error": "id is required"}, 400)
                 return
@@ -10600,7 +10678,7 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/fs/tree":
                 raw = q.get("path", [""])[0]
-                depth = max(1, min(int(q.get("depth", ["2"])[0] or 2), 8))
+                depth = self._qint(q, "depth", 2, lo=1, hi=8)
                 try:
                     root = _wb_root(raw or str(self.state.workspace))
                 except ValueError as exc:
@@ -10893,7 +10971,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/nexus/avatar"):
             q = parse_qs(urlparse(self.path).query)
-            size = int(q.get("size", ["128"])[0] or 128)
+            size = self._qint(q, "size", 128)
             got = self.state.nexus_avatar.avatar(size)
             if got is None:
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -11153,7 +11231,11 @@ class Handler(BaseHTTPRequestHandler):
         # PATCH /api/profiles/<id> → field patch; suffix routes
         # (e.g. /personality) dispatch to the same action handler.
         route = path if path.count("/") > 3 else f"{path}/patch"
-        if self.state.profile_api.handle_post(self, route, body):
+        try:
+            if self.state.profile_api.handle_post(self, route, body):
+                return
+        except Exception as exc:
+            self._api_error(exc)
             return
         self._json({"error": "unknown profile route"}, 404)
 
@@ -11375,7 +11457,7 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/nexus-brain/rollback":
                 self.state.require_brain_creator_session(str(body.get("creator_token", "")))
-                restored = self.state.nexus_brain.rollback_settings(float(body.get("updated_at") or 0))
+                restored = self.state.nexus_brain.rollback_settings(self._bnum(body, "updated_at", 0))
                 self._json({"ok": True, "brain": restored})
                 return
 
@@ -11414,7 +11496,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/policy/temperature":
                 saved = self.state.set_conversation_policy_mode(
                     self.state.config.conversation_policy_mode,
-                    ethical_temperature=float(body.get("ethical_temperature", 1.0)),
+                    ethical_temperature=self._bnum(body, "ethical_temperature", 1.0),
                 )
                 self._json({"ok": True, **saved})
                 return
@@ -11908,7 +11990,7 @@ class Handler(BaseHTTPRequestHandler):
                 row = self.state.hypotheses.propose(
                     stmt,
                     kind=str(body.get("kind") or ""),
-                    confidence=float(body.get("confidence") or 0.3),
+                    confidence=self._bnum(body, "confidence", 0.3),
                     source=str(body.get("source") or "manual"),
                     incident_id=str(body.get("incident_id") or ""),
                     mission_id=str(body.get("mission_id") or ""),
@@ -12004,7 +12086,7 @@ class Handler(BaseHTTPRequestHandler):
                     scope_id=str(body.get("scope_id") or ""),
                     dependents=body.get("dependents")
                     if isinstance(body.get("dependents"), dict) else None,
-                    confidence=float(body.get("confidence") or 0.5),
+                    confidence=self._bnum(body, "confidence", 0.5),
                     test=str(body.get("test") or ""))
                 self._json({"ok": True, "assumption": row})
                 return
@@ -12103,7 +12185,7 @@ class Handler(BaseHTTPRequestHandler):
                     claim,
                     kind=str(body.get("kind") or "note"),
                     source=str(body.get("source") or "manual"),
-                    confidence=float(body.get("confidence") or 0.5),
+                    confidence=self._bnum(body, "confidence", 0.5),
                     refs=body.get("refs")
                     if isinstance(body.get("refs"), list) else None,
                     mission_id=str(body.get("mission_id") or ""),
@@ -12143,9 +12225,9 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 row = self.state.reliability.record(
                     subject, ok=bool(body.get("ok")),
-                    latency_s=float(body.get("latency_s") or 0.0),
+                    latency_s=self._bnum(body, "latency_s", 0.0),
                     error_class=str(body.get("error_class") or ""),
-                    retries=int(body.get("retries") or 0))
+                    retries=int(self._bnum(body, "retries", 0)))
                 self._json({"ok": True, "subject": row,
                             "status": self.state.reliability.status(
                                 subject)})
@@ -12179,7 +12261,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "metric is required"}, 400)
                     return
                 row = self.state.baselines.record(
-                    metric, float(body.get("value") or 0.0),
+                    metric, self._bnum(body, "value", 0.0),
                     context=body.get("context")
                     if isinstance(body.get("context"), dict) else None)
                 self._json({"ok": True, "metric": row})
@@ -12188,7 +12270,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/baselines/check":
                 self._json(self.state.baselines.check(
                     str(body.get("metric") or ""),
-                    float(body.get("value") or 0.0)))
+                    self._bnum(body, "value", 0.0)))
                 return
 
             if path == "/api/bisect":
@@ -12205,7 +12287,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     res = GitBisector(self.state.workspace).run(
                         good=good, bad=bad, test_command=test_cmd,
-                        timeout_s=float(body.get("timeout_s") or 600.0),
+                        timeout_s=self._bnum(body, "timeout_s", 600.0),
                         step_timeout_s=float(
                             body.get("step_timeout_s") or 120.0))
                 except Exception as exc:
@@ -12889,7 +12971,7 @@ class Handler(BaseHTTPRequestHandler):
                     res["wait"] = self.state.devservers.wait_for_url(
                         res["server"]["id"],
                         timeout=max(1.0, min(
-                            float(body.get("timeout", 45)), 180)))
+                            self._bnum(body, "timeout", 45), 180)))
                 self._json(res)
                 return
             if path == "/api/devservers/stop":
@@ -13061,7 +13143,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not cwd.is_dir():
                         self._json({"error": "cwd is not a directory"}, 400)
                         return
-                    timeout = max(1, min(int(body.get("timeout", 120)), 600))
+                    timeout = max(1, min(int(self._bnum(body, "timeout", 120)), 600))
                     import time as _t
                     started = _t.time()
                     flags = _sp.CREATE_NO_WINDOW if sys.platform.startswith(
@@ -13797,31 +13879,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             self.send_error(HTTPStatus.NOT_FOUND)
-        except KeyError as exc:
-            # Legit not-found KeyErrors are handled by inner routes; an
-            # escape reaching here is a latent bug — print the traceback
-            # to stderr (host captures it into backend-host.log) so the
-            # intermittent 'id' failures can be identified post-mortem.
-            import traceback
-            traceback.print_exc()
-            self._json({"error": f"Not found: {exc}"}, 404)
-        except PermissionError as exc:
-            # Creator-session gates (e.g. Nexus Brain sync/lock) raise
-            # PermissionError — report 403, not an opaque 500.
-            self._json({"error": str(exc) or "permission denied"}, 403)
         except Exception as exc:
-            # Transport-classified failures carry a friendly message and a
-            # structured diagnostic — keep the raw exception off the chat
-            # surface while preserving it for diagnostics.
-            diag_fn = getattr(exc, "diagnostic", None)
-            friendly = getattr(exc, "friendly", "")
-            payload: dict[str, Any] = {
-                "error": friendly or f"{type(exc).__name__}: {exc}"
-            }
-            if callable(diag_fn):
-                payload["technical"] = f"{type(exc).__name__}: {exc}"
-                payload["diagnostic"] = diag_fn()
-            self._json(payload, 500)
+            # Shared top-level mapping: malformed body → 400, escaping
+            # KeyError → 404, PermissionError → 403, else a diagnostic
+            # 500 with the traceback on stderr, never the client.
+            self._api_error(exc)
 
     def log_message(self, format: str, *args) -> None:
         pass

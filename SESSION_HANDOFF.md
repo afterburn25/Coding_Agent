@@ -12,7 +12,8 @@
 - **Cognitive Phase 1** (this branch): Strategy Router inside the
   existing IntelligenceGovernor (`metacognition.classify_strategy` →
   `MetaAssessment.strategy/strategies` + strategy→op injection),
-  `governor/solvers.py` safe-AST arithmetic + `_math_reply` lane,
+  `formal_math`→`run_formal_solver` (thalamus math fast path already
+  computes exactly — no duplicate lane),
   `requirements.compile_requirement_spec`/`compile_to_store`
   (MUST/SHOULD/MAY/MUST_NOT/ASSUMPTION/QUESTION/ACCEPTANCE), and
   `assumptions.py` AssumptionLedger with invalidation→dependents +
