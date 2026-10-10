@@ -38,6 +38,7 @@ MAX_WORKSPACES = 64
 IGNORED_SCAN_DIRS = {
     ".git", ".agent", "node_modules", ".venv", "venv", "__pycache__",
     "dist", "build", "target", ".next", "bin", "obj",
+    ".repair-worktrees", ".nexus",
 }
 
 _LANGUAGE_EXT = {

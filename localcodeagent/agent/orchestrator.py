@@ -8073,12 +8073,18 @@ class AgentOrchestrator:
                 pass
         # Bind the latest real failure to active context — "fix that
         # error" resolves against the task ledger, not a guess.
+        # Interactive failures only: mission/work-order failures belong
+        # to their own lane's repair surface — a self-repair worktree
+        # crash must never become the referent of an unrelated chat.
         if active_ctx is not None and not getattr(
                 active_ctx, "active_error", ""):
             try:
                 for _t in self.tasks.recent(limit=5):
                     if (str(_t.get("status")) == "failed"
-                            and _t.get("error")):
+                            and _t.get("error")
+                            and not _t.get("mission_id")
+                            and str(_t.get("mode") or "")
+                            not in {"work_order", "autonomy", "self_repair"}):
                         active_ctx.note_error(str(_t["error"]))
                         break
             except Exception:

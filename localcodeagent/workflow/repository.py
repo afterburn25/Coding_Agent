@@ -11,7 +11,8 @@ from ..fsutil import atomic_write_text
 from typing import Any
 
 
-IGNORED_DIRS = {".git", ".agent", "node_modules", ".venv", "venv", "__pycache__", "dist", "build"}
+IGNORED_DIRS = {".git", ".agent", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
+                ".repair-worktrees", ".nexus"}
 TEXT_EXTENSIONS = {
     ".py", ".js", ".jsx", ".ts", ".tsx", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".cs", ".java",
     ".go", ".rs", ".php", ".rb", ".swift", ".kt", ".kts", ".html", ".css", ".scss", ".json", ".toml",
