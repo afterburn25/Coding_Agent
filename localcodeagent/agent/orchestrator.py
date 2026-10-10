@@ -2541,8 +2541,12 @@ class AgentOrchestrator:
         text = str(row.get("text", "")).strip().rstrip(".")
         if str(row.get("slot") or "").startswith("my:"):
             return AgentOrchestrator._second_person_fact(text)
+        # Prohibitions/imperatives stored as facts ("never use port
+        # 3000") aren't noun phrases — a definite article garbles them
+        # ("the never use port 3000").
         if not text[:1].isupper() and not re.match(
-                r"^(?:the|a|an|my|your|our)\b", text, re.IGNORECASE):
+                r"^(?:the|a|an|my|your|our|never|don'?t|do not|stop|avoid|always)\b",
+                text, re.IGNORECASE):
             text = "the " + text
         return text[:1].upper() + text[1:]
 

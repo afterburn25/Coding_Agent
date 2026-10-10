@@ -1222,7 +1222,16 @@ class ConversationMemory:
                 action = next(g for g in revoke.groups() if g)
                 revoked = self._revoke_rules(action)
                 result["forgotten"].extend(revoked)
-                if not revoked and self._rule_terms(action):
+                # A cease-the-current-activity request is not a durable
+                # prohibition — "stop whatever you're doing with the
+                # files right now" must not bank "Never whatever you're
+                # doing…". Only concrete repeatable actions qualify.
+                ephemeral = re.search(
+                    r"\b(?:whatever|what\s+you'?re|right\s+now|for\s+now|"
+                    r"at\s+the\s+moment|currently)\b"
+                    r"|^(?:it|that|this|everything|all\s+that)\b",
+                    action, flags=re.IGNORECASE)
+                if not revoked and not ephemeral and self._rule_terms(action):
                     # Nothing to retract — the phrase is itself a durable
                     # prohibition ("stop responding in JSON" with no prior
                     # mandate means "never do that").
@@ -1633,7 +1642,35 @@ class ConversationMemory:
         for row in matched:
             by_slot[self._slot_canonical(
                 str(row.get("slot") or "")) or str(row.get("text", ""))] = row
-        return list(by_slot.values())
+        rows = list(by_slot.values())
+        # Drop rows whose matched terms are a strict subset of another
+        # row's — they share the query's incidental words, not its
+        # subject. "what port did I tell you not to use" overlapping
+        # {port} on "staging port is 9100" is noise when "never use
+        # port 3000" overlaps {port, use}; disjoint overlaps ("name"
+        # AND "color" in one question) each stay maximal and survive.
+        if len(rows) > 1:
+            neg_query = bool(re.search(
+                r"\b(?:not|never|no|don'?t|do\s+not|forbidden|prohibited|"
+                r"off[-\s]+limits|avoid|without|banned)\b", query,
+                flags=re.IGNORECASE))
+            overlaps = []
+            for r in rows:
+                text = str(r.get("text", ""))
+                ov = self._fact_query_terms(
+                    text, str(r.get("slot") or "")) & q_terms
+                if neg_query and re.match(
+                        r"(?:never|don'?t|do\s+not|avoid|stop|without)\b",
+                        text.strip(), flags=re.IGNORECASE):
+                    # Prohibition-shaped question vs prohibition-shaped
+                    # fact — the negation itself is a matching signal
+                    # that plain facts can't claim.
+                    ov = ov | {"\x00neg"}
+                overlaps.append(ov)
+            rows = [r for i, r in enumerate(rows)
+                    if not any(overlaps[i] < overlaps[j]
+                               for j in range(len(rows)))]
+        return rows
 
     def active_facts(
         self,

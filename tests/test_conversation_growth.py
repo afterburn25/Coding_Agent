@@ -926,6 +926,46 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertTrue(all(
                 r["active"] for r in memory.snapshot()["behavior_rules"]))
 
+    def test_ephemeral_stop_is_not_a_durable_rule(self):
+        """'stop whatever you're doing right now' is a cease-the-
+        current-activity request — banking 'Never whatever you're
+        doing…' as a durable rule corrupts every future prompt."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            out = memory.learn_from_user(
+                "stop whatever you're doing with the files right now")
+            rules = [r["text"] for r in memory.snapshot()["behavior_rules"]]
+            self.assertEqual(rules, [])
+            self.assertEqual(out.get("behavior_rules") or [], [])
+            # A concrete prohibition still banks.
+            out = memory.learn_from_user("stop responding in JSON")
+            rules = [r["text"] for r in memory.snapshot()["behavior_rules"]]
+            self.assertEqual(rules, ["Never responding in JSON"])
+
+    def test_recall_facts_drops_subset_overlap_noise(self):
+        """A fact sharing one incidental query term must not ride a
+        recall answer when another row matches strictly more terms —
+        'what port did I tell you not to use' overlapping {port} on
+        'staging port is 9100' is noise next to the {port, use} hit."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("my staging port is 9100")
+            memory.learn_from_user("never use port 3000 for anything")
+            rows = memory.recall_facts(
+                "what port did I just tell you not to use?")
+            texts = [r["text"] for r in rows]
+            self.assertTrue(any("3000" in t for t in texts))
+            self.assertFalse(any("9100" in t for t in texts))
+            # Disjoint overlaps each stay maximal — a two-part question
+            # still recalls both facts.
+            memory.learn_from_user("my editor is neovim")
+            memory.learn_from_user("my favorite color is teal")
+            rows = memory.recall_facts(
+                "what's my editor and favorite color?")
+            texts = [r["text"] for r in rows]
+            self.assertTrue(any("editor" in t for t in texts))
+            self.assertTrue(any("color" in t for t in texts))
+
     def test_definite_is_facts_capture_with_value_gate(self):
         """'the port is 5433'-style technical facts capture and supersede;
         adjective/interjection values must not."""
