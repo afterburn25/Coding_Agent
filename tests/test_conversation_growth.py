@@ -926,6 +926,116 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertTrue(all(
                 r["active"] for r in memory.snapshot()["behavior_rules"]))
 
+    def test_marker_prefixed_correction_targets_named_slot(self):
+        """'actually no, my editor is neovim' supersedes the EDITOR
+        slot — the statement names its own attribute, so the bare-value
+        retarget must not rewrite an unrelated preference fact."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("my favorite color is teal")
+            memory.learn_from_user("my editor is vscode")
+            out = memory.learn_from_user("actually no, my editor is neovim")
+            self.assertEqual(out["facts"], ["my editor is neovim"])
+            rows = memory.snapshot()["facts"]
+            by_slot = {}
+            for r in rows:
+                if r.get("active", True):
+                    by_slot.setdefault(r.get("slot"), []).append(r["text"])
+            self.assertEqual(by_slot.get("my:editor"),
+                             ["my editor is neovim"])
+            self.assertEqual(by_slot.get("my:favorite color"),
+                             ["my favorite color is teal"])
+
+    def test_forget_trailing_noun_and_miss_marker(self):
+        """'forget the staging port fact' must find the port fact —
+        the trailing 'fact' names the container, not the referent. A
+        no-match forget reports the miss so the reply lane stays
+        deterministic instead of delegating to the model."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("my staging port is 9100")
+            out = memory.learn_from_user("forget the staging port fact")
+            self.assertEqual([r["text"] for r in out["forgotten"]],
+                             ["my staging port is 9100"])
+
+            out = memory.learn_from_user("forget the deploy tag")
+            self.assertEqual(out["forgotten"], [])
+            self.assertTrue(out.get("forgotten_miss"))
+
+    def test_forget_referential_probe_is_noop(self):
+        """'forget it' must not substring-match facts containing 'it'
+        ('edITor') — referential forget probes need real content."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("my editor is neovim")
+            out = memory.learn_from_user("forget it")
+            self.assertEqual(out["forgotten"], [])
+            self.assertTrue(all(
+                r["active"] for r in memory.snapshot()["facts"]))
+
+    def test_questionless_interrogative_never_banks_fact(self):
+        """'y do ppl use rust over c++' has no '?' but is a question —
+        interrogative-lead subjects must not parse as fact subjects."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for junk in ("y do ppl use rust over c++",
+                         "why do people use rust",
+                         "nm that last thing"):
+                out = memory.learn_from_user(junk)
+                self.assertEqual(out["facts"], [], junk)
+            self.assertEqual(memory.snapshot()["facts"], [])
+            # A genuine declarative still banks.
+            out = memory.learn_from_user("the build uses cmake")
+            self.assertEqual(out["facts"], ["build uses cmake"])
+
+    def test_abortive_marker_with_statement_tail_reenters_learning(self):
+        """'nm, my editor is vim' is nevermind + a fresh statement —
+        the tail must learn, not become a forget target. Abortive +
+        referent tail ('nm that last thing') still attempts forget."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            out = memory.learn_from_user("nm, my editor is vim")
+            self.assertEqual(out["facts"], ["my editor is vim"])
+            out = memory.learn_from_user("nm that last thing")
+            self.assertEqual(out["forgotten"], [])
+            self.assertTrue(out.get("forgotten_miss"))
+
+    def test_negated_copula_correction_and_retraction(self):
+        """'X is not Y, it's Z' must bank 'X is Z' — not the verbatim
+        negated sentence. Bare 'X isn't Y anymore' retracts the unique
+        fact carrying Y rather than claiming an update that never
+        landed."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("cache ttl is 300 seconds")
+            out = memory.learn_from_user("the cache ttl is not 300, it's 600")
+            self.assertEqual(out["facts"], ["cache ttl is 600"])
+            self.assertEqual(out["superseded"], ["cache ttl is 300 seconds"])
+
+            memory.learn_from_user("my editor is emacs")
+            out = memory.learn_from_user("my editor isn't emacs anymore")
+            self.assertEqual(
+                [r["text"] for r in out["forgotten"]],
+                ["my editor is emacs"])
+            self.assertFalse(any(
+                r["active"] for r in memory.snapshot()["facts"]
+                if "editor" in r["text"]))
+
+    def test_dont_prohibition_banks_never_rule(self):
+        """'don't delete anything in .dogfood' is a durable prohibition
+        — banks 'Never …' so the rule survives with no model running.
+        'don't forget the keys' is negation-of-positive — never bank."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            out = memory.learn_from_user("don't delete anything in .dogfood")
+            self.assertEqual(out["behavior_rules"],
+                             ["Never delete anything in .dogfood"])
+            out = memory.learn_from_user("don't forget the keys")
+            self.assertEqual(out["behavior_rules"], [])
+            rules = [r["text"] for r in memory.snapshot()["behavior_rules"]
+                     if r.get("active")]
+            self.assertEqual(rules, ["Never delete anything in .dogfood"])
+
     def test_ephemeral_stop_is_not_a_durable_rule(self):
         """'stop whatever you're doing right now' is a cease-the-
         current-activity request — banking 'Never whatever you're
@@ -1162,6 +1272,105 @@ class CrossChatMemoryTests(unittest.TestCase):
                 learned = memory2.learn_from_user(utterance)
                 self.assertTrue(
                     any(fragment in f for f in learned["facts"]), utterance)
+
+    def test_leading_scratch_that_strips_before_fact(self):
+        # BUG-075 — 'scratch that, the deadline is wednesday' led the
+        # sentence with a correction marker the body-strip didn't know;
+        # the whole clause failed to parse and fell to a model riff.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("the deadline is next tuesday")
+            learned = memory.learn_from_user(
+                "scratch that, the deadline is wednesday")
+            self.assertEqual(learned["facts"], ["deadline is wednesday"])
+            self.assertIn("next tuesday", learned["superseded"][0])
+
+    def test_schedule_predicates_and_usage_supersession(self):
+        # BUG-074 — 'moves to fridays', 'renews annually' are
+        # declarative status facts like 'lifts on monday'; 'we used X
+        # before, now it's Y' is a usage supersession that banks the
+        # new tool.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for utterance, frag in (
+                ("the standup moves to fridays", "standup moves to fridays"),
+                ("the license renews annually", "license renews annually"),
+                ("the freeze continues through friday",
+                 "freeze continues through friday"),
+            ):
+                learned = memory.learn_from_user(utterance)
+                self.assertTrue(
+                    any(frag in f for f in learned["facts"]), utterance)
+            memory2 = ConversationMemory(Path(td) / "m2.json")
+            learned = memory2.learn_from_user(
+                "we used jira before, now it's linear")
+            self.assertEqual(learned["facts"], ["we use linear"])
+
+    def test_thought_was_but_was_belief_correction(self):
+        # 'i thought the port was 8080 but it was 8081' — a corrected
+        # belief banks the true value on the named subject's slot.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            learned = memory.learn_from_user(
+                "i thought the port was 8080 but it was 8081")
+            self.assertEqual(learned["facts"], ["port is 8081"])
+            memory2 = ConversationMemory(Path(td) / "m2.json")
+            memory2.learn_from_user("the port is 8080")
+            learned = memory2.learn_from_user(
+                "i thought the port was 8080 but it was 8081")
+            self.assertEqual(learned["facts"], ["port is 8081"])
+            self.assertIn("port is 8080", learned["superseded"])
+
+    def test_past_tense_banks_but_never_outranks_present(self):
+        # 'the tests were passing yesterday' is a self-qualifying
+        # historical report — banks, and yields to a same-subject
+        # present-tense fact in recall regardless of write order.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            learned = memory.learn_from_user(
+                "the tests were passing yesterday")
+            self.assertEqual(learned["facts"],
+                             ["tests were passing yesterday"])
+            memory.learn_from_user("the port was 8080")
+            memory.learn_from_user("the port is 8081")
+            self.assertEqual(
+                [r["text"] for r in memory.recall_facts(
+                    "what is the port")],
+                ["port is 8081"])
+            memory2 = ConversationMemory(Path(td) / "m2.json")
+            memory2.learn_from_user("the port is 8081")
+            memory2.learn_from_user("the port was 8080")
+            self.assertEqual(
+                [r["text"] for r in memory2.recall_facts(
+                    "what is the port")],
+                ["port is 8081"])
+
+    def test_hearsay_acknowledged_never_banked(self):
+        # BUG-073 — reported speech ("i heard the port is 9090",
+        # "someone said the build is green") is a secondhand claim:
+        # banked as fact it would let rumor outrank evidence; dropped
+        # entirely it falls to a model that may riff an ack. The
+        # `hearsay` marker yields an honest "noted, unverified" ack
+        # with zero writes.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for utterance in (
+                "i heard the port is 9090",
+                "someone said the backup is broken",
+                "they say the build is green",
+                "apparently the cache is stale",
+                "rumor has it the deploy is friday",
+            ):
+                learned = memory.learn_from_user(utterance)
+                self.assertFalse(learned["facts"], utterance)
+                self.assertEqual(len(learned.get("hearsay") or []), 1,
+                                 utterance)
+            self.assertFalse(
+                [r for r in memory._data["facts"] if r.get("active")])
+            # First-person statements still bank — the hearsay lead is
+            # the discriminator, not the declarative shape.
+            learned = memory.learn_from_user("the port is 9090")
+            self.assertTrue(learned["facts"])
 
     def test_compound_turns_learn_first_clause_only(self):
         # A compound turn's second clause is a separate intent, not part

@@ -471,6 +471,301 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertIn("my favorite color is blue", active)
         self.assertNotIn("my favorite color is green", active)
 
+    def test_nevermind_referential_update_retargets(self):
+        # "never mind, it's 60" — spelled-out abortive marker + "it's X"
+        # tail is a referential update of the latest fact, not a forget
+        # and not a model turn.
+        cm = self._mem()
+        cm.learn_from_user("the api timeout is 45 seconds")
+        learned = cm.learn_from_user("never mind, it's 60")
+        active = self._active(cm)
+        self.assertIn("api timeout is 60", active)
+        self.assertNotIn("api timeout is 45 seconds", active)
+
+    def test_nonliteral_its_does_not_corrupt(self):
+        # "it's fine" is an acknowledgement — no literal value means no
+        # retarget, and the latest fact survives untouched.
+        cm = self._mem()
+        cm.learn_from_user("the api timeout is 45 seconds")
+        cm.learn_from_user("never mind, it's fine")
+        self.assertIn("api timeout is 45 seconds", self._active(cm))
+
+    def test_changed_my_mind_names_referent(self):
+        # "i changed my mind about the deploy tag - it's v11" — the
+        # 'about' clause names the referent, the tail carries the new
+        # value; the named slot supersedes without touching others.
+        cm = self._mem()
+        cm.learn_from_user("my deploy tag is v10")
+        cm.learn_from_user("my editor is vim")
+        cm.learn_from_user(
+            "i changed my mind about the deploy tag - it's v11 now")
+        active = self._active(cm)
+        self.assertIn("my deploy tag is v11", active)
+        self.assertNotIn("my deploy tag is v10", active)
+        self.assertIn("my editor is vim", active)
+
+    def test_changed_my_mind_unknown_referent_does_not_guess(self):
+        # A named referent with no matching fact must not retarget the
+        # latest unrelated row.
+        cm = self._mem()
+        cm.learn_from_user("my editor is vim")
+        learned = cm.learn_from_user(
+            "i changed my mind about the deploy tag - it's v11")
+        self.assertFalse(learned["superseded"])
+        self.assertIn("my editor is vim", self._active(cm))
+
+    def test_referential_rename_retargets(self):
+        # "actually the name changed — it is now called vector" — the
+        # referential tail rewrites the latest name-slot fact instead of
+        # falling through to a fabricated "Updated" model reply.
+        cm = self._mem()
+        cm.learn_from_user("my workstation name is beacon")
+        learned = cm.learn_from_user(
+            "actually the name changed — it is now called vector")
+        active = self._active(cm)
+        self.assertIn("my workstation name is vector", active)
+        self.assertNotIn("my workstation name is beacon", active)
+        self.assertIn("my workstation name is vector",
+                      learned.get("facts", []))
+
+    def test_referential_named_form(self):
+        # "the backup label is now named zeta" — the named/renamed
+        # shapes carry the same referential semantics as "called".
+        cm = self._mem()
+        cm.learn_from_user("my backup label is alpha")
+        cm.learn_from_user("the backup label is now named zeta")
+        active = self._active(cm)
+        self.assertIn("my backup label is zeta", active)
+        self.assertNotIn("my backup label is alpha", active)
+
+    def test_entity_rename_binds_name_slot(self):
+        # "the render box is now named titan" restates the entity's
+        # name-slot fact — it must not fork a parallel 'render box'
+        # fact beside 'render box name'.
+        cm = self._mem()
+        cm.learn_from_user("my render box name is cobalt")
+        cm.learn_from_user("the render box is now named titan")
+        active = self._active(cm)
+        self.assertIn("my render box name is titan", active)
+        self.assertEqual(len(active), 1)
+
+    def test_not_old_its_new_retargets(self):
+        # "no not cobalt, it's onyx" — explicit old/new contrast; the
+        # negated head legitimizes a word value the bare-'it's' lane
+        # would reject as non-literal.
+        cm = self._mem()
+        cm.learn_from_user("my render box name is cobalt")
+        cm.learn_from_user("no not cobalt, it's onyx")
+        active = self._active(cm)
+        self.assertIn("my render box name is onyx", active)
+        self.assertNotIn("my render box name is cobalt", active)
+
+    def test_and_coordinated_declaratives_split(self):
+        # "my shell is zsh and my terminal is alacritty" is two facts —
+        # banking the compound verbatim makes per-slot supersession and
+        # precise recall impossible.
+        cm = self._mem()
+        cm.learn_from_user(
+            "my shell is zsh and my terminal is alacritty")
+        active = self._active(cm)
+        self.assertIn("my shell is zsh", active)
+        self.assertIn("my terminal is alacritty", active)
+
+    def test_single_subject_and_compound_stays_whole(self):
+        # "the stack is python and sqlite" — one subject, compound
+        # value; the 'and' is inside the fact, not between facts.
+        cm = self._mem()
+        cm.learn_from_user("the stack is python and sqlite")
+        self.assertIn("stack is python and sqlite", self._active(cm))
+
+    def test_moved_to_retargets_entity_slot(self):
+        # "the standup moved to 10am" restates the standup's time slot —
+        # it must not mint a parallel 'standup uses 10am' fact beside
+        # 'standup is at 9am'.
+        cm = self._mem()
+        cm.learn_from_user("my standup is at 9am on weekdays")
+        learned = cm.learn_from_user("actually the standup moved to 10am")
+        active = self._active(cm)
+        self.assertIn("my standup is 10am", active)
+        self.assertNotIn("my standup is at 9am on weekdays", active)
+        self.assertEqual(len(active), 1)
+
+    def test_passive_move_binds_entity_slot(self):
+        # "the deadline was moved to monday" — passive auxiliaries must
+        # not ride into the subject ('deadline was uses monday' was the
+        # live bug); a time-shaped value on a fresh entity mints 'is'.
+        cm = self._mem()
+        cm.learn_from_user("the deadline was moved to monday")
+        active = self._active(cm)
+        self.assertIn("deadline is monday", active)
+        self.assertNotIn("deadline was uses monday", active)
+
+    def test_passive_move_retargets_tracked_entity(self):
+        cm = self._mem()
+        cm.learn_from_user("my standup is at 9am on weekdays")
+        cm.learn_from_user("the standup was moved to 10am")
+        active = self._active(cm)
+        self.assertIn("my standup is 10am", active)
+        self.assertNotIn("my standup is at 9am on weekdays", active)
+
+    def test_tool_move_still_mints_uses(self):
+        cm = self._mem()
+        cm.learn_from_user("orion moved to redis")
+        self.assertIn("orion uses redis", self._active(cm))
+
+    def test_and_marker_clause_splits(self):
+        # "the deadline is friday, and actually make the standup
+        # 10:30" — the 'and <marker>' boundary splits statement from
+        # correction; banking the chain verbatim loses both.
+        cm = self._mem()
+        cm.learn_from_user(
+            "the deadline is friday, and actually make the standup "
+            "10:30")
+        active = self._active(cm)
+        self.assertIn("deadline is friday", active)
+        self.assertIn("standup is 10:30", active)
+
+    def test_negated_preposition_value_retracts(self):
+        # "my standup isn't at 10:30 anymore" — 'at' is syntax around
+        # the denied value; the stored 'is 10:30' fact retracts.
+        cm = self._mem()
+        cm.learn_from_user("my standup is 10:30")
+        learned = cm.learn_from_user(
+            "my standup isn't at 10:30 anymore")
+        self.assertTrue(learned["forgotten"])
+        self.assertNotIn("my standup is 10:30", self._active(cm))
+
+    def test_negation_miss_reports_honestly(self):
+        # "my favorite color is not blue" with no blue fact — nothing
+        # retracts; the turn reports a miss, never banks a negation,
+        # never falls to the model.
+        cm = self._mem()
+        learned = cm.learn_from_user("my favorite color is not blue")
+        self.assertFalse(learned["facts"])
+        self.assertTrue(learned["forgotten_miss"])
+        self.assertEqual(self._active(cm), [])
+
+    def test_used_to_be_now_its_supersedes(self):
+        # "the deploy region used to be us-east-1 but now it's
+        # eu-west-1" — temporal supersession, value-matched.
+        cm = self._mem()
+        cm.learn_from_user("deploy region is us-east-1")
+        cm.learn_from_user("my editor is vim")
+        cm.learn_from_user(
+            "the deploy region used to be us-east-1 but now it's "
+            "eu-west-1")
+        active = self._active(cm)
+        self.assertIn("deploy region is eu-west-1", active)
+        self.assertNotIn("deploy region is us-east-1", active)
+        self.assertIn("my editor is vim", active)
+
+    def test_used_to_be_comma_now_supersedes(self):
+        # "the oncall used to be priya, now it's sam" — comma+now
+        # boundary; the mandatory separator keeps plain past statements
+        # ("the label used to be blue") unbanked.
+        cm = self._mem()
+        cm.learn_from_user("the oncall is priya until friday")
+        cm.learn_from_user("the oncall used to be priya, now it's sam")
+        active = self._active(cm)
+        self.assertIn("oncall is sam", active)
+        self.assertNotIn("oncall is priya until friday", active)
+        cm2 = self._mem()
+        learned = cm2.learn_from_user("the label used to be blue")
+        self.assertFalse(learned["facts"])
+
+    def test_temporal_verb_predicates_bank(self):
+        # "the code freeze lifts on monday" — schedule-shaped verbs
+        # (lifts/holds/begins/resumes) are declarative facts, not prose
+        # for the model to fabricate an ack over.
+        cm = self._mem()
+        for txt in ("the code freeze lifts on monday",
+                    "the policy holds through friday"):
+            learned = cm.learn_from_user(txt)
+            self.assertTrue(learned["facts"], txt)
+
+    def test_marker_led_decl_retargets_entity_slot(self):
+        # "actually the laptop is pulsar" — the correction marker
+        # legitimizes the short value AND binds the same-entity slot
+        # ('my laptop is named quasar'), never forking a parallel fact.
+        cm = self._mem()
+        cm.learn_from_user("my laptop is named quasar")
+        learned = cm.learn_from_user("actually the laptop is pulsar")
+        self.assertIn("my laptop is pulsar", learned["facts"])
+        active = self._active(cm)
+        self.assertNotIn("my laptop is named quasar", active)
+        self.assertNotIn("laptop is pulsar", active)
+        # Without the marker the adjective guard still holds.
+        cm2 = self._mem()
+        self.assertFalse(
+            cm2.learn_from_user("the movie is great")["facts"])
+
+    def test_is_now_strips_leading_adverb(self):
+        # "my editor is now vscode" banks 'vscode' — the 'now' marks the
+        # change, it isn't part of the value. The my-X-is-Y fast-path
+        # must not bank the clause verbatim.
+        cm = self._mem()
+        learned = cm.learn_from_user("my editor is now vscode")
+        self.assertEqual(learned["facts"], ["my editor is vscode"])
+        learned = cm.learn_from_user("the deadline is now friday")
+        self.assertEqual(learned["facts"], ["deadline is friday"])
+
+    def test_my_scoped_change_mints_is_not_uses(self):
+        # "my timezone changed to pst" — a personal attribute change is
+        # not a tool migration; 'uses' is for switched/moved/migrated.
+        cm = self._mem()
+        learned = cm.learn_from_user("my timezone changed to pst")
+        self.assertIn("my timezone is pst", learned["facts"])
+        self.assertNotIn("my timezone uses pst", learned["facts"])
+
+    def test_disuse_retracts_usage_fact(self):
+        # "i no longer use slack for comms" — the 'for comms' tail is
+        # context; the usage fact mentioning slack retracts.
+        cm = self._mem()
+        cm.learn_from_user("i use slack for comms")
+        cm.learn_from_user("my editor is vim")
+        learned = cm.learn_from_user("i no longer use slack for comms")
+        self.assertTrue(learned["forgotten"])
+        self.assertIn("my editor is vim", self._active(cm))
+
+    def test_disuse_ambiguous_never_guesses(self):
+        # Two facts mentioning the object → no retract, honest miss.
+        cm = self._mem()
+        cm.learn_from_user("i use slack for comms")
+        cm.learn_from_user("slack webhook is wh-8842")
+        learned = cm.learn_from_user("i no longer use slack")
+        self.assertFalse(learned["forgotten"])
+        self.assertTrue(learned["forgotten_miss"])
+        self.assertEqual(len(self._active(cm)), 2)
+
+    def test_negated_my_fact_retracts_not_banks(self):
+        # "my editor is not emacs" retracts the unique emacs fact — it
+        # must never bank the negation verbatim ('your editor is not
+        # emacs' misleads recall).
+        cm = self._mem()
+        cm.learn_from_user("my editor is emacs")
+        learned = cm.learn_from_user("my editor is not emacs")
+        self.assertEqual(self._active(cm), [])
+        self.assertFalse(learned.get("facts"))
+        self.assertTrue(learned.get("forgotten"))
+
+    def test_marker_context_legitimizes_called(self):
+        # "that's wrong — it's called cobalt" — the head marker supplies
+        # correction intent, so 'called' without 'now' still retargets.
+        cm = self._mem()
+        cm.learn_from_user("my render box name is blade")
+        cm.learn_from_user("that's wrong — it's called cobalt")
+        active = self._active(cm)
+        self.assertIn("my render box name is cobalt", active)
+        self.assertNotIn("my render box name is blade", active)
+
+    def test_vague_called_phrase_does_not_corrupt(self):
+        # "it's called having standards" is idiom, not a rename — the
+        # latest fact must survive.
+        cm = self._mem()
+        cm.learn_from_user("the api timeout is 45 seconds")
+        cm.learn_from_user("it's called being careful")
+        self.assertIn("api timeout is 45 seconds", self._active(cm))
+
     def test_restatement_acknowledgement(self):
         from localcodeagent.agent.orchestrator import AgentOrchestrator
         ack = AgentOrchestrator.training_acknowledgement(
@@ -510,6 +805,27 @@ class TestFactsRecallLane(unittest.TestCase):
                   "what do you know about python",
                   "tell me about your father"):
             self.assertFalse(rx.search(q), q)
+
+    def test_recall_regex_covers_did_i_tell_you(self):
+        # "did I tell you my editor" probes stored memory — with no
+        # lane the model fabricated "you didn't tell me" over a live
+        # fact.
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        rx = AgentOrchestrator._FACT_RECALL_RE
+        for q in ("did i tell you my editor",
+                  "did i tell you about the port",
+                  "have i told you my timezone"):
+            self.assertTrue(rx.match(q), q)
+
+    def test_when_does_probes_match_recall_regex(self):
+        # "when does the freeze lift" probes stored memory — the
+        # copular 'when is' lead missed aux-verb forms (BUG-063).
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        rx = AgentOrchestrator._FACT_RECALL_RE
+        for q in ("when does the freeze lift",
+                  "when do the backups run",
+                  "when is the deadline"):
+            self.assertTrue(rx.match(q), q)
 
     def test_second_person_conversion(self):
         from localcodeagent.agent.orchestrator import AgentOrchestrator

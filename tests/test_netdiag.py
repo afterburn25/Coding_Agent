@@ -640,6 +640,121 @@ class TruthGateTests(RecoveryLoopTests):
             ):
                 self.assertTrue(det(claim), claim)
 
+    def test_detector_catches_bare_verb_openers(self):
+        # BUG-045: "Updated — your workstation is now called vector" is a
+        # memory-write claim with an implied subject; the I-subject and
+        # emoji shapes missed it, so a fabricated update sailed past the
+        # gate unmarked.
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            det = agent._executed_action_claims
+            for claim in (
+                "Updated — your workstation is now called vector.",
+                "Saved: the port is 9090.",
+                "Corrected, the tag is now v11.",
+            ):
+                self.assertTrue(det(claim), claim)
+            # Honest value-statements about the world are not claims.
+            for text in (
+                "The API timeout is now 60 seconds.",
+                "Updated rows appear automatically once a sync runs.",
+            ):
+                self.assertFalse(det(text), text)
+
+    def test_my_probe_empty_store_answers_honestly(self):
+        # BUG-051: "what is my editor" with nothing taught must answer
+        # "you haven't told me" — possessive probes can only be
+        # answered by taught facts, so an empty store IS the answer;
+        # falling through to the model risks a fabricated guess/503.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            reply = agent._single_fact_recall_reply(
+                "what is my editor", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("haven't told me", reply.text.lower())
+            agent.conversation_memory.learn_from_user(
+                "my editor is neovim")
+            reply = agent._single_fact_recall_reply(
+                "what is my editor", "conv", "proj")
+            self.assertIn("neovim", reply.text)
+
+    def test_wh_slot_probe_recalls_pronounless_fact(self):
+        # "what time is the standup" — no possessive pronoun, and the
+        # interrogative slot word (time) is answer-type metadata, not
+        # an entity term; the precision gate must not require it.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my standup is at 9am on weekdays")
+            reply = agent._single_fact_recall_reply(
+                "what time is the standup", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("9am", reply.text)
+            # Genuine general-knowledge probes still fall through.
+            self.assertIsNone(agent._single_fact_recall_reply(
+                "what color is the sky", "conv", "proj"))
+
+    def test_when_does_probe_drops_trailing_verb(self):
+        # "when does the freeze lift" — the probe's own verb isn't a
+        # fact term; after the strict subset fails, retry on the noun
+        # phrase alone so 'code freeze lifts on monday' answers.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "the code freeze lifts on monday")
+            reply = agent._single_fact_recall_reply(
+                "when does the freeze lift", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("monday", reply.text)
+            self.assertIsNone(agent._single_fact_recall_reply(
+                "when does the comet arrive", "conv", "proj"))
+
+    def test_when_do_plural_probe_matches_singular_fact(self):
+        # "when do the backups run" — the plural probe binds the
+        # singular 'backup schedule is …' fact (fold-tolerant terms)
+        # and the trailing 'run' verb retries dropped.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "backup schedule is every day at 3am")
+            reply = agent._single_fact_recall_reply(
+                "when do the backups run", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("3am", reply.text)
+
+    def test_remind_me_probe_uses_recall_lane(self):
+        # "remind me about my editor" is a memory recall request — the
+        # frame must not classify 'remind' as an assertion and veto
+        # the lane into a model riff.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my editor is vim")
+            reply = agent._single_fact_recall_reply(
+                "remind me about my editor", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("vim", reply.text)
+
     def test_echoed_notice_stripped_from_stored_reply(self):
         # BUG-029: the badge lives verbatim in stored history, so small
         # models learn to parrot it as their own sign-off. An echoed

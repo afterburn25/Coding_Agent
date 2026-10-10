@@ -290,6 +290,20 @@ class LearningAndCorrectionTests(unittest.TestCase):
                 am.invalidate_superseded(["unrelated fact"]), 0)
             am.store.close()
 
+    def test_forgotten_negated_fact_invalidates_answers(self):
+        # Forgetting "my editor is not emacs" must retire learned
+        # answers still quoting it — forgotten facts feed the same
+        # invalidation as superseded ones.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            am.learn("What is my editor?",
+                     "You told me that — your editor is not emacs.")
+            self.assertEqual(
+                am.invalidate_superseded(["my editor is not emacs"]), 1)
+            m = am.lookup("What is my editor?")
+            self.assertFalse(m.hit)
+            am.store.close()
+
     def test_positive_feedback_promotes(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             am = _mem(td)
@@ -372,6 +386,37 @@ class LearningAndCorrectionTests(unittest.TestCase):
             self.assertEqual(
                 am.store.query_one("SELECT COUNT(*) AS n FROM answers")["n"],
                 0)
+            am.store.close()
+
+    def test_ack_reply_never_learned(self):
+        # BUG-075 — a model riffing "Got it — the deadline is Wednesday.
+        # I'll adjust the plan accordingly." is a transaction ack, not a
+        # reusable answer; banked it replays an unexecuted write-claim.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            out = am.record_exchange(
+                "scratch that, the deadline is wednesday",
+                "Got it — the deadline is Wednesday. "
+                "I'll adjust the plan accordingly.")
+            self.assertTrue(out["suppressed"])
+            self.assertEqual(
+                am.store.query_one("SELECT COUNT(*) AS n FROM answers")["n"],
+                0)
+            am.store.close()
+
+    def test_ack_answer_poisoned_row_self_heals(self):
+        # Pre-gate ack rows invalidate at lookup like error poison.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            r = am.learn("What is my editor?",
+                         "You told me that — your editor is vim.")
+            self.assertTrue(r.get("ok"))
+            m = am.lookup("What is my editor?")
+            self.assertFalse(m.hit)
+            row = am.store.query_one(
+                "SELECT trust_state, invalidation_reason FROM answers")
+            self.assertEqual(row["trust_state"], "invalidated")
+            self.assertIn("ack-shaped", row["invalidation_reason"])
             am.store.close()
 
     def test_poisoned_answer_invalidated_at_lookup(self):

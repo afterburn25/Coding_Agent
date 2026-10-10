@@ -168,6 +168,13 @@ class ConversationMemory:
     _SUBJECT_ADVERBS = frozenset({
         "now", "currently", "today", "recently", "actually", "finally",
         "just", "also", "still", "really", "meanwhile", "anyway",
+        "again",
+    })
+    # Leading position is tighter — 'still'/'already' read as genuine
+    # value words in some slots ("the answer is still TBD") — keep the
+    # strip set to pure temporal/discourse markers.
+    _LEADING_VALUE_ADVERBS = frozenset({
+        "now", "currently", "today", "actually", "just",
     })
 
     _CLAUSE_BOUNDARY_RE = re.compile(
@@ -264,6 +271,13 @@ class ConversationMemory:
         words = value.split()
         while words and words[-1].lower() in cls._SUBJECT_ADVERBS:
             words.pop()
+        # Leading discourse adverbs — "my editor is now vscode" banks
+        # 'vscode', not 'now vscode'. Only strip when more words
+        # follow — "deadline is today"/"launch is now" keep a lone
+        # adverb that IS the value.
+        while (len(words) > 1
+               and words[0].lower() in cls._LEADING_VALUE_ADVERBS):
+            words.pop(0)
         return " ".join(words).strip()
 
     # Preference-class facts — a restated preference ("i prefer green")
@@ -295,6 +309,7 @@ class ConversationMemory:
     def _retarget_latest_fact(
         self, new_value: str, superseded_out: list | None = None,
         *, preference_only: bool = False,
+        subject_hint: str = "",
     ) -> str | None:
         """'make that X' / 'set it to X' — a bare re-set of the most
         recently stated value. The referent's subject+predicate is kept
@@ -351,7 +366,29 @@ class ConversationMemory:
                 target = cands[0]
                 m = pred.match(str(target.get("text") or ""))
             else:
-                for row in reversed(rows):
+                # A subject hint ("the render box is now named titan")
+                # binds the update to the same entity's slot — 'render
+                # box' retargets 'render box name is cobalt' rather than
+                # forking a parallel 'render box' fact. Word-boundary
+                # containment counts. A hint with no match fails the
+                # retarget — an explicit subject isn't referential, and
+                # rewriting the unrelated latest fact would be a guess.
+                hint = re.sub(r"^(?:my|the|our)\s+", "",
+                              subject_hint.strip().lower())
+                candidates = rows
+                if hint:
+                    hits = [
+                        row for row in reversed(rows)
+                        if (m2 := pred.match(str(row.get("text") or "")))
+                        and re.search(
+                            r"\b" + re.escape(hint) + r"\b",
+                            re.sub(r"^(?:my|the|our)\s+", "",
+                                   m2.group(1).strip().lower()))
+                    ]
+                    if not hits:
+                        return None
+                    candidates = hits[:1]
+                for row in reversed(candidates):
                     m = pred.match(str(row.get("text") or ""))
                     if m:
                         if (str(row.get("text") or "").strip().lower()
@@ -395,6 +432,117 @@ class ConversationMemory:
         text = str(hits[0].get("text", "")).strip()
         return text[: len(text) - len(old)].rstrip() + " " + new
 
+    def _revert_candidate(self, referent: str) -> dict | None:
+        """Read-only: the most recently superseded fact row whose
+        subject matches the referent, or None. Shared by the dry-run
+        peek and the mutating revert so both resolve identically."""
+        ref = str(referent or "").strip().lower()
+        ref = re.sub(r"^(?:my|the|our)\s+", "", ref)
+        if not ref:
+            return None
+        with self._lock:
+            rows = [r for r in self._data.get("facts", [])
+                    if isinstance(r, dict)]
+
+            def _subj(row: dict) -> str:
+                m = self._RETARGET_PREDICATE_RE.match(
+                    str(row.get("text") or ""))
+                if not m:
+                    return ""
+                return re.sub(r"^(?:my|the|our)\s+", "",
+                              m.group(1).strip().lower())
+
+            def _hit(row: dict) -> bool:
+                s = _subj(row)
+                return bool(s) and (ref in s or s in ref)
+
+            superseded = sorted(
+                (r for r in rows
+                 if not r.get("active", True) and r.get("superseded")
+                 and _hit(r)),
+                key=lambda r: float(r.get("superseded_at") or 0),
+                reverse=True)
+            return superseded[0] if superseded else None
+
+    def peek_revert_fact(self, referent: str) -> str | None:
+        """Dry-run counterpart of revert_fact — reports the fact text a
+        revert would restore without touching any state."""
+        row = self._revert_candidate(referent)
+        return str(row.get("text") or "") or None if row else None
+
+    def revert_fact(self, referent: str) -> str | None:
+        """'undo that <referent> change' — restore the most recently
+        superseded fact whose subject matches the referent. The current
+        active row in that slot is retired; the prior value goes live
+        again. Returns the restored fact text, or None when nothing in
+        the slot's history matches (a named referent never guesses)."""
+        with self._lock:
+            old = self._revert_candidate(referent)
+            if old is None:
+                return None
+            rows = self._data.get("facts", [])
+            old_slot = self._slot_canonical(str(old.get("slot") or ""))
+            now = time.time()
+            # Retire whatever currently holds the slot (if anything).
+            for r in rows:
+                if (r.get("active", True)
+                        and self._slot_canonical(str(r.get("slot") or ""))
+                        == old_slot and old_slot):
+                    r["active"] = False
+                    r["superseded"] = True
+                    r["superseded_at"] = now
+                    r["superseded_by"] = old.get("id")
+                    r["updated_at"] = now
+            old["active"] = True
+            old["superseded"] = False
+            old.pop("superseded_by", None)
+            old.pop("superseded_at", None)
+            old["updated_at"] = now
+            self._save()
+            return str(old.get("text") or "") or None
+
+    def _retract_fact_value(self, old_value: str) -> list[dict[str, Any]]:
+        """'X isn't Y (anymore)' with no replacement — retire the unique
+        active fact whose value tail is Y. Same precision rule as
+        corrections: exactly one match, or guess nothing."""
+        old = str(old_value or "").strip().lower()
+        if not old:
+            return []
+        with self._lock:
+            hits = [
+                row for row in self._data.get("facts", [])
+                if isinstance(row, dict) and row.get("active", True)
+                and str(row.get("text", "")).strip().lower().endswith(old)
+            ]
+            if len(hits) != 1:
+                return []
+            hits[0]["active"] = False
+            hits[0]["updated_at"] = time.time()
+            self._save()
+            return [dict(hits[0])]
+
+    def _retract_fact_contains(self, needle: str) -> list[dict[str, Any]]:
+        """Retract the unique active fact that MENTIONS `needle` as a
+        whole word — 'i use slack for comms' doesn't end in 'slack' but
+        still names it. Same precision rule: exactly one hit or none."""
+        n = str(needle or "").strip().lower()
+        if not n:
+            return []
+        word = re.compile(
+            r"(?<![a-z0-9])" + re.escape(n) + r"(?![a-z0-9])")
+        with self._lock:
+            hits = [
+                row for row in self._data.get("facts", [])
+                if isinstance(row, dict) and row.get("active", True)
+                and word.search(str(row.get("text", "")).lower())
+            ]
+            if len(hits) != 1:
+                return []
+            hits[0]["active"] = False
+            hits[0]["updated_at"] = time.time()
+            self._save()
+            return [dict(hits[0])]
+
     @staticmethod
     def _fact_subject_ok(subj: str) -> bool:
         """Question/command-shaped openings are not fact subjects."""
@@ -402,11 +550,12 @@ class ConversationMemory:
             return False
         return subj.split()[0].casefold() not in {
             "i", "we", "you", "they", "he", "she", "it",
-            "what", "which", "who", "why", "how", "when", "where",
-            "does", "do", "did", "can", "could", "should", "would",
+            "what", "which", "who", "whom", "whose", "why", "how",
+            "when", "where", "y", "does", "do", "did", "can", "could",
+            "should", "would", "shall", "may", "might",
             "is", "are", "was", "were", "will", "this", "that",
             "tell", "show", "if", "let",
-            "isnt", "arent", "doesnt"}
+            "nm", "isnt", "arent", "doesnt", "dont", "don't"}
 
     @staticmethod
     def _fact_slot(text: str) -> str:
@@ -679,6 +828,10 @@ class ConversationMemory:
         "silent", "normal", "verbose", "debug", "release", "beta",
         "stable", "nightly", "production", "staging", "development",
         "high", "medium", "low", "on", "off",
+        # Cadence words — "the review cadence is weekly" states a fact,
+        # it doesn't schedule work.
+        "hourly", "daily", "weekly", "monthly", "quarterly",
+        "yearly", "annually", "fortnightly", "weekdays", "weekends",
     })
 
     @staticmethod
@@ -695,13 +848,21 @@ class ConversationMemory:
         Returns [] for ordinary statements — the existing pipeline
         handles them unchanged.
         """
+        # 'and <marker>' is also a boundary — "the deadline is friday,
+        # and actually make the standup 10:30" carries a statement then
+        # a correction; banking the chain verbatim loses both.
         parts = [p.strip() for p in
-                 re.split(r"(?<=[.!?])\s+|\s*;\s*", text) if p.strip()]
+                 re.split(
+                     r"(?<=[.!?])\s+|\s*;\s*|,?\s+and\s+"
+                     r"(?=actually|no\b|wait\b|instead|sorry|"
+                     r"never\s*mind|nevermind|nm\b|scratch\s+that|"
+                     r"on\s+second\s+thought|i\s+mean|i\s+meant|"
+                     r"correction)", text) if p.strip()]
         if len(parts) < 2:
             return []
         marker = re.compile(
             r"^(?:actually|no|wait|instead|sorry|never\s*mind|nevermind|"
-            r"scratch\s+that|on\s+second\s+thought|i\s+mean|i\s+meant|"
+            r"nm|scratch\s+that|on\s+second\s+thought|i\s+mean|i\s+meant|"
             r"correction)\b", re.IGNORECASE)
         if not any(marker.search(p) for p in parts[1:]):
             return []
@@ -760,6 +921,16 @@ class ConversationMemory:
             scope_id = conversation_id
             raw = conversation_match.group(1).strip()
 
+        # "my notes say 'never use port 4000' — remember that" — the
+        # quoted span is the referent of the learning request; feed its
+        # content through the normal pipeline so it banks like the
+        # bare statement would.
+        if re.search(r"\bremember\s+(?:that|this)\b", raw,
+                     flags=re.IGNORECASE):
+            quoted = re.findall(r"[\"']([^\"']{3,400})[\"']", raw)
+            if quoted:
+                raw = quoted[-1].strip()
+
         # Creator-locked identity facts (birthday/age/creator) cannot be
         # taught, overridden, or forgotten — drop them before any storage.
         # The refusal only surfaces for an actual write attempt; a plain
@@ -772,14 +943,34 @@ class ConversationMemory:
             return result
 
         forget_match = re.match(
-            r"^(?:forget(?:\s+(?:that|about))?|nevermind(?:\s+about)?|"
+            r"^(?:forget(?:\s+(?:that|about))?|never\s*mind(?:\s+about)?|"
+            r"nm(?:\s+about)?|"
             r"stop\s+remembering|delete\s+(?:the\s+)?facts?"
             r"(?:\s+about)?)[,:]?\s*(.+)$",
             raw, flags=re.IGNORECASE)
         if forget_match:
-            forgotten = self.forget(forget_match.group(1))
-            result["forgotten"].extend(forgotten)
-            return result
+            forget_body = forget_match.group(1).strip()
+            # "nm, my editor is vim" — an abortive marker followed by a
+            # fresh statement is a correction, not a forget: the tail
+            # re-enters the learning pipeline. True forget verbs keep
+            # statement-shaped targets ('forget that my editor is
+            # emacs' deletes that verbatim fact).
+            abortive = bool(re.match(r"^(?:nm|never\s*mind)\b", raw,
+                                     flags=re.IGNORECASE))
+            if not abortive or not re.search(
+                    r"\b(?:is|are|was|were|use|uses|go\s+with|set|"
+                    r"make|change)\b"
+                    r"|it'?s\b",
+                    forget_body, flags=re.IGNORECASE):
+                forgotten = self.forget(forget_body)
+                result["forgotten"].extend(forgotten)
+                if not forgotten:
+                    # Surface the miss so the reply lane can say so
+                    # honestly instead of handing a memory command to the
+                    # model lane (which may not even be running).
+                    result["forgotten_miss"] = [forget_body]
+                return result
+            raw = forget_body
 
         # Credentials are never persisted — "remember my passcode is X"
         # must not bank the secret into facts/rules, sync it to the
@@ -823,8 +1014,59 @@ class ConversationMemory:
                     result.setdefault(key, []).extend(value)
             return result
 
+        # Coordinated declaratives — "my shell is zsh and my terminal
+        # is alacritty" states two facts. Only split when EVERY part is
+        # a complete subject+predicate statement; "ham and eggs" and
+        # "the stack is python and sqlite" stay whole.
+        and_parts = re.split(r"\s+and\s+", raw)
+        if len(and_parts) > 1:
+            decl = re.compile(
+                r"^(?:my|the|our|i|we|it)\b.{1,60}?\b"
+                r"(?:is|are|was|were|uses?|runs on|prefers?|likes?|"
+                r"loves?)\s+\S", re.IGNORECASE)
+            if all(decl.match(p.strip()) for p in and_parts):
+                for part in and_parts:
+                    sub = self.learn_from_user(
+                        part.strip(),
+                        project_id=project_id,
+                        conversation_id=conversation_id)
+                    for key, value in sub.items():
+                        result.setdefault(key, []).extend(value)
+                return result
+
+        # Reported speech / hearsay — "i heard the port is 9090",
+        # "someone said the build is green" — is acknowledged but never
+        # banked: a secondhand claim is unverified by definition, and
+        # treating rumor as fact would let it outrank evidence. The
+        # marker surfaces an honest "noted, unverified" ack instead of
+        # handing the turn to a model that might riff one.
+        hear = re.match(
+            r"^(?:i\s+heard|i\s+was\s+told|i'?m\s+hearing|"
+            r"some(?:one|body)\s+(?:said|told\s+me)|"
+            r"they\s+say|people\s+say|word\s+is|rumou?r\s+has\s+it|"
+            r"apparently|supposedly|reportedly)\s*[,:—-]*\s*"
+            r"(?:that\s+)?(.+)$",
+            raw, flags=re.IGNORECASE)
+        if hear:
+            claim = re.sub(r"[.!?]+$", "", hear.group(1).strip())
+            # "i heard you" is comprehension, not a reported claim —
+            # require a real clause before calling it hearsay.
+            if len(claim.split()) >= 2:
+                result["hearsay"] = [claim]
+                return result
+
         with self._lock:
             fact: str | None = None
+            # Discourse/correction marker prefixes ride the front of a
+            # statement ("actually no, my editor is neovim") — strip the
+            # STACK of them once so every matcher below sees the clause
+            # that carries the content.
+            body = re.sub(
+                r"^(?:(?:actually|by\s+the\s+way|btw|also|so|fyi|note|"
+                r"quick\s+note|for\s+the\s+record|just\s+so\s+you\s+know|"
+                r"no|wait|sorry|nm|never\s*mind|scratch\s+that|"
+                r"on\s+second\s+thought|i\s+mean(?:t)?)[,:\s]+)+",
+                "", raw, flags=re.IGNORECASE)
             for pattern in (
                 r"^remember\s+that\s+(.+)$",
                 r"^remember\s*:\s*(.+)$",
@@ -836,21 +1078,42 @@ class ConversationMemory:
                 r"^i(?:'m| am)\s+using\s+.+$",
                 r"^my\s+.{1,40}\s+is\s+.+$",
             ):
-                match = re.match(pattern, raw, flags=re.IGNORECASE)
+                match = re.match(pattern, body, flags=re.IGNORECASE)
                 if match:
-                    fact = (match.group(1).strip() if match.lastindex
-                            else raw.rstrip(".!?"))
+                    cand = (match.group(1).strip() if match.lastindex
+                            else body.rstrip(".!?"))
+                    # Negated copula — "my editor is not emacs" is a
+                    # retraction/correction for the neg lane, never a
+                    # verbatim fact.
+                    if re.search(
+                            r"\b(?:is|are|was|were)(?:n't|"
+                            r"\s+(?:not|no\s+longer|never))\b",
+                            cand, flags=re.IGNORECASE):
+                        break
+                    fact = cand
+                    # A marker-prefixed preference restatement —
+                    # "actually i prefer green now" — corrects the
+                    # same-class preference fact ("my favorite color is
+                    # blue"), it isn't a brand-new fact. Try the
+                    # preference retarget before banking it fresh.
+                    if body != raw:
+                        pm = re.match(
+                            r"^i\s+(prefer|like|love)\s+(.+?)"
+                            r"(?:\s+(?:now|instead|today|this\s+time))?"
+                            r"[.!?]?$",
+                            fact, flags=re.IGNORECASE)
+                        if pm:
+                            tgt = self._retarget_latest_fact(
+                                pm.group(2), result["superseded"],
+                                preference_only=True)
+                            # No unique same-class referent — bank the
+                            # restated preference itself, trailer-free,
+                            # rather than corrupting an unrelated fact.
+                            fact = (tgt if tgt is not None
+                                    else f"i {pm.group(1).lower()} "
+                                         f"{pm.group(2)}")
                     break
             if fact is None:
-                # Declarative entity-attribute statements — "Project Orion
-                # uses PostgreSQL", "Orion runs on Linux" — and updates like
-                # "we switched Orion to SQLite" / "Orion moved to Redis".
-                # All of these canonicalize to "subject predicate value" so
-                # a newer statement occupies the same supersession slot.
-                body = re.sub(
-                    r"^(?:actually|by the way|btw|also|so|fyi|note|quick note|"
-                    r"for the record|just so you know)[,:\s]+",
-                    "", raw, flags=re.IGNORECASE)
                 # An imperative-led body is a request, not a statement —
                 # 'explain what a mutex is in one sentence' would otherwise
                 # parse as subject 'explain what a mutex' + is + 'in one
@@ -861,7 +1124,20 @@ class ConversationMemory:
                 # imperatives ('set the theme to dark') are exempt — their
                 # dedicated matchers below still run.
                 from ..context.semantics import _ACTION_LEAD_RE
-                imperative_body = bool(_ACTION_LEAD_RE.match(body))
+                # A copula after the lead word makes the clause a
+                # statement, not a command — "review cadence is
+                # weekly" leads with 'review' but asserts a property;
+                # "review my PRs" (no copula) stays imperative. Verbs
+                # whose object is itself a clause ("remember the port
+                # is 8080") keep the imperative read.
+                imperative_body = bool(
+                    _ACTION_LEAD_RE.match(body)) and not re.match(
+                        r"^(?!(?:remember|remind|tell|note|show|"
+                        r"explain|describe|check|make|let|see|keep|"
+                        r"set|use|run|stop|start|get|do|please)\b)"
+                        r"[a-z]+(?:\s+[a-z0-9][a-z0-9 '._-]{0,38}?)?\s+"
+                        r"(?:is|are|was|were|isn't|aren't|ain't)\b",
+                        body, flags=re.IGNORECASE)
                 switch = re.match(
                     r"^we\s+(?:switched|moved|migrated|changed)\s+"
                     r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+to\s+(.+)$",
@@ -905,6 +1181,81 @@ class ConversationMemory:
                             # its subject — the corrected statement can be
                             # learned even when no old-value fact exists.
                             fact = f"{subj_txt} is {new_v}"
+                    elif not imperative_body and (neg := re.match(
+                            r"^(?:actually[,]?\s+|no[,]?\s+|wait[,]?\s+)?"
+                            r"(it|that|this|(?:my|the|our)\s+[a-z0-9]"
+                            r"[a-z0-9 ._-]{0,34}?|"
+                            r"[a-z0-9][a-z0-9 ._-]{0,34}?)\s+"
+                            r"(?:is|are|was|were)"
+                            r"(?:\s+not|\s+no\s+longer|n'?t)\s+(.+?)"
+                            r"(?:\s*,\s*(?:it'?s|it\s+is)\s+(.+?))?"
+                            r"\s*(?:anymore|any\s+more|any\s+longer)?"
+                            r"[.!?]?$",
+                            body, flags=re.IGNORECASE)):
+                        # "X is not Y, it's Z" corrects to Z; bare
+                        # "X isn't Y (anymore)" retracts the unique fact
+                        # carrying Y. Storing the negated sentence
+                        # verbatim ('cache ttl is not 300, it's 600')
+                        # answers nothing and misleads recall.
+                        subj_txt = self._clean_subject(neg.group(1))
+                        old_v = self._clean_value(neg.group(2))
+                        new_v = (self._clean_value(neg.group(3))
+                                 if neg.group(3) else "")
+                        if new_v:
+                            fact = self._correct_fact_value(old_v, new_v)
+                            if (
+                                fact is None
+                                and subj_txt
+                                and subj_txt.casefold() not in {
+                                    "it", "that", "this"}
+                                and self._fact_subject_ok(subj_txt)
+                            ):
+                                fact = f"{subj_txt} is {new_v}"
+                        else:
+                            # 'isn't AT 10:30' negates the time the
+                            # fact states — a leading prep is syntax,
+                            # not part of the value being denied.
+                            neg_v = re.sub(
+                                r"^(?:at|on|in|for|of|to)\s+", "",
+                                old_v, flags=re.IGNORECASE)
+                            retracted = self._retract_fact_value(
+                                neg_v or old_v)
+                            result["forgotten"].extend(retracted)
+                            if not retracted:
+                                # The retraction named a value nothing
+                                # stores — surface the miss so the reply
+                                # is an honest "nothing to forget", not
+                                # a model turn.
+                                result["forgotten_miss"] = [
+                                    f"{subj_txt or 'it'} is {old_v}"]
+                        if fact is None:
+                            # Negated statements are constraints, not
+                            # facts — whether the retraction hit or
+                            # missed, never let a downstream matcher
+                            # bank "X is not Y" verbatim.
+                            body = ""
+                    elif not imperative_body and (disuse := re.match(
+                            r"^i\s+(?:no\s+longer|don't|do\s+not|dont|"
+                            r"stopped|quit)\s+"
+                            r"(?:use|using|run|running|like|liking|"
+                            r"want|needing?|work\s+with)\s+"
+                            r"(.+?)\s*(?:anymore|any\s+more)?[.!?]?$",
+                            body, flags=re.IGNORECASE)):
+                        # "i no longer use slack for comms" retracts
+                        # the unique fact ending in the tool — the
+                        # purpose tail ('for comms') is context, not
+                        # part of the denied value.
+                        obj = self._clean_value(re.sub(
+                            r"\s+(?:for|as|in|on)\s+.+$", "",
+                            disuse.group(1), flags=re.IGNORECASE))
+                        retracted = self._retract_fact_value(obj)
+                        if not retracted:
+                            retracted = self._retract_fact_contains(obj)
+                        result["forgotten"].extend(retracted)
+                        if not retracted:
+                            result["forgotten_miss"] = [
+                                f"i use {obj or disuse.group(1)}"]
+                        body = ""
                     elif corr:
                         inner = corr.group(1).strip()
                         inner_nyc = re.match(
@@ -922,7 +1273,16 @@ class ConversationMemory:
                             # when nothing structured matches.
                             body = inner
                             imperative_body = bool(
-                                _ACTION_LEAD_RE.match(body))
+                                _ACTION_LEAD_RE.match(inner)) and not re.match(
+                                    r"^(?!(?:remember|remind|tell|note|"
+                                    r"show|explain|describe|check|make|"
+                                    r"let|see|keep|set|use|run|stop|"
+                                    r"start|get|do|please)\b)"
+                                    r"[a-z]+(?:\s+[a-z0-9]"
+                                    r"[a-z0-9 '._-]{0,38}?)?\s+"
+                                    r"(?:is|are|was|were|isn't|aren't|"
+                                    r"ain't)\b",
+                                    inner, flags=re.IGNORECASE)
                             corr_body = inner.rstrip(".!?")
                 if fact is None:
                     # Reported copula decisions — "we decided the cache
@@ -1001,7 +1361,9 @@ class ConversationMemory:
                     # "Orion migrated off Postgres to Redis".
                     subj_switch = None if imperative_body else re.match(
                         r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
-                        r"(?:switched|moved|migrated|changed)"
+                        r"(?:(?:was|were|got|is|are|has\s+been|"
+                        r"have\s+been|being|just)\s+)*"
+                        r"(switched|moved|migrated|changed|pushed)"
                         r"(?:\s+(?:off|from|away from)\s+[a-z0-9][a-z0-9 ._-]{0,38}?)?"
                         r"\s+to\s+(.+)$",
                         body, flags=re.IGNORECASE,
@@ -1010,21 +1372,58 @@ class ConversationMemory:
                     subj = ""
                     if subj_switch:
                         subj = self._clean_subject(subj_switch.group(1))
-                        value = self._clean_value(subj_switch.group(2))
+                        verb = subj_switch.group(2).lower()
+                        value = self._clean_value(subj_switch.group(3))
+                        # A move on a fact-tracked entity restates its
+                        # slot — "the standup moved to 10am" updates
+                        # 'standup is at 9am', it isn't 'standup uses
+                        # 10am'. Retarget keeps the original predicate;
+                        # only genuinely new entities mint a fresh slot.
                         if self._fact_subject_ok(subj) and value:
-                            fact = f"{subj} uses {value}"
+                            fact = self._retarget_latest_fact(
+                                value, result["superseded"],
+                                subject_hint=subj)
+                        if (fact is None
+                                and self._fact_subject_ok(subj)
+                                and value):
+                            # Time/date-shaped moves describe WHEN the
+                            # entity happens — "deadline was moved to
+                            # monday" mints 'deadline is monday'; tool
+                            # moves ("Orion moved to Redis") mint 'uses'.
+                            # 'changed' replaces an attribute value —
+                            # "my timezone changed to pst" mints
+                            # 'my timezone is pst', never a tool slot;
+                            # switched/moved/migrated keep 'uses'.
+                            my_scoped = subj.lower().startswith(
+                                ("my ", "our "))
+                            if re.fullmatch(
+                                    r"(?:next\s+|this\s+|every\s+)?"
+                                    r"(?:mon|tue|wed|thu|fri|sat|sun)"
+                                    r"[a-z]*|tomorrow|tonight|today|"
+                                    r"[a-z]+\s+\d{1,2}(?:st|nd|rd|th)?|"
+                                    r".*(?:am|pm)\b|\d{1,2}:\d{2}",
+                                    value, flags=re.IGNORECASE) \
+                                    or (verb == "changed" and my_scoped):
+                                fact = f"{subj} is {value}"
+                            else:
+                                fact = f"{subj} uses {value}"
                     elif not imperative_body:
                         decl = re.match(
                             r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
                             r"(uses?|runs on|is built on|is written in|"
                             r"depends on|prefers?|ends? in|starts? with|"
-                            r"ends? with|(?:is|are|was|were|gets?|is being)\s+"
+                            r"ends? with|(?:is|are|was|were|gets?|"
+                            r"is being)\s+(?:now\s+)?"
                             r"(?:called|named|known as)|equals?|"
                             r"lives? (?:at|in|on)|reports? to|"
                             r"works? (?:on|at|for)|belongs? to|comes? from|"
                             r"scheduled for|due (?:on|by|in)|"
+                            r"expires?|ends?|starts?|runs?|"
+                            r"lifts?|holds?|begins?|resumes?|"
+                            r"pass(?:es)?|fails?|ships?|lands?|"
+                            r"moves?|renews?|rotates?|continues?|pauses?|"
                             r"hosted (?:at|on)|serves?|costs?|lasts?|"
-                            r"is|are)\s+(.+)$",
+                            r"was|were|is|are)\s+(.+)$",
                             body, flags=re.IGNORECASE,
                         )
                         if decl:
@@ -1032,10 +1431,52 @@ class ConversationMemory:
                             if self._fact_subject_ok(subj):
                                 pred = re.sub(
                                     r"\s+", " ", decl.group(2).strip().lower())
+                                # Naming predicates share the 'is' slot —
+                                # "the label is now named zeta" restates
+                                # "the label is alpha", and a later plain
+                                # "the label is omega" must retire it.
+                                naming = bool(re.search(
+                                    r"(?:called|named|known as)$",
+                                    pred))
+                                if naming:
+                                    pred = "is"
                                 value = self._clean_value(decl.group(3))
                                 if value:
                                     fact = f"{subj} {pred} {value}"
+                                if (value and body != raw
+                                        and not naming):
+                                    # Marker-led restatement of a
+                                    # tracked entity ("actually the
+                                    # laptop is pulsar" while 'my
+                                    # laptop is named quasar' lives) —
+                                    # retarget the entity's slot rather
+                                    # than forking a parallel fact.
+                                    tgt = self._retarget_latest_fact(
+                                        value, result["superseded"],
+                                        subject_hint=subj)
+                                    if tgt is not None:
+                                        fact = tgt
+                                if naming and value:
+                                    # "the render box is now named
+                                    # titan" restates the entity's name
+                                    # slot ('render box name is
+                                    # cobalt') — retarget it instead of
+                                    # forking a parallel 'render box'
+                                    # fact.
+                                    tgt = self._retarget_latest_fact(
+                                        value, result["superseded"],
+                                        subject_hint=subj)
+                                    if tgt is not None:
+                                        fact = tgt
                                 if (pred in {"is", "are"} and value
+                                        and not naming
+                                        # Marker context legitimizes a
+                                        # short value — "actually the
+                                        # laptop is pulsar" restates the
+                                        # slot deliberately; the
+                                        # adjective guard only gates
+                                        # unmarked statements.
+                                        and body == raw
                                         and not (
                                             re.search(
                                                 r"[\dA-Z/\\]|(?:^|\s)v\d",
@@ -1100,7 +1541,17 @@ class ConversationMemory:
                     if imp:
                         subj = self._clean_subject(imp.group(1))
                         value = self._clean_value(imp.group(2))
-                        if self._fact_subject_ok(subj) and value:
+                        # "use mercury as the name" renames the latest
+                        # fact — 'the name/label/title' is a referential
+                        # slot word, not a value; banking "mercury is
+                        # the name" inverts the statement.
+                        if re.fullmatch(
+                                r"(?:the\s+)?"
+                                r"(?:name|label|title)s?", value,
+                                flags=re.IGNORECASE):
+                            fact = self._retarget_latest_fact(
+                                subj, result["superseded"])
+                        elif self._fact_subject_ok(subj) and value:
                             fact = f"{subj} is {value}"
                     else:
                         # Bare "use X <literal>" — the literal must look
@@ -1118,6 +1569,30 @@ class ConversationMemory:
                             value = self._clean_value(imp2.group(2))
                             if self._fact_subject_ok(subj) and value:
                                 fact = f"{subj} is {value}"
+                        if fact is None:
+                            # "make the standup 10:30", "move the
+                            # meeting to 4pm" — connector-less value
+                            # sets; the value must look literal or
+                            # 'make the report short' banks adjectives.
+                            imp3 = re.match(
+                                r"^(?:make|change|move|schedule|shift|"
+                                r"push)\s+(?:the\s+|my\s+|our\s+|a\s+)?"
+                                r"([a-z0-9][a-z0-9 ._-]{0,28}?)\s+"
+                                r"(?:to\s+)?"
+                                r"([a-z0-9][a-z0-9 _+./\\#:-]{0,38}?)"
+                                r"[.!?]?$",
+                                body, flags=re.IGNORECASE)
+                            if imp3 and re.search(
+                                    r"[\d_+./\\#:-]", imp3.group(2)):
+                                subj = self._clean_subject(imp3.group(1))
+                                value = self._clean_value(imp3.group(2))
+                                if self._fact_subject_ok(subj) and value:
+                                    fact = (
+                                        self._retarget_latest_fact(
+                                            value,
+                                            result["superseded"],
+                                            subject_hint=subj)
+                                        or f"{subj} is {value}")
                 if fact is None:
                     # Bare re-set of the last stated value — "actually
                     # make that 8090", "no, set it to 9000". The newest
@@ -1142,6 +1617,231 @@ class ConversationMemory:
                         if use_reset and re.search(
                                 r"[\d_+./\\#-]", use_reset.group(1)):
                             reset = use_reset
+                    if not reset:
+                        # "no not cobalt, it's onyx" — the negated value
+                        # is the old one, 'it's X' supplies the new. The
+                        # explicit contrast legitimizes word values the
+                        # bare-'it's' lane would reject.
+                        nyc = re.match(
+                            r"^(?:(?:actually|no|wait|instead|sorry|"
+                            r"never\s*mind|nm)[,]?\s+)*"
+                            r"(?:not|nope|nah|not\s+really)\s+"
+                            r"([^,;—]{1,40}?)[,;—]\s*"
+                            r"(?:it'?s|it\s+is|the\s+\w+\s+is)\s+"
+                            r"(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if nyc:
+                            # The negated value names its own fact —
+                            # "not cobalt, it's onyx" corrects the
+                            # cobalt row, not whatever happens to be
+                            # newest.
+                            fact = self._correct_fact_value(
+                                self._clean_value(nyc.group(1)),
+                                nyc.group(2))
+                            if fact is None:
+                                fact = self._retarget_latest_fact(
+                                    nyc.group(2), result["superseded"])
+                    if not reset and fact is None:
+                        # "i changed my mind (about the X) — it's Y" —
+                        # the lead names the referent, the tail states
+                        # the new value. Strict hint matching: a named
+                        # referent that has no fact must NOT retarget
+                        # the latest unrelated row.
+                        cmm = re.match(
+                            r"^i\s+(?:changed|change)\s+my\s+mind\b"
+                            r"(?:\s+about\s+(?:the\s+|my\s+|our\s+)?"
+                            r"([a-z0-9][a-z0-9 '_-]{0,38}?))?"
+                            r"\s*[-—,;:]\s*(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if cmm:
+                            tail = cmm.group(2).strip()
+                            cmv = re.match(
+                                r"^(?:it'?s|it\s+is)\s+(.+?)"
+                                r"(?:\s+(?:now|instead|today))?[.!?]?$",
+                                tail, flags=re.IGNORECASE)
+                            val = (cmv.group(1) if cmv else tail).strip()
+                            if val and re.search(r"[\d_+./\\#-]", val):
+                                hint = (self._clean_subject(cmm.group(1))
+                                        if cmm.group(1) else None)
+                                fact = self._retarget_latest_fact(
+                                    val, result["superseded"],
+                                    subject_hint=hint)
+                    if not reset and fact is None:
+                        # "the deploy region used to be us-east-1 but
+                        # now it's eu-west-1" — temporal supersession:
+                        # 'used to be' names the old value, the 'now'
+                        # tail carries the new one. Value-match first,
+                        # then the named subject's slot.
+                        utb = re.match(
+                            r"^(?:(?:the\s+|my\s+|our\s+)?"
+                            r"([a-z0-9][a-z0-9 '_-]{0,38}?)\s+)?"
+                            r"used\s+to\s+be\s+(.+?)\s*"
+                            r"(?:,\s*|\s+)(?:but\s+|now\s+|"
+                            r"it'?s\s+|it\s+is\s+)(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if utb:
+                            old_v = self._clean_value(utb.group(2))
+                            # The separator word may leave residue —
+                            # "but now it's X" splits on 'but' and the
+                            # rest still carries "now it's".
+                            new_v = self._clean_value(re.sub(
+                                r"^(?:now\s+)?"
+                                r"(?:it'?s|it\s+is|it\s+was|"
+                                r"they'?re)\s+", "",
+                                utb.group(3), flags=re.IGNORECASE))
+                            fact = self._correct_fact_value(old_v, new_v)
+                            if fact is None and utb.group(1):
+                                hint = self._clean_subject(utb.group(1))
+                                fact = self._retarget_latest_fact(
+                                    new_v, result["superseded"],
+                                    subject_hint=hint)
+                    if not reset and fact is None:
+                        # "i thought the port was 8080 but it was
+                        # 8081" — a corrected belief. The 'but it was'
+                        # tail carries the true value; bank it on the
+                        # named subject's slot.
+                        tht = re.match(
+                            r"^i\s+(?:thought|assumed|believed|"
+                            r"figured)\s+(?:(?:the|my|our)\s+)?"
+                            r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+                            r"(?:was|were|is|are)\s+(.+?)\s*,?\s*"
+                            r"but\s+(?:it\s+(?:was|is)|it'?s|"
+                            r"they\s+(?:were|are)|they'?re|"
+                            r"actually\s+(?:it\s+(?:was|is)|it'?s))\s+"
+                            r"(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if tht:
+                            old_v = self._clean_value(tht.group(2))
+                            new_v = self._clean_value(tht.group(3))
+                            hint = self._clean_subject(tht.group(1))
+                            fact = self._correct_fact_value(
+                                old_v, new_v)
+                            if fact is None:
+                                fact = self._retarget_latest_fact(
+                                    new_v, result["superseded"],
+                                    subject_hint=hint)
+                            if fact is None and new_v and hint:
+                                fact = f"{hint} is {new_v}"
+                    if not reset and fact is None:
+                        # "we used jira before, now it's linear" — past
+                        # usage superseded by present usage. The old
+                        # tool matches an existing 'we/i use X' fact for
+                        # supersession; with none, the new usage banks
+                        # fresh.
+                        usb = re.match(
+                            r"^(we|i|they|the\s+team)\s+used\s+"
+                            r"(.+?)\s+before\s*[,;]?\s*(?:but\s+)?now\s+"
+                            r"(?:it'?s|it\s+is|we\s+use|i\s+use|"
+                            r"they\s+use)\s+(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if usb:
+                            actor = usb.group(1).lower()
+                            actor = ("the team" if actor == "the team"
+                                     else actor)
+                            old_v = self._clean_value(usb.group(2))
+                            new_v = self._clean_value(usb.group(3))
+                            fact = self._correct_fact_value(
+                                old_v, new_v)
+                            if fact is None and new_v:
+                                fact = f"{actor} use {new_v}"
+                    if not reset and fact is None:
+                        # Referential "it's X" after a correction marker —
+                        # "never mind, it's 60" re-states the latest
+                        # fact's value. Literal-shaped values only
+                        # (digits/versions/paths): "it's fine" is an
+                        # acknowledgement, not a correction.
+                        its = re.match(
+                            r"^(?:(?:actually|no|wait|instead|"
+                            r"never\s*mind|scratch\s+that|sorry|nm)"
+                            r"[,]?\s+)*it'?s\s+(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if (its and re.search(
+                                r"[\d_+./\\#-]", its.group(1))):
+                            fact = self._retarget_latest_fact(
+                                its.group(1), result["superseded"])
+                        if fact is None:
+                            # Referential renames — "the name changed —
+                            # it's now called vector", "the label is now
+                            # named zeta", "renamed to X", "call it X",
+                            # "rename it to X", "use X as the name".
+                            # 'now' is required before called/named —
+                            # "it's called being careful" is idiom, not
+                            # a rename. An explicit subject rewrites its
+                            # own slot; 'it'/the name' retargets the
+                            # latest fact.
+                            ren = re.search(
+                                r"\b(?:it'?s|it\s+is|this\s+is|"
+                                r"that\s+is|the\s+name\s+is)\s+"
+                                r"(?:now\s+)?(?:called|named)\s+"
+                                r"([a-z0-9][a-z0-9 ._-]{0,38}?)"
+                                r"(?:\s+(?:now|instead))?[.!?]?\s*$",
+                                raw, flags=re.IGNORECASE)
+                            # 'now' legitimizes inline — or a correction
+                            # marker in the head clause ("that's wrong —
+                            # it's called cobalt") supplies the intent.
+                            if ren and (
+                                    re.search(r"\bnow\b",
+                                              raw[:ren.end()],
+                                              flags=re.IGNORECASE)
+                                    or re.search(
+                                        r"\b(?:actually|wait|sorry|"
+                                        r"never\s*mind|nm|wrong|"
+                                        r"incorrect|not\s+right|"
+                                        r"changed|renamed|updated?)\b",
+                                        raw[:ren.start()],
+                                        flags=re.IGNORECASE)):
+                                fact = self._retarget_latest_fact(
+                                    ren.group(1), result["superseded"])
+                        if fact is None:
+                            ren_subj = re.search(
+                                r"\b(?:(the|my|our)\s+)?"
+                                r"([a-z][a-z0-9 '_-]{0,38}?)\s+"
+                                r"(?:is|are)\s+now\s+"
+                                r"(?:called|named)\s+"
+                                r"([a-z0-9][a-z0-9 ._-]{0,38}?)"
+                                r"(?:\s+(?:now|instead))?"
+                                r"[.!?]?\s*$",
+                                raw, flags=re.IGNORECASE)
+                            if ren_subj:
+                                subj = self._clean_subject(
+                                    ((ren_subj.group(1) or "") +
+                                     " " +
+                                     ren_subj.group(2)).strip())
+                                val = self._clean_value(
+                                    ren_subj.group(3))
+                                # The entity's own name-slot fact
+                                # ("render box name is cobalt") is the
+                                # referent — 'the render box is now
+                                # named titan' restates it, it doesn't
+                                # spawn a parallel 'render box' fact.
+                                fact = self._retarget_latest_fact(
+                                    val, result["superseded"],
+                                    subject_hint=subj)
+                                if (fact is None
+                                        and self._fact_subject_ok(subj)
+                                        and val):
+                                    fact = f"{subj} is {val}"
+                        if fact is None:
+                            ren = re.search(
+                                r"\b(?:renamed\s+to|"
+                                r"rename\s+(?:it|that|this)"
+                                r"(?:\s+back)?\s+to|"
+                                r"call(?:ing)?\s+it)\s+"
+                                r"([a-z0-9][a-z0-9 ._-]{0,38}?)"
+                                r"[.!?]?\s*$",
+                                raw, flags=re.IGNORECASE)
+                            if not ren:
+                                ren = re.search(
+                                    r"\buse\s+"
+                                    r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+                                    r"as\s+(?:the\s+)?"
+                                    r"(?:name|label|title)\b"
+                                    r"[.!?]?\s*$",
+                                    raw, flags=re.IGNORECASE)
+                            if ren:
+                                fact = self._retarget_latest_fact(
+                                    ren.group(1),
+                                    result["superseded"])
                     if reset:
                         val = reset.group(1)
                         # A class-known value ("green") prefers the
@@ -1172,8 +1872,12 @@ class ConversationMemory:
                         r"([a-z0-9][a-z0-9 ._-]{0,20}?)"
                         r"(?:\s+(?:now|instead|today|this\s+time))?[.!?]?$",
                         raw, flags=re.IGNORECASE)
-                    if bare and bare.group(1).strip().lower() not in (
-                            self._BARE_CORRECTION_STOPWORDS):
+                    if (bare
+                            and bare.group(1).strip().lower() not in (
+                                self._BARE_CORRECTION_STOPWORDS)
+                            and not re.search(
+                                r"\b(?:is|are|was|were)\b",
+                                bare.group(1), flags=re.IGNORECASE)):
                         val = bare.group(1)
                         pref = re.search(
                             r"\bi\s+(prefer|like|love)\b", raw,
@@ -1193,6 +1897,16 @@ class ConversationMemory:
                     fact = corr_body
             if fact:
                 fact = self._first_clause(fact) or fact
+                # Emphatic adverbs inside the captured statement aren't
+                # part of the value — "my editor is actually emacs"
+                # stores 'emacs', not 'actually emacs'. The trailing
+                # \s+ guards lone-adverb values — "deadline is today"
+                # keeps 'today' (nothing follows it), while "my editor
+                # is now vscode" drops the 'now'.
+                fact = re.sub(
+                    r"\b(is|are|was|were)\s+"
+                    r"(?:actually|really|just|currently|simply|now)\s+",
+                    r"\1 ", fact, flags=re.IGNORECASE)
             if fact and locked_topic(fact):
                 result.setdefault("locked", []).append(
                     locked_refusal(locked_topic(fact)))
@@ -1214,7 +1928,8 @@ class ConversationMemory:
             # than leaving a contradiction live in every prompt.
             revoke = re.match(
                 r"^(?:stop|quit)\s+(.+?)(?:\s+please)?[.!?]?$"
-                r"|^(?:do\s+not|don't|dont|please\s+do\s+not)\s+(.+?)\s+anymore[.!?]?$"
+                r"|^(?:do\s+not|don't|dont|please\s+do\s+not)\s+(.+?)"
+                r"(?:\s+anymore)?[.!?]?$"
                 r"|^no\s+longer\s+(.+?)[.!?]?$"
                 r"|^you\s+can\s+stop\s+(.+?)[.!?]?$",
                 raw, flags=re.IGNORECASE)
@@ -1231,7 +1946,15 @@ class ConversationMemory:
                     r"at\s+the\s+moment|currently)\b"
                     r"|^(?:it|that|this|everything|all\s+that)\b",
                     action, flags=re.IGNORECASE)
-                if not revoked and not ephemeral and self._rule_terms(action):
+                # Negation-of-positive — "don't forget the keys" means
+                # DO remember them; 'Never forget the keys' inverts the
+                # intent. Only the prohibition of an action banks.
+                inversion = re.match(
+                    r"^(?:forget|remember|miss|lose|skip|worry|"
+                    r"hesitate|bother|stop|delay|hold\s+off)\b",
+                    action, flags=re.IGNORECASE)
+                if (not revoked and not ephemeral and not inversion
+                        and self._rule_terms(action)):
                     # Nothing to retract — the phrase is itself a durable
                     # prohibition ("stop responding in JSON" with no prior
                     # mandate means "never do that").
@@ -1446,7 +2169,19 @@ class ConversationMemory:
         normalized = re.sub(
             r"^(?:(?:the|that|about|my|our|a|an|fact|facts|memory)\s+)+",
             "", target).strip()
+        # Trailing memory-nouns name the container, not the fact —
+        # "forget the staging port fact" refers to "staging port".
+        normalized = re.sub(
+            r"(?:\s+(?:fact|facts|memory|rule|preference|detail|thing|"
+            r"item|entry|bit))+[.!?]*$", "", normalized).strip()
         probes = [p for p in (target, normalized) if p]
+        # Substring matching makes tiny/referential probes dangerous —
+        # "forget it" would match every fact containing the letters
+        # "it" ('edITor'). Referents need real content.
+        probes = [p for p in probes
+                  if len(p) >= 3 and p not in self._BARE_CORRECTION_STOPWORDS
+                  and p not in {"it", "that", "this", "everything",
+                                "all", "them", "those"}]
         if not probes:
             return []
         forgotten: list[dict[str, Any]] = []
@@ -1670,6 +2405,24 @@ class ConversationMemory:
             rows = [r for i, r in enumerate(rows)
                     if not any(overlaps[i] < overlaps[j]
                                for j in range(len(rows)))]
+        if len(rows) > 1:
+            # Past-tense reports ("the port was 8080") are history —
+            # when the same subject has a present-tense row, the 'was'
+            # row is background, not the answer.
+            def _tense_subject(row):
+                m = re.match(
+                    r"^(.+?)\s+(is|are|was|were)\b",
+                    str(row.get("text", "")).strip(),
+                    flags=re.IGNORECASE)
+                return (m.group(1).lower(), m.group(2).lower()) if m \
+                    else ("", "")
+
+            present = {_tense_subject(r)[0] for r in rows
+                       if _tense_subject(r)[1] in ("is", "are")}
+            if present:
+                rows = [r for r in rows
+                        if not (_tense_subject(r)[1] in ("was", "were")
+                                and _tense_subject(r)[0] in present)]
         return rows
 
     def active_facts(
@@ -1701,6 +2454,29 @@ class ConversationMemory:
                         str(row.get("slot") or ""))
                         or str(row.get("text", ""))] = row
             return [str(row.get("text", "")) for row in by_canonical.values()]
+
+    def active_rules(
+        self,
+        *,
+        project_id: str = "",
+        conversation_id: str = "",
+    ) -> list[str]:
+        """Active behavior-rule texts in scope — for 'what rules do
+        you follow' inspection lanes."""
+        with self._lock:
+            out = []
+            for row in self._data.get("behavior_rules", []):
+                if not isinstance(row, dict) or not row.get("active", True):
+                    continue
+                scope = str(row.get("scope") or "global")
+                scope_id = str(row.get("scope_id") or "")
+                if (scope == "global"
+                        or (scope == "project" and project_id
+                            and scope_id == project_id)
+                        or (scope == "conversation" and conversation_id
+                            and scope_id == conversation_id)):
+                    out.append(str(row.get("text", "")))
+            return out
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:

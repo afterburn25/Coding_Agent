@@ -612,7 +612,11 @@ class PersonaRenderer:
         head = " ".join(x for x in (micro, opening) if x).strip()
         text = " ".join(x for x in (head, address, body, closing)
                         if x).strip()
-        text = re.sub(r"\s+([.,!?])", r"\1", text)
+        # Collapse stray space before sentence punctuation — but NOT
+        # before a dotted name: 'in .dogfood', 'the .env file' keep
+        # their space; 'word , text' and 'end .' still tighten.
+        text = re.sub(r"\s+([,!?])", r"\1", text)
+        text = re.sub(r"\s+\.(?=\s|$)", ".", text)
         text = re.sub(r"[ ]{2,}", " ", text).strip()
 
         sig = structure_signature(body)

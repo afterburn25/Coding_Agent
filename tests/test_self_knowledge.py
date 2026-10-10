@@ -220,6 +220,154 @@ class TestServiceControl(unittest.TestCase):
         self.assertTrue(store["voice_enabled"])
         self.assertIn("reverted", res.text.lower())
 
+    def test_undo_named_referent_never_guesses(self):
+        # "undo that laptop change" names a referent — the lane must
+        # never revert an unrelated journaled setting on a guess.
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.changes import ChangeJournal
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        svc, store, _ = make_service()
+        with tempfile.TemporaryDirectory() as td:
+            journal = ChangeJournal(Path(td) / "journal.json")
+            cm = ConversationMemory(Path(td) / "cm.json")
+            svc._env["change_journal"] = lambda: journal
+            svc._env["conversation_memory"] = lambda: cm
+            journal.record("setting", "worker_ceiling", actor="user",
+                           before=8, after=4, reversible=True,
+                           undo={"kind": "setting",
+                                 "key": "worker_ceiling", "value": 8})
+            res = svc.respond("undo that laptop change")
+            self.assertIsNotNone(res)
+            self.assertEqual(res.kind, "answer")
+            self.assertIn("laptop", res.text.lower())
+            # The unrelated journal row is untouched.
+            self.assertFalse(journal.recent(5)[0].get("undone"))
+
+    def test_undo_dry_run_never_mutates(self):
+        # would_answer probes run respond(execute=False) — a scoped undo
+        # must not mutate during the probe, or the real pass reverts a
+        # *different* row (observed live: dry-run restored 'quasar',
+        # real pass then reverted back to 'pulsar').
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        svc, store, _ = make_service()
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            svc._env["conversation_memory"] = lambda: cm
+            cm.learn_from_user("my laptop is named quasar")
+            cm.learn_from_user("actually the laptop is pulsar")
+            probe = svc.respond("undo that laptop change",
+                                execute=False)
+            self.assertIsNotNone(probe)
+            active = [r["text"] for r in cm._data["facts"]
+                      if r.get("active")]
+            self.assertEqual(active, ["my laptop is pulsar"])
+            res = svc.respond("undo that laptop change")
+            self.assertEqual(res.kind, "execute")
+            self.assertIn("quasar", res.text)
+            active = [r["text"] for r in cm._data["facts"]
+                      if r.get("active")]
+            self.assertEqual(active, ["my laptop is named quasar"])
+
+    def test_undo_named_referent_restores_memory_fact(self):
+        # "undo that laptop change" with a superseded memory fact —
+        # 'my laptop is pulsar' reverts to 'my laptop is named quasar'.
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        svc, store, _ = make_service()
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            svc._env["conversation_memory"] = lambda: cm
+            cm.learn_from_user("my laptop is named quasar")
+            cm.learn_from_user("actually the laptop is pulsar")
+            res = svc.respond("undo that laptop change")
+            self.assertIsNotNone(res)
+            self.assertEqual(res.kind, "execute")
+            self.assertIn("quasar", res.text)
+            active = [r["text"] for r in cm._data["facts"]
+                      if r.get("active")]
+            self.assertEqual(active, ["my laptop is named quasar"])
+
+    def test_undo_named_referent_beats_session_last_executed(self):
+        # 'revert the printer change' with a live session undo for
+        # worker_ceiling must not revert the setting — the named
+        # referent owns the turn.
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        svc, store, _ = make_service()
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            svc._env["conversation_memory"] = lambda: cm
+            cm.learn_from_user("my printer is named epson")
+            cm.learn_from_user("actually the printer is hp")
+            svc._context["last_executed"] = {
+                "setting": "worker_ceiling",
+                "undo": {"action": "_set",
+                         "params": {"key": "worker_ceiling",
+                                    "value": 8}}}
+            res = svc.respond("revert the printer change")
+            self.assertIsNotNone(res)
+            self.assertIn("epson", res.text)
+            # The session undo was not consumed — the referent owned it.
+            self.assertIsNotNone(svc._context["last_executed"])
+
+    def test_undo_loose_referent_still_scopes(self):
+        # "undo the correction to the editor" — a referential undo that
+        # doesn't fit the strict '<X> change' template still scopes to
+        # the named entity, never the generic journal fallback.
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.changes import ChangeJournal
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        svc, store, _ = make_service()
+        with tempfile.TemporaryDirectory() as td:
+            journal = ChangeJournal(Path(td) / "journal.json")
+            cm = ConversationMemory(Path(td) / "cm.json")
+            svc._env["change_journal"] = lambda: journal
+            svc._env["conversation_memory"] = lambda: cm
+            cm.learn_from_user("my editor is emacs")
+            cm.learn_from_user("actually the editor is vim")
+            journal.record("setting", "worker_ceiling", actor="user",
+                           before=8, after=4, reversible=True,
+                           undo={"kind": "setting",
+                                 "key": "worker_ceiling", "value": 8})
+            res = svc.respond("undo the correction to the editor")
+            self.assertIsNotNone(res)
+            self.assertIn("emacs", res.text)
+            self.assertFalse(journal.recent(5)[0].get("undone"))
+
+    def test_put_back_shapes_scope_the_referent(self):
+        # "put the scooter back" / "roll back the scooter" name a
+        # referent without an undo keyword — same scoped restore as
+        # 'undo that scooter change'. Bare pronouns ('put it back')
+        # capture nothing and stay generic.
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        for shape in ("put the scooter back",
+                      "switch that scooter back",
+                      "roll back the scooter"):
+            svc, store, _ = make_service()
+            with tempfile.TemporaryDirectory() as td:
+                cm = ConversationMemory(Path(td) / "cm.json")
+                svc._env["conversation_memory"] = lambda: cm
+                svc._env["change_journal"] = lambda: None
+                cm.learn_from_user("my scooter is named dart")
+                cm.learn_from_user("actually the scooter is wisp")
+                res = svc.respond(shape)
+                self.assertIsNotNone(res, shape)
+                self.assertIn("dart", res.text, shape)
+
     def test_mute_uses_voice_action(self):
         svc, store, _ = make_service()
         res = svc.respond("mute yourself")

@@ -2509,6 +2509,15 @@ class AgentOrchestrator:
         r"(?:learned|remembered)(?:\s+about me)?\b|\bwhat have i "
         r"told you\b|\bwhat(?:'s| do you have) (?:on|saved about) "
         r"me\b", re.IGNORECASE)
+    _RULES_RECALL_RE = re.compile(
+        r"\bwhat\s+(?:operating\s+)?rules?\s+do\s+you\s+"
+        r"(?:follow|have|obey|use|operate\s+(?:under|by|with))\b|"
+        r"\bwhat\s+(?:operating\s+)?rules?\s+are\s+you\s+"
+        r"(?:following|under|operating\s+under)\b|"
+        r"\bwhat\s+are\s+your\s+(?:operating\s+)?rules?\b|"
+        r"\b(?:list|show|tell\s+me)\s+(?:your|the)\s+"
+        r"(?:operating\s+)?rules?\b",
+        re.IGNORECASE)
 
     @staticmethod
     def _second_person_fact(text: str) -> str:
@@ -2519,16 +2528,23 @@ class AgentOrchestrator:
         return t
 
     _FACT_RECALL_RE = re.compile(
-        r"^\s*(?:remind me\s+(?:of|about)\s+|what(?:'s|\s+s)?\s+|"
+        r"^\s*(?:remind me\s+(?:(?:of|about)\s+|"
+        r"(?:what|when|where|which|who|whose|how)\s+)?|"
+        r"what(?:'s|\s+s)?\s+|"
         r"whats\s+|which\s+|whichever\s+|who'?s?\s+|whos\s+|whose\s+|"
-        r"who\s+(?:is|are|was|were)\s+|when\s+(?:is|are|was|were)\s+|"
-        r"where\s+(?:is|are|was|were)\s+|do you remember\s+)",
+        r"who\s+(?:is|are|was|were)\s+|when\s+(?:is|are|was|were|"
+        r"do|does|did|will)\s+|"
+        r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
+        r"do\s+i\s+(?:use|have|like|prefer|run|need)\s+|"
+        r"(?:did|have|had)\s+i\s+(?:tell|told|mention)\w*\s+you\s+"
+        r"(?:about\s+)?)",
         re.IGNORECASE)
     _FACT_RECALL_SKIP_RE = re.compile(
         r"^\s*what\s+(?:do you|should|would|could|can|"
         r"did\s+(?:you|we|they|he|she|it|that|this)|"
         r"does\s+(?:it|that|this|he|she|they)|will|"
-        r"happens|happened|time|day|else|if)\b|\byou know\b|"
+        r"happens|happened|else|if)\b|"
+        r"what\s+(?:time|day)\s+is\s+it\b|\byou know\b|"
         r"\babout me\b",
         re.IGNORECASE)
 
@@ -2590,6 +2606,33 @@ class AgentOrchestrator:
             match_text, project_id=project_id,
             conversation_id=conversation_id)
         if not rows:
+            # Possessive probes ("what's my editor", "did I tell you my
+            # port") can only be answered by taught facts — an empty
+            # store is itself the honest answer; don't fall to the
+            # model to improvise a denial or a guess.
+            if re.search(
+                    r"\bmy\b|(?:^|\b)do\s+i\s+(?:use|have|like|prefer|"
+                    r"run|need)\b", match_text, re.IGNORECASE):
+                topic = self._FACT_RECALL_RE.sub(
+                    "", match_text).strip().rstrip("?.!")
+                topic = re.sub(
+                    r"^(?:is|are|was|were|do|does|did)\s+|^about\s+",
+                    "", topic, flags=re.IGNORECASE).strip()
+                topic = re.sub(
+                    r"\s+(?:called|named|known\s+as)\s*$",
+                    "", topic, flags=re.IGNORECASE).strip()
+                topic = re.sub(
+                    r"\s+(?:now|anymore|any\s+more|any\s+longer|"
+                    r"today|currently|these\s+days)\s*$",
+                    "", topic, flags=re.IGNORECASE).strip()
+                topic = re.sub(r"\bmy\b", "your", topic,
+                               flags=re.IGNORECASE).strip()
+                topic = topic or "it"
+                canonical = (f"You haven't told me about {topic} — "
+                             f"there's nothing like that in memory.")
+                from ..context.realize import RenderedReply
+                return RenderedReply(text=canonical,
+                                     speech_act="answer")
             return None
         # Precision gate: pronoun/context-anchored queries ("my X",
         # "are we using", "remind me") are clearly memory lookups, so
@@ -2602,11 +2645,51 @@ class AgentOrchestrator:
                 re.IGNORECASE):
             body = self._FACT_RECALL_RE.sub("", match_text)
             q_terms = self.conversation_memory._content_terms(body)
-            rows = [
-                r for r in rows
-                if q_terms <= self.conversation_memory._fact_query_terms(
-                    str(r.get("text", "")), str(r.get("slot") or ""))
-            ]
+            # Interrogative slot words ("what TIME is the standup")
+            # describe the expected answer's type, not the entity — a
+            # stored fact won't contain them, so requiring them
+            # starves every wh-slot probe with no pronoun.
+            q_terms -= {"time", "when", "date", "day", "days"}
+            if not q_terms:
+                return None
+            def _terms_hit(terms: set, row) -> bool:
+                ft = self.conversation_memory._fact_query_terms(
+                    str(row.get("text", "")), str(row.get("slot") or ""))
+                # Plural-tolerant: 'backups' matches a fact holding
+                # 'backup' (the fold adds base forms; requiring the
+                # exact token starves plural phrasings).
+                return all(
+                    t in ft or (len(t) >= 4 and t.endswith("s")
+                                and not t.endswith(("ss", "us", "is"))
+                                and t[:-1] in ft)
+                    for t in terms)
+            pre_gate = rows
+            rows = [r for r in rows if _terms_hit(q_terms, r)]
+            if not rows and len(q_terms) > 1:
+                # The probe's own verb isn't a fact term — "when do the
+                # backups run" asks about 'backups', so a strict subset
+                # on {backups, run} starves 'backup schedule is …'.
+                # Retry with the trailing token dropped — but ONLY when
+                # it's a verb: dropping an entity noun ("what color is
+                # the sky" → {color}) would widen the match onto
+                # unrelated facts.
+                tail = re.search(r"([a-z0-9]+)\s*$", body.strip())
+                if tail and tail.group(1) in {
+                        "run", "runs", "lift", "lifts", "start",
+                        "starts", "end", "ends", "expire", "expires",
+                        "ship", "ships", "land", "lands", "hold",
+                        "holds", "begin", "begins", "resume", "resumes",
+                        "pass", "passes", "fail", "fails", "happen",
+                        "happens", "occur", "occurs", "cost", "costs",
+                        "last", "lasts", "serve", "serves", "fire",
+                        "fires", "kick"}:
+                    trimmed = re.sub(r"\s+\S+\s*$", "", body.strip())
+                    t_terms = (self.conversation_memory
+                               ._content_terms(trimmed)
+                               - {"time", "when", "date", "day", "days"})
+                    if t_terms and t_terms != q_terms:
+                        rows = [r for r in pre_gate
+                                if _terms_hit(t_terms, r)]
             if not rows:
                 return None
         items = [self._recalled_fact_sentence(r) for r in rows[:4]]
@@ -2641,13 +2724,33 @@ class AgentOrchestrator:
         frame = self._utterance_frame(env, user_text)
         if frame is not None and not frame.allows("memory_recall"):
             return None
-        if not self._FACTS_RECALL_RE.search(
-                (frame.masked_case
+        probe = (frame.masked_case
                  if frame is not None and frame.masked_case
-                 else user_text) or ""):
+                 else user_text) or ""
+        rules_q = bool(self._RULES_RECALL_RE.search(probe))
+        if not rules_q and not self._FACTS_RECALL_RE.search(probe):
             return None
         if self.conversation_memory is None:
             return None
+        if rules_q:
+            rules = self.conversation_memory.active_rules(
+                project_id=project_id, conversation_id=conversation_id)
+            canonical = (
+                "No standing rules yet — nothing you've told me to "
+                "always or never do."
+                if not rules else
+                "Operating rules: " + "; ".join(f'"{r}"' for r in rules[:8]))
+            from ..context.realize import RenderedReply, SemanticResponse
+            sem = SemanticResponse(
+                facts=[canonical], semantic_id="memory:rules_recall",
+                speech_act="answer", bare=True)
+            sp = self._speech(user_text)
+            if not sp:
+                return RenderedReply(text=canonical, speech_act="answer")
+            genome, ctx = sp
+            return _BUILTIN_RENDERER.render_semantic(
+                sem, genome, ctx, intent="memory_rules_recall",
+                canonical=canonical)
         facts = self.conversation_memory.active_facts(
             project_id=project_id, conversation_id=conversation_id)
         if not facts:
@@ -3346,6 +3449,13 @@ class AgentOrchestrator:
         # when nothing actually ran.
         + r"|\bi did\s+" + _CLAIM_ADVERBS +
         r"(?:it|that|all|everything|what you \w+|so|the \w+)\b"
+        # Bare verb-initial claims — "Updated — your workstation is now
+        # vector", "Saved: the port is 9090". The subject is implied
+        # (I did it); with no write landing it's the same fabrication
+        # class as "I updated the file".
+        + r"|\b(?:updated|saved|recorded|noted|logged|corrected|"
+        r"memorized|learned|stored|banked|changed|fixed)\s*[—–:,.]\s+"
+        r"(?:that|it|the|your|my|this|now|i)\b"
         # Checkmark emoji is a claim only next to an execution word
         # ("Done ✅") or as the whole message — decorative emoji after
         # honest prose ("we're holding off ✅") is not a work claim.
@@ -3904,7 +4014,10 @@ class AgentOrchestrator:
         forgotten = learned.get("forgotten") or []
         locked = learned.get("locked") or []
         restated = learned.get("restated") or []
-        if not (facts or rules or examples or forgotten or locked or restated):
+        miss = learned.get("forgotten_miss") or []
+        hearsay = learned.get("hearsay") or []
+        if not (facts or rules or examples or forgotten or locked or restated
+                or miss or hearsay):
             return None
         parts = []
         if locked:
@@ -3920,7 +4033,14 @@ class AgentOrchestrator:
                 parts.append(f"Got it — noted {len(facts)} things.")
         elif restated:
             parts.append(f"Already noted — {restated[0]}.")
-        elif not parts:
+        elif hearsay:
+            # Secondhand claims are acknowledged but never banked —
+            # the ack says so plainly instead of pretending either a
+            # learned fact or a verified report.
+            parts.append(
+                f"Noted — {hearsay[0]} — though that's secondhand, "
+                "so I'll treat it as unverified.")
+        elif not parts and not miss:
             parts.append("Got it.")
         if rules:
             parts.append("I'll apply that as an operating rule going "
@@ -3929,6 +4049,10 @@ class AgentOrchestrator:
             parts.append("Saved your correction for review.")
         if forgotten:
             parts.append(f"Forgot {len(forgotten)} matching item(s).")
+        if miss and not parts:
+            parts.append(
+                f"I don't have anything stored matching "
+                f"\"{miss[0]}\" — nothing to forget.")
         return " ".join(parts)
 
     @staticmethod
@@ -6874,7 +6998,14 @@ class AgentOrchestrator:
                 attachments=session.attachments_meta,
             )
         if (self.answer_memory is not None and not session.unverified_claims
-                and not mission_attributed):
+                and not mission_attributed
+                # Deterministic lane replies — recall acks, honest-empty
+                # memory probes, clock/status answers, training acks —
+                # encode session state, not reusable knowledge. Banking
+                # them as answers let "do i use slack" replay "you
+                # haven't told me about your standup".
+                and str(getattr(session.decision, "model_id", ""))
+                != "builtin-local"):
             try:
                 tool_names = [
                     str(e.get("name") or "")
@@ -8495,7 +8626,7 @@ class AgentOrchestrator:
                     open_loops=ctx.open_loops)
             except Exception:
                 pass
-        if any(learned.values()):
+        if any(v for k, v in learned.items() if k != "forgotten_miss"):
             # Keep Nexus Brain's durable records in lockstep — otherwise
             # superseded/forgotten facts drift out of sync until a manual
             # sync endpoint call.
@@ -8509,6 +8640,14 @@ class AgentOrchestrator:
             # planner/replan path.
             superseded_texts = [
                 str(t) for t in (learned.get("superseded") or []) if t]
+            # A forgotten fact invalidates the same way — a banked
+            # answer quoting "your editor is not emacs" must stop
+            # serving the moment the user says forget it.
+            for row in (learned.get("forgotten") or []):
+                t = (row.get("text") if isinstance(row, dict)
+                     else str(row or ""))
+                if t:
+                    superseded_texts.append(str(t))
             if superseded_texts and self.requirement_change_cb is not None:
                 try:
                     self.requirement_change_cb(superseded_texts)
@@ -8964,6 +9103,23 @@ class AgentOrchestrator:
             or policy_decision.has_url
             or policy_decision.level == _research_policy.WEB_REQUIRED
         )
+        # A stored answer only answers a question-shaped turn. Commands,
+        # requests, complaints, and assertions that replay a banked Q→A
+        # produce nonsense — 'if the build fails, ping me' replayed a
+        # stored incident investigation. Communicative imperatives
+        # ('explain X', 'describe the handshake') are questions in
+        # disguise and still qualify; context hints stay ungated.
+        am_hit_ok = True
+        _sem = getattr(env, "semantic", None)
+        _act = getattr(_sem, "speech_act", "") if _sem is not None else ""
+        if _act and _act != "question":
+            _masked = str(getattr(_sem, "masked", "") or user_text or "")
+            if _act not in ("command", "request") or not re.match(
+                    r"^(?:explain|describe|define|list|tell|show|"
+                    r"summari[sz]e|outline|detail|clarify|"
+                    r"walk(?:\s+me)?\s+through)\b",
+                    _masked.strip().lower()):
+                am_hit_ok = False
         if (
             mode == "auto"
             and self.answer_memory is not None
@@ -9011,7 +9167,7 @@ class AgentOrchestrator:
                 # user just attached — only context hints survive. With a
                 # persona driving, it also can't replay stored text — the
                 # model rephrases the same facts in her voice.
-                if (memory_match.hit and not mem_hit_bad
+                if (memory_match.hit and not mem_hit_bad and am_hit_ok
                         and not attach["image_paths"] and not persona_voice):
                     return self._answer_memory_result(
                         task, user_text, memory_match,
