@@ -825,6 +825,15 @@ class ConversationMemory:
 
         with self._lock:
             fact: str | None = None
+            # Discourse/correction marker prefixes ride the front of a
+            # statement ("actually no, my editor is neovim") — strip the
+            # STACK of them once so every matcher below sees the clause
+            # that carries the content.
+            body = re.sub(
+                r"^(?:(?:actually|by\s+the\s+way|btw|also|so|fyi|note|"
+                r"quick\s+note|for\s+the\s+record|just\s+so\s+you\s+know|"
+                r"no|wait|sorry|i\s+mean(?:t)?)[,:\s]+)+",
+                "", raw, flags=re.IGNORECASE)
             for pattern in (
                 r"^remember\s+that\s+(.+)$",
                 r"^remember\s*:\s*(.+)$",
@@ -836,21 +845,12 @@ class ConversationMemory:
                 r"^i(?:'m| am)\s+using\s+.+$",
                 r"^my\s+.{1,40}\s+is\s+.+$",
             ):
-                match = re.match(pattern, raw, flags=re.IGNORECASE)
+                match = re.match(pattern, body, flags=re.IGNORECASE)
                 if match:
                     fact = (match.group(1).strip() if match.lastindex
-                            else raw.rstrip(".!?"))
+                            else body.rstrip(".!?"))
                     break
             if fact is None:
-                # Declarative entity-attribute statements — "Project Orion
-                # uses PostgreSQL", "Orion runs on Linux" — and updates like
-                # "we switched Orion to SQLite" / "Orion moved to Redis".
-                # All of these canonicalize to "subject predicate value" so
-                # a newer statement occupies the same supersession slot.
-                body = re.sub(
-                    r"^(?:actually|by the way|btw|also|so|fyi|note|quick note|"
-                    r"for the record|just so you know)[,:\s]+",
-                    "", raw, flags=re.IGNORECASE)
                 # An imperative-led body is a request, not a statement —
                 # 'explain what a mutex is in one sentence' would otherwise
                 # parse as subject 'explain what a mutex' + is + 'in one
@@ -1172,8 +1172,12 @@ class ConversationMemory:
                         r"([a-z0-9][a-z0-9 ._-]{0,20}?)"
                         r"(?:\s+(?:now|instead|today|this\s+time))?[.!?]?$",
                         raw, flags=re.IGNORECASE)
-                    if bare and bare.group(1).strip().lower() not in (
-                            self._BARE_CORRECTION_STOPWORDS):
+                    if (bare
+                            and bare.group(1).strip().lower() not in (
+                                self._BARE_CORRECTION_STOPWORDS)
+                            and not re.search(
+                                r"\b(?:is|are|was|were)\b",
+                                bare.group(1), flags=re.IGNORECASE)):
                         val = bare.group(1)
                         pref = re.search(
                             r"\bi\s+(prefer|like|love)\b", raw,
@@ -1193,6 +1197,14 @@ class ConversationMemory:
                     fact = corr_body
             if fact:
                 fact = self._first_clause(fact) or fact
+                # Emphatic adverbs inside the captured statement aren't
+                # part of the value — "my editor is actually emacs"
+                # stores 'emacs', not 'actually emacs'. ('now'/'today'
+                # stay — they can BE the value: "deadline is today".)
+                fact = re.sub(
+                    r"\b(is|are|was|were)\s+"
+                    r"(?:actually|really|just|currently|simply)\s+",
+                    r"\1 ", fact, flags=re.IGNORECASE)
             if fact and locked_topic(fact):
                 result.setdefault("locked", []).append(
                     locked_refusal(locked_topic(fact)))

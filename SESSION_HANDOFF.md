@@ -4980,6 +4980,16 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   stay with the learning clause instead of kicking to a model refusal;
   tails carrying a NEW value (`update it to v12`) still split as real
   clauses. Live-verified: ack + recall both correct.
+- **BUG-031** (P2 recall precision): prohibition questions returned
+  wrong facts + "the never use port 3000" garble; ephemeral "stop
+  whatever you're doing" banked durable "Never whatever…" rules.
+  Subset-overlap drop + negation sentinel in recall_facts; imperative
+  facts skip the definite article; ephemeral cease-requests can't
+  bank. Junk live rule invalidated.
+- **BUG-032** (P1 corrections): "actually no, my editor is neovim"
+  banked "my favorite color is my editor is neovim" — stacked-marker
+  strip + bare-value copula guard + post-copula adverb strip. Live
+  store repaired; "what's my editor?" → "your editor is emacs".
 - Still open: UI click-dogfood (needs interactive browser), installer
   cycle execution, model-lane churn under shared-GPU contention
   (environmental — balanced-policy eviction + deployed instance).

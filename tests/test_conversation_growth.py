@@ -926,6 +926,26 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertTrue(all(
                 r["active"] for r in memory.snapshot()["behavior_rules"]))
 
+    def test_marker_prefixed_correction_targets_named_slot(self):
+        """'actually no, my editor is neovim' supersedes the EDITOR
+        slot — the statement names its own attribute, so the bare-value
+        retarget must not rewrite an unrelated preference fact."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("my favorite color is teal")
+            memory.learn_from_user("my editor is vscode")
+            out = memory.learn_from_user("actually no, my editor is neovim")
+            self.assertEqual(out["facts"], ["my editor is neovim"])
+            rows = memory.snapshot()["facts"]
+            by_slot = {}
+            for r in rows:
+                if r.get("active", True):
+                    by_slot.setdefault(r.get("slot"), []).append(r["text"])
+            self.assertEqual(by_slot.get("my:editor"),
+                             ["my editor is neovim"])
+            self.assertEqual(by_slot.get("my:favorite color"),
+                             ["my favorite color is teal"])
+
     def test_ephemeral_stop_is_not_a_durable_rule(self):
         """'stop whatever you're doing right now' is a cease-the-
         current-activity request — banking 'Never whatever you're
