@@ -467,6 +467,10 @@ class AgentOrchestrator:
         self.tools = tools
         self.runtime = runtime
         self.tasks = tasks
+        # thread-ident → task id: lets the run() wrapper mark the right
+        # ledger row failed when a run raises, even with a mission and an
+        # interactive run in flight at once.
+        self._run_task_ids: dict[int, str] = {}
         self.checkpoints = checkpoints
         self.memory = memory
         self.repository_index = repository_index
@@ -7856,6 +7860,61 @@ class AgentOrchestrator:
         mission_id: str | None = None,
         model_role: str | None = None,
     ) -> AgentResult:
+        """Fault boundary for _run_impl: an unexpected exception closes the
+        ledger row ("error", phase done) BEFORE propagating, so a crash can
+        never leave a phantom 'running/planning' task wedging the queue or
+        stranded past restart. Status "error" (not "failed") keeps the row
+        inside the bounded watchdog retry lane, matching every other
+        execution-failure site. The raise is preserved — every caller's
+        except-path already handles it."""
+        try:
+            return self._run_impl(
+                user_text,
+                history=history, mode=mode, event_callback=event_callback,
+                attachments=attachments, mission_id=mission_id,
+                model_role=model_role)
+        finally:
+            self._close_run_task()
+            self._run_task_ids.pop(threading.get_ident(), None)
+
+    # Statuses that mean "a driver should still be working on this". A
+    # returned-but-parked task (waiting_approval) is NOT here — it must
+    # survive the boundary intact.
+    _ACTIVE_TASK_STATUSES = frozenset(
+        {"queued", "running", "planning", "working", "verifying", "reviewing"})
+
+    def _close_run_task(self) -> None:
+        """Mark the thread's tracked task "error" iff it is still in an
+        active status when run() exits — a no-op on success (terminal rows
+        and approval parks untouched), the phantom-killer on a raise path.
+        Never swallows: a ledger failure here must not mask the original
+        exception."""
+        tid = self._run_task_ids.get(threading.get_ident())
+        if not tid:
+            return
+        try:
+            row = self.tasks.get(tid)
+            if row is not None and str(getattr(row, "status", "")) in self._ACTIVE_TASK_STATUSES:
+                self.tasks.update(
+                    tid, status="error", phase="done",
+                    error="run aborted before a terminal state")
+        except Exception:
+            pass
+
+    def _register_run_task(self, task_id: str) -> None:
+        self._run_task_ids[threading.get_ident()] = task_id
+
+    def _run_impl(
+        self,
+        user_text: str,
+        *,
+        history: list[dict[str, Any]] | None = None,
+        mode: str = "auto",
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
+        mission_id: str | None = None,
+        model_role: str | None = None,
+    ) -> AgentResult:
         # Resolve "option 1" / "the first option" style replies against the
         # assistant's most recent numbered proposal before anything else
         # sees the fragment — otherwise the model can't tell which option.
@@ -7868,6 +7927,7 @@ class AgentOrchestrator:
             except Exception:
                 pass
         task = self.tasks.create(user_text, mode)
+        self._register_run_task(task.id)
         if mission_id:
             self._mission_by_task[task.id] = mission_id
             # Persist attribution on the ledger row too — the in-memory map
@@ -9433,10 +9493,30 @@ class AgentOrchestrator:
         interactive path uses. The instruction is executed, not
         interpreted.
         """
+        try:
+            return self._run_work_order_impl(
+                instruction, task_title=task_title, mission_id=mission_id,
+                model_role=model_role, system_blocks=system_blocks,
+                event_callback=event_callback)
+        finally:
+            self._close_run_task()
+            self._run_task_ids.pop(threading.get_ident(), None)
+
+    def _run_work_order_impl(
+        self,
+        instruction: str,
+        *,
+        task_title: str = "",
+        mission_id: str | None = None,
+        model_role: str | None = None,
+        system_blocks: list[str] | None = None,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentResult:
         instruction = str(instruction or "").strip()
         task = self.tasks.create(
             instruction or task_title or "mission work order",
             "work_order")
+        self._register_run_task(task.id)
         if mission_id:
             self._mission_by_task[task.id] = mission_id
             self.tasks.update(task.id, mission_id=mission_id)
