@@ -718,6 +718,27 @@ class ProhibitionSessionTests(unittest.TestCase):
                     for m in tool_msgs), tool_msgs)
 
 
+class GitHubCapabilityTruthTests(unittest.TestCase):
+    """With github_enabled off the tools are never registered — the
+    github-read lane must answer capability truth ("isn't connected"),
+    never the raw 'unknown tool' string."""
+
+    def test_disabled_github_answers_capability_truth(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, _ = _make(Path(td))
+            agent.config.github_enabled = False
+            executed = []
+            orig = agent.tools.execute
+            agent.tools.execute = lambda *a, **k: (
+                executed.append(a) or orig(*a, **k))
+            reply = agent._github_activity_reply(
+                "check the latest work on acme/widgets", "acme/widgets",
+                issues=False, intent="github_read")
+            self.assertIsNotNone(reply)
+            self.assertIn("isn't connected", reply.text)
+            self.assertEqual(executed, [], "no tool may run unregistered")
+
+
 class UnresolvedReferentNudgeTests(unittest.TestCase):
     """A command verb over a referent bound to nothing ("rename it —
     dusk sounds better", where 'it' is a conversation name, not a file)

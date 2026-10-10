@@ -2080,6 +2080,10 @@ class AgentOrchestrator:
         elif head.startswith("CREATOR_"):
             canonical = ("GitHub read needs an unlocked creator "
                          "session in this profile.")
+        elif head.startswith("TOOL_"):
+            detail = head.split(":", 1)[1].strip() if ":" in head else ""
+            canonical = ("GitHub isn't connected in this setup"
+                         + (f" — {detail}." if detail else "."))
         else:
             detail = head[6:].strip() if head.startswith("ERROR:") \
                 else head
@@ -2103,6 +2107,14 @@ class AgentOrchestrator:
         list. Untrusted remote content is quoted data, never
         instructions. → RenderedReply | None."""
         from ..context.realize import RenderedReply, SemanticResponse
+        # Capability truth first: with GitHub disabled the tools are never
+        # registered — executing would surface the raw "unknown tool"
+        # string instead of the honest "not connected" answer.
+        if not getattr(self.config, "github_enabled", True):
+            return self._github_blocked_reply(
+                user_text,
+                "TOOL_NOT_INSTALLED: github tools are disabled in this setup",
+                intent=intent)
         args = {"limit": 8}
         if repo:
             args["repo"] = repo

@@ -7734,10 +7734,18 @@ def _queued_notice(current, position: int) -> str:
     if phase == "interrupted":
         phase = "resuming"
     doing = phase if phase not in {"running", ""} else "working"
-    prompt = " ".join(str(getattr(current, "prompt", "") or "").split())[:90]
+    prompt = " ".join(str(getattr(current, "prompt", "") or "").split())
+    if len(prompt) > 90:
+        # Cut on a word boundary — a mid-word slice ("VERSION,.") reads
+        # like a broken render, not a status line.
+        prompt = prompt[:90].rsplit(" ", 1)[0] + "…"
     mission = getattr(current, "mission_id", "")
     if mission or str(getattr(current, "mode", "")) in {"autonomy", "self_repair"}:
         label = f"Nexus is {doing} on an autonomous mission"
+        # Mission prompts are machine-authored work orders ("Work the
+        # scoped lane…") — meaningless as a status detail, unlike a
+        # user's own prompt which they recognize.
+        prompt = ""
     else:
         label = f"Nexus is {doing}"
     detail = f": {prompt}" if prompt else ""
