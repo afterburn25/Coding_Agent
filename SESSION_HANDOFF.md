@@ -5025,6 +5025,19 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   `i prefer` fast-path, so it banked fresh instead of superseding
   `favorite color`. Marker-prefixed preference restatements now retarget
   the unique same-class fact first.
+- **BUG-040** (P1 corrections): `never mind` spelled-out wasn't a marker;
+  `it's 60` had no referential-update lane — model claimed updates that
+  never landed. `never\s*mind` + `it's X` retarget (literal-gated).
+- **BUG-041** (P2 API): non-UTF-8 bodies → raw UnicodeDecodeError.
+  `_body()` retries via cp1252.
+- **BUG-042** (P1 memory): `"remember that"` + quoted rule dropped the
+  learning request → 503. Quoted referent now feeds the pipeline.
+- **BUG-043** (P2 inspection): `what rules do you follow` had no lane →
+  503. `active_rules()` + `_RULES_RECALL_RE` list behavior_rules.
+- Also fixed: restored `tests/test_voice_polish.py` (854-line suite)
+  gutted by deployed-instance commit 84f3edeb — its stub imported
+  `agent.state` (exists nowhere) and broke all suite collection.
+- **Canonical suite: 3741 passed, 4 skipped, 530 subtests — all green.**
 - Ops note: backend launch args are `--workspace .dogfood --config
   .dogfood/config.json --host 127.0.0.1 --port 8790 --server` — a
   `--data-dir` restart attempt silently failed earlier this session and
