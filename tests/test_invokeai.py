@@ -443,9 +443,16 @@ class BackendSelectionTests(unittest.TestCase):
     def test_auto_prefers_invokeai_when_ready(self):
         with tempfile.TemporaryDirectory() as td:
             m = _manager(Path(td))
+            # Fixed rows — reading _InvokeStub.model_rows made this test
+            # pass only when a _ServerMixin test ran first and populated
+            # it; a filtered run (pytest -k) left it empty and routing
+            # silently fell back to ComfyUI.
             m.invokeai_backend = SimpleNamespace(
                 health=lambda: (True, "ok"),
-                models=lambda **kw: _InvokeStub.model_rows,
+                models=lambda **kw: [
+                    {"key": "k1", "hash": "h1", "name": "Juggernaut XL",
+                     "base": "sdxl", "type": "main", "format": "checkpoint",
+                     "path": "main/jugg.safetensors"}],
                 capabilities=lambda: {"text_to_image", "edit_image"},
                 endpoint="http://x")
             m.backend = SimpleNamespace(health=lambda: (True, "ok"))

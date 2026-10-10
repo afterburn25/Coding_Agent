@@ -377,6 +377,17 @@ def _candidates(token: str, ctx_words: set[str], *,
         # 'jira'->'ira', 'kanye'->'kane', 'slack'->'lack'.
         if word == token[1:] or word == token[:-1]:
             continue
+        # Short tokens fix conservatively — every letter the user typed
+        # must survive in the fix (insertions 'desrt'->'dessert' and
+        # 'chek'->'check' qualify), and pure anagrams must be a single
+        # adjacent swap ('teh'->'the', not 'kanye'->'kenya'). Dropping or
+        # substituting a short token's letters mangles names — 'priya'->
+        # 'pray', 'jira'->'ira'. Longer tokens stay flexible.
+        if len(token) <= 5:
+            from collections import Counter as _C
+            if (_C(token) - _C(word)) or (sorted(token) == sorted(word)
+                                          and _dl(token, word) > 1):
+                continue
         sk_eq = sk == wsk
         if not sk_eq and len(word) - len(token) > 4:
             continue  # far too long to be this typo

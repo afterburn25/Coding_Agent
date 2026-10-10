@@ -1259,7 +1259,7 @@ class ConversationMemory:
                         r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
                         r"(?:(?:was|were|got|is|are|has\s+been|"
                         r"have\s+been|being|just)\s+)*"
-                        r"(?:switched|moved|migrated|changed|pushed)"
+                        r"(switched|moved|migrated|changed|pushed)"
                         r"(?:\s+(?:off|from|away from)\s+[a-z0-9][a-z0-9 ._-]{0,38}?)?"
                         r"\s+to\s+(.+)$",
                         body, flags=re.IGNORECASE,
@@ -1268,7 +1268,8 @@ class ConversationMemory:
                     subj = ""
                     if subj_switch:
                         subj = self._clean_subject(subj_switch.group(1))
-                        value = self._clean_value(subj_switch.group(2))
+                        verb = subj_switch.group(2).lower()
+                        value = self._clean_value(subj_switch.group(3))
                         # A move on a fact-tracked entity restates its
                         # slot — "the standup moved to 10am" updates
                         # 'standup is at 9am', it isn't 'standup uses
@@ -1285,13 +1286,20 @@ class ConversationMemory:
                             # entity happens — "deadline was moved to
                             # monday" mints 'deadline is monday'; tool
                             # moves ("Orion moved to Redis") mint 'uses'.
+                            # 'changed' replaces an attribute value —
+                            # "my timezone changed to pst" mints
+                            # 'my timezone is pst', never a tool slot;
+                            # switched/moved/migrated keep 'uses'.
+                            my_scoped = subj.lower().startswith(
+                                ("my ", "our "))
                             if re.fullmatch(
                                     r"(?:next\s+|this\s+|every\s+)?"
                                     r"(?:mon|tue|wed|thu|fri|sat|sun)"
                                     r"[a-z]*|tomorrow|tonight|today|"
                                     r"[a-z]+\s+\d{1,2}(?:st|nd|rd|th)?|"
                                     r".*(?:am|pm)\b|\d{1,2}:\d{2}",
-                                    value, flags=re.IGNORECASE):
+                                    value, flags=re.IGNORECASE) \
+                                    or (verb == "changed" and my_scoped):
                                 fact = f"{subj} is {value}"
                             else:
                                 fact = f"{subj} uses {value}"
@@ -1540,14 +1548,20 @@ class ConversationMemory:
                         utb = re.match(
                             r"^(?:(?:the\s+|my\s+|our\s+)?"
                             r"([a-z0-9][a-z0-9 '_-]{0,38}?)\s+)?"
-                            r"used\s+to\s+be\s+(.+?)\s*,?\s*"
-                            r"but\s+(?:now\s+)?"
-                            r"(?:it'?s|it\s+is|it\s+was)\s+"
-                            r"(.+?)[.!?]?$",
+                            r"used\s+to\s+be\s+(.+?)\s*"
+                            r"(?:,\s*|\s+)(?:but\s+|now\s+|"
+                            r"it'?s\s+|it\s+is\s+)(.+?)[.!?]?$",
                             raw, flags=re.IGNORECASE)
                         if utb:
                             old_v = self._clean_value(utb.group(2))
-                            new_v = self._clean_value(utb.group(3))
+                            # The separator word may leave residue —
+                            # "but now it's X" splits on 'but' and the
+                            # rest still carries "now it's".
+                            new_v = self._clean_value(re.sub(
+                                r"^(?:now\s+)?"
+                                r"(?:it'?s|it\s+is|it\s+was|"
+                                r"they'?re)\s+", "",
+                                utb.group(3), flags=re.IGNORECASE))
                             fact = self._correct_fact_value(old_v, new_v)
                             if fact is None and utb.group(1):
                                 hint = self._clean_subject(utb.group(1))

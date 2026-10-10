@@ -659,6 +659,28 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertNotIn("deploy region is us-east-1", active)
         self.assertIn("my editor is vim", active)
 
+    def test_used_to_be_comma_now_supersedes(self):
+        # "the oncall used to be priya, now it's sam" — comma+now
+        # boundary; the mandatory separator keeps plain past statements
+        # ("the label used to be blue") unbanked.
+        cm = self._mem()
+        cm.learn_from_user("the oncall is priya until friday")
+        cm.learn_from_user("the oncall used to be priya, now it's sam")
+        active = self._active(cm)
+        self.assertIn("oncall is sam", active)
+        self.assertNotIn("oncall is priya until friday", active)
+        cm2 = self._mem()
+        learned = cm2.learn_from_user("the label used to be blue")
+        self.assertFalse(learned["facts"])
+
+    def test_my_scoped_change_mints_is_not_uses(self):
+        # "my timezone changed to pst" — a personal attribute change is
+        # not a tool migration; 'uses' is for switched/moved/migrated.
+        cm = self._mem()
+        learned = cm.learn_from_user("my timezone changed to pst")
+        self.assertIn("my timezone is pst", learned["facts"])
+        self.assertNotIn("my timezone uses pst", learned["facts"])
+
     def test_disuse_retracts_usage_fact(self):
         # "i no longer use slack for comms" — the 'for comms' tail is
         # context; the usage fact mentioning slack retracts.

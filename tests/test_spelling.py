@@ -111,6 +111,25 @@ class TestNormalizeUserText(unittest.TestCase):
         self.assertIn("invokeai", out)
         self.assertIn("comfyui", out)
 
+    def test_short_proper_nouns_never_relettered(self):
+        # BUG-062 — interior drops and multi-position anagrams on short
+        # unknown tokens are name-mangling, not typo repair.
+        for text, keep in (
+                ("the oncall is priya", "priya"),
+                ("call kanye tonight", "kanye"),
+                ("i stopped using jira", "jira"),
+                ("deploy to onyx", "onyx")):
+            out = self.norm(text)
+            self.assertIn(keep, out)
+
+    def test_short_insertions_and_swaps_still_fix(self):
+        # The conservative short-token rule must not block the classic
+        # fixes: dropped letters and adjacent transpositions.
+        self.assertIn("check", self.norm("chek github"))
+        self.assertIn("the", self.norm("teh end"))
+        self.assertIn("desert",
+                      self.norm("want some desrt", ctx={"desert", "sand"}))
+
     # --- real words that stay -------------------------------------------------
     def test_dose_of_medicine_kept(self):
         out = self.norm("take a dose twice a day")
