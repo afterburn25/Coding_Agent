@@ -702,6 +702,23 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNone(agent._single_fact_recall_reply(
                 "what color is the sky", "conv", "proj"))
 
+    def test_remind_me_probe_uses_recall_lane(self):
+        # "remind me about my editor" is a memory recall request — the
+        # frame must not classify 'remind' as an assertion and veto
+        # the lane into a model riff.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my editor is vim")
+            reply = agent._single_fact_recall_reply(
+                "remind me about my editor", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("vim", reply.text)
+
     def test_echoed_notice_stripped_from_stored_reply(self):
         # BUG-029: the badge lives verbatim in stored history, so small
         # models learn to parrot it as their own sign-off. An echoed

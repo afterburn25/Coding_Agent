@@ -1407,6 +1407,31 @@ class ConversationMemory:
                                 fact = self._retarget_latest_fact(
                                     nyc.group(2), result["superseded"])
                     if not reset and fact is None:
+                        # "i changed my mind (about the X) — it's Y" —
+                        # the lead names the referent, the tail states
+                        # the new value. Strict hint matching: a named
+                        # referent that has no fact must NOT retarget
+                        # the latest unrelated row.
+                        cmm = re.match(
+                            r"^i\s+(?:changed|change)\s+my\s+mind\b"
+                            r"(?:\s+about\s+(?:the\s+|my\s+|our\s+)?"
+                            r"([a-z0-9][a-z0-9 '_-]{0,38}?))?"
+                            r"\s*[-—,;:]\s*(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if cmm:
+                            tail = cmm.group(2).strip()
+                            cmv = re.match(
+                                r"^(?:it'?s|it\s+is)\s+(.+?)"
+                                r"(?:\s+(?:now|instead|today))?[.!?]?$",
+                                tail, flags=re.IGNORECASE)
+                            val = (cmv.group(1) if cmv else tail).strip()
+                            if val and re.search(r"[\d_+./\\#-]", val):
+                                hint = (self._clean_subject(cmm.group(1))
+                                        if cmm.group(1) else None)
+                                fact = self._retarget_latest_fact(
+                                    val, result["superseded"],
+                                    subject_hint=hint)
+                    if not reset and fact is None:
                         # Referential "it's X" after a correction marker —
                         # "never mind, it's 60" re-states the latest
                         # fact's value. Literal-shaped values only

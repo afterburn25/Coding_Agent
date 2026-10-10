@@ -490,6 +490,30 @@ class TestCorrectionChains(unittest.TestCase):
         cm.learn_from_user("never mind, it's fine")
         self.assertIn("api timeout is 45 seconds", self._active(cm))
 
+    def test_changed_my_mind_names_referent(self):
+        # "i changed my mind about the deploy tag - it's v11" — the
+        # 'about' clause names the referent, the tail carries the new
+        # value; the named slot supersedes without touching others.
+        cm = self._mem()
+        cm.learn_from_user("my deploy tag is v10")
+        cm.learn_from_user("my editor is vim")
+        cm.learn_from_user(
+            "i changed my mind about the deploy tag - it's v11 now")
+        active = self._active(cm)
+        self.assertIn("my deploy tag is v11", active)
+        self.assertNotIn("my deploy tag is v10", active)
+        self.assertIn("my editor is vim", active)
+
+    def test_changed_my_mind_unknown_referent_does_not_guess(self):
+        # A named referent with no matching fact must not retarget the
+        # latest unrelated row.
+        cm = self._mem()
+        cm.learn_from_user("my editor is vim")
+        learned = cm.learn_from_user(
+            "i changed my mind about the deploy tag - it's v11")
+        self.assertFalse(learned["superseded"])
+        self.assertIn("my editor is vim", self._active(cm))
+
     def test_referential_rename_retargets(self):
         # "actually the name changed — it is now called vector" — the
         # referential tail rewrites the latest name-slot fact instead of
