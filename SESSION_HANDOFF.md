@@ -4840,3 +4840,31 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   stale-file, corrupt quarantine (file+DB row), .migrated recovery,
   reopen persistence for autonomy/ledger/identity/safemode/learning,
   cross-store atomic commit.
+
+### Round 10 — Foundations F2–F4 + V4 conversation-binding fixes (HEAD 39db96d8)
+
+- Foundations all landed: F1 StateDB (`4eb73559`), F2 Recovery Center —
+  selective restore + restore-test + pre-update data snapshot
+  (`c1d5001d`), F3 A/B self-update pre-existing, F4 exactly-once ops via
+  `StateDB.op_*` claiming mutating social calls (`c1d5001d`).
+- Contamination closeout BUG-012→019 (commits `bf0a223e`→`b14c3a27`):
+  mission traffic isolated from history/project memory; only real work
+  remembered; fragmentary/context-bound answers rejected at learn +
+  recall; legacy mission-authored answers invalidated; pending_options
+  and active_error bindings conversation-scoped (TaskRecord gained
+  `conversation_id`).
+- BUG-020 (`9f4c3a6e`): spelled-out arithmetic now hits the thalamus
+  math fast path via `_spelled_math` — bounded whole-candidate
+  translator; live-verified (`brain_fast_path`, model down → still
+  answers).
+- QA language (`39db96d8`): tool events carry `permission`; live expect
+  `no_mutating_tools` distinguishes read-only grounding from actions.
+  Soak's quoted-command search_text residual dispositioned as correct
+  behavior, not a defect.
+- Environment note: 21/25 soak failures were the external llama:8391
+  dying (socket dead, process alive). Managed-reaper can't see external
+  runtimes; `qwen3-4b-all` IS managed and self-heals on next request.
+- Full suite green at 3705 passed before V4 rounds; canonical rerun in
+  flight after BUG-020 + QA changes.
+- Still open: UI click-dogfood, installer cycle, tool fuzzing /
+  permission matrix / false-success audit parts, dead-code deep sweep.
