@@ -1089,6 +1089,29 @@ class CrossChatMemoryTests(unittest.TestCase):
             out = memory.learn_from_user("the stack is python and sqlite")
             self.assertEqual(out["facts"], ["stack is python and sqlite"])
 
+    def test_imperative_and_embedded_clause_never_fact_subjects(self):
+        """'go back to what we were talking about' is a request — a
+        'were' inside it must not mint a fact whose subject is 'go back
+        to what we'. Never-noun imperative leads and embedded
+        interrogative/relative clauses are rejected."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for junk in ("go back to what we were talking about",
+                         "get the report to me by friday",
+                         "remind me that the standup is at 9",
+                         "the thing that we built is live",
+                         "the uses are many"):
+                out = memory.learn_from_user(junk)
+                self.assertEqual(out["facts"], [], junk)
+            self.assertEqual(memory.snapshot()["facts"], [])
+            # Noun-final subjects + verb predicates still parse right.
+            out = memory.learn_from_user("the deploy ships friday")
+            self.assertEqual(out["facts"], ["deploy ships friday"])
+            out = memory.learn_from_user("the deploy is at noon tomorrow")
+            self.assertEqual(out["facts"], ["deploy is at noon tomorrow"])
+            out = memory.learn_from_user("the queue drains every hour")
+            self.assertEqual(out["facts"], ["queue drains every hour"])
+
     def test_negated_copula_correction_and_retraction(self):
         """'X is not Y, it's Z' must bank 'X is Z' — not the verbatim
         negated sentence. Bare 'X isn't Y anymore' retracts the unique

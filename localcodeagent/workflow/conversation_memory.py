@@ -311,20 +311,30 @@ class ConversationMemory:
     # matcher so a new predicate can't bank alone yet split-fail in a
     # compound.
     _DECL_PRED_ALT = (
-        r"uses?|runs on|is built on|is written in|"
-        r"depends on|prefers?|ends? in|starts? with|"
+        r"runs on|is built on|is written in|"
+        r"depends on|ends? in|starts? with|"
         r"ends? with|(?:is|are|was|were|gets?|"
         r"is being)\s+(?:now\s+)?"
         r"(?:called|named|known as)|equals?|"
         r"lives? (?:at|in|on)|reports? to|"
         r"works? (?:on|at|for)|belongs? to|comes? from|"
         r"scheduled for|due (?:on|by|in)|"
-        r"expires?|ends?|starts?|runs?|"
+        r"hosted (?:at|on)|"
+        # Simple-verb predicates. Every one of these is also a common
+        # noun, so a candidate followed by a copula is really the last
+        # word of the subject ("the deploy is…", "the moves were…") —
+        # the lookahead keeps the verb parse off those.
+        r"(?:uses?|prefers?|equals?|expires?|ends?|starts?|runs?|"
         r"lifts?|holds?|begins?|resumes?|"
         r"pass(?:es)?|fails?|ships?|lands?|"
         r"moves?|renews?|rotates?|continues?|pauses?|"
-        r"archives?|syncs?|rebuilds?|backs? up|"
-        r"hosted (?:at|on)|serves?|costs?|lasts?|"
+        r"archives?|syncs?|rebuilds?|backs? up|drains?|scales?|"
+        r"restarts?|resets?|clears?|purges?|cleans?|collects?|"
+        r"deploys?|releases?|scans?|polls?|fires?|triggers?|"
+        r"suspends?|sweeps?|prunes?|compacts?|flushes?|checks?|"
+        r"wakes?|sleeps?|spins? (?:up|down)|ramps? (?:up|down)|"
+        r"serves?|costs?|lasts?)"
+        r"(?!\s+(?:is|are|was|were|been|being)\b)|"
         r"was|were|is|are")
 
     _TIME_VALUE_RE = re.compile(
@@ -598,14 +608,32 @@ class ConversationMemory:
         """Question/command-shaped openings are not fact subjects."""
         if not subj:
             return False
-        return subj.split()[0].casefold() not in {
-            "i", "we", "you", "they", "he", "she", "it",
-            "what", "which", "who", "whom", "whose", "why", "how",
-            "when", "where", "y", "does", "do", "did", "can", "could",
-            "should", "would", "shall", "may", "might",
-            "is", "are", "was", "were", "will", "this", "that",
-            "tell", "show", "if", "let",
-            "nm", "isnt", "arent", "doesnt", "dont", "don't"}
+        if subj.split()[0].casefold() in {
+                "i", "we", "you", "they", "he", "she", "it",
+                "what", "which", "who", "whom", "whose", "why", "how",
+                "when", "where", "y", "does", "do", "did", "can", "could",
+                "should", "would", "shall", "may", "might",
+                "is", "are", "was", "were", "will", "this", "that",
+                "tell", "show", "if", "let",
+                # Never-noun imperative leads — "go back to X", "get
+                # me Y", "remind me to Z" are requests wearing a
+                # declarative parse (a verb-only first token with no
+                # article is an imperative, not a subject).
+                "go", "get", "put", "take", "look", "give", "send",
+                "bring", "ask", "remind", "ping", "grab", "fetch",
+                "forward", "say", "thank", "please", "come", "wait",
+                "help", "listen", "watch", "sit", "stand", "hold",
+                "talk", "speak", "gimme",
+                "nm", "isnt", "arent", "doesnt", "dont", "don't"}:
+            return False
+        # Embedded interrogative/relative clauses are commands in
+        # disguise — "go back to what we were talking about" parses a
+        # 'were' declarative with 'what we' inside the subject.
+        return not re.search(
+            r"\b(?:what|which|who|whom|whose|why|how|when|where)\s+"
+            r"(?:i|we|you|they|he|she|it)\b"
+            r"|\bthat\s+(?:i|we|you|they|he|she|it)\b",
+            subj, flags=re.IGNORECASE)
 
     @staticmethod
     def _fact_slot(text: str) -> str:
@@ -1514,7 +1542,14 @@ class ConversationMemory:
                                 fact = f"{subj} uses {value}"
                     elif not imperative_body:
                         decl = re.match(
-                            r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+                            r"^(?:project\s+)?"
+                            # Article is an optional prefix — the
+                            # subject can never reduce to a bare 'the'/
+                            # 'my', which would let a noun-final
+                            # subject word get eaten as the predicate
+                            # ('the deploy ships friday').
+                            r"((?:(?:my|the|our|a|an|your|its|their)\s+)?"
+                            r"[a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
                             r"(" + self._DECL_PRED_ALT + r")\s+(.+)$",
                             body, flags=re.IGNORECASE,
                         )
