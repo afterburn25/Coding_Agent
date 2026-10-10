@@ -432,6 +432,15 @@ class ConversationMemory:
                             continue
                         fsubj = re.sub(r"^(?:my|the|our)\s+", "",
                                        m2.group(1).strip().lower())
+                        # group(1) carries the predicate too ("oncall
+                        # is") — an exact-subject hint must compare
+                        # against the bare subject or every retarget
+                        # reads as a qualified-slot mismatch.
+                        fsubj = re.sub(
+                            r"\b(?:is|are|was|were|uses?|runs on|"
+                            r"prefers?|likes?|loves?|should stay|"
+                            r"should be|must be|will be|stays?|"
+                            r"remains?)\s*$", "", fsubj).strip()
                         if not re.search(
                                 r"\b" + re.escape(hint) + r"\b", fsubj):
                             continue
@@ -607,6 +616,12 @@ class ConversationMemory:
     def _fact_subject_ok(subj: str) -> bool:
         """Question/command-shaped openings are not fact subjects."""
         if not subj:
+            return False
+        # A bare determiner is never a subject — 'the deploy ships
+        # friday' must not parse subj='the', pred='deploy' and bank the
+        # whole sentence verbatim.
+        if subj.strip().casefold() in {
+                "the", "a", "an", "my", "our", "your", "its", "their"}:
             return False
         if subj.split()[0].casefold() in {
                 "i", "we", "you", "they", "he", "she", "it",
@@ -1165,6 +1180,7 @@ class ConversationMemory:
                 r"feel\s+like|suspect)|i'?m\s+(?:(?:pretty|fairly|"
                 r"quite|really|not)\s+)?(?:sure|certain)|"
                 r"i'?d\s+(?:say|guess|bet|imagine)|imo\b|imho\b|"
+                r"(?:pretty|fairly|quite|reasonably)\s+sure|"
                 r"in\s+my\s+(?:opinion|view)|my\s+(?:guess|hunch|"
                 r"understanding|impression)\s+is)\s*[,:—-]*\s*"
                 r"(?:that\s+)?(.+?)[.!?]?$",
