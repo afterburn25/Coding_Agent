@@ -1,12 +1,24 @@
-import sys
+from __future__ import annotations
+
+import base64
+import json
+import mimetypes
 import os
+import queue
+import re
+import secrets
+import sys
+import threading
+import time
+from dataclasses import asdict
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, quote, unquote, urlparse
+from typing import Any, Callable
 
-def main():
-    # Apply diagnosis logic here
-    print("Diagnosis applied to epistemic_step_diagnosis.py - Fixing capacity restoration logic")
+from types import SimpleNamespace
 
-if __name__ == "__main__":
-    main()
 from .fsutil import atomic_write_text
 from .procutil import no_window_flags
 from . import netdiag
@@ -14377,4 +14389,3 @@ def serve(config: AgentConfig, workspace: Path, host: str, port: int, web_root: 
     finally:
         stop_state(state)
         server.server_close()
->>>>>>> 50668afd207deac390be8b520241e6d257e5e383
