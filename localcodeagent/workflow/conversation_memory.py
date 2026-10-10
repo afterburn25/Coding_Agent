@@ -1357,6 +1357,43 @@ class ConversationMemory:
                                 fact = (f"{subj} {agreed.group(2).lower()} "
                                         f"{agreed.group(3).lower()} {value}")
                 if fact is None:
+                    # "call the build server titan" — naming a thing,
+                    # not phoning it. Pronoun-led referents ('call me
+                    # later'), idioms ('call it a day'), and lone
+                    # time-word values ('call the vet tomorrow') stay
+                    # out.
+                    cal = re.match(
+                        r"^(?:call|name|dub)\s+"
+                        r"(?:the\s+|my\s+|our\s+|a\s+|an\s+)?"
+                        r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+                        r"([a-z0-9][a-z0-9._-]{1,38}?)[.!?]?$",
+                        body, flags=re.IGNORECASE)
+                    if cal:
+                        subj_c = self._clean_subject(cal.group(1))
+                        val_c = self._clean_value(cal.group(2))
+                        lead = subj_c.split()[0] if subj_c else ""
+                        raw_c = cal.group(2).strip().lower()
+                        idiom = re.fullmatch(
+                            r"(?:a|an)\s+.*|off|quits|even|done|good|"
+                            r"here", raw_c) or re.search(
+                            r"\b(?:a|an)$", cal.group(1).strip().lower())
+                        if (lead in {"it", "that", "this"} and val_c
+                                and not idiom):
+                            fact = self._retarget_latest_fact(
+                                val_c, result["superseded"])
+                        elif (self._fact_subject_ok(subj_c) and val_c
+                                and lead not in {
+                                    "me", "you", "your", "him", "her",
+                                    "them", "us", "it", "its", "that",
+                                    "this", "anyone", "someone"}
+                                and not re.fullmatch(
+                                    r"now|today|tomorrow|tonight|later|"
+                                    r"soon|tonite|next\s+\w+|at\s+.*|"
+                                    r"(?:mon|tue|wed|thu|fri|sat|sun)"
+                                    r"[a-z]*",
+                                    val_c, flags=re.IGNORECASE)):
+                            fact = f"{subj_c} is {val_c}"
+                if fact is None:
                     # Subject-led update: "Orion moved to Redis",
                     # "Orion migrated off Postgres to Redis".
                     subj_switch = None if imperative_body else re.match(
@@ -1839,9 +1876,17 @@ class ConversationMemory:
                                     r"[.!?]?\s*$",
                                     raw, flags=re.IGNORECASE)
                             if ren:
-                                fact = self._retarget_latest_fact(
-                                    ren.group(1),
-                                    result["superseded"])
+                                rv = ren.group(1).strip().lower()
+                                # "call it a day/a night/off/quits"
+                                # are idioms — an article-led or
+                                # closural tail is never a name.
+                                if not re.fullmatch(
+                                        r"(?:a|an)\s+.*|off|quits|"
+                                        r"even|done|good|here",
+                                        rv):
+                                    fact = self._retarget_latest_fact(
+                                        ren.group(1),
+                                        result["superseded"])
                     if reset:
                         val = reset.group(1)
                         # A class-known value ("green") prefers the

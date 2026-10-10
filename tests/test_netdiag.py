@@ -702,6 +702,27 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNone(agent._single_fact_recall_reply(
                 "what color is the sky", "conv", "proj"))
 
+    def test_called_named_probe_is_slot_filler(self):
+        # "what is the build server called" — 'called' asks for the
+        # name; it is never a term inside the stored fact, so the
+        # precision gate must not require it (BUG-077 follow-on).
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "call the build server titan")
+            reply = agent._single_fact_recall_reply(
+                "what is the build server called", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("titan", reply.text)
+            reply = agent._single_fact_recall_reply(
+                "whats the build server named", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("titan", reply.text)
+
     def test_when_does_probe_drops_trailing_verb(self):
         # "when does the freeze lift" — the probe's own verb isn't a
         # fact term; after the strict subset fails, retry on the noun
