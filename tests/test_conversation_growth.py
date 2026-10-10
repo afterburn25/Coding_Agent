@@ -1122,3 +1122,33 @@ class CrossChatMemoryTests(unittest.TestCase):
                 learned = memory2.learn_from_user(utterance)
                 self.assertTrue(
                     any(fragment in f for f in learned["facts"]), utterance)
+
+    def test_compound_turns_learn_first_clause_only(self):
+        # A compound turn's second clause is a separate intent, not part
+        # of the value — "the port is 8080 — also, what is a mutex?"
+        # must bank "port is 8080", not the whole tail.
+        with tempfile.TemporaryDirectory() as td:
+            for utterance, expected in (
+                ("the port is 8080 — also, what is a mutex?",
+                 "port is 8080"),
+                ("the port is 8080. also, what is a mutex?",
+                 "port is 8080"),
+                ("my editor is neovim, and by the way what's a hash map?",
+                 "my editor is neovim"),
+                ("the timeout is 30 — explain why", "timeout is 30"),
+                ("the cache ttl is 300, and tell me the port",
+                 "cache ttl is 300"),
+            ):
+                memory = ConversationMemory(
+                    Path(td) / f"m{abs(hash(utterance))}.json")
+                learned = memory.learn_from_user(utterance)
+                self.assertEqual(learned["facts"], [expected], utterance)
+            # Boundaries inside values survive.
+            memory = ConversationMemory(Path(td) / "m-lists.json")
+            self.assertEqual(
+                memory.learn_from_user("the hosts are web1, web2, web3")
+                ["facts"], ["hosts are web1, web2, web3"])
+            memory2 = ConversationMemory(Path(td) / "m-ver.json")
+            self.assertEqual(
+                memory2.learn_from_user("the version is 1.2.3")
+                ["facts"], ["version is 1.2.3"])

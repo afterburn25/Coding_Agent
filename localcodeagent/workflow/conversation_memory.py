@@ -170,6 +170,47 @@ class ConversationMemory:
         "just", "also", "still", "really", "meanwhile", "anyway",
     })
 
+    _CLAUSE_BOUNDARY_RE = re.compile(
+        r"(?<=[.!?])\s|\s*[—;]\s*")
+    _SPLICE_LEAD_RE = re.compile(
+        r"^(?:(?:and|but|so|also|by\s+the\s+way|"
+        r"while\s+you'?re\s+at\s+it)[,\s]+)+",
+        re.IGNORECASE)
+    # A head that is ONLY a scope/learning prefix ('from now on',
+    # 'for this project', 'remember that') makes the comma internal —
+    # 'from now on, explain errors plainly' is one learning write, not
+    # a statement followed by a new clause.
+    _HEAD_PREFIX_ONLY_RE = re.compile(
+        r"^(?:(?:from\s+now\s+on|for\s+this\s+(?:project|conversation)|"
+        r"remember(?:\s+that)?|note|fyi|btw|actually|by\s+the\s+way|"
+        r"also|so|quick\s+note|for\s+the\s+record|just\s+so\s+you\s+know|"
+        r"correction|i\s+meant|i\s+mean|no|i\s+want\s+you\s+to|"
+        r"i'?d\s+like\s+you\s+to|you\s+should|always|never|instead|"
+        r"teach(?:ing)?)[,\s]*)+$",
+        re.IGNORECASE)
+
+    @classmethod
+    def _first_clause(cls, text: str) -> str:
+        """A learned fact is a single declarative clause. In a compound
+        turn ('the port is 8080 — also, what is a mutex?') the second
+        clause is a separate intent, not part of the value — banking it
+        corrupts the fact and the ack swallows the question. Dots inside
+        values (versions, paths) survive: the dot-boundary requires a
+        following whitespace. Comma-splice counts too, but only when the
+        post-comma tail opens a new interrogative/imperative clause —
+        'neovim, and what's a hash map' bounds at the comma while list
+        values ('hosts are a, b, c') keep theirs."""
+        from ..context.semantics import _ACTION_LEAD_RE, _INTERROGATIVE_LEAD_RE
+        t = cls._CLAUSE_BOUNDARY_RE.split(str(text or ""), maxsplit=1)[0]
+        for m in re.finditer(r",", t):
+            if cls._HEAD_PREFIX_ONLY_RE.match(t[:m.start()].strip()):
+                continue
+            tail = cls._SPLICE_LEAD_RE.sub("", t[m.end():].strip())
+            if (_INTERROGATIVE_LEAD_RE.match(tail)
+                    or _ACTION_LEAD_RE.match(tail)):
+                return t[:m.start()].strip().rstrip(".!?")
+        return t.strip().rstrip(".!?")
+
     @classmethod
     def _clean_subject(cls, raw: str) -> str:
         """Normalize a declarative-fact subject: drop trailing discourse
@@ -1106,6 +1147,8 @@ class ConversationMemory:
                             fact = f"i {pref.group(1).lower()} {val}"
                 if fact is None and corr_body:
                     fact = corr_body
+            if fact:
+                fact = self._first_clause(fact) or fact
             if fact and locked_topic(fact):
                 result.setdefault("locked", []).append(
                     locked_refusal(locked_topic(fact)))
@@ -1184,6 +1227,8 @@ class ConversationMemory:
                 if correction_rule:
                     rule = correction_rule.group(1).strip()
 
+            if rule:
+                rule = self._first_clause(rule) or rule
             if rule and locked_topic(rule):
                 result.setdefault("locked", []).append(
                     locked_refusal(locked_topic(rule)))

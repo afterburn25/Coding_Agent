@@ -8711,6 +8711,15 @@ class AgentOrchestrator:
             else None
         )
         training_response = self.training_acknowledgement(learned) if mode == "auto" else None
+        if training_response is not None:
+            # The ack only covers the learned clause — a compound turn
+            # ("the port is 8080 — also, what is a mutex?") still owes
+            # the user an answer for its second clause, so it must not
+            # short-circuit the model lanes. The fact stays banked.
+            _first = ConversationMemory._first_clause(user_text)
+            _rest = str(user_text).strip()[len(_first):].strip(" ,.!?—;")
+            if _rest:
+                training_response = None
         memory_command = (
             self._answer_memory_command(user_text, conversation_id, project_id)
             if mode == "auto"
