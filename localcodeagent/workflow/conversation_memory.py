@@ -1216,7 +1216,17 @@ class ConversationMemory:
                     if imp:
                         subj = self._clean_subject(imp.group(1))
                         value = self._clean_value(imp.group(2))
-                        if self._fact_subject_ok(subj) and value:
+                        # "use mercury as the name" renames the latest
+                        # fact — 'the name/label/title' is a referential
+                        # slot word, not a value; banking "mercury is
+                        # the name" inverts the statement.
+                        if re.fullmatch(
+                                r"(?:the\s+)?"
+                                r"(?:name|label|title)s?", value,
+                                flags=re.IGNORECASE):
+                            fact = self._retarget_latest_fact(
+                                subj, result["superseded"])
+                        elif self._fact_subject_ok(subj) and value:
                             fact = f"{subj} is {value}"
                     else:
                         # Bare "use X <literal>" — the literal must look
@@ -1276,7 +1286,8 @@ class ConversationMemory:
                         if fact is None:
                             # Referential renames — "the name changed —
                             # it's now called vector", "the label is now
-                            # named zeta", "renamed to X", "call it X".
+                            # named zeta", "renamed to X", "call it X",
+                            # "rename it to X", "use X as the name".
                             # 'now' is required before called/named —
                             # "it's called being careful" is idiom, not
                             # a rename. An explicit subject rewrites its
@@ -1293,37 +1304,46 @@ class ConversationMemory:
                                     r"\bnow\b", raw, flags=re.IGNORECASE):
                                 fact = self._retarget_latest_fact(
                                     ren.group(1), result["superseded"])
-                            elif not ren:
-                                ren_subj = re.search(
-                                    r"\b(?:(the|my|our)\s+)?"
-                                    r"([a-z][a-z0-9 '_-]{0,38}?)\s+"
-                                    r"(?:is|are)\s+now\s+"
-                                    r"(?:called|named)\s+"
-                                    r"([a-z0-9][a-z0-9 ._-]{0,38}?)"
-                                    r"(?:\s+(?:now|instead))?"
-                                    r"[.!?]?\s*$",
-                                    raw, flags=re.IGNORECASE)
-                                if ren_subj:
-                                    subj = self._clean_subject(
-                                        ((ren_subj.group(1) or "") +
-                                         " " +
-                                         ren_subj.group(2)).strip())
-                                    val = self._clean_value(
-                                        ren_subj.group(3))
-                                    if (self._fact_subject_ok(subj)
-                                            and val):
-                                        fact = f"{subj} is {val}"
-                            else:
+                        if fact is None:
+                            ren_subj = re.search(
+                                r"\b(?:(the|my|our)\s+)?"
+                                r"([a-z][a-z0-9 '_-]{0,38}?)\s+"
+                                r"(?:is|are)\s+now\s+"
+                                r"(?:called|named)\s+"
+                                r"([a-z0-9][a-z0-9 ._-]{0,38}?)"
+                                r"(?:\s+(?:now|instead))?"
+                                r"[.!?]?\s*$",
+                                raw, flags=re.IGNORECASE)
+                            if ren_subj:
+                                subj = self._clean_subject(
+                                    ((ren_subj.group(1) or "") +
+                                     " " +
+                                     ren_subj.group(2)).strip())
+                                val = self._clean_value(
+                                    ren_subj.group(3))
+                                if (self._fact_subject_ok(subj)
+                                        and val):
+                                    fact = f"{subj} is {val}"
+                        if fact is None:
+                            ren = re.search(
+                                r"\b(?:renamed\s+to|"
+                                r"rename\s+(?:it|that|this)\s+to|"
+                                r"call(?:ing)?\s+it)\s+"
+                                r"([a-z0-9][a-z0-9 ._-]{0,38}?)"
+                                r"[.!?]?\s*$",
+                                raw, flags=re.IGNORECASE)
+                            if not ren:
                                 ren = re.search(
-                                    r"\b(?:renamed\s+to|"
-                                    r"call(?:ing)?\s+it)\s+"
-                                    r"([a-z0-9][a-z0-9 ._-]{0,38}?)"
+                                    r"\buse\s+"
+                                    r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+                                    r"as\s+(?:the\s+)?"
+                                    r"(?:name|label|title)\b"
                                     r"[.!?]?\s*$",
                                     raw, flags=re.IGNORECASE)
-                                if ren:
-                                    fact = self._retarget_latest_fact(
-                                        ren.group(1),
-                                        result["superseded"])
+                            if ren:
+                                fact = self._retarget_latest_fact(
+                                    ren.group(1),
+                                    result["superseded"])
                     if reset:
                         val = reset.group(1)
                         # A class-known value ("green") prefers the
