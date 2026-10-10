@@ -1028,6 +1028,38 @@ class CrossChatMemoryTests(unittest.TestCase):
                     "what is the build server called")],
                 ["build server is titan"])
 
+    def test_time_value_never_retargets_qualified_slot(self):
+        """'the deploy is at noon' must mint a fresh fact — a schedule
+        value landing on 'deploy region' (a broader-hint containment
+        match) would clobber a region with a time."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("the deploy region is eu-west-2")
+            out = memory.learn_from_user("the deploy is at noon tomorrow")
+            self.assertEqual(out["facts"], ["deploy is at noon tomorrow"])
+            self.assertEqual(out["superseded"], [])
+            # Exact-subject supersession still lands.
+            out = memory.learn_from_user("the deploy region is us-west-1")
+            self.assertEqual(out["facts"], ["deploy region is us-west-1"])
+            self.assertEqual(out["superseded"],
+                             ["deploy region is eu-west-2"])
+
+    def test_dont_forget_embeds_a_learn(self):
+        """'don't forget the meeting is friday' is a retain-imperative
+        — the declarative tail banks. A bare noun tail ('don't forget
+        the keys') banks nothing."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            out = memory.learn_from_user(
+                "don't forget the meeting is friday")
+            self.assertEqual(out["facts"], ["meeting is friday"])
+            out = memory.learn_from_user(
+                "don't forget that the port is 9090")
+            self.assertEqual(out["facts"], ["port is 9090"])
+            out = memory.learn_from_user("don't forget the keys")
+            self.assertEqual(out["facts"], [])
+            self.assertEqual(out["behavior_rules"], [])
+
     def test_negated_copula_correction_and_retraction(self):
         """'X is not Y, it's Z' must bank 'X is Z' — not the verbatim
         negated sentence. Bare 'X isn't Y anymore' retracts the unique

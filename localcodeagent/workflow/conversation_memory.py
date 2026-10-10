@@ -306,6 +306,23 @@ class ConversationMemory:
         r"loves?|should stay|should be|must be|will be|stays?|"
         r"remains?)\s+)(.+?)$", re.IGNORECASE)
 
+    _TIME_VALUE_RE = re.compile(
+        r"\b(?:today|tomorrow|tonight|tonite|noon|midnight|daily|"
+        r"weekdays?|weekends?|mornings?|afternoons?|evenings?|"
+        r"nights?|monday|tuesday|wednesday|thursday|friday|saturday|"
+        r"sunday|january|february|march|april|may|june|july|august|"
+        r"september|october|november|december|"
+        r"\d{1,2}(?::\d{2})?\s*(?:am|pm))\b",
+        re.IGNORECASE)
+
+    @classmethod
+    def _value_type_incompatible(cls, existing: str, new: str) -> bool:
+        """Coarse value-type guard for qualified-subject retargets —
+        a time-shaped value must not overwrite a non-time slot or vice
+        versa. 'the deploy is at noon' is never a 'deploy region'."""
+        return (bool(cls._TIME_VALUE_RE.search(str(existing or "")))
+                != bool(cls._TIME_VALUE_RE.search(str(new or ""))))
+
     def _retarget_latest_fact(
         self, new_value: str, superseded_out: list | None = None,
         *, preference_only: bool = False,
@@ -377,14 +394,26 @@ class ConversationMemory:
                               subject_hint.strip().lower())
                 candidates = rows
                 if hint:
-                    hits = [
-                        row for row in reversed(rows)
-                        if (m2 := pred.match(str(row.get("text") or "")))
-                        and re.search(
-                            r"\b" + re.escape(hint) + r"\b",
-                            re.sub(r"^(?:my|the|our)\s+", "",
-                                   m2.group(1).strip().lower()))
-                    ]
+                    hits = []
+                    for row in reversed(rows):
+                        m2 = pred.match(str(row.get("text") or ""))
+                        if not m2:
+                            continue
+                        fsubj = re.sub(r"^(?:my|the|our)\s+", "",
+                                       m2.group(1).strip().lower())
+                        if not re.search(
+                                r"\b" + re.escape(hint) + r"\b", fsubj):
+                            continue
+                        # A hint that is only a prefix of the subject
+                        # ('deploy' vs 'deploy region') names a broader
+                        # entity — the qualified sub-attribute slot may
+                        # only be rewritten by a compatible value: a
+                        # schedule can't land on a region slot.
+                        if (fsubj != hint
+                                and self._value_type_incompatible(
+                                    m2.group(2), new)):
+                            continue
+                        hits.append(row)
                     if not hits:
                         return None
                     candidates = hits[:1]
@@ -1998,6 +2027,26 @@ class ConversationMemory:
                     r"^(?:forget|remember|miss|lose|skip|worry|"
                     r"hesitate|bother|stop|delay|hold\s+off)\b",
                     action, flags=re.IGNORECASE)
+                # "don't forget the meeting is friday" — the imperative
+                # wrapper asks us to RETAIN the embedded statement:
+                # learn the declarative tail on its own. A bare
+                # noun tail ('don't forget the keys') banks nothing.
+                if inversion:
+                    tail = re.sub(
+                        r"^(?:forget|remember|miss)\s+"
+                        r"(?:that\s+|about\s+|to\s+)?",
+                        "", action.strip(), flags=re.IGNORECASE)
+                    if tail and tail != action.strip() \
+                            and re.search(
+                                r"\b(?:is|are|was|were|has|have|"
+                                r"starts|ends|runs|ships)\b",
+                                tail, flags=re.IGNORECASE):
+                        nested = self.learn_from_user(
+                            tail, project_id=project_id,
+                            conversation_id=conversation_id)
+                        for k, v in nested.items():
+                            if isinstance(v, list) and v:
+                                result.setdefault(k, []).extend(v)
                 if (not revoked and not ephemeral and not inversion
                         and self._rule_terms(action)):
                     # Nothing to retract — the phrase is itself a durable
