@@ -4484,3 +4484,40 @@ path too when the app was running.
 Tests: tests/test_image.py +5 cancel-propagation cases,
 tests/test_image_fleet.py +3 (manifest CUDA index, dedicated venv,
 fleet resource-estimate inheritance). 140 image tests pass.
+
+## Post-deploy validation pass (session 2 continuation)
+
+Isolated self-update validation suite (`python -m localcodeagent.selftest
+--workspace . --json`) is fully green — `ok: true`, all unit tests pass,
+isolated server boots on a second loopback port, every UI page and API
+smoke check returns 200, SSE event-bus handshake verified.
+
+Three stale test expectations fixed (commit bc81f01e):
+- `test_voice_polish.py`: `_StubState` lacked `_notice_last`; two tests
+  still asserted pre-cooldown speech semantics (commit 62a43c10 added a
+  10-min capacity-notice family cooldown to stop flap narration).
+- `test_workflow.py`: two tests used "summarize this repository" prompts
+  now answered by the deterministic github_read lane — the model provider
+  was never invoked. Prompts changed to exercise the path each test
+  targets (question prompt for the clock/prefix-cache assertion; action
+  prompt for the tool-schema check). Production routing unchanged.
+
+Subprocess UnicodeDecodeError root-caused and fixed (commit 78d0fd45):
+- Recurring `Exception in thread Thread-N (_readerthread)` /
+  `charmap can't decode byte 0x8f` in backend-host.log — the scheduled
+  `tool_update_check` job runs `winget upgrade`, whose UTF-8 progress
+  output crashes cp1252 decode mid-stream (~200KB in), losing all
+  captured output. A second instance hit `terminal.py _reader` (the
+  run_shell streaming path).
+- Fix: all 82 text-mode subprocess capture sites across 41 files now
+  pass `encoding="utf-8", errors="replace"`. procutil.py documents the
+  convention next to no_window_flags(). Binary captures untouched.
+- Live-verified on deployed backend: `POST /api/tools/check-updates`
+  completed "checked 10 tools, 3 versions resolved" with zero decode
+  errors post-boot.
+
+Deploy script regression found + fixed (commit 7d5aebbb): an em-dash
+inside a double-quoted Write-Host string made PS 5.1 mis-parse the
+UTF-8-no-BOM file as ANSI (byte 0x94 → stray quote). ASCII hyphen
+restores it. Deploy completed rc=3, app relaunched, v0.42.0 live on
+port 63356 with all Phase A endpoints verified.
