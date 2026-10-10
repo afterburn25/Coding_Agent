@@ -8553,6 +8553,14 @@ class AgentOrchestrator:
             # planner/replan path.
             superseded_texts = [
                 str(t) for t in (learned.get("superseded") or []) if t]
+            # A forgotten fact invalidates the same way — a banked
+            # answer quoting "your editor is not emacs" must stop
+            # serving the moment the user says forget it.
+            for row in (learned.get("forgotten") or []):
+                t = (row.get("text") if isinstance(row, dict)
+                     else str(row or ""))
+                if t:
+                    superseded_texts.append(str(t))
             if superseded_texts and self.requirement_change_cb is not None:
                 try:
                     self.requirement_change_cb(superseded_texts)

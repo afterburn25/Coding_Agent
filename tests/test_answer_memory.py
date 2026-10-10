@@ -290,6 +290,20 @@ class LearningAndCorrectionTests(unittest.TestCase):
                 am.invalidate_superseded(["unrelated fact"]), 0)
             am.store.close()
 
+    def test_forgotten_negated_fact_invalidates_answers(self):
+        # Forgetting "my editor is not emacs" must retire learned
+        # answers still quoting it — forgotten facts feed the same
+        # invalidation as superseded ones.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            am.learn("What is my editor?",
+                     "You told me that — your editor is not emacs.")
+            self.assertEqual(
+                am.invalidate_superseded(["my editor is not emacs"]), 1)
+            m = am.lookup("What is my editor?")
+            self.assertFalse(m.hit)
+            am.store.close()
+
     def test_positive_feedback_promotes(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             am = _mem(td)
