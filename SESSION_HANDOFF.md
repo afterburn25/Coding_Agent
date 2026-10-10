@@ -4659,3 +4659,30 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
 - Tests: full suite 3620 passed / 530 subtests (skipped=4); new
   regressions in test_brain (governor merge), test_learning
   (auto-stage), test_autonomy (internal handler).
+
+### Round 8 — long-300 defect fixes (current HEAD 6e9ce286)
+
+- long-300 (run A): 381 turns, 4 assertion failures → all diagnosed.
+  entity-collision turned out to be a stale backend (3:51 restart
+  predated the phantom-slug fix; commit timestamps mislead — the
+  packs re-run had only passed nondeterministically). Lesson:
+  verify backend code freshness before trusting a green pack.
+- topic-drift "ok continue" → identity echo: three real state-graph
+  bugs. _RETURN_RE/_TOPIC_RETURN_RE didn't admit em-dash discourse
+  separators ("anyway — back to the voice" → misclassified shift,
+  parked kokoro, blanked active_topic). _restore minted bogus topics
+  for unresolvable referents (now restores parked topic / keeps a
+  richer active label). "continue" wasn't an imperative lead →
+  frame vetoed memory_recall → model free-composed identity. Now
+  COMMAND → deterministic "We were on kokoro voice preset."
+- derive_topic prefers the fuller noun phrase ("kokoro voice
+  preset" over "kokoro"); kokoro canon gained the voice/preset
+  aliases voice entities already carried.
+- Deliberately NOT changed: last_topic_event stays consumed by
+  utility turns — test_interrupted_continue_no_pop encodes that a
+  deliberate shift + aside + "continue" confirms the new topic
+  rather than popping. The dogfood failure was the return
+  misclassification, not the resume gate.
+- Verification: all 23 packs green live (81 turns, 0 failures);
+  full suite 3620+1 passed (one voice test flaked under dogfood
+  CPU load, passes isolated); long-300 rerun in flight.
