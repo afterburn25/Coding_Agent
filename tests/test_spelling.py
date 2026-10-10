@@ -216,6 +216,19 @@ class TestNormalizeUserText(unittest.TestCase):
             self.assertEqual(self.norm(sent), sent, sent)
         self.assertIn("fettuccine", self.norm("how do I make fettucini"))
 
+    def test_unknown_compounds_are_real_words(self):
+        """'standup' -> 'standout'/'stands' corrupted a meeting name
+        live. A lexicon-unknown token that splits into two real words
+        is a compound, not a typo — but the shield yields to a
+        decisive same-skeleton one-edit fix ('chiken'->'chicken')."""
+        for sent in (
+            "the standup moves to fridays",
+            "the dropoff is at noon",
+            "mornin all",
+        ):
+            self.assertEqual(self.norm(sent), sent, sent)
+        self.assertIn("chicken", self.norm("chiken alfredo"))
+
     def test_dictionary_words_never_mangled(self):
         """The protective dictionary (SCOWL-60 + proper names) shields
         real words the curated vocab never listed — 'threw', 'spilled',

@@ -1420,6 +1420,7 @@ class ConversationMemory:
                             r"expires?|ends?|starts?|runs?|"
                             r"lifts?|holds?|begins?|resumes?|"
                             r"pass(?:es)?|fails?|ships?|lands?|"
+                            r"moves?|renews?|continues?|pauses?|"
                             r"hosted (?:at|on)|serves?|costs?|lasts?|"
                             r"is|are)\s+(.+)$",
                             body, flags=re.IGNORECASE,
@@ -1693,6 +1694,28 @@ class ConversationMemory:
                                 fact = self._retarget_latest_fact(
                                     new_v, result["superseded"],
                                     subject_hint=hint)
+                    if not reset and fact is None:
+                        # "we used jira before, now it's linear" — past
+                        # usage superseded by present usage. The old
+                        # tool matches an existing 'we/i use X' fact for
+                        # supersession; with none, the new usage banks
+                        # fresh.
+                        usb = re.match(
+                            r"^(we|i|they|the\s+team)\s+used\s+"
+                            r"(.+?)\s+before\s*[,;]?\s*(?:but\s+)?now\s+"
+                            r"(?:it'?s|it\s+is|we\s+use|i\s+use|"
+                            r"they\s+use)\s+(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if usb:
+                            actor = usb.group(1).lower()
+                            actor = ("the team" if actor == "the team"
+                                     else actor)
+                            old_v = self._clean_value(usb.group(2))
+                            new_v = self._clean_value(usb.group(3))
+                            fact = self._correct_fact_value(
+                                old_v, new_v)
+                            if fact is None and new_v:
+                                fact = f"{actor} use {new_v}"
                     if not reset and fact is None:
                         # Referential "it's X" after a correction marker —
                         # "never mind, it's 60" re-states the latest

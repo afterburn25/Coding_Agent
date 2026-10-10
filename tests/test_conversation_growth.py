@@ -1273,6 +1273,27 @@ class CrossChatMemoryTests(unittest.TestCase):
                 self.assertTrue(
                     any(fragment in f for f in learned["facts"]), utterance)
 
+    def test_schedule_predicates_and_usage_supersession(self):
+        # BUG-074 — 'moves to fridays', 'renews annually' are
+        # declarative status facts like 'lifts on monday'; 'we used X
+        # before, now it's Y' is a usage supersession that banks the
+        # new tool.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for utterance, frag in (
+                ("the standup moves to fridays", "standup moves to fridays"),
+                ("the license renews annually", "license renews annually"),
+                ("the freeze continues through friday",
+                 "freeze continues through friday"),
+            ):
+                learned = memory.learn_from_user(utterance)
+                self.assertTrue(
+                    any(frag in f for f in learned["facts"]), utterance)
+            memory2 = ConversationMemory(Path(td) / "m2.json")
+            learned = memory2.learn_from_user(
+                "we used jira before, now it's linear")
+            self.assertEqual(learned["facts"], ["we use linear"])
+
     def test_hearsay_acknowledged_never_banked(self):
         # BUG-073 — reported speech ("i heard the port is 9090",
         # "someone said the build is green") is a secondhand claim:
