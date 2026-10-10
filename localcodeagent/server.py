@@ -4749,11 +4749,15 @@ class AppState:
         # message ("every morning, run the smoke tests"). A cadence in a
         # neighboring statement clause does not schedule anything.
         def _modifies_command(phrase: str) -> bool:
-            # The phrases are inherently imperative; when one sits inside
-            # the main clause, only a plain statement or question act
-            # vetoes it ("the cadence is weekly", "what is weekly?").
+            # The phrases are inherently imperative; when one IS (or
+            # leads) the main clause, only a plain statement or question
+            # act vetoes it. An embedded phrase mid-clause is reported
+            # intent, not a command — "she told me to keep working on
+            # this" reads complaint-ish yet requests nothing.
             if act not in (ASSERTION, QUESTION) and phrase in main:
-                return True
+                head = main.split(phrase, 1)[0].strip(" ,—–-")
+                if act in (COMMAND, REQUEST) or len(head) <= 2:
+                    return True
             head = masked.split(phrase, 1)[0].strip(" ,—–-")
             if len(head) > 2:
                 return False
