@@ -302,8 +302,11 @@ _TOPICS = [
     "continuous deployment", "mechanical keyboards", "soil chemistry",
 ]
 _ANCHORS = [
-    ("for the record, the staging api key ends in xq72",
-     "what did the staging api key end in?", "xq72"),
+    # Note: no credential-shaped anchors — the secret gate correctly
+    # refuses to persist them (observed: 'staging api key ends in …'
+    # dropped, recall answered 'not stored'). Non-secret values only.
+    ("for the record, the staging build id ends in xq72",
+     "what did the staging build id end in?", "xq72"),
     ("we decided the cache ttl is 300 seconds",
      "what cache ttl did we decide on?", "300"),
     ("the primary contact for the vendor is maria chen",

@@ -405,6 +405,14 @@ _TYPO_MAP = {
     "udpate": "update", "erorr": "error", "teh": "the",
     "picutre": "picture", "genrate": "generate", "mkae": "make",
     "wrok": "work", "fixx": "fix", "tes": "test",
+    # Common transpositions + apostrophe-less contractions.
+    "whta": "what", "waht": "what", "whn": "when", "hwo": "how",
+    "hte": "the", "yuo": "you", "adn": "and", "cna": "can",
+    "whats": "what's", "thats": "that's", "dont": "don't",
+    "cant": "can't", "wont": "won't", "isnt": "isn't",
+    "didnt": "didn't", "doesnt": "doesn't", "shouldnt": "shouldn't",
+    "couldnt": "couldn't", "wouldnt": "wouldn't", "im": "i'm",
+    "ive": "i've",
 }
 _TYPO_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(k) for k in _TYPO_MAP) + r")\b")
@@ -872,6 +880,29 @@ def _semantic_gate(env: IntentEnvelope, text: str) -> None:
         env.primary_intent = CONVERSATION
         env.requested_action = ""
         env.confidence = min(env.confidence, 0.6)
+    if env.primary_intent == CONVERSATION and not any(
+            "vetoed" in e for e in env.evidence):
+        # The mirror of the veto: lexical anchors run on the raw text,
+        # so a discourse prefix ('um,', 'ok so,', 'pls') can hide the
+        # act entirely. The frame's main clause is discourse-stripped —
+        # an act it confidently claims upgrades the fallthrough.
+        mc = (frame.main_clause or "").strip().lower()
+        if frame.speech_act == "question" or re.match(
+                r"^(?:who|what|when|where|why|how|which|is|are|can|"
+                r"could|do|does|did|should|would|shall|will)\b", mc):
+            env.primary_intent = QUESTION
+            env.confidence = max(env.confidence, 0.5)
+            env.evidence.append("question via frame (prefix-masked)")
+        elif frame.speech_act in ("command", "request") and re.match(
+                r"^(?:run|open|delete|move|rename|execute|list|restart|"
+                r"stop|start|kill|install|update|deploy|save|copy|"
+                r"export|put|place|attach|insert|upload|download|"
+                r"schedule|post|share|store|verify|apply|clean|sync|"
+                r"publish|merge)\b", mc):
+            env.primary_intent = TOOL_ACTION
+            env.requested_action = mc.split()[0]
+            env.confidence = 0.75
+            env.evidence.append("tool verb via frame (prefix-masked)")
 
 
 def _classify_turn(text: str, *, active: Any = None,

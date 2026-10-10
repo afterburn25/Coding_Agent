@@ -785,3 +785,77 @@ def test_quoted_and_negated_actions_do_not_execute():
     assert env.primary_intent not in _EXECUTING_INTENTS
     f = _env("do not delete that file").semantic
     assert not f.allows("local_action")
+
+
+# ---------------------------------------------------------------------------
+# Discourse-prefix invariance — pragmatics particles must not hide the act
+
+@pytest.mark.parametrize("prefix", [
+    "um, ", "so like, ", "ok so, ", "tbh, ", "hey, ", "wait, ",
+    "hmm — ", "ok, ", "alright, ",
+])
+def test_discourse_prefix_preserves_question_act(prefix):
+    """'um, is the voice on' asks the same question as 'is the voice
+    on'. The discourse strip exposes the main clause to act
+    detection."""
+    f = _frame(f"{prefix}is the voice on")
+    assert f.speech_act == "question", (prefix, f.speech_act)
+    env = _env(f"{prefix}is the voice on")
+    assert env.primary_intent == "question", (prefix, env.primary_intent)
+
+
+@pytest.mark.parametrize("prefix", [
+    "pls ", "please ", "kindly ", "ok, ", "hey ",
+])
+def test_polite_prefix_preserves_command(prefix):
+    """'pls push it to github' is the same command as 'push it'."""
+    env = _env(f"{prefix}push it to github")
+    assert env.primary_intent == "git_action", (
+        prefix, env.primary_intent)
+    f = _frame(f"{prefix}run the tests")
+    assert f.speech_act in ("command", "request"), (prefix, f.speech_act)
+
+
+def test_discourse_prefix_preserves_tool_action():
+    """'ok so, run the tests' keeps the tool-verb nomination via the
+    frame upgrade — lexical anchors alone see only 'ok'."""
+    env = _env("ok so, run the tests")
+    assert env.primary_intent == "tool_action"
+    assert env.requested_action == "run"
+
+
+def test_wait_comma_is_discourse_but_bare_wait_is_command():
+    """'wait, what's the time' — discourse strip exposes the question.
+    'wait a second' — no punctuation, so the imperative 'wait' stays
+    in the main clause rather than being eaten as a filler."""
+    f = _frame("wait, what's the time")
+    assert f.speech_act == "question"
+    assert f.main_clause == "what's the time"
+    f2 = _frame("wait a second")
+    assert f2.main_clause.startswith("wait"), f2.main_clause
+
+
+# ---------------------------------------------------------------------------
+# Typo normalization — whitelist transpositions reach both layers
+
+@pytest.mark.parametrize("typo,fixed", [
+    ("whta time is it", "question"),
+    ("waht time is it", "question"),
+    ("whats the weather like", "question"),
+    ("hwo do i change the theme", "question"),
+    ("isnt the voice on", "question"),
+])
+def test_wh_typo_keeps_question_lane(typo, fixed):
+    env = _env(typo)
+    assert env.primary_intent == "question", (typo, env.primary_intent)
+    f = _frame(typo)
+    assert f.speech_act == "question", (typo, f.speech_act)
+
+
+def test_contraction_typos_normalize():
+    env = _env("dont forget the meeting tomorrow")
+    assert env.primary_intent != "question"
+    env2 = _env("im not sure about that")
+    # assertion/conversation either way — the key is 'im' didn't break
+    # clause parsing into garbage
+    assert env2.primary_intent in ("conversation", "question")

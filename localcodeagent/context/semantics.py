@@ -627,6 +627,32 @@ def _clauses(masked: str) -> list[str]:
     return [p for p in parts if p]
 
 
+# Leading discourse markers / politeness particles are pragmatics, not
+# the communicative clause — 'ok so, is the voice on' asks the same
+# question as 'is the voice on'; 'pls push it' is the same command.
+_DISCOURSE_FREE_RE = re.compile(
+    r"^(?:(?:um+|uh+|er+|hmm+|ok(?:ay)?|so(?:\s+like)?|well|"
+    r"anyways?|alright|yeah|yep|yup|tbh|btw|honestly|actually|"
+    r"basically|literally|like|pls|please|kindly|now|hey)\b"
+    r"[\s,.\-—–!?]*)+", re.IGNORECASE)
+# Imperative-adjacent markers ('wait a second' is a command, 'wait,'
+# is discourse) — only strip when punctuation separates them.
+_DISCOURSE_COMMA_RE = re.compile(
+    r"^(?:(?:wait|look|listen|yo|see)\b\s*[,—–\-]\s*)+",
+    re.IGNORECASE)
+
+
+def _strip_discourse_prefix(clause: str) -> str:
+    out = clause.strip()
+    for _ in range(3):
+        prev = out
+        out = _DISCOURSE_FREE_RE.sub("", out, count=1)
+        out = _DISCOURSE_COMMA_RE.sub("", out, count=1)
+        if out == prev:
+            break
+    return out.lstrip(" ,.—–-") or clause.strip()
+
+
 def _clause_score(clause: str) -> int:
     """How strongly a clause carries the communicative act — later
     high-scoring clauses win the main-clause slot because the actual
@@ -789,6 +815,14 @@ _CACHE: OrderedDict[str, SemanticFrame] = OrderedDict()
 def _analyze(raw: str) -> SemanticFrame:
     frame = SemanticFrame(text=raw)
     t = raw.lower()
+    try:
+        # The whitelist typo map is shared with the intent layer so the
+        # frame sees the same normalized stream — 'whta time is it' is
+        # a question at every level, not just in _classify_turn.
+        from .intent import _fix_typos
+        t = _fix_typos(t)
+    except Exception:
+        pass
     masked, frame.quoted_spans = _strip_quotes(t)
     frame.masked = masked
     # Case-preserving mask — path/identifier-sensitive parsers (the
@@ -823,7 +857,7 @@ def _analyze(raw: str) -> SemanticFrame:
     if not clauses:
         clauses = [masked]
     main_idx = _main_clause_index(clauses)
-    main = clauses[main_idx]
+    main = _strip_discourse_prefix(clauses[main_idx])
     frame.main_clause = main
     frame.supporting = [c for i, c in enumerate(clauses) if i != main_idx]
 
