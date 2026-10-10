@@ -1855,6 +1855,29 @@ class ConversationMemory:
                         or str(row.get("text", ""))] = row
             return [str(row.get("text", "")) for row in by_canonical.values()]
 
+    def active_rules(
+        self,
+        *,
+        project_id: str = "",
+        conversation_id: str = "",
+    ) -> list[str]:
+        """Active behavior-rule texts in scope — for 'what rules do
+        you follow' inspection lanes."""
+        with self._lock:
+            out = []
+            for row in self._data.get("behavior_rules", []):
+                if not isinstance(row, dict) or not row.get("active", True):
+                    continue
+                scope = str(row.get("scope") or "global")
+                scope_id = str(row.get("scope_id") or "")
+                if (scope == "global"
+                        or (scope == "project" and project_id
+                            and scope_id == project_id)
+                        or (scope == "conversation" and conversation_id
+                            and scope_id == conversation_id)):
+                    out.append(str(row.get("text", "")))
+            return out
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             return {

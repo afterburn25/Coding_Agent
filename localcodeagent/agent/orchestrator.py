@@ -2509,6 +2509,15 @@ class AgentOrchestrator:
         r"(?:learned|remembered)(?:\s+about me)?\b|\bwhat have i "
         r"told you\b|\bwhat(?:'s| do you have) (?:on|saved about) "
         r"me\b", re.IGNORECASE)
+    _RULES_RECALL_RE = re.compile(
+        r"\bwhat\s+(?:operating\s+)?rules?\s+do\s+you\s+"
+        r"(?:follow|have|obey|use|operate\s+(?:under|by|with))\b|"
+        r"\bwhat\s+(?:operating\s+)?rules?\s+are\s+you\s+"
+        r"(?:following|under|operating\s+under)\b|"
+        r"\bwhat\s+are\s+your\s+(?:operating\s+)?rules?\b|"
+        r"\b(?:list|show|tell\s+me)\s+(?:your|the)\s+"
+        r"(?:operating\s+)?rules?\b",
+        re.IGNORECASE)
 
     @staticmethod
     def _second_person_fact(text: str) -> str:
@@ -2641,13 +2650,33 @@ class AgentOrchestrator:
         frame = self._utterance_frame(env, user_text)
         if frame is not None and not frame.allows("memory_recall"):
             return None
-        if not self._FACTS_RECALL_RE.search(
-                (frame.masked_case
+        probe = (frame.masked_case
                  if frame is not None and frame.masked_case
-                 else user_text) or ""):
+                 else user_text) or ""
+        rules_q = bool(self._RULES_RECALL_RE.search(probe))
+        if not rules_q and not self._FACTS_RECALL_RE.search(probe):
             return None
         if self.conversation_memory is None:
             return None
+        if rules_q:
+            rules = self.conversation_memory.active_rules(
+                project_id=project_id, conversation_id=conversation_id)
+            canonical = (
+                "No standing rules yet — nothing you've told me to "
+                "always or never do."
+                if not rules else
+                "Operating rules: " + "; ".join(f'"{r}"' for r in rules[:8]))
+            from ..context.realize import RenderedReply, SemanticResponse
+            sem = SemanticResponse(
+                facts=[canonical], semantic_id="memory:rules_recall",
+                speech_act="answer", bare=True)
+            sp = self._speech(user_text)
+            if not sp:
+                return RenderedReply(text=canonical, speech_act="answer")
+            genome, ctx = sp
+            return _BUILTIN_RENDERER.render_semantic(
+                sem, genome, ctx, intent="memory_rules_recall",
+                canonical=canonical)
         facts = self.conversation_memory.active_facts(
             project_id=project_id, conversation_id=conversation_id)
         if not facts:
