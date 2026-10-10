@@ -171,7 +171,7 @@ class ConversationMemory:
     })
 
     _CLAUSE_BOUNDARY_RE = re.compile(
-        r"(?<=[.!?])\s|\s*[—;]\s*")
+        r"(?<=[.!?])\s|\s*[—;]\s*|\s+--\s+")
     _SPLICE_LEAD_RE = re.compile(
         r"^(?:(?:and|but|so|also|by\s+the\s+way|"
         r"while\s+you'?re\s+at\s+it)[,\s]+)+",

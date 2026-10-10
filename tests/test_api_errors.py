@@ -139,6 +139,24 @@ class TestApiErrors(unittest.TestCase):
             self.state.agent.run = orig_run
             self.state.runtime.readiness = orig_ready
 
+    def test_statement_cadence_does_not_create_standing_goal(self):
+        # BUG-027 — "the review cadence is weekly" is a statement, not a
+        # scheduling imperative. Autonomy triggers must come from the
+        # user's own request-shaped words, not substring matches.
+        goals = self.state.autonomy.store.standing_goals.data["goals"]
+        before = len(goals)
+        try:
+            code, raw = self._post(
+                "/api/chat",
+                {"message": "the review cadence is weekly — also, "
+                            "what is a hash map?"})
+            payload = json.loads(raw)
+            self.assertNotIn("Standing goal",
+                             str(payload.get("content") or ""))
+            self.assertEqual(len(goals), before)
+        finally:
+            del goals[before:]
+
     def test_patch_outside_profiles_is_405(self):
         code, raw = self._raw("/api/decisions", b"{}", method="PATCH")
         self.assertEqual(code, 405)

@@ -633,7 +633,7 @@ def _clauses(masked: str) -> list[str]:
 # question as 'is the voice on'; 'pls push it' is the same command.
 _DISCOURSE_FREE_RE = re.compile(
     r"^(?:(?:um+|uh+|er+|hmm+|ok(?:ay)?|so(?:\s+like)?|well|"
-    r"anyways?|alright|yeah|yep|yup|tbh|btw|honestly|actually|"
+    r"anyways?|alright|also|yeah|yep|yup|tbh|btw|honestly|actually|"
     r"basically|literally|like|pls|please|kindly|now|hey)\b"
     r"[\s,.\-—–!?]*)+", re.IGNORECASE)
 # Imperative-adjacent markers ('wait a second' is a command, 'wait,'

@@ -4729,13 +4729,56 @@ class AppState:
                         f"{int(float(w.get('progress') or 0) * 100)}%")
                 return {"content": "\n".join(lines)}
 
-        wants_standing = any(p in low for p in self._MISSION_STANDING_PHRASES)
-        wants_mission = any(p in low for p in self._MISSION_CREATE_PHRASES)
+        # Autonomy triggers must come from the user's own words, in a
+        # request — not from quoted text ('the doc says "keep working
+        # until done"') and not from statements that merely mention a
+        # cadence ("the review cadence is weekly", "standing goals are
+        # useful"). The frame's quote-masked text feeds phrase matching;
+        # its speech act gates goal creation.
+        try:
+            from .context.semantics import (
+                analyze as _sem, ASSERTION, COMMAND, QUESTION, REQUEST)
+            frame = _sem(message)
+            masked = frame.masked or low
+            act = frame.speech_act
+            main = frame.main_clause or ""
+        except Exception:
+            masked, act, main = low, None, ""
+        # The trigger phrase must modify the requested work — inside the
+        # command's own clause ("review my PRs weekly") or leading the
+        # message ("every morning, run the smoke tests"). A cadence in a
+        # neighboring statement clause does not schedule anything.
+        def _modifies_command(phrase: str) -> bool:
+            # The phrases are inherently imperative; when one sits inside
+            # the main clause, only a plain statement or question act
+            # vetoes it ("the cadence is weekly", "what is weekly?").
+            if act not in (ASSERTION, QUESTION) and phrase in main:
+                return True
+            head = masked.split(phrase, 1)[0].strip(" ,—–-")
+            if len(head) > 2:
+                return False
+            try:
+                return _sem(masked.replace(phrase, " ", 1)
+                            ).speech_act in (COMMAND, REQUEST)
+            except Exception:
+                return False
+        wants_standing = any(p in masked and _modifies_command(p)
+                             for p in self._MISSION_STANDING_PHRASES)
+        wants_mission = any(p in masked and _modifies_command(p)
+                            for p in self._MISSION_CREATE_PHRASES)
         if not (wants_mission or wants_standing):
             return None
 
         context = self._mission_context_request(message)
-        objective = context or message
+        referential = bool(re.search(r"\b(?:this|that|it)\b", masked))
+        if wants_standing and not referential:
+            # The scheduling request names its own work — "review my PRs
+            # weekly" — the message IS the objective. Referential forms
+            # ("check this daily", "make it a standing goal") still pull
+            # the objective from the preceding turn.
+            objective = message
+        else:
+            objective = context or message
         if not objective.strip():
             return {"content": "What should the mission objective be?"}
         if wants_standing:
