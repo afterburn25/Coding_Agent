@@ -1000,6 +1000,34 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertEqual(out["forgotten"], [])
             self.assertTrue(out.get("forgotten_miss"))
 
+    def test_call_name_dub_naming_shapes(self):
+        """'call/name/dub <thing> <name>' banks a naming fact; pronoun
+        referents retarget the latest fact. Idioms ('call it a day'),
+        phone-calls ('call me later'), and time tails ('call the vet
+        tomorrow') never bank."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            out = memory.learn_from_user("call the build server titan")
+            self.assertEqual(out["facts"], ["build server is titan"])
+            out = memory.learn_from_user("call my laptop quasar")
+            self.assertEqual(out["facts"], ["laptop is quasar"])
+            # Pronoun referents rename the newest fact.
+            out = memory.learn_from_user("call it falcon")
+            self.assertEqual(out["facts"], ["laptop is falcon"])
+            out = memory.learn_from_user("name the proxy sentinel")
+            self.assertEqual(out["facts"], ["proxy is sentinel"])
+            out = memory.learn_from_user("dub the cluster omega")
+            self.assertEqual(out["facts"], ["cluster is omega"])
+            for junk in ("call me later", "call it a day",
+                         "call it a night", "call the vet tomorrow",
+                         "name your price"):
+                out = memory.learn_from_user(junk)
+                self.assertEqual(out["facts"], [], junk)
+            self.assertEqual(
+                [r["text"] for r in memory.recall_facts(
+                    "what is the build server called")],
+                ["build server is titan"])
+
     def test_negated_copula_correction_and_retraction(self):
         """'X is not Y, it's Z' must bank 'X is Z' — not the verbatim
         negated sentence. Bare 'X isn't Y anymore' retracts the unique

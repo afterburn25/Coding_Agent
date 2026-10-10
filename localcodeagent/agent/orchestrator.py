@@ -2649,7 +2649,11 @@ class AgentOrchestrator:
             # describe the expected answer's type, not the entity — a
             # stored fact won't contain them, so requiring them
             # starves every wh-slot probe with no pronoun.
-            q_terms -= {"time", "when", "date", "day", "days"}
+            q_terms -= {"time", "when", "date", "day", "days",
+                        # 'called/named' are interrogative slot filler —
+                        # "what is the build server called" asks for
+                        # the name, the stored fact won't carry them.
+                        "called", "named", "known"}
             if not q_terms:
                 return None
             def _terms_hit(terms: set, row) -> bool:
