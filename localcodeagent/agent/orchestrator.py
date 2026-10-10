@@ -2539,7 +2539,8 @@ class AgentOrchestrator:
         r"^\s*what\s+(?:do you|should|would|could|can|"
         r"did\s+(?:you|we|they|he|she|it|that|this)|"
         r"does\s+(?:it|that|this|he|she|they)|will|"
-        r"happens|happened|time|day|else|if)\b|\byou know\b|"
+        r"happens|happened|else|if)\b|"
+        r"what\s+(?:time|day)\s+is\s+it\b|\byou know\b|"
         r"\babout me\b",
         re.IGNORECASE)
 
@@ -2631,6 +2632,13 @@ class AgentOrchestrator:
                 re.IGNORECASE):
             body = self._FACT_RECALL_RE.sub("", match_text)
             q_terms = self.conversation_memory._content_terms(body)
+            # Interrogative slot words ("what TIME is the standup")
+            # describe the expected answer's type, not the entity — a
+            # stored fact won't contain them, so requiring them
+            # starves every wh-slot probe with no pronoun.
+            q_terms -= {"time", "when", "date", "day", "days"}
+            if not q_terms:
+                return None
             rows = [
                 r for r in rows
                 if q_terms <= self.conversation_memory._fact_query_terms(

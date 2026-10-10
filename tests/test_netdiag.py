@@ -682,6 +682,26 @@ class TruthGateTests(RecoveryLoopTests):
                 "what is my editor", "conv", "proj")
             self.assertIn("neovim", reply.text)
 
+    def test_wh_slot_probe_recalls_pronounless_fact(self):
+        # "what time is the standup" — no possessive pronoun, and the
+        # interrogative slot word (time) is answer-type metadata, not
+        # an entity term; the precision gate must not require it.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my standup is at 9am on weekdays")
+            reply = agent._single_fact_recall_reply(
+                "what time is the standup", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("9am", reply.text)
+            # Genuine general-knowledge probes still fall through.
+            self.assertIsNone(agent._single_fact_recall_reply(
+                "what color is the sky", "conv", "proj"))
+
     def test_echoed_notice_stripped_from_stored_reply(self):
         # BUG-029: the badge lives verbatim in stored history, so small
         # models learn to parrot it as their own sign-off. An echoed
