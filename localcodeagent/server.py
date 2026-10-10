@@ -6766,6 +6766,29 @@ class AppState:
                     })
                 except Exception as exc:
                     self._voice_finish(voice_rid)
+                    # Interactive queue items are chat turns — a failure
+                    # must not lose the user's message. Record the honest
+                    # reply (friendly text when the error carries one);
+                    # mission-submitted work stays out of conversation
+                    # history per the work-gate.
+                    if not entry.get("mission_id"):
+                        try:
+                            honest = (
+                                str(getattr(exc, "friendly", ""))
+                                or f"Your queued request failed "
+                                   f"({type(exc).__name__}: {exc})")
+                            self.conversation_manager.record_exchange(
+                                str(entry.get("prompt") or ""),
+                                self._persona_notice("failed", honest),
+                                intent="conversation",
+                                response_source=(
+                                    "model_unavailable"
+                                    if isinstance(exc, ModelUnavailableError)
+                                    else "error"))
+                            self.history = self.conversation_manager.history(
+                                limit=32)
+                        except Exception:
+                            pass
                     # A run that dies before its first logged event leaves a
                     # terminal task with an empty transcript — record the
                     # failure so the ledger always explains the outcome.
