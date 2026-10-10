@@ -419,12 +419,10 @@ class ConversationMemory:
         text = str(hits[0].get("text", "")).strip()
         return text[: len(text) - len(old)].rstrip() + " " + new
 
-    def revert_fact(self, referent: str) -> str | None:
-        """'undo that <referent> change' — restore the most recently
-        superseded fact whose subject matches the referent. The current
-        active row in that slot is retired; the prior value goes live
-        again. Returns the restored fact text, or None when nothing in
-        the slot's history matches (a named referent never guesses)."""
+    def _revert_candidate(self, referent: str) -> dict | None:
+        """Read-only: the most recently superseded fact row whose
+        subject matches the referent, or None. Shared by the dry-run
+        peek and the mutating revert so both resolve identically."""
         ref = str(referent or "").strip().lower()
         ref = re.sub(r"^(?:my|the|our)\s+", "", ref)
         if not ref:
@@ -451,9 +449,25 @@ class ConversationMemory:
                  and _hit(r)),
                 key=lambda r: float(r.get("superseded_at") or 0),
                 reverse=True)
-            if not superseded:
+            return superseded[0] if superseded else None
+
+    def peek_revert_fact(self, referent: str) -> str | None:
+        """Dry-run counterpart of revert_fact — reports the fact text a
+        revert would restore without touching any state."""
+        row = self._revert_candidate(referent)
+        return str(row.get("text") or "") or None if row else None
+
+    def revert_fact(self, referent: str) -> str | None:
+        """'undo that <referent> change' — restore the most recently
+        superseded fact whose subject matches the referent. The current
+        active row in that slot is retired; the prior value goes live
+        again. Returns the restored fact text, or None when nothing in
+        the slot's history matches (a named referent never guesses)."""
+        with self._lock:
+            old = self._revert_candidate(referent)
+            if old is None:
                 return None
-            old = superseded[0]
+            rows = self._data.get("facts", [])
             old_slot = self._slot_canonical(str(old.get("slot") or ""))
             now = time.time()
             # Retire whatever currently holds the slot (if anything).

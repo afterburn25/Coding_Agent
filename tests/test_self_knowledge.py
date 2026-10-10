@@ -245,6 +245,34 @@ class TestServiceControl(unittest.TestCase):
             # The unrelated journal row is untouched.
             self.assertFalse(journal.recent(5)[0].get("undone"))
 
+    def test_undo_dry_run_never_mutates(self):
+        # would_answer probes run respond(execute=False) — a scoped undo
+        # must not mutate during the probe, or the real pass reverts a
+        # *different* row (observed live: dry-run restored 'quasar',
+        # real pass then reverted back to 'pulsar').
+        import tempfile
+        from pathlib import Path
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        svc, store, _ = make_service()
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            svc._env["conversation_memory"] = lambda: cm
+            cm.learn_from_user("my laptop is named quasar")
+            cm.learn_from_user("actually the laptop is pulsar")
+            probe = svc.respond("undo that laptop change",
+                                execute=False)
+            self.assertIsNotNone(probe)
+            active = [r["text"] for r in cm._data["facts"]
+                      if r.get("active")]
+            self.assertEqual(active, ["my laptop is pulsar"])
+            res = svc.respond("undo that laptop change")
+            self.assertEqual(res.kind, "execute")
+            self.assertIn("quasar", res.text)
+            active = [r["text"] for r in cm._data["facts"]
+                      if r.get("active")]
+            self.assertEqual(active, ["my laptop is named quasar"])
+
     def test_undo_named_referent_restores_memory_fact(self):
         # "undo that laptop change" with a superseded memory fact —
         # 'my laptop is pulsar' reverts to 'my laptop is named quasar'.

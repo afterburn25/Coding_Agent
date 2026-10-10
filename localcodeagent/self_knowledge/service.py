@@ -249,6 +249,13 @@ class SelfKnowledgeService:
                         continue
                     subject = str(row.get("subject") or "").lower()
                     if any(t in subject for t in ref_terms):
+                        if not getattr(self, "_execute", True):
+                            return Resolution(
+                                "confirm", "undo",
+                                text=(f"The \"{row.get('subject')}\" "
+                                      f"change would be reverted."),
+                                truth={"kind": "journal",
+                                       "dry_run": True})
                         res = cj.undo(str(row.get("id") or ""))
                         if res.get("ok"):
                             return Resolution(
@@ -278,6 +285,25 @@ class SelfKnowledgeService:
         except Exception:
             store = None
         if store is not None and ref_terms:
+            if not getattr(self, "_execute", True):
+                # Dry-run probe (would_answer) — peek only; a real
+                # revert must happen exactly once, on the real pass.
+                try:
+                    peek = getattr(store, "peek_revert_fact", None)
+                    cand = peek(referent) if callable(peek) else None
+                except Exception:
+                    cand = None
+                if cand:
+                    return Resolution(
+                        "confirm", "undo",
+                        text=f"{cand} would be restored.",
+                        truth={"kind": "memory", "dry_run": True})
+                return Resolution(
+                    "answer", "undo",
+                    text=(f"I don't have a journaled or remembered "
+                          f"change matching \"{referent}\" — nothing "
+                          f"to undo."),
+                    truth={"kind": "none", "subject": referent})
             try:
                 restored = store.revert_fact(referent)
             except Exception:
