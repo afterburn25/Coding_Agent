@@ -2,6 +2,43 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## Product-wide polish/QA pass (in flight)
+
+Bugs found + fixed so far — full ledger in `docs/BUG_LEDGER.md`, surface
+map in `docs/SURFACE_INVENTORY.md`:
+
+- **BUG-001..004 (P1, API)** — `do_GET`/`do_PATCH` had no handler-level
+  catch (connection died, no JSON); malformed/non-object JSON bodies →
+  500 not 400; ~35 bare `int()`/`float()` casts on client input → 500 on
+  garbage. Now: shared `_api_error` mapper, `_qint`/`_bnum` coercion.
+- **BUG-005 (P1, orchestrator)** — exception inside `run()` /
+  `run_work_order()` left the ledger row `running/planning` forever →
+  phantom "current" task wedged the whole chat queue (seen live). New
+  thread→task-id fault boundary marks active rows `error` before the
+  raise; `waiting_approval` parks/terminal rows never clobbered; raise
+  contract preserved.
+- **BUG-006 (P2)** — duplicate arithmetic lane (`_math_reply` +
+  `solvers.py`) deleted; brain thalamus owns exact math
+  (`brain_fast_path`, live-verified `14*37=518`).
+- **BUG-007 (P1, tests)** — Windows `answer_memory.db-wal` teardown race
+  → `_RetriedTemporaryDirectory` in `test_end_to_end.py`.
+- **BUG-008 (P2)** — `BackendConnectionError` (dead model backend) →
+  503 friendly+diagnostic, not 500.
+- **BUG-009 (P1, conversation)** — `ProjectMemory.context()` injected
+  the last 6 task summaries verbatim into every chat turn → casual
+  questions echoed mission-failure text. New `context_for()` token-overlap
+  gate; chat lane skips the block on no match; work lanes keep recency.
+
+Live dogfood verified this pass: fast_path math ~280ms, `and of Japan?`
+ellipsis → Tokyo, `don't open Chrome` preempted a mission drive
+(cooperative cancel, supervisor retries — by design), model-down →
+honest `error`/`done` + friendly message, malformed input → 400,
+malformed query int → 200 fallback. Suite: **3685 passed, 4 skipped,
+530 subtests**.
+
+Still open: UI click-dogfood, voice/image/browser live workflows, soak,
+dead-code sweep, remaining audit parts (see BUG_LEDGER discovery queue).
+
 ## Resilience Foundation 1 → Cognitive Phase 1 (in flight)
 
 - **F1 landed** (`4eb73559`): `state_db.py` WAL SQLite + DocStore; all
