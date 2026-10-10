@@ -4878,7 +4878,10 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   crashes, all return error strings. Permission matrix: NEVER_AUTO
   keys ⊆ PERMISSION_INFO, all builtin tool permissions resolve;
   `audio.*` synthesizes correctly via `_PREFIX_CATEGORY`.
+- long-150 seeded soak on latest code: **158 turns, 0 failures**.
+- Part 4 dead-code sweep (`cded208c`): 19 confirmed-unreferenced
+  symbols removed (orphan helpers, half-wired span mask/restore,
+  dead types); focused batteries green (148 + 429 + 142 tests).
 - Still open: UI click-dogfood (needs interactive browser), installer
-  cycle, dead-code deep sweep, external llama:8391 intermittent
-  disconnects (environment fragility — managed reaper covers managed
-  runtimes only).
+  cycle, external llama:8391 intermittent disconnects (environment
+  fragility — managed reaper covers managed runtimes only).
