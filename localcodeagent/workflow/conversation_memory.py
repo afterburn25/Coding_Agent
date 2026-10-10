@@ -766,6 +766,17 @@ class ConversationMemory:
                     r"^(?:actually|by the way|btw|also|so|fyi|note|quick note|"
                     r"for the record|just so you know)[,:\s]+",
                     "", raw, flags=re.IGNORECASE)
+                # An imperative-led body is a request, not a statement —
+                # 'explain what a mutex is in one sentence' would otherwise
+                # parse as subject 'explain what a mutex' + is + 'in one
+                # sentence' and bank the request as a fact while the ack
+                # swallows the answer. The semantic layer's imperative-lead
+                # class is the same vocabulary the action lanes use, so the
+                # classification stays aligned upstream and here. Value-set
+                # imperatives ('set the theme to dark') are exempt — their
+                # dedicated matchers below still run.
+                from ..context.semantics import _ACTION_LEAD_RE
+                imperative_body = bool(_ACTION_LEAD_RE.match(body))
                 switch = re.match(
                     r"^we\s+(?:switched|moved|migrated|changed)\s+"
                     r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+to\s+(.+)$",
@@ -787,7 +798,7 @@ class ConversationMemory:
                         r"to\s+clarify|sorry[,]?\s*i\s+meant)[,:]?\s*(.+)$",
                         body, flags=re.IGNORECASE,
                     )
-                    nyc = re.match(
+                    nyc = None if imperative_body else re.match(
                         r"^(?:actually[,]?\s+|no[,]?\s+)?"
                         r"(it|that|this|the\s+[a-z0-9][a-z0-9 ._-]{0,34}?|"
                         r"[a-z0-9][a-z0-9 ._-]{0,34}?)\s+"
@@ -825,6 +836,8 @@ class ConversationMemory:
                             # Redis"); corr_body is the verbatim fallback
                             # when nothing structured matches.
                             body = inner
+                            imperative_body = bool(
+                                _ACTION_LEAD_RE.match(body))
                             corr_body = inner.rstrip(".!?")
                 if fact is None:
                     # Reported copula decisions — "we decided the cache
@@ -901,7 +914,7 @@ class ConversationMemory:
                 if fact is None:
                     # Subject-led update: "Orion moved to Redis",
                     # "Orion migrated off Postgres to Redis".
-                    subj_switch = re.match(
+                    subj_switch = None if imperative_body else re.match(
                         r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
                         r"(?:switched|moved|migrated|changed)"
                         r"(?:\s+(?:off|from|away from)\s+[a-z0-9][a-z0-9 ._-]{0,38}?)?"
@@ -915,7 +928,7 @@ class ConversationMemory:
                         value = self._clean_value(subj_switch.group(2))
                         if self._fact_subject_ok(subj) and value:
                             fact = f"{subj} uses {value}"
-                    else:
+                    elif not imperative_body:
                         decl = re.match(
                             r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
                             r"(uses?|runs on|is built on|is written in|"

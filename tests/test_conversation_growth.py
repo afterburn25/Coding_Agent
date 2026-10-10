@@ -1095,3 +1095,30 @@ class CrossChatMemoryTests(unittest.TestCase):
             ):
                 learned = memory.learn_from_user(utterance)
                 self.assertFalse(learned["facts"], utterance)
+
+    def test_imperative_requests_not_captured_as_facts(self):
+        # BUG-025 — 'explain what a mutex is in one sentence' parsed as
+        # subject 'explain what a mutex' + is + 'in one sentence'; the
+        # ack then swallowed the request's answer. Value-set imperatives
+        # are still learning writes and must keep working.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for utterance in (
+                "explain what a mutex is in one sentence",
+                "describe the handshake protocol briefly",
+                "tell me the port number you use",
+                "run the tests please",
+                "move the cache to nvme",
+            ):
+                learned = memory.learn_from_user(utterance)
+                self.assertFalse(learned["facts"], utterance)
+            for utterance, fragment in (
+                ("set the theme to dark", "theme is dark"),
+                ("use port 8080", "port is 8080"),
+                ("the test database uses port 5433", "test database"),
+            ):
+                memory2 = ConversationMemory(
+                    Path(td) / f"m{abs(hash(utterance))}.json")
+                learned = memory2.learn_from_user(utterance)
+                self.assertTrue(
+                    any(fragment in f for f in learned["facts"]), utterance)

@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from .types import ImageModelProfile
 from .workflow import WorkflowManager
-from ..fsutil import replace_with_retry
+from ..fsutil import atomic_write_text, replace_with_retry
 
 
 LORA_EXTENSIONS = {".safetensors", ".gguf", ".ckpt", ".pt", ".pth"}
@@ -199,7 +199,7 @@ class ImageAssetLibrary:
             try: existing=json.loads(sidecar.read_text(encoding="utf-8"))
             except Exception: existing={}
         merged={**existing, **metadata, "path":str(path), "updated_at":time.time()}
-        sidecar.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+        atomic_write_text(sidecar, json.dumps(merged, indent=2), encoding="utf-8")
         return merged
 
     def write_comfy_extra_paths(self, destination: Path) -> Path:
@@ -228,7 +228,7 @@ class ImageAssetLibrary:
             "  controlnet: controlnet\n"
             "  upscale_models: upscalers\n"
         )
-        destination.write_text(text, encoding="utf-8")
+        atomic_write_text(destination, text, encoding="utf-8")
         return destination
 
     def _safe_download_url(self, url: str) -> str:
