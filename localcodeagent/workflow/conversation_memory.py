@@ -1064,7 +1064,8 @@ class ConversationMemory:
             body = re.sub(
                 r"^(?:(?:actually|by\s+the\s+way|btw|also|so|fyi|note|"
                 r"quick\s+note|for\s+the\s+record|just\s+so\s+you\s+know|"
-                r"no|wait|sorry|nm|never\s*mind|i\s+mean(?:t)?)[,:\s]+)+",
+                r"no|wait|sorry|nm|never\s*mind|scratch\s+that|"
+                r"on\s+second\s+thought|i\s+mean(?:t)?)[,:\s]+)+",
                 "", raw, flags=re.IGNORECASE)
             for pattern in (
                 r"^remember\s+that\s+(.+)$",
@@ -1420,7 +1421,7 @@ class ConversationMemory:
                             r"expires?|ends?|starts?|runs?|"
                             r"lifts?|holds?|begins?|resumes?|"
                             r"pass(?:es)?|fails?|ships?|lands?|"
-                            r"moves?|renews?|continues?|pauses?|"
+                            r"moves?|renews?|rotates?|continues?|pauses?|"
                             r"hosted (?:at|on)|serves?|costs?|lasts?|"
                             r"is|are)\s+(.+)$",
                             body, flags=re.IGNORECASE,

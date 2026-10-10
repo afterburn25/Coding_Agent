@@ -1273,6 +1273,18 @@ class CrossChatMemoryTests(unittest.TestCase):
                 self.assertTrue(
                     any(fragment in f for f in learned["facts"]), utterance)
 
+    def test_leading_scratch_that_strips_before_fact(self):
+        # BUG-075 — 'scratch that, the deadline is wednesday' led the
+        # sentence with a correction marker the body-strip didn't know;
+        # the whole clause failed to parse and fell to a model riff.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("the deadline is next tuesday")
+            learned = memory.learn_from_user(
+                "scratch that, the deadline is wednesday")
+            self.assertEqual(learned["facts"], ["deadline is wednesday"])
+            self.assertIn("next tuesday", learned["superseded"][0])
+
     def test_schedule_predicates_and_usage_supersession(self):
         # BUG-074 — 'moves to fridays', 'renews annually' are
         # declarative status facts like 'lifts on monday'; 'we used X

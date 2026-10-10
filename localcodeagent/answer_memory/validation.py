@@ -157,6 +157,29 @@ def is_fragment_answer(text: str) -> bool:
     return bool(_FRAGMENT_ANSWER_RE.match(t))
 
 
+# Ack-shaped replies — "Got it — the deadline is Wednesday", "Noted —
+# X", "Reverted — my radio is orion", "You told me that — …" — are
+# transaction confirmations, not reusable answers. Banked under a
+# question they replay a fabricated write-claim to a future turn; when
+# a model riffed the ack the claim was never even executed. The
+# repeat-family prefixes ride here too so a wrapped repeat can never
+# be re-learned as a fresh answer.
+_ACK_ANSWER_RE = re.compile(
+    r"^\s*(?:got it\b|noted\b|already noted\b|reverted\b|forgot\b|"
+    r"you told me that\b|i'?ll\s+(?:adjust|apply|keep\s+(?:that|it)\s+in\s+"
+    r"mind|note\s+that)|"
+    r"same\s+(?:result|answer(?:\s+as\s+before)?|as\s+before)\b|"
+    r"still\s+the\s+case\b|unchanged\b|identical\s+to\s+before\b|"
+    r"as\s+before\b)",
+    re.I)
+
+
+def is_ack_answer(text: str) -> bool:
+    """True when the reply is confirmation-shaped rather than answer-
+    shaped — a banked ack replays a write-claim, not knowledge."""
+    return bool(_ACK_ANSWER_RE.match(str(text or "")))
+
+
 # Machine-authored work-order scaffolds — mission/autonomy lanes issue
 # fixed template prompts ("Work the scoped lane of this mission…",
 # "A mission task failed. Diagnose the concrete cause…",
