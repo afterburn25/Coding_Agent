@@ -5564,6 +5564,10 @@ class AppState:
         return False
 
     def _watchdog_maintenance(self) -> None:
+        try:
+            self.runtime.reap_zombie_listeners()
+        except Exception:
+            pass
         self._evict_idle_models()
         self._expire_stale_approvals()
         self._reap_stalled_tasks()
