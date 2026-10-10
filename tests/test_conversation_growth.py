@@ -1060,6 +1060,28 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertEqual(out["facts"], [])
             self.assertEqual(out["behavior_rules"], [])
 
+    def test_compound_split_uses_full_predicate_set(self):
+        """'the cache is flushed nightly and the logs rotate weekly' —
+        the and-split's completeness check must know the same
+        predicates the single-decl matcher does ('rotate', 'moves',
+        'renews'), or the whole conjunction banks verbatim and a probe
+        for either half dumps both."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            out = memory.learn_from_user(
+                "the cache is flushed nightly and the logs rotate weekly")
+            self.assertEqual(sorted(out["facts"]),
+                             ["cache is flushed nightly",
+                              "logs rotate weekly"])
+            out = memory.learn_from_user(
+                "the standup moves to fridays and the retro renews monthly")
+            self.assertEqual(sorted(out["facts"]),
+                             ["retro renews monthly",
+                              "standup moves to fridays"])
+            # Non-compounds stay whole.
+            out = memory.learn_from_user("the stack is python and sqlite")
+            self.assertEqual(out["facts"], ["stack is python and sqlite"])
+
     def test_negated_copula_correction_and_retraction(self):
         """'X is not Y, it's Z' must bank 'X is Z' — not the verbatim
         negated sentence. Bare 'X isn't Y anymore' retracts the unique

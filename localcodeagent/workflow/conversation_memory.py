@@ -306,6 +306,26 @@ class ConversationMemory:
         r"loves?|should stay|should be|must be|will be|stays?|"
         r"remains?)\s+)(.+?)$", re.IGNORECASE)
 
+    # The full declarative-predicate alternation — shared by the
+    # compound `and`-split completeness check and the single-decl
+    # matcher so a new predicate can't bank alone yet split-fail in a
+    # compound.
+    _DECL_PRED_ALT = (
+        r"uses?|runs on|is built on|is written in|"
+        r"depends on|prefers?|ends? in|starts? with|"
+        r"ends? with|(?:is|are|was|were|gets?|"
+        r"is being)\s+(?:now\s+)?"
+        r"(?:called|named|known as)|equals?|"
+        r"lives? (?:at|in|on)|reports? to|"
+        r"works? (?:on|at|for)|belongs? to|comes? from|"
+        r"scheduled for|due (?:on|by|in)|"
+        r"expires?|ends?|starts?|runs?|"
+        r"lifts?|holds?|begins?|resumes?|"
+        r"pass(?:es)?|fails?|ships?|lands?|"
+        r"moves?|renews?|rotates?|continues?|pauses?|"
+        r"hosted (?:at|on)|serves?|costs?|lasts?|"
+        r"was|were|is|are")
+
     _TIME_VALUE_RE = re.compile(
         r"\b(?:today|tomorrow|tonight|tonite|noon|midnight|daily|"
         r"weekdays?|weekends?|mornings?|afternoons?|evenings?|"
@@ -1051,8 +1071,8 @@ class ConversationMemory:
         if len(and_parts) > 1:
             decl = re.compile(
                 r"^(?:my|the|our|i|we|it)\b.{1,60}?\b"
-                r"(?:is|are|was|were|uses?|runs on|prefers?|likes?|"
-                r"loves?)\s+\S", re.IGNORECASE)
+                r"(?:" + self._DECL_PRED_ALT + r")\s+\S",
+                re.IGNORECASE)
             if all(decl.match(p.strip()) for p in and_parts):
                 for part in and_parts:
                     sub = self.learn_from_user(
@@ -1476,20 +1496,7 @@ class ConversationMemory:
                     elif not imperative_body:
                         decl = re.match(
                             r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
-                            r"(uses?|runs on|is built on|is written in|"
-                            r"depends on|prefers?|ends? in|starts? with|"
-                            r"ends? with|(?:is|are|was|were|gets?|"
-                            r"is being)\s+(?:now\s+)?"
-                            r"(?:called|named|known as)|equals?|"
-                            r"lives? (?:at|in|on)|reports? to|"
-                            r"works? (?:on|at|for)|belongs? to|comes? from|"
-                            r"scheduled for|due (?:on|by|in)|"
-                            r"expires?|ends?|starts?|runs?|"
-                            r"lifts?|holds?|begins?|resumes?|"
-                            r"pass(?:es)?|fails?|ships?|lands?|"
-                            r"moves?|renews?|rotates?|continues?|pauses?|"
-                            r"hosted (?:at|on)|serves?|costs?|lasts?|"
-                            r"was|were|is|are)\s+(.+)$",
+                            r"(" + self._DECL_PRED_ALT + r")\s+(.+)$",
                             body, flags=re.IGNORECASE,
                         )
                         if decl:
