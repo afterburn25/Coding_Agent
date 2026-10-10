@@ -88,3 +88,8 @@ P3 (cosmetic).
   RESOLVED as BUG-028 (see table): ownership moved to a persistent
   spawn registry — the sweep only adopts/kills pids this install
   recorded, verified alive + still running the recorded port/model.
+- BUG-022 detector tail (same change set as BUG-028 commit): a
+  decorative checkmark emoji in honest prose ("we're holding off ✅")
+  bare-matched the claim alternation → false badge. Emoji now counts
+  only adjacent to an execution word or as the entire message; also
+  closed the bare "tests pass" claim gap (`pass(?:es|ed)?`).

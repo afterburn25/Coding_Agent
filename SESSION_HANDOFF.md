@@ -4922,5 +4922,37 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   Chatterbox worker 180s model-load timeout under load). One real
   conflict: BUG-023's element re-add violated the intentional-removal
   test → reverted.
+- **BUG-024** (`cf19e59f`, P1 secrets): corrupt master key → silent
+  re-key wiped the vault. Key write is atomic; corrupt-but-readable
+  keys quarantine (`InvalidToken`/bad-key → `needs_rekey`, never
+  regenerate over ciphertext).
+- **Tier-2 persistence** (`4cb1507b`, `496ebba2`): atomic writes for
+  image profiles + sidecars, runtime catalog metadata, research stats,
+  image-manager job output sidecars (library reads them).
+- **BUG-025** (`6260846`/`852588cb`, P1 learning): imperative questions
+  ("explain what a mutex is") were banked as facts — the ack swallowed
+  the real question. Subject-absorbing matchers gate on
+  `_ACTION_LEAD_RE`; compound turns bound facts to their first clause
+  (`_first_clause`) and the ack no longer short-circuits when a
+  second clause carries its own intent.
+- **BUG-026** (`2b7925ac`/`9b2674a2`, P1 chat lane): model exhaustion →
+  raw 500 + silently lost turn. `ModelUnavailableError` (ValueError
+  subclass w/ friendly+diagnostic contract); chat/SSE/queue lanes
+  record the degraded exchange + 503 `model_unavailable`.
+- **BUG-027** (`a8fa2663`, P1 autonomy): "the review cadence is weekly"
+  created a standing goal titled by a PREVIOUS turn. `_mission_command`
+  phrase-matches on the semantic frame's quote-masked text and requires
+  the trigger to modify the requested work; quoted imperatives and
+  reported intent can't trigger; non-referential scheduling requests
+  use their own message as objective. Plus `also` → discourse prefix,
+  `--` → fact clause boundary.
+- **BUG-028** (`fa59e4fb`, P0 runtime): boot orphan-sweep identified
+  processes by exe path — two installs share one llama binary, so each
+  could adopt/kill the other's live servers. Ownership is now a
+  persistent spawn registry (`spawned_pids.json`): only registered
+  pids still alive + running the recorded port/model are touched;
+  PID-reuse/foreign/stale records drop untouched. Live-verified:
+  booted with deployed's :8080/:8084 servers running — zero kills.
 - Still open: UI click-dogfood (needs interactive browser), installer
-  cycle execution, external llama:8391 intermittent disconnects.
+  cycle execution, external llama:8391 intermittent disconnects
+  (environmental — deployed instance's own evictions).

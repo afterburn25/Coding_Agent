@@ -3312,7 +3312,16 @@ class AgentOrchestrator:
         # when nothing actually ran.
         + r"|\bi did\s+" + _CLAIM_ADVERBS +
         r"(?:it|that|all|everything|what you \w+|so|the \w+)\b"
-        r"|✅|☑|☒|✔"
+        # Checkmark emoji is a claim only next to an execution word
+        # ("Done ✅") or as the whole message — decorative emoji after
+        # honest prose ("we're holding off ✅") is not a work claim.
+        r"|\b(?:done|complete|finished|applied|pushed|committed|merged|"
+        r"deployed|fixed|synced|updated|installed|built|all set|"
+        r"ready to go|sorted)\b[^\n]{0,12}[✅☑☒✔]"
+        r"|[✅☑☒✔][^\n]{0,12}\b(?:done|complete|finished|applied|pushed|"
+        r"committed|merged|deployed|fixed|synced|updated|installed|"
+        r"built|all set|ready to go|sorted)\b"
+        r"|^\s*[✅☑☒✔]+\s*$"
         r"|\b(?:patch|fix|commit|changes?|update|build|code|bug|error|"
         r"issue|files?|config(?:uration)?|module|migration|feature)\s+"
         r"(?:has been |is |was |are )?(?:successfully\s+)?"
@@ -3327,7 +3336,7 @@ class AgentOrchestrator:
         r"in\s+(?:version|release|v\d)))"
         r"|\ball\s+(?:the\s+)?tests?\s+(?:suite\s+)?(?:now\s+)?"
         r"pass(?:es|ed|ing)?\b"
-        r"|\btests?\s+(?:suite\s+)?(?:now\s+)?pass(?:es|ed)\b"
+        r"|\btests?\s+(?:suite\s+)?(?:now\s+)?pass(?:es|ed)?\b"
         r"|\b(?:successfully|confirmed|verified)\s+"
         r"(?:applied|connected|synced|pushed|committed|installed|fixed|"
         r"created|updated|saved|removed|added|deleted|built|deployed)\b",
