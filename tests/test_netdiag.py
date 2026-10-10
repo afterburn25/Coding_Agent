@@ -702,6 +702,25 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNone(agent._single_fact_recall_reply(
                 "what color is the sky", "conv", "proj"))
 
+    def test_when_does_probe_drops_trailing_verb(self):
+        # "when does the freeze lift" — the probe's own verb isn't a
+        # fact term; after the strict subset fails, retry on the noun
+        # phrase alone so 'code freeze lifts on monday' answers.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "the code freeze lifts on monday")
+            reply = agent._single_fact_recall_reply(
+                "when does the freeze lift", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("monday", reply.text)
+            self.assertIsNone(agent._single_fact_recall_reply(
+                "when does the comet arrive", "conv", "proj"))
+
     def test_remind_me_probe_uses_recall_lane(self):
         # "remind me about my editor" is a memory recall request — the
         # frame must not classify 'remind' as an assertion and veto

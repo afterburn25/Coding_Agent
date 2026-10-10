@@ -673,6 +673,16 @@ class TestCorrectionChains(unittest.TestCase):
         learned = cm2.learn_from_user("the label used to be blue")
         self.assertFalse(learned["facts"])
 
+    def test_temporal_verb_predicates_bank(self):
+        # "the code freeze lifts on monday" — schedule-shaped verbs
+        # (lifts/holds/begins/resumes) are declarative facts, not prose
+        # for the model to fabricate an ack over.
+        cm = self._mem()
+        for txt in ("the code freeze lifts on monday",
+                    "the policy holds through friday"):
+            learned = cm.learn_from_user(txt)
+            self.assertTrue(learned["facts"], txt)
+
     def test_marker_led_decl_retargets_entity_slot(self):
         # "actually the laptop is pulsar" — the correction marker
         # legitimizes the short value AND binds the same-entity slot

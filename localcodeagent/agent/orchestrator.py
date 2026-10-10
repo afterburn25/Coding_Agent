@@ -2649,11 +2649,28 @@ class AgentOrchestrator:
             q_terms -= {"time", "when", "date", "day", "days"}
             if not q_terms:
                 return None
+            pre_gate = rows
             rows = [
                 r for r in rows
                 if q_terms <= self.conversation_memory._fact_query_terms(
                     str(r.get("text", "")), str(r.get("slot") or ""))
             ]
+            if not rows and len(q_terms) > 1:
+                # The probe's own verb isn't a fact term — "when do the
+                # backups run" asks about 'backups', so a strict subset
+                # on {backups, run} starves 'backup schedule is …'.
+                # Retry with the trailing token dropped.
+                trimmed = re.sub(r"\s+\S+\s*$", "", body.strip())
+                t_terms = (self.conversation_memory
+                           ._content_terms(trimmed)
+                           - {"time", "when", "date", "day", "days"})
+                if t_terms and t_terms != q_terms:
+                    rows = [
+                        r for r in pre_gate
+                        if t_terms <= self.conversation_memory
+                        ._fact_query_terms(str(r.get("text", "")),
+                                           str(r.get("slot") or ""))
+                    ]
             if not rows:
                 return None
         items = [self._recalled_fact_sentence(r) for r in rows[:4]]

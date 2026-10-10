@@ -5177,14 +5177,30 @@ class AppState:
         conversation_path = Path(config.conversation_memory_path).expanduser()
         if not conversation_path.is_absolute():
             conversation_path = self.runtime.base_dir / conversation_path
-        self.conversation_memory = ConversationMemory(
-            conversation_path,
-            enabled=config.conversation_memory_enabled,
-            history_limit=config.conversation_history_limit,
-            rule_limit=config.conversation_rule_limit,
-            fact_limit=config.conversation_fact_limit,
-            training_limit=config.conversation_training_limit,
-        )
+        conversation_path = conversation_path.resolve()
+        cm = self.conversation_memory
+        if cm is not None and getattr(cm, "path", None) == conversation_path:
+            # Reuse the live store — a second ConversationMemory on the
+            # same file is a stale-writer: each instance snapshot-saves
+            # its own in-memory copy, so a save from the one that loaded
+            # earlier silently clobbers rows the other just banked
+            # (observed: an acked 'code freeze lifts on monday' fact
+            # vanished from disk after a reload-era save).
+            cm.enabled = bool(config.conversation_memory_enabled)
+            cm.history_limit = max(20, int(config.conversation_history_limit))
+            cm.rule_limit = max(20, int(config.conversation_rule_limit))
+            cm.fact_limit = max(20, int(config.conversation_fact_limit))
+            cm.training_limit = max(
+                20, int(config.conversation_training_limit))
+        else:
+            self.conversation_memory = ConversationMemory(
+                conversation_path,
+                enabled=config.conversation_memory_enabled,
+                history_limit=config.conversation_history_limit,
+                rule_limit=config.conversation_rule_limit,
+                fact_limit=config.conversation_fact_limit,
+                training_limit=config.conversation_training_limit,
+            )
         conversations_path = Path(config.conversations_path).expanduser()
         if not conversations_path.is_absolute():
             conversations_path = self.runtime.base_dir / conversations_path
@@ -5234,6 +5250,15 @@ class AppState:
         self.agent.model_growth = self.model_growth
         self.agent.nexus_brain = self.nexus_brain
         self.agent.answer_memory = self.answer_memory
+        # The brain's hippocampus captured these services at init —
+        # without re-pointing, it keeps writing through stale (and for
+        # answer_memory, closed) handles after a reload.
+        hipp = getattr(getattr(self.agent, "brain", None),
+                       "hippocampus", None)
+        if hipp is not None:
+            hipp.conversation_memory = self.conversation_memory
+            hipp.answer_memory = self.answer_memory
+            hipp.knowledge_memory = self.knowledge_memory
         self.history = self.conversation_manager.history(limit=32)
         self.images.config = config
         self.images.adult_content_allowed = lambda: self.brain_allows("adult_content", True)
