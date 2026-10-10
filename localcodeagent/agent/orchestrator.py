@@ -2666,13 +2666,27 @@ class AgentOrchestrator:
                 # The probe's own verb isn't a fact term — "when do the
                 # backups run" asks about 'backups', so a strict subset
                 # on {backups, run} starves 'backup schedule is …'.
-                # Retry with the trailing token dropped.
-                trimmed = re.sub(r"\s+\S+\s*$", "", body.strip())
-                t_terms = (self.conversation_memory
-                           ._content_terms(trimmed)
-                           - {"time", "when", "date", "day", "days"})
-                if t_terms and t_terms != q_terms:
-                    rows = [r for r in pre_gate if _terms_hit(t_terms, r)]
+                # Retry with the trailing token dropped — but ONLY when
+                # it's a verb: dropping an entity noun ("what color is
+                # the sky" → {color}) would widen the match onto
+                # unrelated facts.
+                tail = re.search(r"([a-z0-9]+)\s*$", body.strip())
+                if tail and tail.group(1) in {
+                        "run", "runs", "lift", "lifts", "start",
+                        "starts", "end", "ends", "expire", "expires",
+                        "ship", "ships", "land", "lands", "hold",
+                        "holds", "begin", "begins", "resume", "resumes",
+                        "pass", "passes", "fail", "fails", "happen",
+                        "happens", "occur", "occurs", "cost", "costs",
+                        "last", "lasts", "serve", "serves", "fire",
+                        "fires", "kick"}:
+                    trimmed = re.sub(r"\s+\S+\s*$", "", body.strip())
+                    t_terms = (self.conversation_memory
+                               ._content_terms(trimmed)
+                               - {"time", "when", "date", "day", "days"})
+                    if t_terms and t_terms != q_terms:
+                        rows = [r for r in pre_gate
+                                if _terms_hit(t_terms, r)]
             if not rows:
                 return None
         items = [self._recalled_fact_sentence(r) for r in rows[:4]]
