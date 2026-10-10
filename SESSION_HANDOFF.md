@@ -5090,3 +5090,9 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
 - Live-verified full rename matrix: teach → `it's now called` → `rename
   it to` → `call it` → `use X as the name` → `the X is now named` →
   `that's wrong — it's called` → recall, all persistent.
+- **BUG-047** (P1 memory): `not X, it's Y` fabricated acks (no lane);
+  value-matched via `_correct_fact_value` (the negated value names its
+  own fact — verified live: `no not cobalt, it's onyx` corrected the
+  cobalt row while `cache db` was newer). `and`-joined declaratives
+  split when every part is a complete statement.
+- Commit `7b2cb052` + `5214726a`. Live matrix all persistent.
