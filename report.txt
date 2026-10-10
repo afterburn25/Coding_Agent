@@ -1,0 +1,6 @@
+This is a plain-English rollup of the report endpoint.
+
+Endpoint: /api/missions/<id>/report
+Status: In Progress
+Details: Mission report endpoint + UI implemented with backend report endpoint.
+Mission objective: internal:epistemic_step completed successfully. 
