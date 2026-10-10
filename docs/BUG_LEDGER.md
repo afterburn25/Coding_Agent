@@ -38,6 +38,12 @@ P3 (cosmetic).
   stays a 500 — do not widen the 400 map.
 - Part 4 dead-code sweep, Part 6 tool fuzzing, Part 7 permission
   confusion matrix, Part 28 false-success audit: in progress.
+- Test-infra flake fixed (suite-ordering): the `openai_compat` urlopen
+  patch is module-global, and a leaked `warmup-*` daemon ping (posts
+  to chat/completions up to 120s) consumed a scripted call in
+  `test_reset_triggers_…` → expected 2 calls, saw 3. All counting
+  fakes now run under `_completions_only(fn, 9999, 1)` — only this
+  test's own endpoints count; foreign probes see a dead endpoint.
 - Soak residual dispositions (81-turn run): spelled-math → BUG-020
   (fixed); kokoro topic-return → external llama 503, not semantic
   (the eventual reply was correct); `search_text` on the quoted-command

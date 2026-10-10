@@ -87,6 +87,22 @@ def _win_reset() -> ConnectionResetError:
     return exc
 
 
+def _completions_only(fn, *ports):
+    """The urlopen patch is module-global — a stray background caller
+    (a leaked runtime warmup ping posts to chat/completions on a daemon
+    thread) would otherwise consume scripted calls and corrupt call
+    accounting. Only count/answer chat-completion requests on this
+    test's own ports; anything else sees a dead endpoint."""
+    def wrapped(req, timeout):
+        url = getattr(req, "full_url", "") or ""
+        if "chat/completions" not in url:
+            raise urllib.error.URLError("no server in test")
+        if ports and not any(f":{p}/" in url for p in ports):
+            raise urllib.error.URLError("no server in test")
+        return fn(req, timeout)
+    return wrapped
+
+
 class ClassificationTests(unittest.TestCase):
     def test_winerror_10054_classifies_as_connection_reset(self):
         self.assertEqual(
@@ -319,7 +335,7 @@ class RecoveryLoopTests(unittest.TestCase):
 
             netdiag._FAILURES.clear()
             with patch("localcodeagent.models.openai_compat.urllib.request.urlopen",
-                       side_effect=fake_urlopen):
+                       side_effect=_completions_only(fake_urlopen, 9999, 1)):
                 result = agent._complete_with_recovery(
                     provider, profile, messages=[], tools=None,
                     model_events=[])
@@ -365,7 +381,7 @@ class RecoveryLoopTests(unittest.TestCase):
 
             netdiag._FAILURES.clear()
             with patch("localcodeagent.models.openai_compat.urllib.request.urlopen",
-                       side_effect=dead_urlopen):
+                       side_effect=_completions_only(dead_urlopen, 9999, 1)):
                 with self.assertRaises(BackendConnectionError):
                     agent._complete_with_recovery(
                         provider, agent.config.models[0], messages=[],
@@ -439,7 +455,7 @@ class RecoveryLoopTests(unittest.TestCase):
 
             netdiag._FAILURES.clear()
             with patch("localcodeagent.models.openai_compat.urllib.request.urlopen",
-                       side_effect=fake_urlopen):
+                       side_effect=_completions_only(fake_urlopen, 9999, 1)):
                 result = agent._complete_with_recovery(
                     provider, profile, messages=[], tools=None,
                     model_events=[])
@@ -480,7 +496,7 @@ class RecoveryLoopTests(unittest.TestCase):
                     "Bad Request", {}, io.BytesIO(body))
 
             with patch("localcodeagent.models.openai_compat.urllib.request.urlopen",
-                       side_effect=fake_urlopen):
+                       side_effect=_completions_only(fake_urlopen, 9999, 1)):
                 with self.assertRaises(ModelHTTPError):
                     agent._complete_with_recovery(
                         provider, profile, messages=[], tools=None,
