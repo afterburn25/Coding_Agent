@@ -185,13 +185,18 @@ class AnswerMemory:
             bad = [
                 r for r in ([match.answer] + list(match.context_answers or []))
                 if isinstance(r, dict)
-                and validation.is_error_answer(str(r.get("answer_text") or ""))
+                and (validation.is_error_answer(str(r.get("answer_text") or ""))
+                     or validation.is_fragment_answer(
+                         str(r.get("answer_text") or "")))
             ]
             for r in bad:
                 try:
                     learning.invalidate_answer(
                         self.store, str(r.get("id") or ""),
-                        "error output stored as answer")
+                        "error output stored as answer"
+                        if validation.is_error_answer(
+                            str(r.get("answer_text") or ""))
+                        else "fragment answer stored as answer")
                 except Exception:
                     pass
             if bad:
@@ -341,6 +346,13 @@ class AnswerMemory:
         # A failure report ("I couldn't reach GitHub — unknown tool …")
         # is not evidence of a good answer — never let it become one.
         if validation.is_error_answer(answer):
+            out["suppressed"] = True
+            self.store.bump("suppressed_experiences")
+            return out
+        # A mid-thread continuation fragment ("— no auto") is not a
+        # standalone answer — learned, it replays as nonsense hints on
+        # unrelated questions.
+        if validation.is_fragment_answer(answer):
             out["suppressed"] = True
             self.store.bump("suppressed_experiences")
             return out
