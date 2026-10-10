@@ -12,14 +12,12 @@ objective, source/time budget, and evaluation plan — study ≠ research
 
 from __future__ import annotations
 
-import json
 import re
 import threading
 import time
 import uuid
 from pathlib import Path
 
-from ..fsutil import atomic_write_text
 from . import competencies as comp
 
 CURRICULUM_LEVELS = (
@@ -99,27 +97,24 @@ class CurriculumManager:
 
 
 class StudySessionStore:
-    def __init__(self, path: Path, *, max_sessions: int = 300) -> None:
+    def __init__(self, path: Path, *, max_sessions: int = 300,
+                 db: Any = None) -> None:
         self.path = Path(path).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.max_sessions = int(max_sessions)
         self._lock = threading.RLock()
+        from ..state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="learning")
         self._data: dict = {"version": 1, "sessions": []}
         self._load()
 
     def _load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict) and isinstance(raw.get("sessions"), list):
-                self._data["sessions"] = raw["sessions"]
-        except (OSError, ValueError, TypeError):
-            pass
+        raw = self._doc.load_json(None)
+        if isinstance(raw, dict) and isinstance(raw.get("sessions"), list):
+            self._data["sessions"] = raw["sessions"]
 
     def _save(self) -> None:
-        atomic_write_text(self.path, json.dumps(
-            self._data, indent=2, ensure_ascii=False))
+        self._doc.save_json(self._data)
 
     def open(self, topic: str, *, competency_ids: list[str] | None = None,
              curriculum: dict | None = None, budget: dict | None = None) -> dict:

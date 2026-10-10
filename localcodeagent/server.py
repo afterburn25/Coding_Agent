@@ -153,6 +153,12 @@ class AppState:
         self.config_path = (config_path or (runtime_root / "config.json")).expanduser().resolve()
         self.runtime_root = runtime_root
         self._boot: Callable[[float, str, str], None] = boot or (lambda *a: None)
+        # Transactional state layer — WAL-mode SQLite backing the
+        # highest-risk document stores (autonomy, ledger, identity,
+        # safemode, decisions, requirements). Each save is a crash-safe
+        # commit; corrupt sources quarantine instead of resetting.
+        from .state_db import StateDB
+        self.state_db = StateDB(runtime_root / "data" / "state.db")
         self._boot(4, "INITIALIZING · NEXUS CORE", "Preparing local application environment")
         self._boot(12, "CALIBRATING · MODEL RUNTIME", "Detecting models, hardware and available resources")
         self.runtime = RuntimeManager(config, base_dir=runtime_root)
@@ -206,13 +212,17 @@ class AppState:
         from .projects import ProjectStore
         self.projects = ProjectStore(runtime_root / "data")
         from .requirements import RequirementStore
-        self.requirements = RequirementStore(runtime_root / "data" / "requirements.json")
+        self.requirements = RequirementStore(runtime_root / "data" / "requirements.json",
+                                             db=self.state_db)
         from .hypotheses import HypothesisStore
         from .causal import CausalMemory
         from .decisions import DecisionJournal
-        self.hypotheses = HypothesisStore(runtime_root / "data" / "hypotheses.json")
-        self.causal = CausalMemory(runtime_root / "data" / "causal_memory.json")
-        self.decisions = DecisionJournal(runtime_root / "data" / "decisions.json")
+        self.hypotheses = HypothesisStore(runtime_root / "data" / "hypotheses.json",
+                                          db=self.state_db)
+        self.causal = CausalMemory(runtime_root / "data" / "causal_memory.json",
+                                   db=self.state_db)
+        self.decisions = DecisionJournal(runtime_root / "data" / "decisions.json",
+                                         db=self.state_db)
         from .promotion import PromotionPipeline
         self.promotions = PromotionPipeline(runtime_root / "data" / "promotions.json")
         from .evidence import EvidenceBoard
@@ -289,7 +299,8 @@ class AppState:
             decisions=self.decisions,
             regressions=self.regressions,
             benchmarks=getattr(self, "benchmarks", None),
-            model_growth=self.model_growth)
+            model_growth=self.model_growth,
+            state_db=self.state_db)
         # Every terminal task transition feeds the learning loop — lesson
         # extraction, competency updates, strategy stats — regardless of
         # which lane (chat, queue, mission, worker) produced it.
@@ -613,7 +624,8 @@ class AppState:
         # consecutive-failure counter; repeated failures surface a
         # Safe Mode offer (never automatic data loss).
         from .safemode import GoldenConfigStore, SafeModeStore
-        self.safemode = SafeModeStore(runtime_root / "data" / "safe_mode.json")
+        self.safemode = SafeModeStore(runtime_root / "data" / "safe_mode.json",
+                                      db=self.state_db)
         self.safemode.record_boot(
             previous_clean=not bool(self.prior_session_abnormal))
         self.golden = GoldenConfigStore(
@@ -674,7 +686,8 @@ class AppState:
             config=config, vault=self.secrets,
             permission_check=lambda p: self.permission_manager.effective(p),
             store_root=runtime_root / "data" / "social",
-            event_sink=lambda e, p: self.events.publish(e, p))
+            event_sink=lambda e, p: self.events.publish(e, p),
+            state_db=self.state_db)
         try:
             self._moltbook_connector = MoltbookConnector(
                 base_url=str(getattr(config, "moltbook_api_url",
@@ -710,7 +723,8 @@ class AppState:
             connectors=self.connectors,
             github_account=self.github_account,
             permission_check=lambda p: self.permission_manager.effective(p),
-            emit=lambda e, d: self.events.publish(e, d))
+            emit=lambda e, d: self.events.publish(e, d),
+            state_db=self.state_db)
         self._knowledge_path = runtime_root / "data" / "knowledge_graph.db"
         self.skills = SkillRegistry(runtime_root)
         # L13: learned procedures promote to real skills only through
@@ -1017,7 +1031,7 @@ class AppState:
         # success language is only allowed on a 'verified' entry.
         from .action_ledger import ActionLedger
         self.action_ledger = ActionLedger(
-            runtime_root / "data" / "action_ledger.json")
+            runtime_root / "data" / "action_ledger.json", db=self.state_db)
         # Entries still 'recorded' across a restart were interrupted —
         # close them as unverified so open-looking rows never masquerade
         # as pending work.
@@ -1089,6 +1103,21 @@ class AppState:
         self.autonomy = self._build_autonomy(config, runtime_root)
         self._sweep_worktree_orphans()
         self._report_prior_crash()
+        # Startup integrity — bounded check of the transactional state
+        # layer: SQLite quick_check plus a JSON parse probe of every
+        # migrated document row. Degraded stores still boot (each fell
+        # back to a quarantined/default state with the original
+        # preserved), but the condition is surfaced, never silent.
+        try:
+            self.state_integrity = self.state_db.integrity()
+            if not self.state_integrity.get("ok"):
+                self.events.publish("state_health", {
+                    "ok": False,
+                    "bad_rows": self.state_integrity.get("bad_rows", []),
+                    "degraded": self.state_integrity.get("degraded", [])})
+        except Exception:
+            self.state_integrity = {"ok": False,
+                                    "quick_check": "check failed"}
         self.queue.enrich = self._queue_enrich_mission
         # Requirement-change propagation — a superseded conversation fact
         # flags in-flight mission nodes that still reference the stale
@@ -3317,6 +3346,7 @@ class AppState:
                 self.config, "autonomous_approval_timeout_seconds", 0.0) or 0.0)
             if getattr(self.config, "autonomous_mode", False) else 0.0,
             task_resolver=self._task_row,
+            state_db=self.state_db,
         )
         self._register_goal_metrics(registry, sup, runtime_root)
         # Evidence for non-executor node kinds (verify/internal/job) —
@@ -6457,6 +6487,20 @@ class AppState:
             resources=res, last_interaction_at=self._last_interaction_at,
             profile=prof)
 
+    def state_health(self) -> dict:
+        """Transactional state layer health: the boot-time integrity
+        report re-checked live, plus per-domain row inventory. Degraded
+        stores are listed with their quarantine issue — a damaged store
+        boots degraded and recoverable, never silently empty."""
+        report = self.state_db.integrity()
+        boot = getattr(self, "state_integrity", None) or {}
+        report["boot_ok"] = bool(boot.get("ok", True))
+        report["stores"] = {
+            d: self.state_db.kv_keys(d)
+            for d in ("autonomy", "ledger", "identity", "safemode",
+                      "decisions", "requirements", "hypotheses", "causal")}
+        return report
+
     def situation(self) -> dict:
         """The Situation Model — one coherent, live view of everything
         Nexus is doing: conversation focus, missions + workstreams,
@@ -7740,6 +7784,7 @@ class Handler(BaseHTTPRequestHandler):
     _PLATFORM_PREFIXES = ("/api/health", "/api/twin", "/api/artifacts",
                           "/api/skills", "/api/connectors", "/api/knowledge",
                           "/api/social", "/api/identity", "/api/situation",
+                          "/api/state",
                           "/api/rag", "/api/eval", "/api/experiments",
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
@@ -7781,6 +7826,11 @@ class Handler(BaseHTTPRequestHandler):
             # consults, failures. Feeds the Intelligence Center and the
             # "what's going on?" lane.
             self._json(self.state.situation())
+            return True
+        if path == "/api/state/health":
+            # Transactional state layer integrity — quick_check + row
+            # parse probe + degraded/migration report.
+            self._json(self.state.state_health())
             return True
         if path == "/api/identity":
             # Identity Manager — persistent account/identity registry.
@@ -13825,6 +13875,13 @@ def stop_state(state: AppState) -> None:
     try:
         if getattr(state, "brain", None) is not None:
             state.brain.close()
+    except Exception:
+        pass
+    # State layer last — every migrated store writes through it, so it
+    # closes only after all writers are stopped.
+    try:
+        if getattr(state, "state_db", None) is not None:
+            state.state_db.close()
     except Exception:
         pass
     # Join tracked daemon threads so nothing writes after the workspace

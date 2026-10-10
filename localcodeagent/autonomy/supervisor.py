@@ -72,9 +72,10 @@ class AutonomousSupervisor:
         rc: Any = None,                      # RCManager — freezes self-dev/packages
         approval_timeout_seconds: float | Callable[[], float] = 0.0,
         task_resolver: Callable[[str], dict | None] | None = None,
+        state_db: Any = None,                # StateDB — transactional critical state
     ) -> None:
         self.workspace = Path(workspace)
-        self.store = AutonomyStore(store_root)
+        self.store = AutonomyStore(store_root, db=state_db)
         # Adaptive Worker Manager — measured-capacity admission control for
         # every mission node (and, via the shared instance, ad-hoc user
         # work). Injected by the server so the queue can reach voice/UI;

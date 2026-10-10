@@ -54,6 +54,7 @@ class LearningGovernor:
         regressions=None,
         benchmarks=None,
         model_growth=None,
+        state_db=None,
     ) -> None:
         data_dir = Path(data_dir).expanduser().resolve()
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -65,14 +66,20 @@ class LearningGovernor:
         self.regressions = regressions
         self.benchmarks = benchmarks
         self.model_growth = model_growth
-        # Owned stores.
-        self.lessons = LessonStore(data_dir / "lessons.json")
-        self.procedures = ProceduralMemory(data_dir / "procedures.json")
-        self.strategies = StrategyEvaluator(data_dir / "strategies.json")
-        self.competencies = CompetencyMap(data_dir / "competencies.json")
-        self.study_sessions = StudySessionStore(data_dir / "study_sessions.json")
+        # Owned stores — WAL-committed kv rows when a StateDB is wired
+        # (live file shadow kept), atomic files otherwise.
+        self.lessons = LessonStore(data_dir / "lessons.json", db=state_db)
+        self.procedures = ProceduralMemory(data_dir / "procedures.json",
+                                           db=state_db)
+        self.strategies = StrategyEvaluator(data_dir / "strategies.json",
+                                            db=state_db)
+        self.competencies = CompetencyMap(data_dir / "competencies.json",
+                                          db=state_db)
+        self.study_sessions = StudySessionStore(
+            data_dir / "study_sessions.json", db=state_db)
         self.mastery = MasteryEvaluator(data_dir / "mastery.json",
-                                        competency_map=self.competencies)
+                                        competency_map=self.competencies,
+                                        db=state_db)
         # Policies/engines.
         self.promotion = KnowledgePromotionPolicy()
         self.freshness = FreshnessPolicy()
@@ -88,7 +95,8 @@ class LearningGovernor:
         # L13–L15: skill promotion needs user approval; training rows
         # pass the quality gate; teacher/student feeds both.
         self.skill_promotion = SkillPromotionEngine(
-            data_dir / "skill_candidates.json", procedures=self.procedures)
+            data_dir / "skill_candidates.json", procedures=self.procedures,
+            db=state_db)
         self.training_gate = (TrainingCandidateGate(
             model_growth, policy=self.promotion)
             if model_growth is not None else None)

@@ -43,13 +43,15 @@ class SocialService:
                  permission_check: Callable[[str], str] | None = None,
                  store_root: Path | None = None,
                  event_sink: Callable[[str, dict], None] | None = None,
-                 activity: Callable[..., Any] | None = None) -> None:
+                 activity: Callable[..., Any] | None = None,
+                 state_db: Any = None) -> None:
         self._config = config
         self._vault = vault
         self._perm = permission_check or (lambda _p: "allow")
         self._event = event_sink or (lambda _e, _p: None)
         self._activity = activity
-        self.store = SocialStore(store_root or Path("data/social"))
+        self.store = SocialStore(store_root or Path("data/social"),
+                                 db=state_db)
         self.drive = SocialDrive(
             self.store,
             level=lambda: str(getattr(config, "social_level",
@@ -61,7 +63,8 @@ class SocialService:
             self.store,
             consults_path=(Path(store_root) / "consults.json"
                            if store_root else None),
-            event_sink=self._event)
+            event_sink=self._event,
+            db=state_db)
         self._connector = None
         self._connectors = None
 

@@ -13,12 +13,10 @@ remembered too, so Nexus does not loop a known-bad fix.
 """
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 from typing import Any
 
-from ..fsutil import atomic_write_text
 
 
 def _similar(a: str, b: str) -> float:
@@ -30,21 +28,18 @@ def _similar(a: str, b: str) -> float:
 
 
 class RepairMemory:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, db: Any = None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self.data = json.loads(
-                self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        from ..state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="autonomy")
+        self.data = self._doc.load_json({"version": 1, "procedures": []})
+        if not isinstance(self.data, dict):
             self.data = {"version": 1, "procedures": []}
         self.data.setdefault("procedures", [])
 
     def save(self) -> None:
-        atomic_write_text(
-            self.path,
-            json.dumps(self.data, indent=2, ensure_ascii=False,
-                       default=str))
+        self._doc.save_json(self.data)
 
     # ------------------------------------------------------------------
     def record(self, signature: str, *, kind: str, steps: list[str],

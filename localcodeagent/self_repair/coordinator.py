@@ -91,7 +91,9 @@ class SelfRepairCoordinator:
                                getattr(store, "root", repo_root))
         self.localizer = localizer or Localizer(self.repo_root)
         self.diagnostician = diagnostician or Diagnostician()
-        self.memory = RepairMemory(self.state_root / "repair_memory.json")
+        self.memory = RepairMemory(
+            self.state_root / "repair_memory.json",
+            db=getattr(store, "db", None))
         # Phase-2 cognitive stores — hypothesis lifecycle, causal
         # memory, decision journal. All optional: an unwired coordinator
         # behaves exactly as before.

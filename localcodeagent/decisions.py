@@ -8,35 +8,30 @@ This is the feed into procedural learning (Cerebellum) and the answer to
 """
 from __future__ import annotations
 
-import json
 import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
-from .fsutil import atomic_write_text
 
 _HISTORY_BOUND = 500
 
 
 class DecisionJournal:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, db: Any = None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        try:
-            self.data = json.loads(
-                self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        from .state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="decisions")
+        self.data = self._doc.load_json({"version": 1, "decisions": []})
+        if not isinstance(self.data, dict):
             self.data = {"version": 1, "decisions": []}
         self.data.setdefault("decisions", [])
 
     def _save(self) -> None:
-        atomic_write_text(
-            self.path,
-            json.dumps(self.data, indent=2, ensure_ascii=False,
-                       default=str))
+        self._doc.save_json(self.data)
 
     # ------------------------------------------------------------------
     def record(self, problem: str, *, alternatives: list,

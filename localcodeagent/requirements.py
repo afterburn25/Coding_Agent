@@ -16,7 +16,6 @@ user asked for this".
 """
 from __future__ import annotations
 
-import json
 import re
 import threading
 import time
@@ -24,7 +23,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .fsutil import atomic_write_text
 
 MAX_REQUIREMENTS = 2000
 MAX_EVIDENCE = 30
@@ -85,27 +83,27 @@ def new_requirement(description: str, *, source: str = "user",
 class RequirementStore:
     """Bounded JSON store at <runtime>/data/requirements.json."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, db: Any = None) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        from .state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="requirements")
         self._rows: list[dict[str, Any]] = self._load()
 
     # -- persistence --------------------------------------------------
 
     def _load(self) -> list[dict]:
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            rows = raw.get("requirements", [])
-            return [r for r in rows if isinstance(r, dict)
-                    and r.get("id")][-MAX_REQUIREMENTS:]
-        except (OSError, ValueError):
+        raw = self._doc.load_json(None)
+        if not isinstance(raw, dict):
             return []
+        rows = raw.get("requirements", [])
+        return [r for r in rows if isinstance(r, dict)
+                and r.get("id")][-MAX_REQUIREMENTS:]
 
     def _save(self) -> None:
-        atomic_write_text(self.path, json.dumps(
-            {"version": 1, "requirements": self._rows[-MAX_REQUIREMENTS:]},
-            indent=2, ensure_ascii=False))
+        self._doc.save_json(
+            {"version": 1, "requirements": self._rows[-MAX_REQUIREMENTS:]})
 
     # -- CRUD -----------------------------------------------------------
 

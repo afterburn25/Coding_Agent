@@ -4686,3 +4686,40 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
 - Verification: all 23 packs green live (81 turns, 0 failures);
   full suite 3620+1 passed (one voice test flaked under dogfood
   CPU load, passes isolated); long-300 rerun in flight.
+
+### Round 9 — Resilience Foundation 1: transactional critical state
+
+- New `localcodeagent/state_db.py`: `StateDB` — WAL-mode SQLite at
+  `data/state.db` (foreign_keys, busy_timeout, schema_migrations,
+  `txn()` atomic multi-write, `integrity()` boot probe) — and
+  `DocStore`, a drop-in persistence adapter: DB-backed kv row when
+  wired, legacy atomic file otherwise. Valid legacy files import
+  once + freeze as `<file>.migrated`; a live shadow file is still
+  written every save (downgrade + file-tooling safe). Corrupt
+  sources quarantine (quarantine table + .corrupt-* copy) and flag
+  the store degraded — never silently reset.
+- P0 defect fixed everywhere at once: ActionLedger, IdentityManager,
+  SafeModeStore, DecisionJournal, RequirementStore, HypothesisStore,
+  CausalMemory + all 7 learning stores silently reset to empty on
+  ANY load error (no quarantine — a truncated file wiped the store).
+- Tier-1 migrated: all 12 autonomy JsonStores (missions, approvals,
+  schedules, grants, goals, triggers, notifications, repairs,
+  findings, procedures, control, standing_goals), action_ledger,
+  identity, safe_mode, decisions, requirements, hypotheses, causal,
+  learning×7, social×8 (peers/claims/backlog/drive/debates/journal/
+  experiments/consults) — all through `db=`/`state_db=` params,
+  defaulting to prior file behavior.
+- Server: `self.state_db` first in AppState; boot integrity report
+  publishes `state_health` events when degraded; `/api/state/health`
+  endpoint; `stop_state` closes the DB last (after all writers).
+- Groundwork tables for later foundations: `operations`
+  (exactly-once) and `events` (audit replay).
+- docs/STATE_AUDIT.md — every persistent store classified
+  (transactional/atomic-file/append-only/recoverable/non-critical/
+  legacy) with Tier-2/Tier-3 migration notes.
+- Tests: tests/test_state_db.py — 21 tests: WAL/pragmas, idempotent
+  schema version, txn all-or-nothing, uncommitted-write invisibility,
+  integrity bad-row probe, migration verify+.migrated, DB-wins-over-
+  stale-file, corrupt quarantine (file+DB row), .migrated recovery,
+  reopen persistence for autonomy/ledger/identity/safemode/learning,
+  cross-store atomic commit.

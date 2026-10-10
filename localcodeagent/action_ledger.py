@@ -27,7 +27,6 @@ post-condition that must hold before success language is allowed:
 from __future__ import annotations
 
 import hashlib
-import json
 import shutil
 import threading
 import time
@@ -35,7 +34,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .fsutil import atomic_write_text
 
 BOUND = 2000
 
@@ -177,23 +175,23 @@ def run_filesystem(kind: str, params: dict[str, Any]) -> None:
 class ActionLedger:
     """Bounded, durable record of consequential actions."""
 
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str, db: Any = None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        try:
-            self.data = json.loads(
-                self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        # DocStore: WAL-committed kv row when a StateDB is wired (plus a
+        # live file shadow); atomic file otherwise. Either way a corrupt
+        # source is quarantined — never silently reset to empty.
+        from .state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="ledger")
+        self.data = self._doc.load_json({"version": 1, "entries": []})
+        if not isinstance(self.data, dict):
             self.data = {"version": 1, "entries": []}
         self.data.setdefault("entries", [])
 
     def _save(self) -> None:
         try:
-            atomic_write_text(
-                self.path,
-                json.dumps(self.data, indent=2, ensure_ascii=False,
-                           default=str))
+            self._doc.save_json(self.data)
         except OSError:
             pass
 

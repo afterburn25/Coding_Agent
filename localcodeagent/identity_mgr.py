@@ -34,8 +34,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from .fsutil import atomic_write_text
-
 # Account lifecycle states.
 ACCOUNT_STATES = (
     "creating",                # signup flow in progress
@@ -78,9 +76,15 @@ class IdentityManager:
     def __init__(self, data_dir: Path, *, vault: Any = None,
                  connectors: Any = None, github_account: Any = None,
                  permission_check: Callable[[str], str] | None = None,
-                 emit: Callable[[str, dict], None] | None = None) -> None:
+                 emit: Callable[[str, dict], None] | None = None,
+                 state_db: Any = None) -> None:
         self._dir = Path(data_dir)
         self._path = self._dir / "identity.json"
+        # DocStore: WAL-committed kv row when state_db is wired (plus a
+        # live file shadow); atomic file otherwise. Corrupt sources are
+        # quarantined + flagged, never silently reset to empty.
+        from .state_db import DocStore
+        self._doc = DocStore(state_db, self._path, domain="identity")
         self._vault = vault
         self._connectors = connectors
         self._github = github_account
@@ -101,28 +105,22 @@ class IdentityManager:
     # -- persistence --------------------------------------------------------
 
     def _load(self) -> None:
-        try:
-            import json
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                for k in ("canonical_name", "primary_email",
-                          "email_account", "recovery_owner"):
-                    if raw.get(k):
-                        self._data[k] = raw[k]
-                if isinstance(raw.get("accounts"), dict):
-                    self._data["accounts"] = raw["accounts"]
-                if isinstance(raw.get("audit"), list):
-                    self._data["audit"] = raw["audit"][-_AUDIT_LIMIT:]
-        except FileNotFoundError:
-            pass
-        except Exception:
-            pass
+        raw = self._doc.load_json(None)
+        if not isinstance(raw, dict):
+            return
+        for k in ("canonical_name", "primary_email",
+                  "email_account", "recovery_owner"):
+            if raw.get(k):
+                self._data[k] = raw[k]
+        if isinstance(raw.get("accounts"), dict):
+            self._data["accounts"] = raw["accounts"]
+        if isinstance(raw.get("audit"), list):
+            self._data["audit"] = raw["audit"][-_AUDIT_LIMIT:]
 
     def _save(self) -> None:
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
-            import json
-            atomic_write_text(self._path, json.dumps(self._data, indent=2))
+            self._doc.save_json(self._data)
         except Exception:
             pass
 

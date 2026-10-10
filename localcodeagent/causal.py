@@ -12,14 +12,12 @@ single old record can never outrank fresh deterministic evidence.
 """
 from __future__ import annotations
 
-import json
 import re
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
-from .fsutil import atomic_write_text
 
 _TOKEN_RE = re.compile(r"[a-z0-9_]+")
 
@@ -39,21 +37,18 @@ _HISTORY_BOUND = 400
 
 
 class CausalMemory:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, db: Any = None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self.data = json.loads(
-                self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        from .state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="causal")
+        self.data = self._doc.load_json({"version": 1, "records": []})
+        if not isinstance(self.data, dict):
             self.data = {"version": 1, "records": []}
         self.data.setdefault("records", [])
 
     def _save(self) -> None:
-        atomic_write_text(
-            self.path,
-            json.dumps(self.data, indent=2, ensure_ascii=False,
-                       default=str))
+        self._doc.save_json(self.data)
 
     # ------------------------------------------------------------------
     def record(self, symptom: str, *, root_cause: str, mechanism: str,
