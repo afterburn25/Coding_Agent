@@ -1,0 +1,12 @@
+[
+  {
+    "name": "browser_verify",
+    "description": "End-to-end verify a web page/app in a real browser: navigate, run optional actions, then assert expected text/title/selectors and that the console is error-free",
+    "category": "browsers",
+    "capabilities": ["browser_automation", "browser_verify", "e2e_verify"],
+    "permission": "ask",
+    "enabled": true,
+    "install": "installed",
+    "installable": false
+  }
+]
