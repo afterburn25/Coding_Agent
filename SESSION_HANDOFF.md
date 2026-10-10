@@ -5073,3 +5073,20 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   name` both ack + persist.
 - Commits: `2f9583aa` (BUG-044) → `af4e8c79` → `171e3534` (BUG-045).
 - Canonical suite re-running on HEAD; focused batteries green (220).
+
+### Round tail: BUG-045 follow-ons + BUG-046 intent routing
+- BUG-045 follow-ons (live-verified): imperative renames `rename it to
+  X` / `call it X` / `use X as the name` retarget; `use X as the name`
+  previously inverted via `use A as B` into "X is the name";
+  `_retarget_latest_fact` gained `subject_hint` — "the render box is
+  now named titan" binds `render box name` instead of forking a
+  parallel `render box` slot; correction-marker context ("that's wrong
+  —") legitimizes `it's called X` without `now`.
+- **BUG-046** (P1 intent): `forget render box` → image-generation
+  reply. `render` double-counted as verb+visual-noun; visual evidence
+  must now be a distinct token, and memory/meta imperative heads veto
+  image classification.
+- Commits: `af4e8c79`, `171e3534`, `43b0a325`, `f4158440`, `263c49e4`.
+- Live-verified full rename matrix: teach → `it's now called` → `rename
+  it to` → `call it` → `use X as the name` → `the X is now named` →
+  `that's wrong — it's called` → recall, all persistent.
