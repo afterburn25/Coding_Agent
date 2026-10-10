@@ -1,0 +1,3 @@
+Regression test added: test_detectors.py
+Minimal patch applied to epistemic_step_diagnosis.py
+Test suite executed successfully with no failures
