@@ -1640,15 +1640,21 @@ class OrphanSweepTests(unittest.TestCase):
                        "llama-server.exe")
             self.assertTrue(manager._exe_is_ours(ours, ""))
 
+    def _register_orphan(self, manager, pid, model_path, port):
+        endpoint = f"http://127.0.0.1:{port}"
+        manager._register_spawn(pid, "coder", endpoint, model_path)
+        cmd = f"llama-server --model {model_path} --port {port}"
+        return cmd
+
     def test_healthy_matching_orphan_is_adopted_not_killed(self):
         with tempfile.TemporaryDirectory() as td:
             manager = self._manager(Path(td))
             model_path = str(manager.models_dir / "coder.gguf")
-            cmd = f"llama-server --model {model_path} --port 51234"
-            orphan = {"pid": 4242, "exe": "llama-server", "cmdline": cmd}
+            cmd = self._register_orphan(manager, 4242, model_path, 51234)
             killed = []
-            with patch.object(manager, "_our_runtime_processes",
-                              return_value=[orphan]), \
+            with patch.object(manager, "_pid_image_cmdline",
+                              return_value=("llama-server.exe", cmd)), \
+                 patch.object(manager, "_exe_is_ours", return_value=True), \
                  patch.object(manager, "_adopt_healthy_orphan",
                               return_value=True) as adopt, \
                  patch.object(manager, "_kill_pid",
@@ -1661,17 +1667,69 @@ class OrphanSweepTests(unittest.TestCase):
     def test_unmatched_orphan_is_killed(self):
         with tempfile.TemporaryDirectory() as td:
             manager = self._manager(Path(td))
-            orphan = {"pid": 7777, "exe": "llama-server",
-                      "cmdline": "llama-server --model /other/x.gguf "
-                                 "--port 51111"}
+            cmd = self._register_orphan(
+                manager, 7777, "/other/x.gguf", 51111)
             killed = []
-            with patch.object(manager, "_our_runtime_processes",
-                              return_value=[orphan]), \
+            with patch.object(manager, "_pid_image_cmdline",
+                              return_value=("llama-server.exe", cmd)), \
+                 patch.object(manager, "_exe_is_ours", return_value=True), \
                  patch.object(manager, "_kill_pid",
                               side_effect=lambda p: killed.append(p)):
                 result = manager.sweep_orphan_runtimes()
             self.assertEqual(killed, [7777])
             self.assertEqual(result["adopted"], [])
+
+    def test_foreign_same_binary_process_is_never_touched(self):
+        # Cross-instance hazard: a second Nexus install's llama-server
+        # runs the SAME executable — image identity cannot separate
+        # owners. It is never in this install's spawn registry, so the
+        # sweep must not adopt or kill it.
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            killed = []
+            with patch.object(manager, "_kill_pid",
+                              side_effect=lambda p: killed.append(p)), \
+                 patch.object(manager, "_adopt_healthy_orphan",
+                              return_value=True) as adopt:
+                result = manager.sweep_orphan_runtimes()
+            self.assertEqual(killed, [])
+            self.assertEqual(result["adopted"], [])
+            adopt.assert_not_called()
+
+    def test_reused_pid_is_dropped_not_killed(self):
+        # A registered pid that now hosts a different command line was
+        # reused after our server exited — killing it would hit an
+        # unrelated process.
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            model_path = str(manager.models_dir / "coder.gguf")
+            self._register_orphan(manager, 6666, model_path, 51234)
+            killed = []
+            with patch.object(manager, "_pid_image_cmdline",
+                              return_value=("llama-server.exe",
+                                            "llama-server --model z.gguf "
+                                            "--port 40000")), \
+                 patch.object(manager, "_exe_is_ours", return_value=True), \
+                 patch.object(manager, "_kill_pid",
+                              side_effect=lambda p: killed.append(p)):
+                result = manager.sweep_orphan_runtimes()
+            self.assertEqual(killed, [])
+            self.assertEqual(result["adopted"], [])
+            self.assertNotIn("6666", manager._spawn_registry())
+
+    def test_dead_registered_pid_is_dropped_not_killed(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            model_path = str(manager.models_dir / "coder.gguf")
+            self._register_orphan(manager, 5555, model_path, 51234)
+            killed = []
+            with patch.object(manager, "_pid_image_cmdline",
+                              return_value=("", "")), \
+                 patch.object(manager, "_kill_pid",
+                              side_effect=lambda p: killed.append(p)):
+                result = manager.sweep_orphan_runtimes()
+            self.assertEqual(killed, [])
+            self.assertNotIn("5555", manager._spawn_registry())
 
     def test_duplicate_orphan_for_managed_profile_is_killed(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1681,12 +1739,12 @@ class OrphanSweepTests(unittest.TestCase):
             # A managed sibling already owns the profile — a second
             # server of the same checkpoint is a double-load leak.
             model_path = str(manager.models_dir / "coder.gguf")
-            orphan = {"pid": 8888, "exe": "llama-server",
-                      "cmdline": f"llama-server --model {model_path} "
-                                 "--port 51235"}
+            cmd = self._register_orphan(
+                manager, 8888, model_path, 51235)
             killed = []
-            with patch.object(manager, "_our_runtime_processes",
-                              return_value=[orphan]), \
+            with patch.object(manager, "_pid_image_cmdline",
+                              return_value=("llama-server.exe", cmd)), \
+                 patch.object(manager, "_exe_is_ours", return_value=True), \
                  patch.object(manager, "_kill_pid",
                               side_effect=lambda p: killed.append(p)):
                 result = manager.sweep_orphan_runtimes()
@@ -1700,44 +1758,20 @@ class OrphanSweepTests(unittest.TestCase):
             fake = _attach_fake_managed(manager, profile)
             fake_pid = 9999
             fake.pid = fake_pid  # stand-in pid for the managed entry
-            orphan = {"pid": fake_pid, "exe": "llama-server",
-                      "cmdline": "llama-server --port 51236"}
+            self._register_orphan(
+                manager, fake_pid,
+                str(manager.models_dir / "coder.gguf"), 51236)
             killed = []
-            with patch.object(manager, "_our_runtime_processes",
-                              return_value=[orphan]), \
+            with patch.object(manager, "_pid_image_cmdline",
+                              return_value=("llama-server.exe",
+                                            "llama-server --port 51236")), \
+                 patch.object(manager, "_exe_is_ours", return_value=True), \
                  patch.object(manager, "_kill_pid",
                               side_effect=lambda p: killed.append(p)):
                 manager.sweep_orphan_runtimes()
             self.assertEqual(killed, [])
-
-    def test_process_managed_mid_enumeration_is_not_killed(self):
-        # Regression: _our_runtime_processes() is a slow external probe —
-        # a launch registering _managed between enumeration and the
-        # per-pid ownership check used to read as an orphan and fall
-        # through to _kill_pid, killing the just-launched server (seen as
-        # repeated llama-server deaths seconds after boot). Membership is
-        # re-read under the lock on every pid now.
-        with tempfile.TemporaryDirectory() as td:
-            manager = self._manager(Path(td))
-            profile = manager.config.models[0]
-            model_path = str(manager.models_dir / "coder.gguf")
-            orphan = {"pid": 5555, "exe": "llama-server",
-                      "cmdline": f"llama-server --model {model_path} "
-                                 "--port 51234"}
-
-            def enumerate_then_register():
-                fake = _attach_fake_managed(manager, profile)
-                fake.pid = 5555
-                return [orphan]
-
-            killed = []
-            with patch.object(manager, "_our_runtime_processes",
-                              side_effect=enumerate_then_register), \
-                 patch.object(manager, "_kill_pid",
-                              side_effect=lambda p: killed.append(p)):
-                result = manager.sweep_orphan_runtimes()
-            self.assertEqual(killed, [])
-            self.assertEqual(result["adopted"], [])
+            # Still-managed pids keep their registry entry.
+            self.assertIn(str(fake_pid), manager._spawn_registry())
 
 
 if __name__ == "__main__":
