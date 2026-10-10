@@ -61,7 +61,7 @@ def _git(root: Path, *args: str, timeout: int = 5) -> str | None:
         proc = subprocess.run(
             ["git", *args], cwd=root, text=True,
             capture_output=True, timeout=timeout,
-            creationflags=no_window_flags())
+            creationflags=no_window_flags(), encoding="utf-8", errors="replace")
     except Exception:
         return None
     if proc.returncode != 0:

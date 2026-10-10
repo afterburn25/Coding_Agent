@@ -199,7 +199,7 @@ class ChatterboxEngine(TTSEngine):
         proc = subprocess.run(
             [ffmpeg, "-y", "-i", str(src), "-ac", "1", "-ar", "24000",
              "-f", "wav", str(out)],
-            capture_output=True, text=True, timeout=120)
+            capture_output=True, text=True, timeout=120, encoding="utf-8", errors="replace")
         if proc.returncode != 0 or not out.exists():
             raise VoiceEngineError(
                 "ffmpeg could not decode the reference audio: "

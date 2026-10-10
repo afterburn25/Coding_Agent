@@ -177,7 +177,7 @@ def register_audit_tools(registry: ToolRegistry, workspace: Path, *,
                     capture_output=True, text=True, timeout=120,
                     creationflags=no_window_flags(),
                     shell=(spec["exe"] == "npm" and
-                           __import__("os").name == "nt"))
+                           __import__("os").name == "nt"), encoding="utf-8", errors="replace")
             except subprocess.TimeoutExpired:
                 audits.append({"ecosystem": eco_name,
                                "status": "timeout"})

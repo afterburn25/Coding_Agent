@@ -835,7 +835,7 @@ class ToolDownloadManager:
             try:
                 out = subprocess.run(
                     [cand, "--version"], capture_output=True, text=True, timeout=15,
-                    creationflags=no_window_flags())
+                    creationflags=no_window_flags(), encoding="utf-8", errors="replace")
             except (OSError, subprocess.TimeoutExpired):
                 continue
             banner = f"{out.stdout or ''} {out.stderr or ''}".lower()
@@ -852,7 +852,7 @@ class ToolDownloadManager:
         try:
             listing = subprocess.run(
                 [tar, "-tf", str(archive)], capture_output=True, text=True, timeout=120,
-                creationflags=no_window_flags())
+                creationflags=no_window_flags(), encoding="utf-8", errors="replace")
             if listing.returncode != 0:
                 return False
         except (OSError, subprocess.TimeoutExpired):
@@ -867,7 +867,7 @@ class ToolDownloadManager:
             proc = subprocess.Popen(
                 [tar, "-xvf", str(archive), "-C", str(dest)],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                creationflags=no_window_flags())
+                creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         except OSError:
             return False
         try:

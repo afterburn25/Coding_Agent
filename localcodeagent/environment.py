@@ -54,7 +54,7 @@ def _probe_builtin(name: str, timeout: float = 5.0) -> dict:
     try:
         out = subprocess.run(
             [exe] + list(args), capture_output=True, text=True,
-            timeout=timeout, creationflags=no_window_flags())
+            timeout=timeout, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         text = (out.stdout or "") + (out.stderr or "")
         m = re.search(pattern, text)
         return {"installed": True,

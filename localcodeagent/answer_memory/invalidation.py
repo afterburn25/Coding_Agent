@@ -72,7 +72,7 @@ def repo_head(workspace: str | Path) -> str:
             ["git", "-C", str(root), "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=5,
             creationflags=no_window_flags(),
-        )
+            encoding="utf-8", errors="replace")
         return head.stdout.strip()[:40] if head.returncode == 0 else ""
     except Exception:
         return ""

@@ -81,7 +81,7 @@ def _run_git(workspace: Path, args: list[str], *, timeout: int = 60, check: bool
         capture_output=True,
         timeout=timeout,
         creationflags=no_window_flags(),
-    )
+        encoding="utf-8", errors="replace")
     output = (proc.stdout + proc.stderr).strip()
     if check and proc.returncode != 0:
         raise RuntimeError(output or f"git {' '.join(args)} failed with exit code {proc.returncode}")
@@ -418,7 +418,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
             capture_output=True,
             text=True,
             creationflags=no_window_flags(),
-        )
+            encoding="utf-8", errors="replace")
         if staged.returncode == 0:
             raise RuntimeError("No staged changes to commit")
         if staged.returncode not in {0, 1}:
@@ -757,7 +757,7 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         argv += ["clone", url, str(dest)]
         proc = subprocess.run(argv, capture_output=True, text=True,
                               timeout=600,
-                              creationflags=no_window_flags())
+                              creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         if proc.returncode != 0:
             raise RuntimeError(
                 f"git clone failed: {(proc.stderr or proc.stdout)[-2000:]}")

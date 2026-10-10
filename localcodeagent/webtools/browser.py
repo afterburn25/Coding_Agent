@@ -157,7 +157,7 @@ class BrowserRunner:
             proc = subprocess.run(
                 [str(node), str(cli), "install", "chromium"],
                 env=env, capture_output=True, text=True, timeout=self.INSTALL_TIMEOUT_S,
-                creationflags=no_window_flags())
+                creationflags=no_window_flags(), encoding="utf-8", errors="replace")
             if proc.returncode != 0:
                 tail = (proc.stderr or proc.stdout or "").strip()[-300:]
                 raise RuntimeError(f"browser provisioning failed: {tail}")

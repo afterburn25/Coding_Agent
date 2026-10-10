@@ -382,7 +382,7 @@ class ModelGrowthLab:
                 stderr=subprocess.STDOUT,
                 text=True,
                 creationflags=no_window_flags(),
-            )
+                encoding="utf-8", errors="replace")
             self._processes[job_id] = process
             job["status"] = "running"
             job["started_at"] = time.time()

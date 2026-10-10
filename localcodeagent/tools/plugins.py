@@ -412,7 +412,7 @@ def _make_invoker(manifest: PluginManifest, *, workspace: Path | None,
                 text=True,
                 timeout=timeout,
                 creationflags=no_window_flags(),
-            )
+                encoding="utf-8", errors="replace")
         except FileNotFoundError:
             return f"ERROR: executable not found: {cmd[0]}"
         except subprocess.TimeoutExpired:
@@ -442,7 +442,7 @@ def _make_health_check(manifest: PluginManifest, *, install_root: Path | None = 
                 run_cmd = list(command)
                 run_cmd[0] = resolve_executable(run_cmd[0], install_root, manifest.id,
                                                 extra_dirs=manifest.extra_executable_dirs(install_root))
-                proc = subprocess.run(run_cmd, capture_output=True, text=True, timeout=15, creationflags=no_window_flags())
+                proc = subprocess.run(run_cmd, capture_output=True, text=True, timeout=15, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
             except FileNotFoundError:
                 return {"ok": False, "status": "missing", "detail": f"health command not found: {command[0]}"}
             except subprocess.TimeoutExpired:

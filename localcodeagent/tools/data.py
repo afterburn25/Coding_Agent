@@ -98,7 +98,7 @@ def _duckdb_query(workspace: Path, source: Path | None, sql: str, limit: int) ->
     argv = [exe, db_arg, "-json", "-c",
             f"{prefix}{sql} LIMIT {limit}" if "limit" not in sql.lower()
             else f"{prefix}{sql}"]
-    proc = subprocess.run(argv, cwd=str(workspace), capture_output=True, text=True, timeout=300, creationflags=no_window_flags())
+    proc = subprocess.run(argv, cwd=str(workspace), capture_output=True, text=True, timeout=300, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or proc.stdout or "duckdb failed")[-500:])
     try:
@@ -137,10 +137,10 @@ def profile_source(workspace: Path, source_raw: str, *, sample: int = 1000) -> d
         exe = find_duckdb()
         describe = subprocess.run([exe, ":memory:", "-json", "-c", f"DESCRIBE SELECT * FROM {reader}('{s}')"],
                                   cwd=str(workspace), capture_output=True, text=True, timeout=120,
-                                  creationflags=no_window_flags())
+                                  creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         count = subprocess.run([exe, ":memory:", "-json", "-c", f"SELECT COUNT(*) AS n FROM {reader}('{s}')"],
                                cwd=str(workspace), capture_output=True, text=True, timeout=300,
-                               creationflags=no_window_flags())
+                               creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         return {
             "engine": "duckdb", "source": source.name,
             "size_bytes": source.stat().st_size,

@@ -2141,7 +2141,7 @@ class AutonomousSupervisor:
                     ["git", "-C", str(path), *argv], text=True,
                     timeout=60, capture_output=True,
                     creationflags=getattr(subprocess,
-                                          "CREATE_NO_WINDOW", 0))
+                                          "CREATE_NO_WINDOW", 0), encoding="utf-8", errors="replace")
                 return p.returncode, (p.stdout + p.stderr).strip()
             rc, out = _git("status", "--porcelain")
             if rc != 0 or not out.strip():
@@ -2180,7 +2180,7 @@ class AutonomousSupervisor:
                     ["git", *argv], cwd=root, text=True, timeout=60,
                     capture_output=True,
                     creationflags=getattr(subprocess,
-                                          "CREATE_NO_WINDOW", 0))
+                                          "CREATE_NO_WINDOW", 0), encoding="utf-8", errors="replace")
                 return p.stdout.strip() if p.returncode == 0 else ""
             except Exception:
                 return ""

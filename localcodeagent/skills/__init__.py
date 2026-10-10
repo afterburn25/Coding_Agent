@@ -509,7 +509,7 @@ class SkillRegistry:
                 text=True,
                 timeout=max(1, min(int(check.get("timeout_seconds", 30)), 120)),
                 creationflags=no_window_flags(),
-            )
+                encoding="utf-8", errors="replace")
         except FileNotFoundError:
             return {"ok": False, "status": "missing", "detail": f"health executable not found: {exe}"}
         except subprocess.TimeoutExpired:

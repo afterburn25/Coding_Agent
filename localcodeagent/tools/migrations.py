@@ -251,7 +251,7 @@ def register_migration_tools(
         try:
             proc = subprocess.run(
                 argv, cwd=root, text=True, capture_output=True,
-                timeout=timeout, creationflags=no_window_flags())
+                timeout=timeout, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
             return proc.returncode, (proc.stdout + proc.stderr).rstrip()
         except FileNotFoundError:
             return 127, f"{argv[0]}: command not found"

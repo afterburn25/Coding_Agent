@@ -62,7 +62,7 @@ class ToolUpdateChecker:
             ["winget", "upgrade", "--id", package, "-e",
              "--accept-source-agreements"],
             capture_output=True, text=True, timeout=120,
-            creationflags=no_window_flags())
+            creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         text = f"{out.stdout}\n{out.stderr}"
         if "No applicable upgrade" in text or out.returncode in (-1978335189,):
             return "current"
@@ -87,7 +87,7 @@ class ToolUpdateChecker:
         out = subprocess.run(
             [python, "-m", "pip", "index", "versions", package],
             capture_output=True, text=True, timeout=120,
-            creationflags=no_window_flags())
+            creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         m = re.search(r"\(([^)]+)\)", out.stdout or "")
         return m.group(1) if m else None
 

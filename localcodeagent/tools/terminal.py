@@ -156,7 +156,7 @@ class TerminalTracker:
         if env:
             merged_env.update({str(k): str(v) for k, v in env.items()})
         flags = subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") and hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-        proc = subprocess.Popen(argv, cwd=str(cwd), env=merged_env, stdout=handle, stderr=subprocess.STDOUT, text=True, creationflags=flags)
+        proc = subprocess.Popen(argv, cwd=str(cwd), env=merged_env, stdout=handle, stderr=subprocess.STDOUT, text=True, creationflags=flags, encoding="utf-8", errors="replace")
         with self._lock:
             self._procs[job_id] = {
                 "job_id": job_id,
@@ -331,7 +331,7 @@ def run_process_streaming(
         # Own process group on POSIX so _kill_tree can killpg the wrapper and
         # every child it spawned.
         start_new_session=not sys.platform.startswith("win"),
-    )
+        encoding="utf-8", errors="replace")
     job_handle = _assign_kill_job(proc)
     threads = [
         threading.Thread(target=_reader, args=(proc.stdout, out_parts, "stdout"), daemon=True),

@@ -35,7 +35,7 @@ def run_unittest(workdir: Path, target: str, *, timeout_s: float = 300.0,
             timeout=timeout_s,
             env=None if extra_env is None else
             {**__import__("os").environ, **extra_env},
-            creationflags=no_window_flags())
+            creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         tail = (r.stdout + r.stderr)[-4000:]
         return {"ok": r.returncode == 0, "returncode": r.returncode,
                 "elapsed_s": round(time.time() - t0, 2),

@@ -43,7 +43,7 @@ def _git(source: Path, *args: str, timeout: int = 60) -> subprocess.CompletedPro
     return subprocess.run(
         ["git", "-C", str(source), *args],
         capture_output=True, text=True, timeout=timeout,
-        creationflags=no_window_flags())
+        creationflags=no_window_flags(), encoding="utf-8", errors="replace")
 
 
 class SelfUpdate:
@@ -59,7 +59,7 @@ class SelfUpdate:
         try:
             p = subprocess.run(cmd, cwd=str(cwd), capture_output=True,
                                text=True, timeout=timeout,
-                               creationflags=no_window_flags())
+                               creationflags=no_window_flags(), encoding="utf-8", errors="replace")
             return {"rc": p.returncode,
                     "out": (p.stdout or "")[-20000:],
                     "err": (p.stderr or "")[-20000:]}

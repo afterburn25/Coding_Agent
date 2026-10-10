@@ -47,7 +47,7 @@ def run_python(code: str, sandbox_dir: Path, *, timeout: int = DEFAULT_TIMEOUT) 
             cwd=str(sandbox_dir), env=_sandbox_env(),
             capture_output=True, text=True, timeout=timeout,
             creationflags=no_window_flags(),
-        )
+            encoding="utf-8", errors="replace")
         return {
             "exit_code": proc.returncode,
             "elapsed_seconds": round(time.time() - started, 3),

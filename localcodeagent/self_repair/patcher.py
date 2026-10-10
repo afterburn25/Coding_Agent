@@ -30,7 +30,7 @@ class Patcher:
         return subprocess.run(
             ["git", "-C", str(self.repo_root), *args],
             capture_output=True, text=True, timeout=30,
-            creationflags=no_window_flags())
+            creationflags=no_window_flags(), encoding="utf-8", errors="replace")
 
     def _git_ok(self, *args: str) -> bool:
         try:
@@ -92,7 +92,7 @@ class Patcher:
                 out = subprocess.run(
                     ["git", "-C", str(wt), "status", "--porcelain"],
                     capture_output=True, text=True, timeout=15,
-                    creationflags=no_window_flags()).stdout
+                    creationflags=no_window_flags(), encoding="utf-8", errors="replace").stdout
                 files = []
                 for line in out.splitlines():
                     if not line.strip():

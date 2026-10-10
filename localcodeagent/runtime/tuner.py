@@ -164,7 +164,7 @@ class RuntimeTuner:
                         proc = subprocess.run(
                             [exe, "--help"], capture_output=True, text=True, timeout=PROBE_TIMEOUT,
                             creationflags=no_window_flags(),
-                        )
+                            encoding="utf-8", errors="replace")
                         help_text = (proc.stdout or "") + (proc.stderr or "")
                         break
                     except subprocess.TimeoutExpired:
@@ -182,7 +182,7 @@ class RuntimeTuner:
                     if re.search(token, help_text, re.IGNORECASE):
                         supported.add(flag)
                 caps["supported"] = supported
-                ver = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=PROBE_TIMEOUT, creationflags=no_window_flags())
+                ver = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=PROBE_TIMEOUT, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
                 caps["build"] = ((ver.stdout or "") + (ver.stderr or "")).strip().splitlines()[0] if (ver.stdout or ver.stderr) else "unknown"
             except Exception:
                 caps["build"] = "unavailable"

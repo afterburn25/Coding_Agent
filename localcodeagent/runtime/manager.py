@@ -781,7 +781,7 @@ class RuntimeManager:
                 out = subprocess.run(
                     ["netstat", "-ano", "-p", "tcp"],
                     capture_output=True, text=True, timeout=15,
-                ).stdout
+                encoding="utf-8", errors="replace").stdout
                 for line in out.splitlines():
                     parts = line.split()
                     if (len(parts) >= 5 and parts[0].upper() == "TCP"
@@ -792,7 +792,7 @@ class RuntimeManager:
                 out = subprocess.run(
                     ["lsof", "-nP", "-ti", f":{port}", "-sTCP:LISTEN"],
                     capture_output=True, text=True, timeout=15,
-                ).stdout
+                encoding="utf-8", errors="replace").stdout
                 for line in out.splitlines():
                     if line.strip().isdigit():
                         pids.add(int(line.strip()))
@@ -866,7 +866,7 @@ class RuntimeManager:
                      "\"Name like 'llama%'\" | Select-Object ProcessId,"
                      "ExecutablePath,CommandLine | ConvertTo-Json -Compress"],
                     capture_output=True, text=True, timeout=30,
-                    creationflags=no_window_flags())
+                    creationflags=no_window_flags(), encoding="utf-8", errors="replace")
                 rows = json.loads(ps.stdout.strip() or "[]")
                 if isinstance(rows, dict):
                     rows = [rows]
@@ -999,7 +999,7 @@ class RuntimeManager:
                     ["netstat", "-ano", "-p", "tcp"],
                     capture_output=True, text=True, timeout=15,
                     creationflags=no_window_flags(),
-                ).stdout
+                encoding="utf-8", errors="replace").stdout
                 for line in out.splitlines():
                     parts = line.split()
                     if (len(parts) >= 5 and parts[0].upper() == "TCP"
@@ -1010,7 +1010,7 @@ class RuntimeManager:
                 out = subprocess.run(
                     ["lsof", "-nP", "-ti", f":{port}", "-sTCP:LISTEN"],
                     capture_output=True, text=True, timeout=15,
-                ).stdout
+                encoding="utf-8", errors="replace").stdout
                 for line in out.splitlines():
                     if line.strip().isdigit():
                         pids.add(int(line.strip()))
@@ -1027,7 +1027,7 @@ class RuntimeManager:
                     ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
                     capture_output=True, text=True, timeout=10,
                     creationflags=no_window_flags(),
-                ).stdout.strip()
+                encoding="utf-8", errors="replace").stdout.strip()
                 if out.startswith('"'):
                     return out.split('","')[0].strip('"')
             else:
@@ -1127,7 +1127,7 @@ class RuntimeManager:
                     ["powershell", "-NoProfile", "-Command",
                      f"(Get-Process -Id {pid}).WorkingSet64"],
                     capture_output=True, text=True, timeout=5,
-                    creationflags=no_window_flags())
+                    creationflags=no_window_flags(), encoding="utf-8", errors="replace")
                 if r.returncode == 0 and r.stdout.strip().isdigit():
                     out["ram_used_gb"] = round(int(r.stdout.strip()) / 1e9, 2)
             else:
@@ -1142,7 +1142,7 @@ class RuntimeManager:
                 ["nvidia-smi", "--query-compute-apps=pid,used_memory",
                  "--format=csv,noheader,nounits"],
                 capture_output=True, text=True, timeout=5,
-                creationflags=no_window_flags())
+                creationflags=no_window_flags(), encoding="utf-8", errors="replace")
             if r.returncode == 0:
                 for line in r.stdout.splitlines():
                     parts = [p.strip() for p in line.split(",")]
@@ -1589,7 +1589,7 @@ class RuntimeManager:
                 stderr=subprocess.STDOUT,
                 text=True,
                 creationflags=creationflags,
-            )
+                encoding="utf-8", errors="replace")
         except OSError as exc:
             try:
                 log_handle.close()
@@ -1755,7 +1755,7 @@ class RuntimeManager:
             stderr=subprocess.STDOUT,
             text=True,
             creationflags=creationflags,
-        )
+            encoding="utf-8", errors="replace")
         # The probe MUST use its own port — _profile_endpoint would return the
         # profile's configured endpoint, silently measuring a resident server
         # (or polling a dead port) instead of the candidate under test.

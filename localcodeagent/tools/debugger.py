@@ -185,7 +185,7 @@ def register_debug_tools(registry: ToolRegistry, workspace: Path, *,
             try:
                 proc = subprocess.run(
                     cmd, cwd=target.parent, capture_output=True, text=True,
-                    timeout=timeout, creationflags=no_window_flags())
+                    timeout=timeout, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
                 timed_out = False
             except subprocess.TimeoutExpired as exc:
                 proc = None

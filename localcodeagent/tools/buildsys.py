@@ -249,7 +249,7 @@ def register_build_tools(registry: ToolRegistry, workspace: Path, *, default_tim
         timeout = max(1, min(int(args.get("timeout_seconds", default_timeout)), 3600))
         started = time.time()
         try:
-            proc = subprocess.run(cmd, cwd=str(root), shell=True, capture_output=True, text=True, timeout=timeout, creationflags=no_window_flags())
+            proc = subprocess.run(cmd, cwd=str(root), shell=True, capture_output=True, text=True, timeout=timeout, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
             payload = {"system": entry["id"], "command": cmd, "exit_code": proc.returncode,
                        "stdout": (proc.stdout or "")[-MAX_OUTPUT:], "stderr": (proc.stderr or "")[-8000:],
                        "timed_out": False}
@@ -385,7 +385,7 @@ def register_build_tools(registry: ToolRegistry, workspace: Path, *, default_tim
             proc = subprocess.run(
                 cmd, cwd=str(root), shell=True, capture_output=True,
                 text=True, timeout=timeout,
-                creationflags=no_window_flags())
+                creationflags=no_window_flags(), encoding="utf-8", errors="replace")
             payload = {"linter": chosen["id"], "command": cmd,
                        "exit_code": proc.returncode,
                        "stdout": (proc.stdout or "")[-MAX_OUTPUT:],
@@ -437,7 +437,7 @@ def register_build_tools(registry: ToolRegistry, workspace: Path, *, default_tim
             proc = subprocess.run(
                 cmd, cwd=str(root), shell=True, capture_output=True,
                 text=True, timeout=timeout,
-                creationflags=no_window_flags())
+                creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         except subprocess.TimeoutExpired:
             return json.dumps({"ok": False, "command": cmd,
                                "timed_out": True}, ensure_ascii=False)
@@ -448,7 +448,7 @@ def register_build_tools(registry: ToolRegistry, workspace: Path, *, default_tim
             f" p.sort_stats('cumulative').print_stats({top_n})" '"')
         summ = subprocess.run(
             summary_cmd, cwd=str(root), shell=True, capture_output=True,
-            text=True, timeout=60, creationflags=no_window_flags())
+            text=True, timeout=60, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
         return json.dumps({
             "ok": proc.returncode == 0,
             "command": cmd,
