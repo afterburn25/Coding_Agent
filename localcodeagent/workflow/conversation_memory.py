@@ -427,7 +427,7 @@ class ConversationMemory:
             "should", "would", "shall", "may", "might",
             "is", "are", "was", "were", "will", "this", "that",
             "tell", "show", "if", "let",
-            "nm", "isnt", "arent", "doesnt"}
+            "nm", "isnt", "arent", "doesnt", "dont", "don't"}
 
     @staticmethod
     def _fact_slot(text: str) -> str:
@@ -1298,7 +1298,8 @@ class ConversationMemory:
             # than leaving a contradiction live in every prompt.
             revoke = re.match(
                 r"^(?:stop|quit)\s+(.+?)(?:\s+please)?[.!?]?$"
-                r"|^(?:do\s+not|don't|dont|please\s+do\s+not)\s+(.+?)\s+anymore[.!?]?$"
+                r"|^(?:do\s+not|don't|dont|please\s+do\s+not)\s+(.+?)"
+                r"(?:\s+anymore)?[.!?]?$"
                 r"|^no\s+longer\s+(.+?)[.!?]?$"
                 r"|^you\s+can\s+stop\s+(.+?)[.!?]?$",
                 raw, flags=re.IGNORECASE)
@@ -1315,7 +1316,15 @@ class ConversationMemory:
                     r"at\s+the\s+moment|currently)\b"
                     r"|^(?:it|that|this|everything|all\s+that)\b",
                     action, flags=re.IGNORECASE)
-                if not revoked and not ephemeral and self._rule_terms(action):
+                # Negation-of-positive — "don't forget the keys" means
+                # DO remember them; 'Never forget the keys' inverts the
+                # intent. Only the prohibition of an action banks.
+                inversion = re.match(
+                    r"^(?:forget|remember|miss|lose|skip|worry|"
+                    r"hesitate|bother|stop|delay|hold\s+off)\b",
+                    action, flags=re.IGNORECASE)
+                if (not revoked and not ephemeral and not inversion
+                        and self._rule_terms(action)):
                     # Nothing to retract — the phrase is itself a durable
                     # prohibition ("stop responding in JSON" with no prior
                     # mandate means "never do that").

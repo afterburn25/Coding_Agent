@@ -1021,6 +1021,21 @@ class CrossChatMemoryTests(unittest.TestCase):
                 r["active"] for r in memory.snapshot()["facts"]
                 if "editor" in r["text"]))
 
+    def test_dont_prohibition_banks_never_rule(self):
+        """'don't delete anything in .dogfood' is a durable prohibition
+        — banks 'Never …' so the rule survives with no model running.
+        'don't forget the keys' is negation-of-positive — never bank."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            out = memory.learn_from_user("don't delete anything in .dogfood")
+            self.assertEqual(out["behavior_rules"],
+                             ["Never delete anything in .dogfood"])
+            out = memory.learn_from_user("don't forget the keys")
+            self.assertEqual(out["behavior_rules"], [])
+            rules = [r["text"] for r in memory.snapshot()["behavior_rules"]
+                     if r.get("active")]
+            self.assertEqual(rules, ["Never delete anything in .dogfood"])
+
     def test_ephemeral_stop_is_not_a_durable_rule(self):
         """'stop whatever you're doing right now' is a cease-the-
         current-activity request — banking 'Never whatever you're
