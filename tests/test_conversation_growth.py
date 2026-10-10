@@ -1078,6 +1078,13 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertEqual(sorted(out["facts"]),
                              ["retro renews monthly",
                               "standup moves to fridays"])
+            # Shared-predicate 'both' compounds split per subject so
+            # each can supersede on its own.
+            out = memory.learn_from_user(
+                "the staging api and the prod api are both on 443")
+            self.assertEqual(sorted(out["facts"]),
+                             ["prod api is on 443",
+                              "staging api is on 443"])
             # Non-compounds stay whole.
             out = memory.learn_from_user("the stack is python and sqlite")
             self.assertEqual(out["facts"], ["stack is python and sqlite"])

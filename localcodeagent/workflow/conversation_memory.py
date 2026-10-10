@@ -323,6 +323,7 @@ class ConversationMemory:
         r"lifts?|holds?|begins?|resumes?|"
         r"pass(?:es)?|fails?|ships?|lands?|"
         r"moves?|renews?|rotates?|continues?|pauses?|"
+        r"archives?|syncs?|rebuilds?|backs? up|"
         r"hosted (?:at|on)|serves?|costs?|lasts?|"
         r"was|were|is|are")
 
@@ -1057,6 +1058,24 @@ class ConversationMemory:
             for clause in clauses:
                 sub = self.learn_from_user(
                     clause,
+                    project_id=project_id,
+                    conversation_id=conversation_id)
+                for key, value in sub.items():
+                    result.setdefault(key, []).extend(value)
+            return result
+
+        # Shared-predicate compound — "the staging api and the prod api
+        # are both on 443" states the same fact for two subjects;
+        # splitting lets each subject supersede on its own.
+        both = re.match(
+            r"^((?:my|the|our)\s+[a-z0-9][a-z0-9 ._-]{0,38}?)\s+and\s+"
+            r"((?:my|the|our)\s+[a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+            r"(?:are|is|were|was)\s+both\s+(.+?)[.!?]?$",
+            raw, flags=re.IGNORECASE)
+        if both:
+            for subj in (both.group(1), both.group(2)):
+                sub = self.learn_from_user(
+                    f"{subj} is {both.group(3)}",
                     project_id=project_id,
                     conversation_id=conversation_id)
                 for key, value in sub.items():
