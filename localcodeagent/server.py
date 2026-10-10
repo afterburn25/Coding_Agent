@@ -7747,9 +7747,8 @@ class Handler(BaseHTTPRequestHandler):
             identity = getattr(self.state, "identity", None)
             self._json({"audit": identity.audit() if identity else []})
             return True
-        if path == "/api/capabilities/graph":
-            return False  # handled in the main GET chain — /api/capabilities
-                          # already exists outside the platform prefixes
+        # /api/capabilities/graph lives in the main GET chain — the bare
+        # /api/capabilities endpoint predates the platform prefixes.
         if path == "/api/artifacts":
             rows = self.state.artifacts.list(
                 kind=(q.get("kind") or [""])[0],
@@ -8207,8 +8206,8 @@ class Handler(BaseHTTPRequestHandler):
                 str(body.get("service") or ""),
                 str(body.get("address") or "")))
             return True
-        if path == "/api/capabilities/selftest":
-            return False  # handled in the main POST chain — see do_POST
+        # /api/capabilities/selftest lives in the main POST chain —
+        # see do_POST.
         if path == "/api/social/backlog/resolve":
             social = getattr(self.state, "social", None)
             if social is None:

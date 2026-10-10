@@ -269,6 +269,7 @@ class _StubState:
         self._queue_announced = set()
         self._queue_line_cursor = {}
         self._notice_cursor = {}
+        self._notice_last = {}
         self._queue_burst = []
         self._style = style
         self.voice = _StubVoice()
@@ -383,6 +384,15 @@ class SpokenNotices(unittest.TestCase):
                                       {"ceiling": 3})
         self.assertEqual(len(st.voice.enqueued), 1)
         self.assertIn("slower", st.voice.enqueued[0][1])
+        # Family cooldown (62a43c10): a deeper cut inside the 10-min
+        # window stays silent — ceiling oscillation must not narrate
+        # every move.
+        st._on_worker_queue_event("worker_capacity_reduced",
+                                  {"ceiling": 2})
+        self.assertEqual(len(st.voice.enqueued), 1)
+        # Once the cooldown lapses a new level speaks again — and the
+        # suppressed transition never consumed its dedup id.
+        st._notice_last["capacity"] = 0.0
         st._on_worker_queue_event("worker_capacity_reduced",
                                   {"ceiling": 2})
         self.assertEqual(len(st.voice.enqueued), 2)
@@ -418,14 +428,21 @@ class SpokenNotices(unittest.TestCase):
                                   {"ceiling": 4})
         self.assertEqual(len(st.voice.enqueued), 1)
         self.assertIn("recovering", st.voice.enqueued[0][1])
-        # Oscillation: reduce → restore → reduce again speaks each move.
+        # Flap damping (62a43c10): reduce → restore → reduce inside the
+        # 10-min family cooldown stays silent — the whole point is that
+        # an oscillating ceiling cannot re-speak every transition.
         st._on_worker_queue_event("worker_capacity_reduced",
                                   {"ceiling": 3})
         st._on_worker_queue_event("worker_capacity_restored",
                                   {"ceiling": 4})
         st._on_worker_queue_event("worker_capacity_reduced",
                                   {"ceiling": 3})
-        self.assertEqual(len(st.voice.enqueued), 4)
+        self.assertEqual(len(st.voice.enqueued), 1)
+        # Cooldown elapsed — the next transition speaks again.
+        st._notice_last["capacity"] = 0.0
+        st._on_worker_queue_event("worker_capacity_restored",
+                                  {"ceiling": 4})
+        self.assertEqual(len(st.voice.enqueued), 2)
 
     def test_mute_speaks_farewell_before_muting(self):
         st = _StubState()

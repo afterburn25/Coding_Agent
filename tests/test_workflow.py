@@ -288,7 +288,10 @@ class LightweightUtilityRouteTests(unittest.TestCase):
             )
             agent._provider_for = lambda *_a, **_kw: provider
 
-            agent.run("summarize this repository")
+            # Question prompt — must reach the provider without the
+            # action nudge appending a system message; "summarize this
+            # repository" is intercepted by the github_read lane.
+            agent.run("what does this project do")
             system = [m for m in provider.messages if m.get("role") == "system"]
             self.assertGreater(len(system), 1)
             self.assertIn("Nexus Core", str(system[0]["content"]))
@@ -1730,7 +1733,10 @@ class ActionNudgeTests(unittest.TestCase):
             )
             agent._provider_for = lambda _: provider
 
-            agent.run("summarize the repository layout")
+            # Action-shaped prompt — must reach the provider. A repository
+            # summary question is intercepted by the deterministic
+            # github_read lane before the model is ever called.
+            agent.run("run the cleanup script")
 
             advertised = {
                 s["function"]["name"] for s in (provider.seen_tools[0] or [])
