@@ -80,6 +80,7 @@ tools_*.png
 # Windows null-device artifact (something redirects to NUL as a filename)
 NUL
 .repair-worktrees/
+repair-worktrees/
 Devinchat-nexus/
 .dogfood/
 runtime/
