@@ -8661,13 +8661,16 @@ class AgentOrchestrator:
         # Single-fact recall ("whats my favorite color") answers from
         # stored memory directly — right attribution, no model call.
         # Identity questions ("what's YOUR name") keep precedence even
-        # when a stored fact happens to overlap the phrasing.
+        # when a stored fact happens to overlap the phrasing. A question
+        # whose terms match a STORED FACT outranks a feature-alias card:
+        # "what's the deploy tag?" asks about the user's declared value,
+        # not the deployment feature (observed live: the self-knowledge
+        # lane answered with the experimental-deploy capability blurb).
         from .. import identity as _identity_guard
         recall_reply = (
             self._single_fact_recall_reply(user_text, conversation_id,
                                            project_id, env=env)
             if (mode == "auto" and facts_reply is None
-                and sk_reply is None
                 and _identity_guard.response_for(
                     user_text,
                     asker_is_creator=self._resolve_asker_is_creator(),
@@ -8682,7 +8685,8 @@ class AgentOrchestrator:
         # denial/failure verbatim. Anything outside the bounded grammar
         # returns None so the model lane still owns ambiguous requests.
         if (mode == "auto" and not attach["image_paths"]
-                and sk_reply is None and not mission_id):
+                and sk_reply is None and recall_reply is None
+                and not mission_id):
             # Missions always take the model/worker pipeline — a
             # deterministic one-shot reply can't drive a workstream.
             action_reply = self._local_action_reply(
@@ -8714,7 +8718,7 @@ class AgentOrchestrator:
                 and sk_reply is None and facts_reply is None
                 and recall_reply is None)
             else None)
-        builtin_reply = github_reply or sk_reply or facts_reply or recall_reply or state_reply or (
+        builtin_reply = github_reply or recall_reply or sk_reply or facts_reply or state_reply or (
             self._builtin_reply(user_text)
             if mode == "auto" and (
                 not env.suppresses_canned() or identity_lane_hit)
@@ -8763,7 +8767,7 @@ class AgentOrchestrator:
             # short-circuit the model lanes. The fact stays banked.
             _first = ConversationMemory._first_clause(user_text)
             _rest = str(user_text).strip()[len(_first):].strip(" ,.!?—;")
-            if _rest:
+            if _rest and not ConversationMemory._update_tail(_rest):
                 training_response = None
         memory_command = (
             self._answer_memory_command(user_text, conversation_id, project_id)

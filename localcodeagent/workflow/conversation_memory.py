@@ -188,6 +188,32 @@ class ConversationMemory:
         r"i'?d\s+like\s+you\s+to|you\s+should|always|never|instead|"
         r"teach(?:ing)?)[,\s]*)+$",
         re.IGNORECASE)
+    # A clause tail that only manages the just-stored fact — mutation
+    # verb + anaphoric object bound to it ("overwrite the old one",
+    # "forget that", "use this instead") — continues the SAME teach act;
+    # it is not an independent remainder the model lane must answer.
+    _UPDATE_TAIL_RE = re.compile(
+        r"^(?:(?:and|also|just|please|so|then)[,\s]+)*"
+        r"(?:overwrite|replace|update|change|correct|fix|forget|drop|"
+        r"delete|remove|discard|erase|ignore|supersede|scratch|strike|"
+        r"retire|use|keep|save|store|remember|note)\s+"
+        r"(?:it|that|this|them|those|"
+        r"the\s+(?:old|new|previous|prior|former|earlier|last|other|"
+        r"first|latest|current|same)\s+(?:one|value|version|thing|entry|"
+        r"answer|setting|tag|name|port|fact)|"
+        r"the\s+(?:old|new|previous|prior|former|earlier|latest|current)"
+        r"\s+one|"
+        r"what\s+(?:you\s+had|i\s+(?:just\s+)?said|was\s+there\s+before))"
+        r"(?:[,\s]+(?:instead|now|please|thanks|thank\s+you|"
+        r"going\s+forward|from\s+now\s+on))*\s*[.!?]*\s*$",
+        re.IGNORECASE)
+
+    @classmethod
+    def _update_tail(cls, text: str) -> bool:
+        """True when a compound turn's remainder only manages the fact
+        just banked — "my tag is v10 — overwrite the old one" is one
+        teach act; the supersession already satisfies the tail."""
+        return bool(cls._UPDATE_TAIL_RE.match(str(text or "")))
 
     @classmethod
     def _first_clause(cls, text: str) -> str:
@@ -410,6 +436,23 @@ class ConversationMemory:
                 return f"{subj}:{pred}"
         return ""
 
+    @staticmethod
+    def _slot_canonical(slot: str) -> str:
+        """Supersession key for a stored slot — 'my deploy tag is v10'
+        and 'the deploy tag is v9' describe the same attribute (the
+        user's deploy tag IS the deploy tag), so 'my:X' and 'X:is/are/
+        was/were' collapse onto the same canonical slot. Without this a
+        value restated with or without the possessive splits into two
+        live facts (observed live: 'deploy tag is v9' +
+        'my deploy tag is v10' both active)."""
+        s = str(slot or "")
+        if s.startswith("my:"):
+            return s[3:] + ":is"
+        subj, sep, pred = s.rpartition(":")
+        if sep and pred in {"is", "are", "was", "were"}:
+            return f"{subj}:is"
+        return s
+
     def _append_unique(
         self,
         key: str,
@@ -442,7 +485,8 @@ class ConversationMemory:
                 if (
                     isinstance(row, dict)
                     and row.get("active", True)
-                    and str(row.get("slot") or "") == slot
+                    and self._slot_canonical(str(row.get("slot") or ""))
+                    == self._slot_canonical(slot)
                     and str(row.get("scope") or "global") == scope
                     and str(row.get("scope_id") or "") == scope_id
                 ):
@@ -1300,7 +1344,8 @@ class ConversationMemory:
                                     isinstance(other, dict)
                                     and other is not row
                                     and other.get("active", True)
-                                    and str(other.get("slot") or "") == row["slot"]
+                                    and self._slot_canonical(str(other.get("slot") or ""))
+                                    == self._slot_canonical(str(row.get("slot") or ""))
                                     and str(other.get("scope") or "global") == str(row.get("scope") or "global")
                                     and str(other.get("scope_id") or "") == str(row.get("scope_id") or "")
                                 ):
@@ -1500,6 +1545,16 @@ class ConversationMemory:
                 picked = {i for _s, i, _r in scored[:12]}
                 fact_rows = [row for i, row in enumerate(fact_rows)
                              if i in picked]
+            # Same canonical-slot collapse as recall_facts: a fact
+            # restated with/without the possessive ('deploy tag is v9'
+            # vs 'my deploy tag is v10') must not inject both values —
+            # the newest write owns the attribute.
+            by_canonical: dict[str, dict[str, Any]] = {}
+            for row in fact_rows:
+                by_canonical[self._slot_canonical(
+                    str(row.get("slot") or ""))
+                    or str(row.get("text", ""))] = row
+            fact_rows = list(by_canonical.values())
             facts = [str(row.get("text", "")) for row in fact_rows][-12:]
             rules = [
                 str(row.get("text", ""))
@@ -1576,7 +1631,8 @@ class ConversationMemory:
             ]
         by_slot: dict[str, dict[str, Any]] = {}
         for row in matched:
-            by_slot[str(row.get("slot") or row.get("text", ""))] = row
+            by_slot[self._slot_canonical(
+                str(row.get("slot") or "")) or str(row.get("text", ""))] = row
         return list(by_slot.values())
 
     def active_facts(
@@ -1601,11 +1657,13 @@ class ConversationMemory:
             return False
 
         with self._lock:
-            return [
-                str(row.get("text", ""))
-                for row in self._data.get("facts", [])
-                if isinstance(row, dict) and applies(row)
-            ]
+            by_canonical: dict[str, dict[str, Any]] = {}
+            for row in self._data.get("facts", []):
+                if isinstance(row, dict) and applies(row):
+                    by_canonical[self._slot_canonical(
+                        str(row.get("slot") or ""))
+                        or str(row.get("text", ""))] = row
+            return [str(row.get("text", "")) for row in by_canonical.values()]
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:

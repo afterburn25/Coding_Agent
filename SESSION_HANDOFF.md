@@ -4967,6 +4967,19 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   NB: the 8391 "vanished server" mystery is resolved as our own
   `release_managed_models_for_vram` balanced-policy eviction under
   shared-GPU pressure — not a foreign kill.
+- **BUG-030** (P1 conversation memory / lane precedence): fact slots
+  split-brain — `my deploy tag is v10` and `deploy tag is v9` keyed
+  different slots (`my:<noun>` vs `<noun>:is`) → supersession skipped,
+  both live. `_slot_canonical` now unifies `my X`/`the X`/`X is` to one
+  slot at write AND read (`recall_facts`, `prompt_context`,
+  `active_facts` — latest wins, so pre-fix stores self-heal). Lane
+  precedence: stored-fact recall now beats the self-knowledge
+  capability card (`sk_reply` no longer short-circuits `recall_reply`)
+  — `"what's the deploy tag?"` returns v10, not the adapters blurb.
+  Referential update tails (`overwrite the old one`, `forget that`)
+  stay with the learning clause instead of kicking to a model refusal;
+  tails carrying a NEW value (`update it to v12`) still split as real
+  clauses. Live-verified: ack + recall both correct.
 - Still open: UI click-dogfood (needs interactive browser), installer
   cycle execution, model-lane churn under shared-GPU contention
   (environmental — balanced-policy eviction + deployed instance).
