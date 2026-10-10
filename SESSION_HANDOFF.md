@@ -4624,3 +4624,38 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   regressions in test_answer_memory, test_conversation_qa,
   test_conversation_state, test_runtime.
 - Ledger: .dogfood/CONVERSATION_DEFECTS.md round-6 table.
+
+### Round 7 — long-150 green + Phase B learning loop (current HEAD c8db5028)
+
+- Live dogfood: 231 turns / 24 scenarios / 0 assertion failures
+  (long150c). Includes the corrected non-credential anchor —
+  the prior run's only real defect was a credential-shaped test
+  anchor the secret gate rightly refused; infra failures traced to
+  an auto-tuner spawning 18 concurrent 4B probe llamas against a
+  saturated card (auto_tune disabled in .dogfood/config.json).
+- long-300 soak in flight at handoff time.
+- Phase B (Adaptive Intelligence): closed the
+  experience→lesson→consolidation→procedure→skill circuit on the
+  EXISTING substrate — no new framework.
+  * learning-consolidate scheduled mission (30 min default,
+    learning_consolidate_minutes config) → supervisor
+    internal:learning_consolidate → LearningGovernor.consolidate().
+    sup.learning wired in server.py like sup.social.
+  * consolidate() auto-stages SkillPromotionEngine proposals for
+    verified procedures with ≥5 successes (idempotent); pending
+    list surfaces via /api/learning.
+  * Hippocampus._procedural now merges governor ProceduralMemory
+    matches (provenance 'learning_procedures') alongside the SQLite
+    procedure table — learned procedures reach task-time recall.
+    NexusBrain takes procedures= like the other source handles.
+  * /api/skills/proposals/approve|reject — skills.manage-gated;
+    approve stages into skills/_generated and installs via the real
+    SkillRegistry (transactional, rollback-capable).
+- Known remaining gap: hippocampus' own SQLite procedures table and
+  the governor's JSON store are still two stores — the bridge is
+  read-side only (hippocampus consults governor; nothing publishes
+  kind=procedure LEARNING_EVENTs into the SQLite table). Deliberate:
+  governor owns write-path truth; hippocampus merges at recall.
+- Tests: full suite 3620 passed / 530 subtests (skipped=4); new
+  regressions in test_brain (governor merge), test_learning
+  (auto-stage), test_autonomy (internal handler).
