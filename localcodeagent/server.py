@@ -7818,6 +7818,19 @@ class Handler(BaseHTTPRequestHandler):
             # opaque 500.
             self._json({"error": str(exc) or "permission denied"}, 403)
             return
+        # Dependency-down is not a server fault: a dead llama-server /
+        # backend endpoint is a 503 with the friendly message + diagnostic
+        # the transport layer already classified.
+        try:
+            from .netdiag import BackendConnectionError
+        except Exception:
+            BackendConnectionError = ()  # type: ignore[assignment]
+        if isinstance(exc, BackendConnectionError):
+            payload = {"error": exc.friendly,
+                       "technical": f"{type(exc).__name__}: {exc}",
+                       "diagnostic": exc.diagnostic()}
+            self._json(payload, 503)
+            return
         traceback.print_exc()
         diag_fn = getattr(exc, "diagnostic", None)
         friendly = getattr(exc, "friendly", "")

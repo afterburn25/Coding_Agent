@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -51,6 +52,53 @@ class ProjectMemory:
             items = self._data.get("task_history", [])[-max(1, limit):]
         if not items:
             return "No previous completed tasks are recorded for this workspace."
+        return self._format(items)
+
+    # Tokens too generic to carry recall signal — an overlap on these
+    # alone would call every past task "relevant".
+    _QUERY_GENERIC = frozenset({
+        "what", "when", "where", "which", "that", "this", "these", "those",
+        "have", "has", "had", "with", "from", "your", "yours", "would",
+        "could", "should", "there", "their", "them", "then", "than",
+        "about", "does", "did", "into", "been", "were", "they", "will",
+        "shall", "each", "such", "like", "just", "make", "made", "more",
+        "some", "also", "only", "very", "much", "many", "same", "here",
+        "take", "over", "used", "uses", "work", "task", "fix", "fixed",
+        "fixes", "thing", "things", "something", "anything", "everything",
+        "tell", "know", "want", "need", "please", "thanks", "thank",
+        "deleted", "delete", "open", "close", "change", "changed",
+    })
+
+    @staticmethod
+    def _tokens(text: str) -> set:
+        return set(re.findall(r"[a-z0-9_]{4,}", str(text).lower()))
+
+    def context_for(self, query: str, *, limit: int = 6,
+                    max_items: int = 3) -> str:
+        """Relevance-gated recall for the conversation lane: only task
+        records that share a content token with the query are injected.
+        Returns "" when nothing matches — a chat turn about an unrelated
+        topic must not get six verbatim mission/workstream summaries
+        dumped into its context (the model reliably echoes them)."""
+        qt = self._tokens(query) - self._QUERY_GENERIC
+        if not qt:
+            return ""
+        with self._lock:
+            items = list(self._data.get("task_history", [])[-max(1, limit):])
+        scored = []
+        for item in reversed(items):  # newest first
+            hay = self._tokens(
+                f"{item.get('prompt','')} {item.get('summary','')} "
+                f"{' '.join(map(str, item.get('files_changed', [])))}")
+            if qt & hay:
+                scored.append(item)
+            if len(scored) >= max_items:
+                break
+        scored.reverse()
+        return self._format(scored) if scored else ""
+
+    @staticmethod
+    def _format(items: list) -> str:
         lines = ["Recent project work remembered locally:"]
         for item in items:
             changed = ", ".join(item.get("files_changed", [])[:8]) or "no files recorded"

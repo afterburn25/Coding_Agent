@@ -138,6 +138,26 @@ class TestApiErrors(unittest.TestCase):
         payload = json.loads(raw)
         self.assertIsInstance(payload, dict)
 
+    def test_backend_connection_error_is_503_not_500(self):
+        # A dead model/backend endpoint is a dependency failure, not a
+        # server fault — 503 with the transport's friendly+diagnostic.
+        from localcodeagent.netdiag import BackendConnectionError
+        orig = self.state.causal.list
+        try:
+            def down(**_kw):
+                raise BackendConnectionError(
+                    ConnectionRefusedError("refused"),
+                    subsystem="llm", url="http://127.0.0.1:8391/v1/chat",
+                    model_id="m1", phase="connect", elapsed_s=1.2)
+            self.state.causal.list = down
+            code, raw = self._get("/api/causal-memory")
+            self.assertEqual(code, 503, raw)
+            payload = json.loads(raw)
+            self.assertIn("diagnostic", payload)
+            self.assertIn("error", payload)
+        finally:
+            self.state.causal.list = orig
+
     def test_assumption_routes(self):
         code, raw = self._post("/api/assumptions", {
             "text": "VRAM fits the model", "scope_type": "mission",

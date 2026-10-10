@@ -9315,7 +9315,11 @@ class AgentOrchestrator:
             messages.append({"role": "user", "content": self._vision_user_content(
                 user_content, vision_image_paths, profile)})
         else:
-            project_memory = self.memory.context()
+            # Conversation lane recall is relevance-gated: unrelated
+            # queries get no task-history dump at all (the model reliably
+            # echoes whatever memory block it is shown). Work lanes keep
+            # the full recency window — recency IS their context.
+            project_memory = self.memory.context_for(user_text)
             index_act = self._act(
                 task.id, "investigating", "Investigating",
                 "Scanning repository index and project context",
@@ -9360,11 +9364,16 @@ class AgentOrchestrator:
                     )
             elif research_context:
                 self.tasks.update(task.id, research=research_context)
+            _ws_parts = []
+            if project_memory:
+                _ws_parts.append(f"Workspace memory:\n{project_memory}")
+            _ws_parts.append(
+                f"Repository index: {index_summary.get('file_count', 0)} indexed files.")
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
                     "role": "system",
-                    "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
+                    "content": "\n\n".join(_ws_parts),
                 },
             ]
             _cap_msg = self._capability_prompt_message()
