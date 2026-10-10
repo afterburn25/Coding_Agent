@@ -514,6 +514,16 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertIn("backup label is zeta", active)
         self.assertNotIn("backup label is alpha", active)
 
+    def test_marker_context_legitimizes_called(self):
+        # "that's wrong — it's called cobalt" — the head marker supplies
+        # correction intent, so 'called' without 'now' still retargets.
+        cm = self._mem()
+        cm.learn_from_user("my render box name is blade")
+        cm.learn_from_user("that's wrong — it's called cobalt")
+        active = self._active(cm)
+        self.assertIn("render box name is cobalt", active)
+        self.assertNotIn("render box name is blade", active)
+
     def test_vague_called_phrase_does_not_corrupt(self):
         # "it's called having standards" is idiom, not a rename — the
         # latest fact must survive.

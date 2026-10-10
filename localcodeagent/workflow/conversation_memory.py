@@ -1300,8 +1300,20 @@ class ConversationMemory:
                                 r"([a-z0-9][a-z0-9 ._-]{0,38}?)"
                                 r"(?:\s+(?:now|instead))?[.!?]?\s*$",
                                 raw, flags=re.IGNORECASE)
-                            if ren and re.search(
-                                    r"\bnow\b", raw, flags=re.IGNORECASE):
+                            # 'now' legitimizes inline — or a correction
+                            # marker in the head clause ("that's wrong —
+                            # it's called cobalt") supplies the intent.
+                            if ren and (
+                                    re.search(r"\bnow\b",
+                                              raw[:ren.end()],
+                                              flags=re.IGNORECASE)
+                                    or re.search(
+                                        r"\b(?:actually|wait|sorry|"
+                                        r"never\s*mind|nm|wrong|"
+                                        r"incorrect|not\s+right|"
+                                        r"changed|renamed|updated?)\b",
+                                        raw[:ren.start()],
+                                        flags=re.IGNORECASE)):
                                 fact = self._retarget_latest_fact(
                                     ren.group(1), result["superseded"])
                         if fact is None:
