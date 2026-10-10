@@ -1840,6 +1840,34 @@ class NotificationTests(unittest.TestCase):
             self.assertEqual(rows[-1]["state"], "failed")
             sup.stop()
 
+    def test_step_limit_finish_commits_worktree_wip(self):
+        """A step-limit retry must not be able to lose the lane's
+        uncommitted work — the finish path commits a WIP checkpoint on
+        the lane branch before re-queuing the node."""
+        import subprocess as sp
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "lane"
+            repo.mkdir()
+            def git(*a):
+                return sp.run(["git", "-C", str(repo), *a],
+                              capture_output=True, text=True)
+            git("init", "-q")
+            git("-c", "user.name=T", "-c", "user.email=t@t",
+                "commit", "-qm", "base", "--allow-empty")
+            (repo / "work.py").write_text("partial = True\n")
+            sup = make_sup(td)
+            node = {"id": "n-1", "title": "Work", "kind": "agent",
+                    "metadata": {"worktree_path": str(repo),
+                                 "worktree_branch": "nexus/x/lane"}}
+            sup._wip_commit({"id": "m-1", "title": "M"}, node)
+            # The dirty file is now a committed WIP — a subsequent
+            # `git reset --hard` cannot destroy it.
+            sp.run(["git", "-C", str(repo), "reset", "--hard", "HEAD"],
+                   capture_output=True)
+            self.assertEqual(
+                (repo / "work.py").read_text(), "partial = True\n")
+            sup.stop()
+
 
 class SchedulerTests(unittest.TestCase):
     def test_once_fires_and_disables(self):
@@ -2708,6 +2736,474 @@ class JsonlLogTests(unittest.TestCase):
             # Every surviving line must be complete JSON — no torn head.
             for line in p.read_bytes().splitlines():
                 json.loads(line)
+
+
+class EngineeringMissionTests(unittest.TestCase):
+    """Codex-scale layer — durable workstreams, context capsule,
+    ownership reservations, steering, thrash escalation, git checkpoints."""
+
+    def _decomposed(self, sup, td, **kw):
+        return sup.create_mission(
+            objective="refactor the backend api and update the web ui "
+                      "and write tests for both",
+            title="cross-stack",
+            scope="repository",
+            workspace=str(Path(td)),
+            decomposition=[
+                {"title": "backend", "instruction": "refactor the api",
+                 "scope": ["localcodeagent/"], "role": "backend"},
+                {"title": "frontend", "instruction": "update the ui",
+                 "scope": ["web/"], "role": "frontend"}],
+            success_criteria=[{"kind": "all_tasks_completed"}],
+            **kw)
+
+    def test_workstreams_integrate_and_capsule_builds(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            m = drive(sup, m["id"], ticks=60)
+            self.assertIn(m["status"],
+                          {"completed", "completed_with_warnings"})
+            roll = sup.missions.workstream_rollup(m)
+            self.assertEqual(len(roll), 2)
+            self.assertTrue(all(w["status"] == "integrated"
+                                for w in roll), [w["status"] for w in roll])
+            self.assertTrue(all(w["tasks"] >= 1 for w in roll))
+            # §2/§4 — acceptance criteria authored before implementation;
+            # capsule carries the compact continuation context.
+            self.assertTrue(m.get("acceptance_criteria"))
+            cap = m.get("context_capsule") or {}
+            self.assertEqual(cap.get("objective")[:30],
+                             m["objective"][:30])
+            self.assertTrue(cap.get("workstreams"))
+            sup.stop()
+
+    def test_mission_report_payload_shape(self):
+        # GET /api/missions/<id>/report — plain-English rollup assembled
+        # purely from the durable record; the detail-page Report panel
+        # and external checks rely on this shape staying stable.
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            m = drive(sup, m["id"], ticks=60)
+            rep = sup.missions.mission_report(
+                m,
+                requirements=[{"id": "req-1", "description": "api works",
+                               "status": "verified"}])
+            for key in ("mission_id", "title", "status", "headline",
+                        "progress", "timeline", "acceptance",
+                        "requirements", "workstreams", "decisions",
+                        "verification", "artifacts", "blockers",
+                        "next_steps", "events_tail"):
+                self.assertIn(key, rep, key)
+            self.assertEqual(rep["mission_id"], m["id"])
+            p = rep["progress"]
+            self.assertEqual(p["tasks_total"], len(m["graph"]["nodes"]))
+            self.assertGreaterEqual(p["percent"], 0)
+            self.assertLessEqual(p["percent"], 100)
+            self.assertEqual(p["workstreams_total"], 2)
+            self.assertIsInstance(rep["headline"], str)
+            self.assertTrue(rep["headline"])
+            self.assertEqual(rep["requirements"][0]["status"], "verified")
+            self.assertIn("runs", rep["verification"])
+            self.assertIsInstance(rep["workstreams"], list)
+            self.assertIsInstance(rep["next_steps"], list)
+            sup.stop()
+
+    def test_mission_report_terminal_headline(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            m = drive(sup, m["id"], ticks=60)
+            rep = sup.missions.mission_report(m)
+            self.assertIn(rep["status"],
+                          {"completed", "completed_with_warnings"})
+            self.assertIn("Mission", rep["headline"])
+            self.assertIn("/", rep["headline"])  # "N/N tasks" rollup
+            sup.stop()
+
+    def test_context_package_scopes_to_workstream(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(
+                objective="improve startup", scope="repository",
+                constraints=["do not add Electron"])
+            sup.missions.record_decision(
+                m["id"], "Keep the desktop host native C#",
+                reason="startup cost", source="user")
+            ws = sup.missions.add_workstream(
+                m["id"], "voice startup", scope=["localcodeagent/voice/"],
+                acceptance=["cold start < 2s"])
+            node = new_task("warmup", "parallelize chatterbox warmup",
+                            metadata={"workstream": ws["id"],
+                                      "scope": ["localcodeagent/voice/"]})
+            pkg = sup.missions.context_package(m, node,
+                                               nexus_md="tests: pytest -q")
+            self.assertIn("voice startup", pkg)
+            self.assertIn("native C#", pkg)
+            self.assertIn("Electron", pkg)
+            self.assertIn("cold start", pkg)
+            self.assertIn("NEXUS.md", pkg)
+            sup.stop()
+
+    def test_maybe_compact_rebuilds_capsule_and_counts(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="grow forever")
+
+            def _grow(row):
+                row["history"] = [{"ts": 1, "event": "e", "detail": "d"}
+                                  ] * 190
+            sup.missions.mutate(m["id"], _grow)
+            self.assertTrue(sup.missions.maybe_compact(m["id"]))
+            m = sup.missions.get(m["id"])
+            self.assertTrue((m.get("context_capsule") or {}).get("version"))
+            self.assertEqual(
+                (m.get("metrics") or {}).get("compactions"), 1)
+            # Raw history is preserved — compaction adds a capsule, it
+            # never deletes the record.
+            self.assertEqual(len(m["history"]), 191)
+            sup.stop()
+
+    def test_nexus_md_discovery(self):
+        from localcodeagent.autonomy.missions import discover_nexus_md
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(discover_nexus_md(td), "")
+            Path(td, "NEXUS.md").write_text("# Ops\ntests: pytest -q")
+            self.assertIn("pytest -q", discover_nexus_md(td))
+
+    def test_ownership_conflict_parks_node(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="edit the web ui",
+                                   scope="repository",
+                                   workspace=td)
+            def _graph(row):
+                g = TaskGraph(row)
+                g.add(new_task("ui work", "edit web/app.js",
+                               metadata={"scope": ["web/app.js"]}))
+            sup.missions.mutate(m["id"], _graph)
+            # Inject straight into executing — a 'ready' mission would
+            # replan over the hand-built graph.
+            sup.missions.update(m["id"], status="executing")
+            # Another live worker already owns web/.
+            sup.missions.reserve_paths(m["id"], "other-worker",
+                                       ["web/"])
+            for _ in range(6):
+                sup.tick()
+                time.sleep(0.1)
+            m = sup.missions.get(m["id"])
+            node = TaskGraph(m).nodes[0]
+            self.assertNotEqual(node["state"], "running")
+            self.assertEqual(node.get("queue_reason"),
+                             "ownership_conflict")
+            self.assertEqual(
+                (m.get("metrics") or {}).get("ownership_conflicts"), 1)
+            # After the other worker releases, the node can proceed.
+            sup.missions.release_paths(m["id"], owner="other-worker")
+            m = drive(sup, m["id"], ticks=40)
+            self.assertEqual(TaskGraph(m).nodes[0]["state"],
+                             "completed")
+            sup.stop()
+
+    def test_steer_pause_resume_drop(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            sup.tick(); sup.tick()
+            m = sup.missions.get(m["id"])
+            front = next(w for w in sup.missions.workstream_rollup(m)
+                         if "frontend" in w["title"])
+            out = sup.steer(m["id"], "pause the frontend")
+            self.assertTrue(out["ok"])
+            m = sup.missions.get(m["id"])
+            ws = next(w for w in m["workstreams"]
+                      if w["id"] == front["id"])
+            self.assertEqual(ws["status"], "paused")
+            node = TaskGraph(m).get(front["node_ids"][0])
+            self.assertIn(node["state"], {"blocked", "running",
+                                          "completed"})
+            out = sup.steer(m["id"], "resume the frontend")
+            self.assertTrue(out["ok"])
+            out = sup.steer(m["id"], "forget the frontend")
+            self.assertTrue(out["ok"])
+            m = sup.missions.get(m["id"])
+            ws = next(w for w in m["workstreams"]
+                      if w["id"] == front["id"])
+            self.assertEqual(ws["status"], "abandoned")
+            out = sup.steer(m["id"], "pause the flux capacitor")
+            self.assertFalse(out["ok"])
+            sup.stop()
+
+    def test_thrash_escalates_to_deep_model(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="x")
+            def _graph(row):
+                g = TaskGraph(row)
+                g.add(new_task("flaky", "do the flaky thing",
+                               max_retries=4))
+            sup.missions.mutate(m["id"], _graph)
+            sup.missions.update(m["id"], status="executing")
+            node = TaskGraph(
+                sup.missions.get(m["id"])).nodes[0]
+            node["state"] = "running"
+            sup.missions.update(
+                m["id"], graph=TaskGraph(
+                    sup.missions.get(m["id"])).graph)
+            for _ in range(2):
+                sup._finish_node(m["id"], node["id"],
+                                 {"ok": False, "error": "same boom"})
+            node = TaskGraph(sup.missions.get(m["id"])).nodes[0]
+            self.assertEqual(node["state"], "ready")
+            self.assertEqual(node.get("model_role"), "deep_reasoner")
+            m = sup.missions.get(m["id"])
+            self.assertEqual(
+                (m.get("metrics") or {}).get("escalations"), 1)
+            sup.stop()
+
+    def test_requirement_change_propagates_to_hierarchy(self):
+        """§18 — supersession reaches nodes, workstream acceptance,
+        mission criteria, and durable decisions, with history."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(
+                objective="migrate the store layer")
+            sup.missions.mutate(
+                m["id"],
+                lambda row: row.update({
+                    "acceptance_criteria": [
+                        "data persists in postgresql",
+                        "tests stay green"]}))
+            sup.missions.record_decision(
+                m["id"], "Use postgresql for the store",
+                reason="maturity", source="user")
+            ws = sup.missions.add_workstream(
+                m["id"], "db layer",
+                acceptance=["postgresql schema migrated"])
+            def _graph(row):
+                g = TaskGraph(row)
+                g.add(new_task("schema work",
+                               "port the schema to postgresql",
+                               metadata={"workstream": ws["id"]}))
+            sup.missions.mutate(m["id"], _graph)
+            sup.missions.update(m["id"], status="executing")
+            out = sup.missions.flag_requirement_change(
+                ["store uses postgresql"])
+            self.assertTrue(out["flagged"])
+            m = sup.missions.get(m["id"])
+            node = TaskGraph(m).nodes[0]
+            self.assertTrue(node.get("stale_requirement"))
+            self.assertIn("postgresql",
+                          m.get("superseded_requirements") or [])
+            self.assertNotIn("postgresql", " ".join(
+                str(c) for c in m.get("acceptance_criteria") or []))
+            ws_row = next(w for w in m["workstreams"]
+                          if w["id"] == ws["id"])
+            self.assertTrue(ws_row.get("requirement_flags"))
+            dec = next(d for d in m["decisions"]
+                       if "postgresql" in str(d["decision"]).lower())
+            self.assertTrue(dec.get("superseded"))
+            sup.stop()
+
+    def test_review_packet_lists_upstream_evidence(self):
+        """§23 — the reviewer sees what each predecessor produced and
+        which files it touched; it never re-implements blindly."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="ship the feature")
+            ws = sup.missions.add_workstream(m["id"], "backend")
+            impl = new_task("build it", "build the backend",
+                            metadata={"workstream": ws["id"]})
+            impl["state"] = "completed"
+            impl["result"] = {"ok": True,
+                              "artifacts": ["localcodeagent/api.py",
+                                            "localcodeagent/store.py"]}
+            rev = new_task("review", "review the integrated result",
+                           kind="review")
+            def _graph(row):
+                g = TaskGraph(row)
+                g.add(impl)
+                g.add(rev)
+            sup.missions.mutate(m["id"], _graph)
+            m = sup.missions.get(m["id"])
+            pkg = sup.missions.context_package(m, rev)
+            self.assertIn("did NOT implement", pkg)
+            self.assertIn("localcodeagent/api.py", pkg)
+            self.assertIn("Lane status", pkg)
+            sup.stop()
+
+    def test_residency_batches_hot_model_tier(self):
+        """§31 — within a priority tier, the model role already hot
+        dispatches before an equal-priority node on a cold tier."""
+        with tempfile.TemporaryDirectory() as td:
+            ran = []
+            def exec_rec(m, n, cb):
+                ran.append(n["title"])
+                return {"ok": True, "output": "done"}
+            sup = make_sup(td, executor=exec_rec)
+            m = sup.create_mission(objective="batch check")
+            cold = new_task("cold task", "x", model_role="")
+            hotn = new_task("hot task", "y", model_role="deep_reasoner")
+            def _graph(row):
+                g = TaskGraph(row)
+                g.add(cold)
+                g.add(hotn)
+            sup.missions.mutate(m["id"], _graph)
+            sup.missions.update(m["id"], status="executing")
+            # The deep tier is resident — without batching the older
+            # 'cold task' would dispatch first on created_at order.
+            sup._hot_model_role = "deep_reasoner"
+            sup.tick()
+            time.sleep(0.3)
+            self.assertEqual(ran[0], "hot task")
+            drive(sup, m["id"], ticks=20)
+            sup.stop()
+
+    def test_workstream_worktree_lifecycle(self):
+        """§13-14 — parallel lanes get isolated checkouts; lane work
+        lands on the lane branch and merges back at the integrate
+        step; integrated worktrees tear down (clean only)."""
+        import subprocess as _sp
+        with tempfile.TemporaryDirectory() as td:
+            _sp.run(["git", "init", "-q"], cwd=td, check=True)
+            _sp.run(["git", "config", "user.email", "t@t"], cwd=td)
+            _sp.run(["git", "config", "user.name", "t"], cwd=td)
+            Path(td, "a.txt").write_text("one")
+            _sp.run(["git", "add", "-A"], cwd=td, check=True)
+            _sp.run(["git", "commit", "-qm", "init"], cwd=td, check=True)
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            # Tick until both lanes have dispatched at least once —
+            # provisioning happens on first agent dispatch.
+            for _ in range(10):
+                sup.tick()
+                time.sleep(0.12)
+                m = sup.missions.get(m["id"])
+                if any((w.get("worktree") or {}).get("path")
+                       for w in m.get("workstreams") or []):
+                    break
+            ws_wt = [w for w in m["workstreams"]
+                     if (w.get("worktree") or {}).get("path")]
+            self.assertTrue(ws_wt, "no lane worktree provisioned")
+            wt = ws_wt[0]["worktree"]
+            self.assertTrue(Path(wt["path"]).is_dir())
+            self.assertTrue(wt["branch"].startswith("nexus/"))
+            # Simulate lane work on the isolated checkout — it lands on
+            # the lane branch, not the main tree.
+            Path(wt["path"], "lane.txt").write_text("lane work")
+            _sp.run(["git", "add", "-A"], cwd=wt["path"], check=True)
+            _sp.run(["git", "commit", "-qm", "lane"], cwd=wt["path"],
+                    check=True)
+            m = drive(sup, m["id"], ticks=80)
+            self.assertIn(m["status"],
+                          {"completed", "completed_with_warnings"})
+            # The integrate step merged the lane branch into the repo.
+            self.assertTrue(Path(td, "lane.txt").exists(),
+                            "lane work never merged back")
+            # And the integrated lane's checkout was torn down.
+            rec = next(w for w in sup.missions.get(m["id"])
+                       ["workstreams"] if w["id"] == ws_wt[0]["id"])
+            self.assertEqual((rec.get("worktree") or {}).get("state"),
+                             "closed")
+            self.assertFalse(Path(wt["path"]).exists())
+            sup.stop()
+
+    def test_replan_reuses_workstreams(self):
+        """§1 — workstream identity is durable: a replan rebuilds the
+        task graph but must NOT append duplicate lane records (observed
+        live: 4 lanes became 8 orphaned rows)."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            sup.tick()
+            time.sleep(0.2)
+            m = sup.missions.get(m["id"])
+            ws_before = {w["id"] for w in m.get("workstreams") or []}
+            self.assertEqual(len(ws_before), 2)
+            # Force a replan — same decomposition.
+            sup.missions.update(m["id"], status="replanning")
+            sup.tick()
+            time.sleep(0.2)
+            m = sup.missions.get(m["id"])
+            titles = [w["title"] for w in m.get("workstreams") or []]
+            self.assertEqual(len(titles), len(set(titles)),
+                             "replan duplicated workstream rows")
+            live = [w for w in m["workstreams"]
+                    if w["status"] not in
+                    {"integrated", "abandoned", "failed"}]
+            self.assertEqual(len(live), 2)
+            sup.stop()
+
+    def test_restart_preserves_hierarchy_state(self):
+        """§39 — workstreams, decisions, ownership leases and the
+        context capsule are all durable record state: a supervisor
+        restart loses nothing, and a dead worker's reservation is
+        reclaimable on the other side."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            m = sup.create_mission(objective="durable restart check")
+            sup.missions.mutate(
+                m["id"],
+                lambda row: row.update({
+                    "acceptance_criteria": ["tests stay green"]}))
+            ws = sup.missions.add_workstream(
+                m["id"], "db layer", scope=["localcodeagent/db/"])
+            sup.missions.record_decision(
+                m["id"], "Use SQLite", reason="embedded")
+            sup.missions.reserve_paths(
+                m["id"], "crashed-worker", ["localcodeagent/db/"],
+                lease_s=0.01)
+            sup.missions.refresh_capsule(m["id"])
+            sup.missions.update(m["id"], status="executing")
+            sup.stop()
+
+            time.sleep(0.05)  # let the crashed worker's lease expire
+            sup2 = make_sup(td)
+            m2 = sup2.missions.get(m["id"])
+            self.assertTrue(m2.get("workstreams"))
+            self.assertTrue(m2.get("context_capsule"))
+            self.assertTrue(sup2.missions.active_decisions(m2))
+            res = (m2.get("ownership") or [])
+            self.assertTrue(any(r.get("owner") == "crashed-worker"
+                                for r in res))
+            # The dead lease is reclaimable on the new supervisor.
+            freed = sup2.missions.sweep_ownership(m["id"])
+            self.assertIn("crashed-worker", freed)
+            # And the mission still drives — the durable record was all
+            # it needed.
+            sup2.tick()
+            sup2.stop()
+
+    def test_git_checkpoints_recorded(self):
+        import subprocess as _sp
+        with tempfile.TemporaryDirectory() as td:
+            _sp.run(["git", "init", "-q"], cwd=td, check=True)
+            _sp.run(["git", "config", "user.email", "t@t"], cwd=td)
+            _sp.run(["git", "config", "user.name", "t"], cwd=td)
+            Path(td, "a.txt").write_text("one")
+            _sp.run(["git", "add", "-A"], cwd=td, check=True)
+            _sp.run(["git", "commit", "-qm", "init"], cwd=td, check=True)
+            sup = make_sup(td)
+            m = self._decomposed(sup, td)
+            sup.start_mission(m["id"])
+            m = drive(sup, m["id"], ticks=60)
+            self.assertIn(m["status"],
+                          {"completed", "completed_with_warnings"})
+            labels = {c["label"] for c in
+                      (m.get("git_checkpoints") or [])}
+            self.assertIn("baseline", labels)
+            self.assertIn("final", labels)
+            tags = _sp.run(["git", "tag", "-l", "nexus/*"], cwd=td,
+                           capture_output=True, text=True).stdout
+            self.assertIn(f"nexus/{m['id']}/baseline", tags)
+            sup.stop()
 
 
 if __name__ == "__main__":

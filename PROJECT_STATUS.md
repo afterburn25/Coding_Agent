@@ -1,8 +1,116 @@
 # Project Status
 
-> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.39.0 is the current release — **Peer Intelligence Network** (durable peer dossiers with domain-scoped earned expertise, ConsultEngine with EV gating + sanitized questions + external-wait mission nodes, debates/journal/replication stores, extended claim ladder, provenance-grounded social queries). v0.38.0 shipped — **Live Capability Grounding + Social/Epistemic Drives** (capability denials audited against probed runtime state; `web_access`/`moltbook` probed capabilities; action-shaped "join X" lane through permission + approval; Moltbook connector with host-scoped auth + vault-only key + untrusted-content tagging + outbound secret scans; Social Drive with level gating and scored participation; Epistemic Drive with persistent learning backlog; peer expertise per-domain; claim verification ladder heard→verified→applied; scheduler-driven heartbeat; `/api/social*` + Social UI). v0.37.0 shipped — **Conversation State Graph** (durable per-conversation state on ActiveContext: entity graph with stable ids/aliases/salience, topic stack with explicit return, decision ledger with supersession, open loops, referent bindings, req_spec accumulation; alias/possessive/ordinal/open-loop reference resolution with ambiguity margins; focus-weighted memory recall; deterministic state-recall lane; response self-audit; forget propagation). v0.36.0 shipped — **Whole-Utterance Semantic Adjudication** (SemanticFrame gates every deterministic fast lane; keyword hijack rate asserted at zero over a 300+-case collision corpus; offers/prohibitions/hypotheticals/complaints resolve by speech act, not topic word). v0.35.2 shipped **Voice/Text Sync** (spoken reply gates text reveal, sealed segment accounting, stall watchdog). v0.33.0 was — **Interactive Chat Permissions** (inline approval cards, backend-authoritative decisions, exact-once resume). v0.32.0 shipped **Conversation Intelligence** (response-scope classifier, progressive disclosure, deterministic memory lanes, topic-shift decay). v0.31.6 was the prior release — **Isabella V7 golden-matched tone + narrator integrity**: barrel report root-caused to (a) stale narrator clips (salt omitted preset content — fixed + regression test) and (b) a tonal gap (live centroid now +7 Hz vs the 4391 Hz golden, air 0.125 vs 0.129). v0.31.4 delivered **Isabella V7 live-verified**: the deployed install now runs dry `bf_isabella` → Chatterbox Turbo → approved V7 DSP once → −12.5 LUFS target → −1 dBFS limiter (6 live segments measured: −13.0…−13.3 LUFS, clip 0, centered, warm RTF ~0.3–0.4), plus recovery-hook coverage (`restore_backup` wired via hash-verified `BackupService.restore`; unhandled actions escalate fully). v0.31.3 shipped **Autonomy liveness & recovery coverage**: model-crash recovery steps (`restart_model`/`fallback_model`) are wired end-to-end, blocked missions untouched >3d auto-retire to `failed` (resumable), the self-repair staleness chain retires orphaned repairs even while autonomy is stopped, and Safe Mode is surfaced on `/api/status` + the main topbar. v0.31.1 added **Evidence & reliability convergence** on top of the action-execution milestone: mission evidence now covers every node kind, failed success criteria are re-checked by replans (never retired unverified), compound actions resume tails across approval gates, and the action lane has a CI-gated correctness eval (`scripts/eval_action_lane.py`). v0.31.0 introduced — **Verified local-action execution**: bounded computer tasks ("create a folder D:\Nexus") run a real lifecycle — intent → capability → permission → execute → verify → evidence → truthful reply — through a deterministic lane (`action_ops.py`) backed by a durable ActionLedger (`action_ledger.py`) and per-kind verification contracts. Success language requires a `verified` entry or `*_OK` tool result; the observed "Yes — Workspaces is ready" fabrication is a permanent regression. v0.30.0 was **Conversation-memory lifecycle**: the teach → recall → correct → supersede → revoke → forget loop is complete end-to-end through `run()`, with subject-named corrections ("actually the port was 5433 not 8080"), stem-matched rule revocation that never retires a matching prohibition, filler-tolerant forget phrasings, value-gated `is`-fact capture, and Nexus Brain kept in sync on every learn (inactive records no longer inject). v0.29.0 was **Performance & resource convergence**: WorkerLeakTracker wired into managed image backends, direction-aware baseline regression gates attached to every BenchmarkLab run, a unified PerfTrace timeline (`/api/perf/timeline`) riding the event bus, recursive file_changed watches, a q4_0 KV-cache tuner candidate, and `/api/storage/audit` for JSON-persistence classification. v0.28.2 was **Soak-hardening patch** on top of 0.28.1: concurrent environment probes (serial probes blew the soak's 15s client timeout), approval-row ordering race fix (worker transitioned to `waiting_approval` before writing the row → reconcile replanned the gate away). Dispatched soak green. v0.28.1 was the **Action-turn reliability patch**: adaptive tool-schema budgeting against the model's context window (root cause of the action-stall — oversized schema payload made llama drop all tools), one-shot action nudge with `tool_choice="required"`, verification-denial loop fix, Windows 8.3 short-name containment fixes. v0.28.0 was **Performance audit pass 2** (backend spawn overlapped with splash boot + first-paint readiness → interface ready ~7.3 s→~4.1–5.1 s, `/api/status` 375 KB→33 KB, Chatterbox conditioning disk cache ~1.05 s→~0.02 s warm, incremental repository index, intent-based tool-schema pruning ~41 % smaller, boot-trace instrumentation + prespawn orphan guard). v0.27.0 was the prior release — the **Performance & Residency** milestone (startup ~21.4 s→~7.0 s, `/api/status` ~800 ms→~20–50 ms, demand-driven GPU residency with verified idle unload + VRAM reclaim, 50-turn soak flat ~6.1 GB). v0.26.1 was the release before that — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core`. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
+> **Takeover note:** Devin should read `DEVIN_START_HERE.md` first. v0.42.0 is the current release — **Adaptive Intelligence Phase A** (Identity Manager over durable account records with vault-only credentials, dependency-aware Capability Truth Graph, Situation Model + 'what's going on?' lane, Intelligence Center UI). v0.41.0 was **RealVisXL V5.0 first-class image model** (merged fleet inventory in the Image Model Manager — visible before install with live state; zero-copy dedup against checkpoints already on disk; `image_adult_default_model` config as the deterministic adult-content preference after policy gates; fleet Install/Verify/Remove lifecycle; capability-brief self-knowledge; `image_backend` config-load fix; splash error/recovery animation fix). v0.40.0 was — **Engineering Missions** (durable Mission→Workstream→Task→Subtask→Verification hierarchy; acceptance criteria authored before implementation; mission context capsule + auto-compaction independent of model context windows; per-task scoped context packages; NEXUS.md discovery; durable engineering decisions; file/symbol ownership reservations with leases + sweep; live steering ops pause/resume/drop/reprioritize via chat + API + UI; thrash detection with deep-model escalation; goal-drift probes; git checkpoints; workstream cards + context/metrics in the Missions UI). v0.39.0 was — **Peer Intelligence Network** (durable peer dossiers with domain-scoped earned expertise, ConsultEngine with EV gating + sanitized questions + external-wait mission nodes, debates/journal/replication stores, extended claim ladder, provenance-grounded social queries). v0.38.0 shipped — **Live Capability Grounding + Social/Epistemic Drives** (capability denials audited against probed runtime state; `web_access`/`moltbook` probed capabilities; action-shaped "join X" lane through permission + approval; Moltbook connector with host-scoped auth + vault-only key + untrusted-content tagging + outbound secret scans; Social Drive with level gating and scored participation; Epistemic Drive with persistent learning backlog; peer expertise per-domain; claim verification ladder heard→verified→applied; scheduler-driven heartbeat; `/api/social*` + Social UI). v0.37.0 shipped — **Conversation State Graph** (durable per-conversation state on ActiveContext: entity graph with stable ids/aliases/salience, topic stack with explicit return, decision ledger with supersession, open loops, referent bindings, req_spec accumulation; alias/possessive/ordinal/open-loop reference resolution with ambiguity margins; focus-weighted memory recall; deterministic state-recall lane; response self-audit; forget propagation). v0.36.0 shipped — **Whole-Utterance Semantic Adjudication** (SemanticFrame gates every deterministic fast lane; keyword hijack rate asserted at zero over a 300+-case collision corpus; offers/prohibitions/hypotheticals/complaints resolve by speech act, not topic word). v0.35.2 shipped **Voice/Text Sync** (spoken reply gates text reveal, sealed segment accounting, stall watchdog). v0.33.0 was — **Interactive Chat Permissions** (inline approval cards, backend-authoritative decisions, exact-once resume). v0.32.0 shipped **Conversation Intelligence** (response-scope classifier, progressive disclosure, deterministic memory lanes, topic-shift decay). v0.31.6 was the prior release — **Isabella V7 golden-matched tone + narrator integrity**: barrel report root-caused to (a) stale narrator clips (salt omitted preset content — fixed + regression test) and (b) a tonal gap (live centroid now +7 Hz vs the 4391 Hz golden, air 0.125 vs 0.129). v0.31.4 delivered **Isabella V7 live-verified**: the deployed install now runs dry `bf_isabella` → Chatterbox Turbo → approved V7 DSP once → −12.5 LUFS target → −1 dBFS limiter (6 live segments measured: −13.0…−13.3 LUFS, clip 0, centered, warm RTF ~0.3–0.4), plus recovery-hook coverage (`restore_backup` wired via hash-verified `BackupService.restore`; unhandled actions escalate fully). v0.31.3 shipped **Autonomy liveness & recovery coverage**: model-crash recovery steps (`restart_model`/`fallback_model`) are wired end-to-end, blocked missions untouched >3d auto-retire to `failed` (resumable), the self-repair staleness chain retires orphaned repairs even while autonomy is stopped, and Safe Mode is surfaced on `/api/status` + the main topbar. v0.31.1 added **Evidence & reliability convergence** on top of the action-execution milestone: mission evidence now covers every node kind, failed success criteria are re-checked by replans (never retired unverified), compound actions resume tails across approval gates, and the action lane has a CI-gated correctness eval (`scripts/eval_action_lane.py`). v0.31.0 introduced — **Verified local-action execution**: bounded computer tasks ("create a folder D:\Nexus") run a real lifecycle — intent → capability → permission → execute → verify → evidence → truthful reply — through a deterministic lane (`action_ops.py`) backed by a durable ActionLedger (`action_ledger.py`) and per-kind verification contracts. Success language requires a `verified` entry or `*_OK` tool result; the observed "Yes — Workspaces is ready" fabrication is a permanent regression. v0.30.0 was **Conversation-memory lifecycle**: the teach → recall → correct → supersede → revoke → forget loop is complete end-to-end through `run()`, with subject-named corrections ("actually the port was 5433 not 8080"), stem-matched rule revocation that never retires a matching prohibition, filler-tolerant forget phrasings, value-gated `is`-fact capture, and Nexus Brain kept in sync on every learn (inactive records no longer inject). v0.29.0 was **Performance & resource convergence**: WorkerLeakTracker wired into managed image backends, direction-aware baseline regression gates attached to every BenchmarkLab run, a unified PerfTrace timeline (`/api/perf/timeline`) riding the event bus, recursive file_changed watches, a q4_0 KV-cache tuner candidate, and `/api/storage/audit` for JSON-persistence classification. v0.28.2 was **Soak-hardening patch** on top of 0.28.1: concurrent environment probes (serial probes blew the soak's 15s client timeout), approval-row ordering race fix (worker transitioned to `waiting_approval` before writing the row → reconcile replanned the gate away). Dispatched soak green. v0.28.1 was the **Action-turn reliability patch**: adaptive tool-schema budgeting against the model's context window (root cause of the action-stall — oversized schema payload made llama drop all tools), one-shot action nudge with `tool_choice="required"`, verification-denial loop fix, Windows 8.3 short-name containment fixes. v0.28.0 was **Performance audit pass 2** (backend spawn overlapped with splash boot + first-paint readiness → interface ready ~7.3 s→~4.1–5.1 s, `/api/status` 375 KB→33 KB, Chatterbox conditioning disk cache ~1.05 s→~0.02 s warm, incremental repository index, intent-based tool-schema pruning ~41 % smaller, boot-trace instrumentation + prespawn orphan guard). v0.27.0 was the prior release — the **Performance & Residency** milestone (startup ~21.4 s→~7.0 s, `/api/status` ~800 ms→~20–50 ms, demand-driven GPU residency with verified idle unload + VRAM reclaim, 50-turn soak flat ~6.1 GB). v0.26.1 was the release before that — **Chatterbox Turbo voice engine** merged to `main` (PR #8), tagged, deployed + live-verified on `D:\Nexus_Core`. See `CHANGELOG.md` and `SESSION_HANDOFF.md`.
 
-## Active version: 0.39.0 — Peer Intelligence Network (peer graph with domain-scoped earned expertise + relationship dimensions + follow-up intent; ConsultEngine with EV gating + sanitized questions + external-wait mission nodes; debates/journal/replication stores; extended claim ladder with testable/retired; provenance-grounded social queries; expanded Social UI. v0.38.x: capability grounding + social/epistemic drives; v0.37.x: Conversation State Graph; v0.36.x: Whole-Utterance Semantic Adjudication; v0.35.x: voice/text sync; v0.34.x: Full Verified Computer Control; v0.33.x: chat permission cards)
+## Active version: 0.42.0 — Adaptive Intelligence Phase A (Identity Manager + Capability Truth Graph + Situation Model)
+
+### 0.42.0 — adaptive intelligence, phase A
+
+First stage of the experience→evidence→lesson→improvement program:
+
+- **`identity_mgr.py`** — `IdentityManager`: durable `data/identity.json`
+  holding canonical name, primary email + backing account, recovery
+  owner (always the user), per-service account records (handle, state,
+  auth method, scopes, credential_ref — vault key names only, never
+  values), provenance, health, last-success, audit. Live merge with
+  `GitHubAccountService` + connector account probes.
+- **Account lifecycle** — `begin_account_creation` gated by the new
+  `identity.account_create` permission; human-only challenges
+  (CAPTCHA/phone/ToS/security) park at `awaiting_human`;
+  `verify_login` marks `active` only after a real authenticated probe.
+- **`identity.*` permissions** — read / account_create / account_modify
+  / account_delete / recovery_modify / oauth_connect; mutations are
+  `AUTONOMY_NEVER_AUTO`, denied under the offline profile.
+- **Capability Truth Graph** — `depends_on` edges, `blockers()` root
+  chains, five new states (`permission_required`, `disconnected`,
+  `temporarily_unavailable`, `policy_denied`, `unsupported`), engine +
+  verify timestamps, rate-limited `run_selftest()`, `graph()` export.
+- **Situation Model** — `nexus_state.build_situation`/`situation_text`:
+  conversation topic+goal, missions+workstreams, jobs/installs/
+  downloads, resident models, approvals, services, waiting consults,
+  recent failures — and a compact "what's going on?" chat answer.
+- **Intelligence Center** — `web/intel.html` (Situation / Capabilities /
+  Identity tabs), nav-wired across all pages; endpoints
+  `/api/situation`, `/api/identity*`, `/api/capabilities/graph`,
+  `/api/capabilities/selftest`.
+
+### 0.41.0 — RealVisXL V5.0 first-class image model
+
+- **`image/manager.py`** — `fleet_status()` merges every fleet spec into
+  one inventory row (tags, size, license, `adult_capable`, ops, live
+  `installed`/`missing`/`downloading`/`verifying`/`failed` state,
+  backend registration, byte progress) so the Image Model Manager lists
+  RealVisXL before any checkpoint exists. `start_fleet_install`,
+  `verify_fleet_model` (registration + size + optional deep SHA-256),
+  `remove_fleet_model` (InvokeAI registry delete — tracked weights
+  only), `describe_fleet_defaults` for self-knowledge answers.
+- **`image/fleet.py`** — `fleet_tags()` display metadata;
+  `find_fleet_checkpoint()` locates a verified-size checkpoint already
+  on disk (InvokeAI store or `models/image`) for in-place registration
+  instead of a duplicate ~6.9 GB download.
+- **`image/router.py`** — `adult_default` (config-backed callable) picks
+  the configured fleet model deterministically on `adult`-classified,
+  fleet-capable requests with the reason `adult-content preference:
+  <model>` — after policy gates and manual override, before trait
+  scoring; missing/unfit defaults fall back with recorded reasons.
+- **`config.py`** — `image_adult_default_model` (default
+  `realvisxl-v5`, `auto` = trait scoring) merges into existing configs
+  on upgrade without touching user choices; `image_backend` is now
+  actually loaded from `config.json` (was persisted, never read back).
+- **`provisioning.py`** — fleet model items dedup on disk before
+  downloading (`inplace` registration); `model-realvisxl-v5` already in
+  the recommended plan after Juggernaut + CyberRealistic.
+- **`server.py`** — `/api/image/fleet/install|verify|remove`,
+  `/api/image/adult-default`; `image_model_state` extra line in the
+  capability brief so adult-model questions answer from live state.
+- **`self_knowledge/settings.py` + `catalog.py`** —
+  `image_adult_default_model` SettingSpec (choice, aliases) under the
+  image feature.
+- **`web/image.*`** — fleet cards in the merged model list (state chips,
+  tags, ~size, license, install progress, lifecycle buttons), Adult
+  default dropdown in the topbar.
+- **Safety unchanged** — `ImageSafetyPolicy` + creator-locked adult
+  gate still run before model selection; `adult_capable` is routing
+  metadata, never a bypass.
+
+### 0.40.0 — engineering missions
+
+### 0.40.0 — engineering missions
+
+- **`autonomy/missions.py`** — durable workstream records
+  (scope patterns, role, priority, status machine
+  `planned→active→awaiting_review→integration_ready→integrated` +
+  `paused/blocked/failed/abandoned`), `workstream_rollup`,
+  `add_workstream`, `pause/resume/drop/reprioritize_workstream`,
+  `find_workstream` (fuzzy title match), `record_decision`/
+  `active_decisions`, `reserve_paths`/`release_paths`/
+  `sweep_ownership` (lease expiry), `bump_metric`,
+  `refresh_capsule`/`maybe_compact`/`context_package`,
+  `discover_nexus_md`.
+- **`autonomy/planner.py`** — `derive_acceptance_criteria` before
+  implementation; decomposed missions create durable workstream rows
+  linked to their nodes (incl. per-lane integrate/review).
+- **`autonomy/supervisor.py`** — ownership reservation on dispatch
+  (`queue_reason: ownership_conflict`, counted once per park);
+  expired-lease sweep; `steer(mission, text)` NL steering;
+  thrash detection (same `fail_sig` ≥2 → deep-model escalation +
+  thrash event); periodic `_goal_drift_check`; `nexus/<id>/<label>`
+  git tags at baseline/final; capsule refresh + compaction inside
+  the executing step.
+- **`server.py`** — `GET /api/missions/:id/workstreams` (rollup +
+  criteria + decisions + capsule + checkpoints + metrics),
+  `POST /api/missions/:id/steer`, per-workstream
+  `pause|resume|drop|reprioritize` ops; chat steering + status
+  ("pause the frontend", "what are you working on") in the mission
+  command lane.
+- **`web/missions.js`** — workstream cards (progress, priority pill,
+  acceptance criteria, Pause/Resume/P0/Drop) + mission context
+  section (decisions, failures, blockers, metrics) on the detail
+  page.
+- **Completion gate unchanged** — `MissionEvaluator` still requires
+  structured `success_criteria` + all nodes terminal; acceptance
+  criteria are the human-readable contract shown to workers,
+  reviewers, and the UI.
 
 ### 0.39.0 — peer intelligence network
 

@@ -166,6 +166,19 @@ SETTINGS: list[SettingSpec] = [
                 aliases=("image backend", "invokeai", "comfyui",
                          "image engine", "image system"),
                 ui_route="/image.html#backends"),
+    SettingSpec("image_adult_default_model", "Adult image model",
+                "Preferred photoreal model for permitted adult-content "
+                "requests — a fleet model id or auto for pure trait "
+                "scoring. Routing preference only; the image safety "
+                "policy still gates every request first.",
+                category="images", type="choice",
+                allowed_values=("auto", "realvisxl-v5",
+                                "juggernaut-xl-v9",
+                                "cyberrealistic-xl-v9"),
+                aliases=("adult model", "adult image model",
+                         "nsfw model", "explicit image model",
+                         "adult content model"),
+                ui_route="/image.html#models"),
     SettingSpec("image_resource_mode", "Image resource mode",
                 "How much hardware image jobs may use.",
                 category="images", type="choice",

@@ -34,6 +34,7 @@
         <a class="nav-item" href="/answers.html"><span class="nav-icon">◆</span><span>Answers</span></a>
         <a class="nav-item" href="/learning.html"><span class="nav-icon">✧</span><span>Learning</span></a>
         <a class="nav-item active" href="/social.html"><span class="nav-icon">◍</span><span>Social</span></a>
+        <a class="nav-item" href="/intel.html"><span class="nav-icon">◉</span><span>Intel</span></a>
         <a class="nav-item" href="/system.html"><span class="nav-icon">≣</span><span>System</span></a>
         <button id="voiceToggle" class="nav-item voice-toggle" type="button"><span class="nav-icon">🔊</span><span>Voice On</span></button>
         <a class="nav-item" href="/settings.html"><span class="nav-icon">⚙</span><span>Settings</span></a>
@@ -96,6 +97,36 @@
         <p class="empty-note" id="backlogEmpty" hidden>The backlog is empty.</p>
       </section>
     </div>
+
+    <section class="panel">
+      <h2>Peer graph</h2>
+      <p class="panel-sub">How Nexus relates to each known agent — edges are
+      evidence-derived (interacted, consulted, learned from, disagreed,
+      reproduced). Click a node for the dossier.</p>
+      <div class="peer-graph-filters">
+        <label>Relationship
+          <select id="pgEdge"><option value="">all</option>
+            <option value="interacted">interacted</option>
+            <option value="consulted">consulted</option>
+            <option value="learned_from">learned from</option>
+            <option value="disagreed">disagreed</option>
+            <option value="reproduced">reproduced</option>
+            <option value="follow_up">follow-up</option>
+          </select></label>
+        <label>Domain <select id="pgDomain"><option value="">all</option></select></label>
+        <label>Min trust <input type="range" id="pgTrust" min="0" max="100"
+                                value="0"></label>
+        <label>Seen <select id="pgRecent">
+          <option value="">any time</option>
+          <option value="86400000">last 24h</option>
+          <option value="604800000">last week</option>
+          <option value="2592000000">last month</option>
+        </select></label>
+      </div>
+      <canvas id="peerGraph" width="860" height="380"></canvas>
+      <div id="peerDossier" class="peer-dossier" hidden></div>
+      <p class="empty-note" id="peerGraphEmpty" hidden>No peers recorded yet.</p>
+    </section>
 
     <div class="learning-grid">
       <section class="panel">

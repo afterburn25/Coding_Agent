@@ -73,10 +73,31 @@ class ImageManager:
         self.invokeai_runtime = InvokeAIRuntime(
             base_dir=self.base_dir, backend=self.invokeai_backend, config=config,
             leak_tracker=self.leaks)
-        self.router = ImageRouter(models, resource_fit=self._resource_fit)
+        self.router = ImageRouter(
+            models, resource_fit=self._resource_fit,
+            adult_default=lambda: getattr(
+                self.config, "image_adult_default_model", "") or "")
+        # Fleet (InvokeAI) install jobs this manager started — tracked so
+        # the Image Model Manager shows Downloading/Verifying/Failed and
+        # byte progress for fleet installs outside the provisioning plan.
+        self._fleet_jobs: dict[str, dict[str, Any]] = {}
+        self._fleet_lock = threading.RLock()
         from .sampling import SamplingAdvisor
         self.sampling_advisor = SamplingAdvisor(self.data_dir / "sampling_stats.json")
         self._jobs: dict[str, ImageJob] = {}
+        # Backend cancels that never landed (backend unreachable/crash-looping).
+        # InvokeAI persists its queue in sqlite and RESUMES in-flight items on
+        # restart — a missed cancel leaves orphaned work burning CPU/GPU after
+        # the Nexus job is already gone (observed: a cancelled 30-step job
+        # grinding ~90s/step on CPU for 40+ min across a process restart).
+        self._pending_cancels_path = self.data_dir / "pending_cancels.json"
+        self._pending_cancels: set[str] = set()
+        try:
+            saved = json.loads(self._pending_cancels_path.read_text(encoding="utf-8"))
+            if isinstance(saved, list):
+                self._pending_cancels = {str(x) for x in saved}
+        except Exception:
+            pass
         self._lock = threading.RLock()
         self._ws_listener = None
         self._backend_up_ts: dict[str, float] = {}
@@ -522,6 +543,9 @@ class ImageManager:
             "inventory": discover_image_models(self.models_dir),
             "model_status": self.library.verify_all(self.router.models),
             "loras": self.library.list_loras(),
+            "fleet": self.fleet_status(),
+            "adult_default_model": str(getattr(
+                self.config, "image_adult_default_model", "") or ""),
             "installs": self.library.install_jobs(),
             "setup": self.setup_state(),
             "workflows": self.workflows.list(),
@@ -560,6 +584,355 @@ class ImageManager:
     def remove_model(self, model_id: str) -> list[str]:
         profile=self.router.get_profile(model_id)
         return self.library.remove_model(profile)
+
+    # -- photoreal fleet (InvokeAI) ---------------------------------------
+    #
+    # Fleet specs are declarative — a spec must be visible in the Image
+    # Model Manager before its checkpoint exists, and a checkpoint can
+    # serve only when the backend registers it. `fleet_status()` is the
+    # merged view the UI renders.
+
+    def _invokeai_models_root(self) -> Path:
+        """InvokeAI's managed model store (the same root --root serves)."""
+        return (self.base_dir / "data" / "invokeai" / "models").resolve()
+
+    def _fleet_installed_row(self, fleet_id: str,
+                             rows: list[dict[str, Any]] | None = None,
+                             *, force: bool = False) -> dict[str, Any] | None:
+        """The backend registry row matching a fleet spec, or None."""
+        from .fleet import fleet_for_model_name
+        if rows is None:
+            rows = self._invokeai_models(force=force)
+        for row in rows:
+            for cand in (str(row.get("name") or ""),
+                         str(row.get("source") or ""),
+                         str(row.get("path") or "")):
+                spec = fleet_for_model_name(cand)
+                if spec and spec["id"] == fleet_id:
+                    return row
+        return None
+
+    def _fleet_disk_roots(self) -> list[Path]:
+        return [self._invokeai_models_root(), self.models_dir]
+
+    def fleet_status(self) -> list[dict[str, Any]]:
+        """Merged fleet inventory — every known spec with live state:
+        installed / downloading / verifying / failed / missing.
+
+        State resolution order: live manager-tracked install → backend
+        registry row → live InvokeAI install job (covers provisioning-
+        driven installs, which use the same endpoint) → missing."""
+        from .fleet import FLEET, fleet_tags
+        configured_default = str(getattr(
+            self.config, "image_adult_default_model", "") or "").lower()
+        registry = self._invokeai_models()
+        live_remote: list[dict[str, Any]] = []
+        if self._backend_up("invokeai"):
+            try:
+                live_remote = self.invokeai_backend.model_install_jobs() or []
+            except Exception:
+                live_remote = []
+        rows: list[dict[str, Any]] = []
+        for spec in FLEET:
+            fid = spec["id"]
+            with self._fleet_lock:
+                job = dict(self._fleet_jobs.get(fid) or {})
+            job_state = str(job.get("state") or "")
+            remote_job = None
+            if not job and live_remote:
+                for rj in live_remote:
+                    src = str(rj.get("source") or "")
+                    if spec["source_file"].lower() in src.lower() or \
+                            spec["invokeai_source"] == src:
+                        remote_job = rj
+                        break
+            installed_row = self._fleet_installed_row(fid, rows=registry)
+            if job_state in {"queued", "checking", "downloading",
+                             "verifying"}:
+                state = ("verifying" if job_state == "verifying"
+                         else "downloading")
+            elif job_state == "failed":
+                state = "failed"
+            elif installed_row is not None:
+                state = "installed"
+            elif remote_job is not None:
+                rj_status = str(remote_job.get("status") or "").lower()
+                state = ("downloading" if rj_status in
+                         {"waiting", "downloading", "running", "paused"}
+                         else "failed" if rj_status in {"error", "cancelled"}
+                         else "installed" if rj_status == "completed"
+                         else "missing")
+            else:
+                state = "missing"
+            progress = dict(job.get("progress") or {})
+            if not progress and remote_job is not None:
+                progress = {
+                    "bytes_done": int(remote_job.get("bytes") or 0),
+                    "bytes_total": int(remote_job.get("bytes_total")
+                                       or spec["size_bytes"]),
+                    "file": spec["source_file"],
+                }
+            rows.append({
+                "id": fid,
+                "display_name": spec["display_name"],
+                "role": spec["role"],
+                "base": spec["base"],
+                "version": spec.get("version") or "",
+                "family": "stable-diffusion-xl",
+                "backend": "invokeai",
+                "tags": fleet_tags(spec),
+                "size_bytes": int(spec["size_bytes"]),
+                "size_gb": round(int(spec["size_bytes"]) / (1024 ** 3), 2),
+                "license": spec["license_name"],
+                "homepage": spec.get("homepage") or "",
+                "source_repo": spec.get("source_repo") or "",
+                "adult_capable": bool(spec.get("adult_capable")),
+                "restriction_status": spec["restriction_status"],
+                "adult_default": fid == configured_default,
+                "supported_operations": list(
+                    spec.get("supported_operations") or []),
+                "state": state,
+                "installed": installed_row is not None,
+                "backend_model": (
+                    {"key": installed_row.get("key"),
+                     "name": installed_row.get("name"),
+                     "format": installed_row.get("format"),
+                     "hash": installed_row.get("hash"),
+                     "path": installed_row.get("path")}
+                    if installed_row else None),
+                "progress": progress,
+                "error": str(job.get("error") or ""),
+            })
+        return rows
+
+    def describe_fleet_defaults(self) -> str:
+        """One-line live model state for self-knowledge answers — which
+        fleet models are registered and which is the configured adult
+        default, with an honest installed/missing qualifier."""
+        try:
+            rows = self.fleet_status()
+        except Exception:
+            return ""
+        installed = [r["display_name"] for r in rows if r["installed"]]
+        adult = next((r for r in rows if r["adult_default"]), None)
+        bits: list[str] = []
+        bits.append("installed photoreal models: "
+                    + (", ".join(installed) if installed else "none"))
+        if adult is not None:
+            bits.append(
+                f"adult-content default: {adult['display_name']} "
+                f"({'installed' if adult['installed'] else 'configured but not installed'})")
+        return "Image models — " + "; ".join(bits) + "."
+
+    def start_fleet_install(self, fleet_id: str,
+                            *, repair: bool = False) -> dict[str, Any]:
+        """Install/verify a fleet checkpoint through InvokeAI.
+
+        Dedup order: already registered in the backend → already
+        registered in the on-disk registry → verified checkpoint file
+        already on disk (registered in place, zero extra download) →
+        remote install of the pinned source. Returns a live job row;
+        the Image Model Manager renders its progress."""
+        from .fleet import FLEET_BY_ID, find_fleet_checkpoint
+        spec = FLEET_BY_ID.get(str(fleet_id or ""))
+        if spec is None:
+            raise KeyError(f"unknown fleet model '{fleet_id}'")
+        fid = spec["id"]
+        with self._fleet_lock:
+            existing = self._fleet_jobs.get(fid)
+            if existing and existing.get("state") in {
+                    "queued", "checking", "downloading", "verifying"}:
+                return dict(existing)
+            job = {
+                "id": uuid.uuid4().hex, "fleet_id": fid,
+                "display_name": spec["display_name"],
+                "state": "queued", "progress": {
+                    "bytes_done": 0,
+                    "bytes_total": int(spec["size_bytes"]),
+                    "file": spec["source_file"]},
+                "error": "", "created_at": time.time(),
+                "finished_at": None, "repair": bool(repair),
+            }
+            self._fleet_jobs[fid] = job
+        threading.Thread(
+            target=self._run_fleet_install,
+            args=(spec, job["id"], repair), daemon=True).start()
+        return dict(job)
+
+    def _fleet_job_update(self, job_id: str, **fields: Any) -> None:
+        with self._fleet_lock:
+            for job in self._fleet_jobs.values():
+                if job["id"] == job_id:
+                    job.update(fields)
+                    return
+
+    def _fleet_job(self, job_id: str) -> dict[str, Any]:
+        with self._fleet_lock:
+            for job in self._fleet_jobs.values():
+                if job["id"] == job_id:
+                    return job
+        return {}
+
+    def _run_fleet_install(self, spec: dict[str, Any], job_id: str,
+                           repair: bool) -> None:
+        from .fleet import find_fleet_checkpoint
+        fid = spec["id"]
+        try:
+            self._fleet_job_update(job_id, state="checking")
+            if not repair and self._fleet_installed_row(fid) is not None:
+                self._fleet_job_update(
+                    job_id, state="completed", finished_at=time.time(),
+                    progress={"bytes_done": int(spec["size_bytes"]),
+                              "bytes_total": int(spec["size_bytes"]),
+                              "file": spec["source_file"],
+                              "note": "already registered"})
+                return
+            self.invokeai_runtime.ensure_ready()
+            self._flush_pending_cancels()
+            # The backend may have been stopped a moment ago — re-check
+            # the live registry now that it is up before downloading.
+            if not repair and self._fleet_installed_row(fid, force=True) is not None:
+                self._fleet_job_update(
+                    job_id, state="completed", finished_at=time.time(),
+                    progress={"note": "already registered"})
+                return
+            source = str(spec["invokeai_source"])
+            inplace = False
+            if not repair:
+                local = find_fleet_checkpoint(spec, self._fleet_disk_roots())
+                if local is not None:
+                    # A verified copy already exists on this machine —
+                    # register it in place instead of pulling ~7 GB again.
+                    source = str(local)
+                    inplace = True
+            remote = self.invokeai_backend.install_model(
+                source, inplace=inplace)
+            remote_id = remote.get("id")
+            if remote_id is None:
+                raise RuntimeError(f"model install rejected: {remote}")
+            self._fleet_job_update(job_id, state="downloading")
+            deadline = time.time() + 12 * 3600
+            while time.time() < deadline:
+                row = self.invokeai_backend.model_install_job(remote_id)
+                if row is None:
+                    raise RuntimeError(
+                        "model install job disappeared (backend restart?)")
+                status = str(row.get("status") or "").lower()
+                self._fleet_job_update(job_id, progress={
+                    "bytes_done": int(row.get("bytes") or 0),
+                    "bytes_total": int(row.get("bytes_total")
+                                     or spec["size_bytes"]),
+                    "file": spec["source_file"],
+                    "job_status": status})
+                if status == "completed":
+                    break
+                if status in {"error", "cancelled"}:
+                    raise RuntimeError(str(row.get("error")
+                                           or f"model install {status}"))
+                time.sleep(2.0)
+            else:
+                raise RuntimeError("model install timed out")
+            self._fleet_job_update(job_id, state="verifying")
+            if self._verify_fleet_registered(fid):
+                self._fleet_job_update(
+                    job_id, state="completed", finished_at=time.time())
+                # Registration changed — rebuilt router pool picks the
+                # model up for the next request without a restart.
+                try:
+                    self._refresh_invokeai_models()
+                except Exception:
+                    pass
+                return
+            raise RuntimeError(
+                "model downloaded but not enumerable by the backend")
+        except Exception as exc:
+            self._fleet_job_update(
+                job_id, state="failed", finished_at=time.time(),
+                error=f"{type(exc).__name__}: {exc}")
+
+    def _verify_fleet_registered(self, fleet_id: str,
+                                 timeout: float = 60.0) -> bool:
+        """Registered ≠ file on disk — the install only counts when the
+        backend can enumerate the model."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._fleet_installed_row(fleet_id, force=True) is not None:
+                return True
+            time.sleep(2.0)
+        return False
+
+    def verify_fleet_model(self, fleet_id: str,
+                           *, deep_hash: bool = False) -> dict[str, Any]:
+        """Live verification: backend registration plus (when the file is
+        resolvable) on-disk size and optional SHA-256 against the spec."""
+        from .fleet import FLEET_BY_ID, find_fleet_checkpoint
+        from .library import _sha256
+        spec = FLEET_BY_ID.get(str(fleet_id or ""))
+        if spec is None:
+            raise KeyError(f"unknown fleet model '{fleet_id}'")
+        row = self._fleet_installed_row(spec["id"])
+        out: dict[str, Any] = {
+            "fleet_id": spec["id"], "display_name": spec["display_name"],
+            "registered": row is not None,
+            "backend_model": row or None,
+            "file_found": False, "size_ok": False, "hash_ok": None,
+            "expected_sha256": spec.get("sha256") or "",
+            "ok": False,
+        }
+        path = None
+        if row is not None:
+            raw = str(row.get("path") or "")
+            if raw:
+                cand = Path(raw)
+                if not cand.is_absolute():
+                    cand = self._invokeai_models_root() / cand
+                if cand.is_file():
+                    path = cand
+        if path is None:
+            path = find_fleet_checkpoint(spec, self._fleet_disk_roots())
+        if path is not None:
+            out["file_found"] = True
+            out["path"] = str(path)
+            try:
+                out["size_ok"] = (path.stat().st_size
+                                  == int(spec["size_bytes"]))
+            except OSError:
+                pass
+            if deep_hash:
+                out["sha256"] = _sha256(path)
+                out["hash_ok"] = (
+                    out["sha256"].lower()
+                    == str(spec["sha256"]).lower())
+        out["ok"] = bool(out["registered"] and out["file_found"]
+                         and out["size_ok"]
+                         and out["hash_ok"] is not False)
+        return out
+
+    def remove_fleet_model(self, fleet_id: str) -> dict[str, Any]:
+        """Delete a fleet model through InvokeAI's registry — removes the
+        model's own weights only; shared files are untouched."""
+        from .fleet import FLEET_BY_ID
+        spec = FLEET_BY_ID.get(str(fleet_id or ""))
+        if spec is None:
+            raise KeyError(f"unknown fleet model '{fleet_id}'")
+        self.invokeai_runtime.ensure_ready()
+        self._flush_pending_cancels()
+        row = self._fleet_installed_row(spec["id"], force=True)
+        if row is None:
+            return {"ok": True, "removed": False,
+                    "note": "model is not registered"}
+        key = str(row.get("key") or "")
+        if not key:
+            raise RuntimeError("registered model row carries no key")
+        if not self.invokeai_backend.delete_model(key):
+            raise RuntimeError("InvokeAI refused to delete the model")
+        with self._fleet_lock:
+            self._fleet_jobs.pop(spec["id"], None)
+        try:
+            self._refresh_invokeai_models()
+        except Exception:
+            pass
+        return {"ok": True, "removed": True, "key": key}
 
     def save_lora_metadata(self, lora_path: str, metadata: dict[str, Any]) -> dict[str, Any]:
         return self.library.save_lora_metadata(lora_path, metadata)
@@ -759,6 +1132,14 @@ class ImageManager:
                 profile.display_name = spec["display_name"]
                 profile.capability_class = "photoreal"
                 profile.restriction_status = spec["restriction_status"]
+                # Resource estimates feed the pre-job arbiter — without them
+                # the job submits alongside a resident LLM and the backend
+                # spills to shared memory (observed: ~148s/step instead of
+                # ~8s/step on a 12 GB card with qwen3-14b resident).
+                profile.estimated_vram_gb = float(
+                    spec.get("estimated_vram_gb") or 0.0)
+                profile.estimated_ram_gb = float(
+                    spec.get("estimated_ram_gb") or 0.0)
                 for k, v in (spec.get("sampling") or {}).items():
                     profile.metadata.setdefault("sampling", {})[k] = v
                 profile.metadata["sampling"]["model_scope"] = spec["id"]
@@ -1307,6 +1688,7 @@ class ImageManager:
             job.stage = "starting InvokeAI" if job.backend_starting else "connecting to InvokeAI"
             job.progress = max(job.progress, 0.10); self._save_jobs(job)
             self.invokeai_runtime.ensure_ready()
+            self._flush_pending_cancels()
             job.backend_starting = False
 
             job.stage = "preparing generation"; job.progress = max(job.progress, 0.14)
@@ -1345,6 +1727,7 @@ class ImageManager:
                     except Exception:
                         pass
                     self.invokeai_runtime.ensure_ready()
+                    self._flush_pending_cancels()
 
             job.stage = "saving image"; job.progress = max(job.progress, 0.92)
             self._save_jobs(job)
@@ -1375,6 +1758,9 @@ class ImageManager:
         except _ImageJobCancelled:
             pass
         except Exception as exc:
+            # Timeouts and failures must not leave the queue item grinding —
+            # InvokeAI persists in-flight items and resumes them on restart.
+            self._discard_backend_work(job)
             error = describe_image_error(exc)
             job.state = "failed"; job.stage = "failed"
             job.error_code = error["code"]; job.error_message = error["message"]
@@ -1568,12 +1954,48 @@ class ImageManager:
             meta=Path(output).with_suffix(Path(output).suffix+".json")
             meta.write_text(json.dumps(row, indent=2), encoding="utf-8")
 
+    def _discard_backend_work(self, job: "ImageJob") -> None:
+        """Best-effort cancel of the job's backend queue item. Never raises —
+        a failed InvokeAI cancel is persisted and retried once the backend is
+        healthy again (see _pending_cancels)."""
+        bid = job.backend_job_id
+        if not bid:
+            return
+        try:
+            (self.backends.get(job.backend) or self.backend).cancel(str(bid))
+        except Exception:
+            if job.backend != "invokeai":
+                return  # ComfyUI's queue is in-memory; a restart drops it.
+            try:
+                self._pending_cancels.add(str(bid))
+                _atomic_json_write(self._pending_cancels_path,
+                                   sorted(self._pending_cancels))
+            except Exception:
+                pass
+
+    def _flush_pending_cancels(self) -> None:
+        """Retry persisted InvokeAI cancels once the backend is reachable —
+        call after ensure_ready() or a confirmed-healthy status poll."""
+        if not self._pending_cancels:
+            return
+        for bid in list(self._pending_cancels):
+            try:
+                self.invokeai_backend.cancel(bid)
+                self._pending_cancels.discard(bid)
+            except Exception:
+                pass
+        try:
+            _atomic_json_write(self._pending_cancels_path,
+                               sorted(self._pending_cancels))
+        except Exception:
+            pass
+
     def cancel(self, job_id: str) -> ImageJob:
         job=self._jobs[job_id]
         if job.state in {"finished","failed","cancelled"}: return job
-        if job.backend_job_id:
-            backend = self.backends.get(job.backend) or self.backend
-            backend.cancel(job.backend_job_id)
+        self._discard_backend_work(job)
+        if job.backend == "invokeai":
+            self._flush_pending_cancels()
         job.state="cancelled"; job.stage="cancelled"; job.finished_at=time.time(); self._save_jobs(job); return job
 
     def get_job(self, job_id: str) -> ImageJob:

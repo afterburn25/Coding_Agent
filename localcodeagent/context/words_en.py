@@ -590,7 +590,7 @@ rockford rialto savannah scranton simivalley thornton tyler wichita
 # Nexus/technical vocabulary — protected as-is and preferred as
 # correction targets in technical contexts.
 DOMAIN_WORDS = frozenset("""
-nexus devin github gitlab bitbucket git commit push pull merge rebase
+nexus devin moltbook github gitlab bitbucket git commit push pull merge rebase
 checkout branch repo repository clone fork stash diff patch blame
 python javascript typescript java rust golang cpp csharp dotnet nodejs
 npm pip yarn cargo conda venv virtualenv pytest unittest junit

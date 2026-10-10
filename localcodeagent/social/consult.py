@@ -197,11 +197,16 @@ class ConsultEngine:
              expected_value: float = 0.0, privacy: str = "public_safe",
              backlog_id: str = "", mission_id: str = "",
              thread_ref: str = "", timeout_s: float = DEFAULT_TIMEOUT_S,
-             status: str = "pending_send") -> dict[str, Any]:
+             status: str = "pending_send",
+             kind: str = "consult") -> dict[str, Any]:
         """Record a consult intent. Status flow: pending_send →
-        awaiting_response → answered | unanswered | withdrawn."""
+        awaiting_response → answered | unanswered | withdrawn.
+        ``kind`` marks the workflow ('consult' |
+        'adversarial_review') so downstream handling can treat
+        critique answers differently from ordinary answers."""
         row = {
             "id": f"pc-{uuid.uuid4().hex[:10]}",
+            "kind": str(kind or "consult")[:40],
             "question": str(question or "")[:1600],
             "domain": str(domain or "general").lower(),
             "target_peers": [str(p)[:80] for p in (peers or [])][:6],
@@ -262,15 +267,26 @@ class ConsultEngine:
         callers emit the mission-wake signal and record provenance."""
         matched: list[dict[str, Any]] = []
         hits = injection_hits(text)
-        for c in self.pending():
-            if c.get("status") != "awaiting_response":
-                continue
+        awaiting = [c for c in self.pending()
+                    if c.get("status") == "awaiting_response"]
+        for c in awaiting:
             targets = {t.lower() for t in c.get("target_peers") or []}
             same_peer = peer.lower() in targets if targets else False
             same_thread = bool(ref) and ref in {
                 c.get("thread_ref"), c.get("post_ref")}
-            if not (same_peer or same_thread):
+            # Sole-open fallback: a reply/mention aimed at Nexus with no
+            # thread/peers match still resolves the one outstanding ask
+            # — older consults may carry an empty post_ref from send
+            # envelopes whose id shape wasn't extracted. Only applies
+            # when the consult has no matchable signals of its own.
+            signals = bool(c.get("target_peers")) or \
+                bool(c.get("post_ref")) or bool(c.get("thread_ref"))
+            sole = not (same_peer or same_thread) and not signals \
+                and len(awaiting) == 1
+            if not (same_peer or same_thread or sole):
                 continue
+            if sole:
+                c["matched_by"] = "sole_open_consult"
             c["status"] = "answered"
             c["answer"] = str(text)[:2000]
             c["answered_by"] = str(peer)[:80]

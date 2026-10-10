@@ -416,6 +416,10 @@ class AppState:
         self._queue_announced: set[str] = set()
         self._queue_line_cursor: dict[str, int] = {}
         self._notice_cursor: dict[str, int] = {}
+        # Per-family cooldown for notices that re-arm on state
+        # transitions (capacity flap, etc.) — a notice id may speak
+        # again only after the family has been quiet this long.
+        self._notice_last: dict[str, float] = {}
         self._queue_burst: list[float] = []
         self.workers = AdaptiveWorkerManager(
             self.workspace,
@@ -688,6 +692,18 @@ class AppState:
             self.social.attach(self.connectors, self._moltbook_connector)
         except Exception:
             self._moltbook_connector = None
+        # Identity Manager — the authoritative registry of Nexus's
+        # persistent online identity: service accounts, handles,
+        # verification state, credential *references* (vault key names
+        # only). Live rows merge GitHubAccountService + connector account
+        # state so answers reflect reality, not stale records.
+        from .identity_mgr import IdentityManager
+        self.identity = IdentityManager(
+            runtime_root / "data", vault=self.secrets,
+            connectors=self.connectors,
+            github_account=self.github_account,
+            permission_check=lambda p: self.permission_manager.effective(p),
+            emit=lambda e, d: self.events.publish(e, d))
         self._knowledge_path = runtime_root / "data" / "knowledge_graph.db"
         self.skills = SkillRegistry(runtime_root)
         # L13: learned procedures promote to real skills only through
@@ -1867,6 +1883,22 @@ class AppState:
                 states.append(st)
             return next((s for s in states if s), "")
 
+        def _image_engine() -> str:
+            """Which backend the image subsystem would use right now —
+            the graph's 'engine' field, not just a state word."""
+            images = getattr(self, "images", None)
+            if images is None:
+                return ""
+            inv = getattr(images, "invokeai_runtime", None)
+            if inv is not None and getattr(getattr(inv, "status", None),
+                                           "healthy", False):
+                return "invokeai"
+            comfy = getattr(images, "backend_runtime", None)
+            if comfy is not None and getattr(getattr(comfy, "status", None),
+                                             "healthy", False):
+                return "comfyui"
+            return ""
+
         def _stt_state() -> str:
             if getattr(self, "_stt_engine", None) is not None:
                 return "ready"
@@ -1900,6 +1932,8 @@ class AppState:
             "image_enabled":
                 lambda: bool(getattr(config, "image_enabled", False)),
             "image_backend_state": _image_state,
+            "image_backend_engine": _image_engine,
+            "browser_engine": lambda: "playwright",
             "stt_enabled":
                 lambda: str(getattr(config, "stt_backend", "off"))
                 .lower() != "off",
@@ -1915,7 +1949,18 @@ class AppState:
                 lambda: bool(self.policies.is_offline()),
             "connector_state": self._connector_capability_state,
         }
-        return CapabilityRegistry(env)
+
+        def _image_model_state() -> str:
+            images = getattr(self, "images", None)
+            if images is None:
+                return ""
+            try:
+                return str(images.describe_fleet_defaults() or "")
+            except Exception:
+                return ""
+
+        return CapabilityRegistry(
+            env, extra_lines=[_image_model_state])
 
     def _connector_capability_state(self, name: str) -> dict:
         """Live connector state for capability probes — enabled, auth,
@@ -2935,6 +2980,26 @@ class AppState:
                         return _adopt(parked_row)
             instruction = str(
                 node.get("instruction") or node.get("title") or "")
+            # §6 task-specific context package — the worker gets the
+            # mission contract, its workstream, in-force decisions and
+            # repo guidance (NEXUS.md), not the whole mission record.
+            try:
+                if getattr(self, "supervisor", None) is not None:
+                    from .autonomy.missions import discover_nexus_md
+                    if not hasattr(self, "_nexus_md_cache"):
+                        self._nexus_md_cache = {}
+                    wroot = str(mission.get("workspace")
+                                or self.workspace)
+                    if wroot not in self._nexus_md_cache:
+                        self._nexus_md_cache[wroot] = \
+                            discover_nexus_md(wroot)
+                    pkg = self.supervisor.missions.context_package(
+                        mission, node,
+                        nexus_md=self._nexus_md_cache.get(wroot, ""))
+                    if pkg:
+                        instruction = pkg + "\n\n" + instruction
+            except Exception:
+                pass
             if node.get("stale_requirement"):
                 # Requirement-change propagation — the conversation fact
                 # this node was planned against has been superseded. Tell
@@ -2956,16 +3021,54 @@ class AppState:
                 prev = str(((node.get("result") or {}).get("error"))
                            or ((node.get("result") or {}).get("output"))
                            or "")[:400]
-                instruction += (
-                    "\n\nYour previous attempt failed"
-                    + (f": {prev}" if prev else ".")
-                    + " Do not assert completed actions — actually invoke "
-                      "the required tools.")
-            result = self.agent.run(
-                instruction, history=[], mode="auto",
-                event_callback=emit_cb,
-                mission_id=str(mission.get("id") or "") or None,
-            )
+                if "step limit" in prev.lower():
+                    # A step-limit stop is not a failure of the work — the
+                    # workspace may already hold partial results. The
+                    # continuation must build on them, never reset them.
+                    instruction += (
+                        "\n\nA previous attempt stopped at the step "
+                        "limit — it was NOT a wrong-answer failure. "
+                        "Partial work may already exist in this "
+                        "workspace: inspect `git status` / the target "
+                        "files first, continue from what is there, and "
+                        "never run `git reset`, `git checkout --`, or "
+                        "`git clean` to start over. Finish only the "
+                        "remaining work.")
+                else:
+                    instruction += (
+                        "\n\nYour previous attempt failed"
+                        + (f": {prev}" if prev else ".")
+                        + " Do not assert completed actions — actually "
+                          "invoke the required tools.")
+            # §10 — model escalation is real: a node's model_role (set
+            # by the planner or thrash escalation) overrides routing to
+            # that tier via the router, without disturbing mode=="auto"
+            # behavior elsewhere in the run.
+            # §10 — model escalation is real: a node's model_role (set
+            # by the planner or thrash escalation) overrides routing to
+            # that tier via the router.
+            # A node instruction is a delegated work ORDER, not a user
+            # utterance — run_work_order skips conversational intent
+            # adjudication (which once routed 'add an endpoint to
+            # server.py' into the GitHub repo-read lane; the connector
+            # 404'd and every lane "completed" with the same error
+            # prose) and drives the agentic tool loop directly.
+            wo_runner = getattr(self.agent, "run_work_order", None)
+            if wo_runner is not None:
+                result = wo_runner(
+                    instruction,
+                    task_title=str(node.get("title") or ""),
+                    mission_id=str(mission.get("id") or "") or None,
+                    model_role=str(node.get("model_role") or "") or None,
+                    event_callback=emit_cb,
+                )
+            else:
+                result = self.agent.run(
+                    instruction, history=[], mode="auto",
+                    event_callback=emit_cb,
+                    mission_id=str(mission.get("id") or "") or None,
+                    model_role=str(node.get("model_role") or "") or None,
+                )
             return _mission_node_out(mission, node, result)
 
         def _mission_node_out(mission: dict, node: dict, result) -> dict:
@@ -3010,6 +3113,35 @@ class AppState:
                         failure=str(out.get("error") or "")[:300])
                 except Exception:
                     pass
+            meta_out = node.get("metadata") or {}
+            if (out["ok"] and node.get("kind") == "agent"
+                    and (meta_out.get("workstream")
+                         or meta_out.get("scope"))
+                    and not out.get("artifacts")):
+                # A scoped work lane that 'succeeded' while changing zero
+                # files produced prose, not work (observed live: all four
+                # lanes returned a conversational error string and every
+                # node passed). A lane that legitimately changes nothing
+                # can say so — but a retry gets to try doing the work
+                # first.
+                out["ok"] = False
+                out["error"] = (
+                    "no artifacts — lane reported success but zero files "
+                    "changed; the work was not performed")
+            if (not out["ok"] and status == "step_limit"
+                    and out.get("artifacts")):
+                # A lane that produced artifacts and passed its scoped
+                # verification before exhausting the step budget did the
+                # work — 'ran out of steps' is a budget artifact, not a
+                # failure signature. The mission's own verify node still
+                # gates the integrated result downstream.
+                vres = list(task.get("verification") or [])
+                if vres and "EXIT_CODE=0" in str(
+                        (vres[-1] or {}).get("result") or ""):
+                    out["ok"] = True
+                    out["output"] = (
+                        str(out.get("output") or "")
+                        + " [step budget reached after artifacts verified]")
             if (out["ok"] and node.get("kind") == "agent"
                     and _UNVERIFIED_CLAIMS_MARKER in str(
                         out.get("output") or "")):
@@ -3021,6 +3153,41 @@ class AppState:
                 out["error"] = (
                     "unverified action claims — reply asserted completed "
                     "actions but no tools ran")
+            # Scope audit — lane artifacts outside the declared scope
+            # globs are surfaced (not failed): a lane editing types.py
+            # while scoped to server.py may be legitimate support work,
+            # but the reviewer must SEE that it happened rather than
+            # trusting the artifact list is in-scope.
+            scope_globs = [
+                str(s) for s in (meta_out.get("scope") or [])
+                if str(s).strip()]
+            if not scope_globs and meta_out.get("workstream"):
+                ws_row = next(
+                    (w for w in (mission.get("workstreams") or [])
+                     if w.get("id") == meta_out.get("workstream")), None)
+                scope_globs = [
+                    str(s) for s in ((ws_row or {}).get("scope") or [])
+                    if str(s).strip()]
+            if scope_globs and out.get("artifacts"):
+                import fnmatch as _fn
+                def _in_scope(path: str) -> bool:
+                    p = str(path).replace("\\", "/").lstrip("./")
+                    return any(_fn.fnmatch(p, g) or p.startswith(
+                        g.rstrip("*").rstrip("/") + "/")
+                        or p == g.rstrip("*")
+                        for g in scope_globs)
+                out_scope = [a for a in out["artifacts"]
+                             if not _in_scope(a)]
+                if out_scope:
+                    out["out_of_scope"] = out_scope
+                    if len(out_scope) == len(out["artifacts"]):
+                        # EVERY artifact missed the declared scope — the
+                        # lane wrote somewhere else entirely; that is a
+                        # wrong-execution signal, not support work.
+                        out["ok"] = False
+                        out["error"] = (
+                            "all artifacts outside declared scope: "
+                            + ", ".join(out_scope[:5]))
             # Feed the cognitive architecture: PFC conflict monitoring
             # (repeated failures/loops) + Hippocampus episodic memory.
             brain = getattr(self, "brain", None)
@@ -3173,6 +3340,27 @@ class AppState:
                         "kind": "mission",
                         "objective": "internal:social_heartbeat",
                         "title": "Social heartbeat",
+                        "priority": "low",
+                        "scope": "one_shot",
+                        "autonomy_profile": "local_autonomous",
+                    },
+                    created_by="system")
+        except Exception:
+            pass
+        # Bounded idle-learning unit — picks at most one backlog item
+        # per tick and advances it exactly one step (§14). Research
+        # work-orders run as utility-tier nodes so chat always wins.
+        try:
+            if not any(s.get("name") == "epistemic-step"
+                       for s in sup.scheduler.list()):
+                sup.scheduler.add(
+                    "epistemic-step", "interval",
+                    interval_s=max(900.0, float(getattr(
+                        config, "epistemic_step_minutes", 60)) * 60.0),
+                    action={
+                        "kind": "mission",
+                        "objective": "internal:epistemic_step",
+                        "title": "Epistemic learning step",
                         "priority": "low",
                         "scope": "one_shot",
                         "autonomy_profile": "local_autonomous",
@@ -4379,6 +4567,21 @@ class AppState:
             sup.resume_autonomy()
             return {"content": "Autonomy resumed — paused missions can continue."}
 
+        # Situation query — "what's going on?" answers from the live
+        # Situation Model: conversation focus, missions, jobs, models,
+        # approvals, services, consults, failures. Compact and honest —
+        # never a JSON dump.
+        if any(p in low for p in ("what's going on", "what is going on",
+                                  "whats going on", "what's happening",
+                                  "what is happening", "status report",
+                                  "system status", "give me a status",
+                                  "what's the situation",
+                                  "what are you up to")):
+            sit = self.situation()
+            return {"content": str(sit.get("text")
+                                 or "Nothing is running right now."),
+                    "situation": sit}
+
         if any(p in low for p in ("cancel the mission", "stop the mission",
                                   "stop working on that mission",
                                   "cancel that mission", "stop that mission")):
@@ -4391,6 +4594,50 @@ class AppState:
                 return {"content": "There is no active mission to stop."}
             sup.cancel_mission(live[0]["id"])
             return {"content": f"Stopped mission '{live[0]['title']}'. Its state is preserved on the Missions page."}
+
+        # §19/§38 — live steering + status on running missions.
+        # Workstream-scoped verbs only claim when a live mission has a
+        # matching workstream; anything else falls through to the model.
+        live = [m for m in sup.missions.list()
+                if m.get("status") in
+                {"active", "planning", "executing", "verifying",
+                 "evaluating", "replanning", "waiting_dependency",
+                 "waiting_approval"}]
+        if live and any(v in low for v in (
+                "pause", "stop working on", "resume", "unpause",
+                "forget the", "drop the", "prioritize", "prioritise",
+                "focus on", "make the", "skip the")):
+            for m in live:
+                out = sup.steer(m["id"], low)
+                if out.get("ok"):
+                    word = {"pause": "Paused", "resume": "Resumed",
+                            "drop": "Dropped",
+                            "reprioritize": "Reprioritized"}.get(
+                                out["op"], out["op"].title())
+                    return {"content": (
+                        f"{word} workstream '{out['workstream']}' on "
+                        f"'{m.get('title')}'. The rest of the mission "
+                        "keeps running.")}
+        if live and any(p in low for p in (
+                "what are you working on", "what's the mission",
+                "mission status", "how is the mission",
+                "what is the mission doing", "what are you doing")):
+            m = live[0]
+            ans = sup.answer_about_mission(m["id"], message)
+            if ans:
+                return {"content": ans}
+            roll = sup.missions.workstream_rollup(m)
+            if roll:
+                lines = [f"Mission '{m.get('title')}' "
+                         f"({m.get('status')}):"]
+                for w in roll:
+                    mark = {"integrated": "✓", "active": "●",
+                            "awaiting_review": "◐"}.get(
+                                str(w.get("status")), "○")
+                    lines.append(
+                        f"{mark} {w.get('title')} — "
+                        f"{int(float(w.get('progress') or 0) * 100)}%")
+                return {"content": "\n".join(lines)}
 
         wants_standing = any(p in low for p in self._MISSION_STANDING_PHRASES)
         wants_mission = any(p in low for p in self._MISSION_CREATE_PHRASES)
@@ -5810,14 +6057,16 @@ class AppState:
             return
         if event_type == "worker_capacity_reduced":
             # Resource pressure explains slowdowns — speak once per
-            # distinct ceiling so repeated failures don't nag. Clear
-            # the restore id so a later recovery speaks again.
+            # distinct ceiling so repeated failures don't nag, AND
+            # once per 10 min for the family so a flapping ceiling
+            # doesn't narrate every oscillation.
             ceiling = payload.get("ceiling")
             # Next restore lands at ceiling+1 — let it speak again.
             self._queue_announced.discard(f"cap-up-{int(ceiling or 0) + 1}")
             self._speak_notice(
                 f"cap-{ceiling}", "status",
-                "Worker capacity reduced — heavy jobs may run slower.")
+                "Worker capacity reduced — heavy jobs may run slower.",
+                family="capacity", cooldown_s=600.0)
             return
         if event_type == "worker_capacity_restored":
             ceiling = payload.get("ceiling")
@@ -5825,7 +6074,8 @@ class AppState:
             self._queue_announced.discard(f"cap-{int(ceiling or 0) - 1}")
             self._speak_notice(
                 f"cap-up-{ceiling}", "status",
-                "Workers are recovering — capacity is back up.")
+                "Workers are recovering — capacity is back up.",
+                family="capacity", cooldown_s=600.0)
             return
         if event_type == "queued_task_started":
             w = payload.get("worker") or {}
@@ -5874,12 +6124,22 @@ class AppState:
         except Exception:
             pass
 
-    def _speak_notice(self, dedup_id: str, kind: str, fact: str) -> None:
+    def _speak_notice(self, dedup_id: str, kind: str, fact: str,
+                      *, family: str = "", cooldown_s: float = 0.0
+                      ) -> None:
         """Persona-wrapped spoken notice for worker/notification events.
-        Deduplicates by id against the shared announced set; silent when
-        voice is unavailable or muted (enqueue drops muted jobs)."""
+        Deduplicates by id against the shared announced set; a `family`
+        cooldown additionally silences every id in the group for
+        `cooldown_s` after the last speak, so re-armed transitions can't
+        narrate state flapping. Silent when voice is unavailable or
+        muted (enqueue drops muted jobs)."""
         if not dedup_id or dedup_id in self._queue_announced:
             return
+        if family and cooldown_s > 0:
+            last = float(self._notice_last.get(family) or 0.0)
+            if time.monotonic() - last < cooldown_s:
+                return
+            self._notice_last[family] = time.monotonic()
         if len(self._queue_announced) > 512:
             self._queue_announced.clear()
         self._queue_announced.add(dedup_id)
@@ -6148,6 +6408,101 @@ class AppState:
             missions=getattr(sup, "missions", None) if sup else None,
             resources=res, last_interaction_at=self._last_interaction_at,
             profile=prof)
+
+    def situation(self) -> dict:
+        """The Situation Model — one coherent, live view of everything
+        Nexus is doing: conversation focus, missions + workstreams,
+        jobs/installs/downloads, model residency, pending approvals,
+        connected services, waiting peer consults, recent failures.
+        Answers 'what's going on?' from measured state, never JSON dumps."""
+        from .nexus_state import build_situation, situation_text
+        sup = getattr(self, "autonomy", None)
+        base = self.operational_state()
+
+        def _conversation() -> dict:
+            """The active chat's state-graph focus — topic and goal."""
+            try:
+                conv = self.conversation_manager.active()
+                if not conv:
+                    return {"active": False}
+                ctx = self.conversation_manager.active_context(
+                    conv.get("id"))
+                cdict = ctx.to_dict() if hasattr(ctx, "to_dict") \
+                    else (ctx if isinstance(ctx, dict) else {})
+                return {"active": True,
+                        "topic": str(cdict.get("active_topic")
+                                     or conv.get("title") or "")[:140],
+                        "goal": str(cdict.get("current_goal") or "")[:200]}
+            except Exception:
+                return {"active": True}
+
+        def _models() -> dict:
+            try:
+                ids = self.runtime.resident_model_ids() or []
+                return {"resident": ", ".join(ids[:2]),
+                        "count": len(ids)}
+            except Exception:
+                return {}
+
+        def _approvals() -> list:
+            out: list[str] = []
+            try:
+                n = getattr(sup, "notifications", None) if sup else None
+                for row in (n.list(unread_only=True, limit=50)
+                            if n is not None else []):
+                    if str(row.get("level")) in ("approval",
+                                                 "approval_required"):
+                        out.append(str(row.get("title") or ""))
+            except Exception:
+                pass
+            return out
+
+        def _consults() -> list:
+            try:
+                social = getattr(self, "social", None)
+                if social is None:
+                    return []
+                return [c for c in (social.consults_list(limit=50) or [])
+                        if str(c.get("state")) in
+                        ("awaiting_reply", "open", "sent")]
+            except Exception:
+                return []
+
+        def _failures() -> list:
+            out: list[str] = []
+            try:
+                for j in (self.jobs.list_jobs() or [])[:60]:
+                    if str(j.get("state")) == "failed":
+                        out.append(str(j.get("title") or j.get("id") or ""))
+            except Exception:
+                pass
+            try:
+                w = self.workers.status() if getattr(self, "workers", None) \
+                    is not None else {}
+                for h in (w.get("recent") or [])[-8:]:
+                    if str(h.get("outcome")) == "failed":
+                        out.append(str(h.get("title") or h.get("id") or ""))
+            except Exception:
+                pass
+            return out
+
+        env = {
+            "conversation": _conversation,
+            "missions": getattr(sup, "missions", None) if sup else None,
+            "jobs": getattr(self, "jobs", None),
+            "models_resident": _models,
+            "pending_approvals": _approvals,
+            "connectors": getattr(self, "connectors", None),
+            "waiting_consults": _consults,
+            "recent_failures": _failures,
+            "current_project":
+                lambda: str(getattr(self, "active_project_name", "")
+                            or ""),
+            "artifacts_awaiting": lambda: 0,
+        }
+        sit = build_situation(env=env, base=base)
+        sit["text"] = situation_text(sit)
+        return sit
 
     def return_briefing(self) -> dict:
         """"While you were away" — deduped, evidence-only digest since the
@@ -7336,7 +7691,7 @@ class Handler(BaseHTTPRequestHandler):
 
     _PLATFORM_PREFIXES = ("/api/health", "/api/twin", "/api/artifacts",
                           "/api/skills", "/api/connectors", "/api/knowledge",
-                          "/api/social",
+                          "/api/social", "/api/identity", "/api/situation",
                           "/api/rag", "/api/eval", "/api/experiments",
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
@@ -7372,6 +7727,28 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/twin":
             self._json(self.state.twin.status())
             return True
+        if path == "/api/situation":
+            # The Situation Model — one live view of conversation focus,
+            # missions, workstreams, jobs, models, approvals, services,
+            # consults, failures. Feeds the Intelligence Center and the
+            # "what's going on?" lane.
+            self._json(self.state.situation())
+            return True
+        if path == "/api/identity":
+            # Identity Manager — persistent account/identity registry.
+            # Credential refs are vault key names; values never leave.
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            self._json(identity.status())
+            return True
+        if path == "/api/identity/audit":
+            identity = getattr(self.state, "identity", None)
+            self._json({"audit": identity.audit() if identity else []})
+            return True
+        # /api/capabilities/graph lives in the main GET chain — the bare
+        # /api/capabilities endpoint predates the platform prefixes.
         if path == "/api/artifacts":
             rows = self.state.artifacts.list(
                 kind=(q.get("kind") or [""])[0],
@@ -7601,6 +7978,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"peer": (social.store.peer_card(name)
                                  if social is not None else None)})
             return True
+        if path == "/api/social/peer_graph":
+            social = getattr(self.state, "social", None)
+            if social is None:
+                self._json({"nodes": [], "edges": []})
+            else:
+                self._json(social.store.peer_graph(
+                    consults=social.consults_list(limit=100)))
+            return True
         if path == "/api/social/consults":
             social = getattr(self.state, "social", None)
             self._json({"consults": (social.consults_list(limit=50)
@@ -7736,6 +8121,93 @@ class Handler(BaseHTTPRequestHandler):
                 return True
             self._json(social.check_verification())
             return True
+        if path == "/api/identity/account/create":
+            # Begin a tracked third-party signup — gated by
+            # identity.account_create, never implied by social.post or
+            # browser.control.
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            self._json(identity.begin_account_creation(
+                str(body.get("service") or ""),
+                handle=str(body.get("handle") or ""),
+                provenance=str(body.get("provenance") or "api")))
+            return True
+        if path == "/api/identity/account/human-gate":
+            # A CAPTCHA/phone/ToS/security challenge appeared — park the
+            # workflow; Nexus never bypasses human-only controls.
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            self._json(identity.pause_for_human(
+                str(body.get("service") or ""),
+                str(body.get("challenge") or ""),
+                detail=str(body.get("detail") or "")))
+            return True
+        if path == "/api/identity/account/resume":
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            self._json(identity.resume_creation(
+                str(body.get("service") or ""),
+                step=str(body.get("step") or "") or None))
+            return True
+        if path == "/api/identity/account/verify":
+            # Prove the account by a real authenticated check — service-
+            # specific probes are resolved live; without one the account
+            # stays honestly unverified.
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            service = str(body.get("service") or "")
+            probe = None
+            if service == "github" and getattr(self.state,
+                                               "github_account", None):
+                ga = self.state.github_account
+                probe = lambda: (ga.status(refresh=True).get("state")
+                                 == "connected")
+            elif service:
+                rec = (getattr(self.state.connectors, "connectors", {})
+                       or {}).get(service)
+                if rec is not None and hasattr(rec.get("conn"), "health"):
+                    conn = rec["conn"]
+                    probe = lambda: bool(conn.health().get("ok"))
+            self._json(identity.verify_login(service, probe))
+            return True
+        if path == "/api/identity/account/remove":
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            verdict = self.state.permission_manager.effective(
+                "identity.account_delete")
+            if verdict != "allow":
+                self._json({"ok": False,
+                            "permission": "identity.account_delete",
+                            "verdict": verdict,
+                            "needs_approval": verdict == "ask",
+                            "error": "permission denied: "
+                                     "identity.account_delete"})
+                return True
+            self._json(identity.remove_account(
+                str(body.get("service") or ""),
+                delete_credential=bool(body.get("delete_credential"))))
+            return True
+        if path == "/api/identity/primary-email":
+            identity = getattr(self.state, "identity", None)
+            if identity is None:
+                self._json({"error": "identity manager unavailable"}, 503)
+                return True
+            self._json(identity.set_primary_email(
+                str(body.get("service") or ""),
+                str(body.get("address") or "")))
+            return True
+        # /api/capabilities/selftest lives in the main POST chain —
+        # see do_POST.
         if path == "/api/social/backlog/resolve":
             social = getattr(self.state, "social", None)
             if social is None:
@@ -8276,6 +8748,51 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(
                     self.state.action_ledger.mission_rollup(m.get("id") or mid))
                 return True
+            if mid.endswith("/report"):
+                # Plain-English mission report — durable rollup of
+                # objective, progress, criteria, decisions, evidence and
+                # next steps; consumed by the missions detail Report
+                # panel and safe to poll at any mission stage.
+                mid = mid[:-len("/report")]
+                m = sup.missions.get(mid)
+                if m is None:
+                    self._json({"error": "mission not found"}, 404)
+                    return True
+                reqs = self.state.requirements.list(
+                    scope_type="mission", scope_id=m.get("id") or mid)
+                self._json({
+                    "report": sup.missions.mission_report(
+                        m, requirements=reqs)})
+                return True
+            if mid.endswith("/workstreams"):
+                # §34-35 — the engineering-mission view: durable
+                # workstream rollup + compact context capsule + metrics.
+                mid = mid[:-len("/workstreams")]
+                m = sup.missions.get(mid)
+                if m is None:
+                    self._json({"error": "mission not found"}, 404)
+                    return True
+                nexus_md_proposal = ""
+                try:
+                    from .autonomy.missions import (
+                        discover_nexus_md, draft_nexus_md)
+                    wroot = str(m.get("workspace") or self.workspace)
+                    if not discover_nexus_md(wroot):
+                        nexus_md_proposal = draft_nexus_md(m)
+                except Exception:
+                    pass
+                self._json({
+                    "workstreams": sup.missions.workstream_rollup(m),
+                    "acceptance_criteria":
+                        m.get("acceptance_criteria") or [],
+                    "decisions": sup.missions.active_decisions(m),
+                    "capsule": m.get("context_capsule") or {},
+                    "checkpoints": m.get("git_checkpoints") or [],
+                    "metrics": m.get("metrics") or {},
+                    "questions": m.get("unresolved_questions") or [],
+                    "nexus_md_proposal": nexus_md_proposal,
+                })
+                return True
             m = sup.missions.get(mid)
             if m is None:
                 self._json({"error": "mission not found"}, 404)
@@ -8485,6 +9002,35 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if path.startswith("/api/missions/"):
             rest = path[len("/api/missions/"):].strip("/")
+            # §19/§37 — live steering: free-text ("pause the frontend")
+            # or a direct workstream op.
+            if rest.endswith("/steer"):
+                mid = rest[:-len("/steer")]
+                out = sup.steer(mid, str(body.get("command")
+                                         or body.get("text") or ""))
+                self._json(out, 200 if out.get("ok") else 404)
+                return True
+            if "/workstreams/" in rest:
+                mid, tail = rest.split("/workstreams/", 1)
+                for wop in ("pause", "resume", "drop", "reprioritize"):
+                    if not tail.endswith("/" + wop):
+                        continue
+                    ws_id = tail[:-len("/" + wop)]
+                    if wop == "pause":
+                        out = sup.missions.pause_workstream(mid, ws_id)
+                    elif wop == "resume":
+                        out = sup.missions.resume_workstream(mid, ws_id)
+                    elif wop == "drop":
+                        out = sup.missions.drop_workstream(mid, ws_id)
+                    else:
+                        out = sup.missions.reprioritize_workstream(
+                            mid, ws_id, str(body.get("priority") or "p1"))
+                    if out is None:
+                        self._json({"error": "not found"}, 404)
+                        return True
+                    sup.wake()
+                    self._json({"ok": True})
+                    return True
             for verb in ("pause", "resume", "cancel", "replan", "ask", "update"):
                 suffix = "/" + verb
                 if not rest.endswith(suffix):
@@ -9311,6 +9857,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.state.capabilities.status(name))
             else:
                 self._json(self.state.capabilities.summary())
+            return
+        if path == "/api/capabilities/graph":
+            # The Capability Truth Graph — probed nodes + dependency
+            # edges + blocker chains (capabilities.py graph()).
+            reg = getattr(self.state, "capability_registry", None)
+            if reg is None:
+                self._json({"error": "capability registry unavailable"},
+                           503)
+                return
+            q = parse_qs(urlparse(self.path).query)
+            self._json(reg.graph(force=(q.get("refresh") == ["1"])))
             return
         # Self-knowledge + control plane — the same registries the chat
         # lane resolves against. Read-only surfaces for the capability
@@ -10576,6 +11133,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "unknown platform route"}, 404)
                 return
 
+            if path == "/api/capabilities/selftest":
+                # Bounded live exercise of one capability — explicit and
+                # rate-limited; never from the per-turn prompt path.
+                reg = getattr(self.state, "capability_registry", None)
+                if reg is None:
+                    self._json({"error": "capability registry unavailable"},
+                               503)
+                    return
+                self._json(reg.run_selftest(
+                    str(body.get("capability") or ""),
+                    force=bool(body.get("force"))))
+                return
+
             if path == "/api/nexus-brain/initialize":
                 state = self.state.nexus_brain.initialize_creator(
                     str(body.get("creator_name", "")).strip(),
@@ -11011,6 +11581,67 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 removed = self.state.images.remove_model(model_id)
                 self._json({"ok": True, "removed": removed})
+                return
+
+            if path == "/api/image/fleet/install":
+                fleet_id = str(body.get("fleet_id", "")).strip()
+                if not fleet_id:
+                    self._json({"error": "fleet_id is required"}, 400)
+                    return
+                try:
+                    job = self.state.images.start_fleet_install(
+                        fleet_id, repair=bool(body.get("repair", False)))
+                except KeyError as exc:
+                    self._json({"error": str(exc)}, 404)
+                    return
+                self._json({"ok": True, "install": job})
+                return
+
+            if path == "/api/image/fleet/verify":
+                fleet_id = str(body.get("fleet_id", "")).strip()
+                if not fleet_id:
+                    self._json({"error": "fleet_id is required"}, 400)
+                    return
+                try:
+                    result = self.state.images.verify_fleet_model(
+                        fleet_id, deep_hash=bool(body.get("deep_hash", False)))
+                except KeyError as exc:
+                    self._json({"error": str(exc)}, 404)
+                    return
+                self._json({"ok": True, "verify": result})
+                return
+
+            if path == "/api/image/fleet/remove":
+                fleet_id = str(body.get("fleet_id", "")).strip()
+                if not fleet_id:
+                    self._json({"error": "fleet_id is required"}, 400)
+                    return
+                try:
+                    result = self.state.images.remove_fleet_model(fleet_id)
+                except KeyError as exc:
+                    self._json({"error": str(exc)}, 404)
+                    return
+                except Exception as exc:
+                    self._json({"ok": False,
+                                "error": f"{type(exc).__name__}: {exc}"},
+                               500)
+                    return
+                self._json(result)
+                return
+
+            if path == "/api/image/adult-default":
+                value = str(body.get("model", "") or "").strip().lower()
+                from .image.fleet import FLEET_BY_ID
+                if value and value != "auto" and value not in FLEET_BY_ID:
+                    self._json({"error": "adult default must be 'auto' or a "
+                                f"known fleet id ({', '.join(FLEET_BY_ID)})"},
+                               400)
+                    return
+                self.state._update_config_file(
+                    {"image_adult_default_model": value})
+                self.state.config.image_adult_default_model = value
+                self._json({"ok": True,
+                            "image_adult_default_model": value})
                 return
 
             if path == "/api/image/loras/metadata":

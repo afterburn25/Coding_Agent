@@ -164,6 +164,58 @@ def fleet_for_model_name(name: str) -> dict[str, Any] | None:
     return None
 
 
+def fleet_tags(spec: dict[str, Any]) -> list[str]:
+    """Display tags for the model manager — descriptive capability
+    metadata, never a policy statement. ``adult_capable`` means the
+    checkpoint CAN serve permitted adult requests, not that it only
+    exists for that purpose."""
+    tags = [str(spec.get("base") or "").upper() or "SDXL"]
+    version = str(spec.get("version") or "")
+    if "fp16" in version.lower():
+        tags.append("fp16")
+    elif "fp8" in version.lower():
+        tags.append("fp8")
+    tags.append("Photoreal")
+    if spec.get("adult_capable"):
+        tags.append("Adult-capable")
+    tags.append("High quality")
+    return tags
+
+
+def find_fleet_checkpoint(spec: dict[str, Any],
+                          roots: list) -> "Any | None":
+    """Locate an already-downloaded checkpoint file for a fleet spec.
+
+    Searches ``roots`` recursively for ``spec['source_file']``; a match
+    must carry the expected size so a half-written file is never treated
+    as a usable copy. Returns the Path or None — callers feed it to the
+    backend's local-path install (in-place registration) instead of
+    downloading a second multi-GB copy."""
+    from pathlib import Path
+
+    want_name = str(spec.get("source_file") or "").lower()
+    want_size = int(spec.get("size_bytes") or 0)
+    if not want_name:
+        return None
+    for root in roots:
+        root = Path(root)
+        try:
+            if not root.is_dir():
+                continue
+            for cand in root.rglob("*"):
+                try:
+                    if not cand.is_file() or cand.name.lower() != want_name:
+                        continue
+                    if want_size and cand.stat().st_size != want_size:
+                        continue
+                    return cand.resolve()
+                except OSError:
+                    continue
+        except OSError:
+            continue
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Request classification — trait extraction from the prompt. Pure heuristic
 # keyword scoring; results feed fleet routing, never safety decisions.

@@ -136,8 +136,11 @@ function renderDetail(){
     (actionable?`<button class="mini-button danger" data-act="cancel">Cancel</button>`:'')+
     `</div></div>`+
     `<div class="detail-section"><h3>Objective</h3><div class="objective">${esc(m.objective)}</div></div>`+
+    `<div class="detail-section"><h3>Report</h3><div id="missionReport"><div class="hist-row">loading…</div></div></div>`+
     `<div class="detail-section"><h3>Requirements</h3><div id="missionReqs"><div class="hist-row">loading…</div></div></div>`+
     `<div class="detail-section"><h3>Success criteria</h3>${critHtml}</div>`+
+    `<div class="detail-section"><h3>Workstreams</h3><div id="missionWs"><div class="hist-row">loading…</div></div></div>`+
+    `<div class="detail-section"><h3>Mission context</h3><div id="missionCapsule"><div class="hist-row">loading…</div></div></div>`+
     (stages?`<div class="detail-section"><h3>Pipeline</h3><div class="stage-strip">${stages}</div></div>`:'')+
     `<div class="detail-section"><h3>Task graph (${nodes.length})</h3>${dag}</div>`+
     `<div class="detail-section"><h3>Activity</h3><div id="missionActivity"><div class="hist-row">loading…</div></div></div>`+
@@ -148,6 +151,110 @@ function renderDetail(){
   loadMissionActivity(m.id);
   loadMissionRequirements(m.id);
   loadMissionEvidence(m.id);
+  loadMissionWorkstreams(m.id);
+  loadMissionReport(m.id);
+}
+
+async function loadMissionReport(mid){
+  // Plain-English mission report — the headline answer ("what happened,
+  // what's left") plus criteria/decisions/artifacts detail, sourced from
+  // the durable record rather than the live DAG.
+  try{
+    const r=await api('/api/missions/'+encodeURIComponent(mid)+'/report');
+    const el=$('#missionReport');
+    if(!el||selected!==mid)return;
+    const rep=r.report||{};
+    const p=rep.progress||{};
+    const t=rep.timeline||{};
+    const rows=[];
+    if(rep.headline)
+      rows.push(`<div class="report-headline">${esc(rep.headline)}</div>`);
+    rows.push(`<div class="hist-row"><b>progress</b> ${p.percent||0}% — `+
+      `${p.tasks_done||0}/${p.tasks_total||0} tasks · `+
+      `${p.workstreams_done||0}/${p.workstreams_total||0} workstreams`+
+      (t.elapsed_s!=null?` · ${Math.round(t.elapsed_s/60)}m elapsed`:'')+
+      `</div>`);
+    (rep.acceptance||[]).slice(0,6).forEach(c=>
+      rows.push(`<div class="hist-row"><b>${esc(c.status||'unchecked')}</b> ${esc(c.description)}</div>`));
+    (rep.blockers||[]).slice(0,3).forEach(b=>
+      rows.push(`<div class="hist-row"><b>blocker</b> ${esc(b)}</div>`));
+    const v=rep.verification||{};
+    if(v.runs)
+      rows.push(`<div class="hist-row"><b>verification</b> ${v.passed||0}/${v.runs} run(s) passed</div>`);
+    (rep.artifacts||[]).slice(0,6).forEach(a=>
+      rows.push(`<div class="hist-row"><b>artifact</b> ${esc(a)}</div>`));
+    (rep.next_steps||[]).forEach(s=>
+      rows.push(`<div class="hist-row"><b>next</b> ${esc(s)}</div>`));
+    setHtml(el,rows.join('')||'<div class="hist-row">no report data yet</div>');
+  }catch(e){
+    setHtml($('#missionReport'),'<div class="hist-row">report unavailable</div>');
+  }
+}
+
+const WS_MARKS={integrated:'✓',active:'●',ready:'◐',awaiting_review:'◐',
+  integration_ready:'◐',planned:'○',paused:'‖',blocked:'⊘',
+  failed:'✕',abandoned:'–'};
+async function loadMissionWorkstreams(mid){
+  // §34-35 — the durable workstream view: per-lane progress, controls
+  // (pause/resume/drop/prioritize), the compact context capsule, and
+  // mission metrics. Replaces digging through the raw DAG.
+  try{
+    const r=await api('/api/missions/'+encodeURIComponent(mid)+'/workstreams');
+    const wsel=$('#missionWs');
+    if(wsel&&selected===mid){
+      const rows=(r.workstreams||[]);
+      setHtml(wsel,rows.map(w=>{
+        const live=['ready','active','planned'].includes(w.status);
+        const paus=['paused','blocked'].includes(w.status);
+        const drop=!['integrated','abandoned','failed'].includes(w.status);
+        return `<div class="mission-card"><div class="title">`+
+          `${WS_MARKS[w.status]||'○'} ${esc(w.title)} `+
+          `<span class="mstatus ${w.status==='failed'?'failed':w.status==='integrated'?'done':live?'executing':''}">${esc(w.status)}</span> `+
+          `<span class="pill">${esc(w.priority||'p2')}</span></div>`+
+          `<div class="meta">${w.tasks_done||0}/${w.tasks||0} tasks · `+
+          `${Math.round((w.progress||0)*100)}%`+
+          (w.blocker?` — ${esc(w.blocker)}`:'')+
+          (w.role?` · ${esc(w.role)}`:'')+
+          ((w.worktree&&w.worktree.branch)?
+            ` · ${esc(w.worktree.branch)}${w.worktree.state==='conflict'?' (merge conflict)':w.worktree.state==='abandoned_dirty'?' (kept — uncommitted work)':''}`:'')+
+          `</div>`+
+          ((w.acceptance||[]).length?`<div class="meta" style="color:#4d5f7c">${w.acceptance.map(a=>'· '+esc(a)).join('<br>')}</div>`:'')+
+          `<div class="side-actions">`+
+          (live?`<button class="mini-button" data-wsact="${w.id}:pause">Pause</button>`:'')+
+          (paus?`<button class="mini-button" data-wsact="${w.id}:resume">Resume</button>`:'')+
+          (live?`<button class="mini-button" data-wsact="${w.id}:reprioritize">P0</button>`:'')+
+          (drop?`<button class="mini-button danger" data-wsact="${w.id}:drop">Drop</button>`:'')+
+          `</div></div>`;
+      }).join('')||'<div class="hist-row">no workstreams — single-lane mission</div>');
+    }
+    const cel=$('#missionCapsule');
+    if(cel&&selected===mid){
+      const cap=r.capsule||{};
+      const rows=[];
+      if((r.decisions||[]).length)
+        rows.push(`<div class="hist-row"><b>decisions</b> `+
+          r.decisions.slice(0,6).map(d=>esc(d.decision)).join(' · ')+`</div>`);
+      if((cap.known_failures||[]).length)
+        rows.push(`<div class="hist-row"><b>known failures</b> `+
+          cap.known_failures.slice(0,4).map(f=>esc(f)).join(' · ')+`</div>`);
+      if((cap.blockers||[]).length)
+        rows.push(`<div class="hist-row"><b>blockers</b> `+
+          cap.blockers.slice(0,4).map(b=>esc(b)).join(' · ')+`</div>`);
+      const met=r.metrics||{};
+      const mbits=['compactions','repair_cycles','escalations',
+        'ownership_conflicts','worker_calls','model_swaps',
+        'checkpoints'].filter(k=>met[k])
+        .map(k=>`${k.replace('_',' ')} ${met[k]}`);
+      if(mbits.length)
+        rows.push(`<div class="hist-row"><b>metrics</b> ${esc(mbits.join(' · '))}</div>`);
+      if(r.nexus_md_proposal)
+        rows.push(`<div class="hist-row"><b>NEXUS.md proposal</b> — repo has no operating-instructions file; a draft was generated from this mission's decisions, scopes and criteria. <details><summary>view</summary><pre>${esc(r.nexus_md_proposal)}</pre></details></div>`);
+      setHtml(cel,rows.join('')||'<div class="hist-row">no capsule yet</div>');
+    }
+  }catch(e){
+    setHtml($('#missionWs'),'<div class="hist-row">workstreams unavailable</div>');
+    setHtml($('#missionCapsule'),'');
+  }
 }
 
 const REQ_MARKS={verified:'✓',implemented:'◐',in_progress:'~',planned:'~',
@@ -351,6 +458,13 @@ document.addEventListener('click',async e=>{
   const act=e.target.closest('[data-act]');
   if(act&&selected){
     try{await api(`/api/missions/${selected}/${act.dataset.act}`,'POST',{});refresh();}catch(err){alert(err.message);}
+    return;
+  }
+  const wsa=e.target.closest('[data-wsact]');
+  if(wsa&&selected){
+    const[wsid,op]=wsa.dataset.wsact.split(':');
+    const body=op==='reprioritize'?{priority:'p0'}:{};
+    try{await api(`/api/missions/${selected}/workstreams/${wsid}/${op}`,'POST',body);refresh();}catch(err){alert(err.message);}
     return;
   }
   const appr=e.target.closest('[data-appr]');

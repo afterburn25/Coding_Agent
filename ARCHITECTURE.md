@@ -167,6 +167,41 @@ Probed specs now include `web_access` (tool + offline policy) and `moltbook` (co
 - **Heartbeat** — a seeded `social-heartbeat` interval schedule materializes a low-priority `internal:` mission (`internal:social_heartbeat`) through the normal planner; `SocialService.heartbeat()` polls notifications (peer replies publish the `social_reply` trigger signal so missions can external-wait), scans the feed against interests + open backlog, follows threads without speaking, and captures claims at `heard`.
 - **Surface** — `/api/social*` status/peers/claims/backlog GETs, level/heartbeat/verify/backlog-resolve POSTs, and `web/social.html` — a dashboard showing connection, motivation, backlog, peers, threads and the claims ladder plus the autonomy-level picker.
 
+## Identity, capability truth, and situation (v0.42)
+
+```text
+IdentityManager (identity_mgr.py, data/identity.json)
+  ├─ canonical name / primary email / recovery owner (always the user)
+  ├─ account records: service, handle, state, auth_method, scopes,
+  │   credential_ref (vault key NAME only), provenance, health, audit
+  ├─ creation workflow: creating → awaiting_verification →
+  │   awaiting_human (CAPTCHA/phone/ToS/security — never bypassed) →
+  │   verifying_login → active (only after a real auth probe)
+  └─ merges live probes (GitHubAccountService, connector account state)
+     over durable rows — observed state wins
+
+Capability Truth Graph (capabilities.py)
+  ├─ probed states: verified | available | degraded | setup_required |
+  │   unauthorized | unavailable | broken | experimental |
+  │   permission_required | disconnected | temporarily_unavailable |
+  │   policy_denied | unsupported
+  ├─ depends_on edges + blockers() — "github is down because the
+  │   network is offline" names the real root
+  ├─ engine + checked_at/verified_at on every report
+  └─ run_selftest() — bounded live exercises, rate-limited, explicit
+
+Situation Model (nexus_state.build_situation)
+  └─ one live snapshot: conversation topic/goal (state graph), missions
+     + workstreams, jobs/installs/downloads, resident models, pending
+     approvals, connected services, waiting consults, recent failures,
+     project. situation_text → the "what's going on?" lane.
+```
+
+`/api/situation`, `/api/identity`, `/api/capabilities/graph` feed the
+Intelligence Center (`web/intel.html` — Situation / Capabilities /
+Identity tabs). Identity mutations ride `identity.*` permission keys;
+all are in `AUTONOMY_NEVER_AUTO` — no autonomous account lifecycle.
+
 ## Transactional mutation model
 
 Filesystem edits are tracked per task. On the first mutation of a path, `CheckpointManager` records whether it existed and stores the original bytes if necessary.
@@ -333,6 +368,19 @@ There are now two model-routing planes:
 1. `ModelRouter` chooses the conversational/coding/reasoning model.
 2. `ImageRouter` chooses the image model/workflow for an image tool call.
 
+Within the image plane, `image/fleet.py` declares the managed photoreal
+checkpoint fleet (Juggernaut XL, CyberRealistic XL, RealVisXL V5.0).
+`ImageManager.fleet_status()` merges fleet specs, backend registrations,
+and install jobs into one inventory so the Image Model Manager lists
+fleet models before they are installed; installs dedup against
+checkpoints already on disk (`find_fleet_checkpoint` → in-place
+registration) instead of re-downloading ~7 GB. `image_adult_default_model`
+(config default `realvisxl-v5`, `auto` = pure trait scoring) is the
+deterministic preferred model for adult-classified, policy-approved,
+fleet-capable requests — applied after `ImageSafetyPolicy`, the
+creator-locked adult gate, and manual overrides. See
+`docs/IMAGE_SYSTEM.md` for the full fleet/routing contract.
+
 This prevents the chat LLM from needing to know low-level image runtime details. A small/fast chat model can still call `generate_image`, while the image router independently chooses a large quality model.
 
 ### GPU arbitration
@@ -440,3 +488,40 @@ listening/thinking, and `/api/nexus/state` supplies the fallback operational
 presentation. CSS handles the initial low-cost motion and honors
 `prefers-reduced-motion`; failure or absence of the renderer leaves the static
 portrait and all agent/voice behavior intact. See `docs/AVATAR.md`.
+
+## Engineering Missions layer (v0.40)
+
+```text
+Mission (objective + acceptance_criteria, durable in missions.json)
+  └─ Workstream (scoped slice: role, file scope, acceptance, worktree)
+       └─ Task → Subtask (graph nodes; worker lanes on worktrees)
+            └─ Verification → Evaluation → Integration
+```
+
+- The record hierarchy is durable and restart-safe: Mission →
+  Workstream → Task → Subtask → Verification lives on the mission row,
+  so a restart or redeploy resumes the same plan rather than replanning
+  from scratch (internal `internal:` missions are exempt from the
+  `verify_passed` criterion that has no verification run).
+- Acceptance criteria are authored before implementation; machine-
+  checkable `success_criteria` (e.g. `verify_passed`,
+  `all_tasks_completed`) stay distinct from prose acceptance text.
+- `context_capsule` + `context_package` give each worker a scoped,
+  auto-compacting context independent of the model window; `NEXUS.md`
+  discovery/drafting carries repo-level operating instructions into
+  workers and durable `decisions` are injected into every lane.
+- `ownership` reservations lease file-scope patterns per lane —
+  overlapping claims park instead of overwriting.
+- Steering is live: pause/resume/drop/reprioritize per mission and per
+  workstream via chat, `/api/missions/<id>/workstreams/<ws>/<op>`, and
+  the Missions UI; thrash detection escalates to the deep model;
+  goal-drift probes re-check worker output against the objective;
+  step-limit stops commit WIP on the lane branch so retries resume
+  instead of resetting.
+- `GET /api/missions/<id>/report` returns a plain-English rollup —
+  headline, task/workstream progress, timeline, acceptance and
+  requirement status, decisions, verification runs, artifacts,
+  blockers, next steps — assembled only from the durable record
+  (`MissionStore.mission_report`), so it is truthful for in-flight,
+  completed and failed missions alike. The missions detail page renders
+  it as the Report panel.

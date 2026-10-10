@@ -101,9 +101,15 @@ def parse_sampling_controls(text: str) -> tuple[str, dict]:
 class ImageRouter:
     """Routes conversational image requests to installed/configured image models."""
 
-    def __init__(self, models: list[ImageModelProfile], resource_fit=None) -> None:
+    def __init__(self, models: list[ImageModelProfile], resource_fit=None,
+                 adult_default=None) -> None:
         self.models = [m for m in models if m.enabled]
         self.resource_fit = resource_fit
+        # Configured adult-content fleet preference — a fleet id (str) or a
+        # zero-arg callable returning one, so a live config change applies
+        # without rebuilding the router. "auto"/"" leaves pure trait
+        # scoring in charge.
+        self._adult_default = adult_default
 
     @staticmethod
     def infer_operation(request: ImageRequest) -> tuple[str, list[str]]:
@@ -260,6 +266,14 @@ class ImageRouter:
     # removal still go through the capability pipeline below.
     _FLEET_OPS = {"text_to_image", "edit_image", "inpaint", "variation"}
 
+    def _adult_default_id(self) -> str:
+        try:
+            src = self._adult_default
+            value = src() if callable(src) else src
+        except Exception:
+            return ""
+        return str(value or "").strip().lower()
+
     def _fleet_pick(self, pool: list[ImageModelProfile],
                     request: ImageRequest, operation: str,
                     reasons: list[str]) -> ImageModelProfile | None:
@@ -277,6 +291,35 @@ class ImageRouter:
             traits["photoreal"] = max(traits.get("photoreal", 0), 2)
         if not traits:
             return None
+        # Configured adult-content preference — runs only after the
+        # request already passed the image safety policy in create_job,
+        # the operation is fleet-capable, and no manual override exists.
+        # The pick is deterministic: an installed configured default wins
+        # outright, never coin-flips against keyword scoring. Resource fit
+        # still gates it; a miss or unfit default degrades to normal
+        # scoring with an honest reason.
+        if info.get("adult"):
+            wanted = self._adult_default_id()
+            if wanted and wanted != "auto":
+                pick = next((m for m in fleet_models
+                             if m.metadata.get("fleet_id") == wanted), None)
+                if pick is not None:
+                    label = pick.metadata.get("fleet_display") or pick.id
+                    fits, _rs, res_reason = (True, 0, "")
+                    if self.resource_fit:
+                        fits, _rs, res_reason = self.resource_fit(pick)
+                    if fits:
+                        reasons.append(
+                            f"adult-content preference: {label}")
+                        return pick
+                    reasons.append(
+                        f"adult default {label} skipped — "
+                        f"{res_reason or 'resource fit'}; falling back")
+                elif wanted in FLEET_BY_ID:
+                    reasons.append(
+                        f"adult default "
+                        f"{FLEET_BY_ID[wanted]['display_name']} not installed "
+                        "— using best installed match")
         scored: list[tuple[int, ImageModelProfile]] = []
         for m in fleet_models:
             spec = FLEET_BY_ID.get(str(m.metadata.get("fleet_id")))

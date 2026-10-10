@@ -154,6 +154,164 @@
     }).join("");
   }
 
+  /* ---- peer graph (nodes + evidence-derived edges, click → dossier) ---- */
+  let _pg = { nodes: [], edges: [], pos: {} };
+  const EDGE_COLORS = {
+    interacted: "#7aa2ff", consulted: "#e0a84a", learned_from: "#58c98a",
+    disagreed: "#d96a6a", reproduced: "#c98ad0", follow_up: "#e0d24a",
+    observed: "#4a5568",
+  };
+
+  function _pgFiltered() {
+    const edge = $("pgEdge") ? $("pgEdge").value : "";
+    const dom = $("pgDomain") ? $("pgDomain").value : "";
+    const minT = $("pgTrust") ? $("pgTrust").value / 100 : 0;
+    const recent = $("pgRecent") && $("pgRecent").value
+      ? Number($("pgRecent").value) : 0;
+    const cutoff = recent ? Date.now() - recent : 0;
+    const nodes = _pg.nodes.filter((n) => {
+      if (n.kind === "self") return true;
+      if (dom && !(n.domains || []).includes(dom)) return false;
+      if ((n.trust || 0) < minT) return false;
+      if (cutoff && (n.last_seen || 0) * 1000 < cutoff) return false;
+      if (edge) {
+        const e = _pg.edges.find((x) => x.to === n.id);
+        if (!e || !(e.types || []).includes(edge)) return false;
+      }
+      return true;
+    });
+    const keep = new Set(nodes.map((n) => n.id));
+    return { nodes, edges: _pg.edges.filter(
+      (e) => keep.has(e.to) && keep.has(e.from)) };
+  }
+
+  function renderPeerGraph(graph) {
+    _pg = { nodes: graph.nodes || [], edges: graph.edges || [], pos: {} };
+    const domSel = $("pgDomain");
+    if (domSel && domSel.options.length <= 1) {
+      const all = new Set();
+      _pg.nodes.forEach((n) => (n.domains || []).forEach(
+        (d) => all.add(d)));
+      [...all].sort().forEach((d) => {
+        const o = document.createElement("option");
+        o.value = o.textContent = d;
+        domSel.appendChild(o);
+      });
+    }
+    drawPeerGraph();
+  }
+
+  function drawPeerGraph() {
+    const cv = $("peerGraph");
+    if (!cv) return;
+    const { nodes, edges } = _pgFiltered();
+    const peers = nodes.filter((n) => n.kind !== "self");
+    $("peerGraphEmpty").hidden = peers.length > 0 || _pg.nodes.length > 1;
+    const ctx = cv.getContext("2d");
+    const W = cv.width = cv.clientWidth || 860;
+    const H = cv.height = 380;
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2;
+    const R = Math.min(W, H) / 2 - 52;
+    _pg.pos = {};
+    peers.forEach((n, i) => {
+      const a = (2 * Math.PI * i) / Math.max(peers.length, 1) - Math.PI / 2;
+      _pg.pos[n.id] = { x: cx + R * Math.cos(a),
+                        y: cy + R * Math.sin(a) };
+    });
+    _pg.pos.nexus = { x: cx, y: cy };
+    edges.forEach((e) => {
+      const a = _pg.pos[e.from], b = _pg.pos[e.to];
+      if (!a || !b) return;
+      const t = (e.types || [])[0] || "observed";
+      ctx.strokeStyle = EDGE_COLORS[t] || "#4a5568";
+      ctx.lineWidth = Math.min((e.types || []).length, 3);
+      ctx.globalAlpha = 0.75;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      if ((e.types || []).length && e.types[0] !== "observed") {
+        ctx.fillStyle = "#9aa4b8";
+        ctx.font = "10px sans-serif";
+        ctx.fillText(e.types.join(","), (a.x + b.x) / 2 + 4,
+                     (a.y + b.y) / 2);
+      }
+    });
+    peers.forEach((n) => {
+      const p = _pg.pos[n.id];
+      const r = 8 + 10 * (n.familiarity || 0);
+      ctx.fillStyle = n.flags ? "#d96a6a"
+        : n.stage === "trusted" ? "#58c98a"
+        : n.stage === "strained" ? "#d96a6a"
+        : n.stage === "familiar" ? "#e0a84a" : "#7aa2ff";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.fillStyle = "#e8ecf4";
+      ctx.font = "11px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(n.name, p.x, p.y + r + 13);
+      ctx.textAlign = "start";
+    });
+    const c = _pg.pos.nexus;
+    ctx.fillStyle = "#e8ecf4";
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 14, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.fillStyle = "#0d1117";
+    ctx.font = "bold 10px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("NX", c.x, c.y + 3);
+    ctx.textAlign = "start";
+  }
+
+  async function showPeerDossier(name) {
+    const panel = $("peerDossier");
+    const r = await api(
+      `/api/social/peer?name=${encodeURIComponent(name)}`);
+    const p = r.peer;
+    if (!p) { panel.hidden = true; return; }
+    const rel = p.relationship || {};
+    const exp = Object.entries(p.expertise || {})
+      .sort((a, b) => b[1].confidence - a[1].confidence)
+      .map(([d, e]) => `<tr><td>${esc(d)}</td><td>${pct(e.confidence)}</td>` +
+        `<td>${e.evidence}</td></tr>`).join("");
+    const flags = (p.manipulation_flags || []).map(
+      (f) => `<li class="flag">${esc(f.kind || f)}</li>`).join("");
+    const recent = (p.recent || []).map((i) =>
+      `<li><span class="item-sub">${esc(i.kind)} · ${esc(i.ref || "")} · ` +
+      `${esc(relTime(i.ts))}</span></li>`).join("");
+    panel.innerHTML =
+      `<h3>${esc(p.display_name || p.name)} ` +
+      `<span class="item-sub">${esc(p.stage)} · ${esc(p.network)}</span></h3>` +
+      `<div class="dossier-grid">` +
+      `<div><strong>Relationship</strong><table class="kv-table"><tbody>` +
+      Object.entries(rel).map(([k, v]) =>
+        `<tr><td>${esc(k)}</td><td>${pct(v)}</td></tr>`).join("") +
+      `</tbody></table>` +
+      `<p class="item-sub">${p.interactions} interactions · ` +
+      `${p.claims} claims · ${p.claims_upheld} upheld / ` +
+      `${p.claims_failed} failed</p></div>` +
+      `<div><strong>Expertise</strong><table class="kv-table"><thead>` +
+      `<tr><th>domain</th><th>conf</th><th>ev</th></tr></thead>` +
+      `<tbody>${exp || "<tr><td colspan=3>—</td></tr>"}</tbody></table></div>` +
+      `<div><strong>Open</strong><ul class="learning-list">` +
+      (p.open_questions || []).map((q) =>
+        `<li class="learning-item">${esc(String(q).slice(0, 120))}</li>`)
+        .join("") +
+      `</ul>` +
+      (p.follow_up && p.follow_up.wanted
+        ? `<p class="item-sub">follow-up wanted · attempts ` +
+          `${p.follow_up.attempts || 0}</p>` : "") +
+      (flags ? `<ul>${flags}</ul>` : "") + `</div>` +
+      `<div><strong>Recent</strong><ul class="learning-list">${recent ||
+        "<li>—</li>"}</ul></div>` +
+      `</div>`;
+    panel.hidden = false;
+  }
+
   function renderThreads(threads) {
     const el = $("threadList");
     $("threadEmpty").hidden = threads.length > 0;
@@ -273,12 +431,12 @@
 
   async function refresh() {
     const [status, peers, claims, backlog, consults, debates, journal,
-           exps, councils] = await Promise.all([
+           exps, councils, peerGraph] = await Promise.all([
       api("/api/social"), api("/api/social/peers"),
       api("/api/social/claims"), api("/api/social/backlog"),
       api("/api/social/consults"), api("/api/social/debates"),
       api("/api/social/journal"), api("/api/social/experiments"),
-      api("/api/social/councils"),
+      api("/api/social/councils"), api("/api/social/peer_graph"),
     ]);
     if (!status.available) {
       $("overviewCards").innerHTML =
@@ -299,6 +457,7 @@
     renderExperiments(exps.experiments || []);
     renderInterests(status.interest_graph || {});
     renderCouncils(councils.councils || []);
+    renderPeerGraph(peerGraph);
   }
 
   $("consultBtn").onclick = async () => {
@@ -311,6 +470,23 @@
     refresh();
   };
   $("refreshBtn").onclick = refresh;
+  ["pgEdge", "pgDomain", "pgTrust", "pgRecent"].forEach((id) => {
+    const el = $(id);
+    if (el) el.oninput = drawPeerGraph;
+  });
+  if ($("peerGraph")) {
+    $("peerGraph").onclick = (ev) => {
+      const rect = ev.target.getBoundingClientRect();
+      const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+      let best = null, bd = 24;
+      Object.entries(_pg.pos).forEach(([id, p]) => {
+        if (id === "nexus") return;
+        const d = Math.hypot(p.x - x, p.y - y);
+        if (d < bd) { bd = d; best = id; }
+      });
+      if (best) showPeerDossier(best);
+    };
+  }
   $("heartbeatBtn").onclick = async () => {
     await api("/api/social/heartbeat", {});
     refresh();

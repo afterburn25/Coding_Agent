@@ -21,6 +21,8 @@ from localcodeagent.social.safety import (
 from localcodeagent.social.service import SocialService
 from localcodeagent.social.store import SocialStore
 from localcodeagent.tools.base import ToolRegistry
+from localcodeagent.workflow.conversation_manager import (
+    ConversationManager)
 from localcodeagent.workflow.checkpoint import CheckpointManager
 from localcodeagent.workflow.memory import ProjectMemory
 from localcodeagent.workflow.repository import RepositoryIndex
@@ -105,7 +107,7 @@ def _svc(root: Path, conn=None, perm=lambda p: "allow",
     return svc
 
 
-def _agent(root: Path, svc=None):
+def _agent(root: Path, svc=None, conv=None):
     profile = ModelProfile(
         id="local", endpoint="http://unused/v1", model="x",
         roles=["primary_coder", "fast_coder", "deep_reasoner",
@@ -121,7 +123,7 @@ def _agent(root: Path, svc=None):
         config, router, tools, _FakeRuntime(),
         tasks=TaskStore(root), checkpoints=CheckpointManager(root),
         memory=ProjectMemory(root), repository_index=index,
-        social=lambda: svc)
+        social=lambda: svc, conversation_manager=conv)
 
 
 # ------------------------------------------------------------------
@@ -645,14 +647,30 @@ class _FeedClient(_FakeClient):
 
     def request(self, method, path, *, params=None, body=None,
                 auth=True):
+        self.calls.append({"method": method, "path": path,
+                           "body": body, "auth": auth})
         if path == "/posts" and method == "GET":
             return {"ok": True, "status": 200, "data": {"posts": [
-                {"title": "Scaling agent memory",
+                {"id": "p1", "title": "Scaling agent memory",
                  "agent": {"name": "Aurora"}},
-                {"title": "Vulkan vs CPU inference",
+                {"id": "p2", "title": "Vulkan vs CPU inference",
                  "author": "byte_sage"}]}}
-        return super().request(method, path, params=params,
-                               body=body, auth=auth)
+        if path == "/posts/p1/comments" and method == "GET":
+            return {"ok": True, "status": 200, "data": {"comments": [
+                {"id": "c1", "agent": {"name": "Aurora"},
+                 "content": "Summaries degrade after 40 turns."}]}}
+        if path == "/posts/p2/comments" and method == "GET":
+            return {"ok": True, "status": 200, "data": {"comments": []}}
+        # Mirror _FakeClient without re-recording the call.
+        if path == "/agents/register":
+            return {"ok": True, "status": 200,
+                    "data": dict(self._register)}
+        if path == "/agents/status":
+            return {"ok": True, "status": 200,
+                    "data": {"status": self._status}}
+        if path == "/feed" or path == "/posts":
+            return {"ok": True, "status": 200, "data": {"posts": []}}
+        return {"ok": True, "status": 200, "data": {}}
 
 
 def _authed_svc(root: Path, client=None):
@@ -740,6 +758,54 @@ class SocialUseLaneTests(unittest.TestCase):
             self.assertEqual(posts[0]["body"]["title"],
                              "hello from nexus")
 
+    def test_comments_on_remembered_post_binds_anaphora(self):
+        """'read the comments on that memory post' after a feed read —
+        the anaphora that previously fell through to the GitHub lane
+        and returned a 404."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            client = _FeedClient(status="claimed")
+            svc = _authed_svc(root / "s", client=client)
+            agent = _agent(root / "a", svc)
+            agent.run("read my moltbook feed")
+            result = agent.run(
+                "read the comments on that memory post")
+            text = result.content or ""
+            self.assertIn("Summaries degrade", text)
+            self.assertIn("Aurora", text)
+            self.assertNotIn("GitHub", text)
+            comments = [c for c in client.calls
+                        if c["path"] == "/posts/p1/comments"]
+            self.assertTrue(comments)
+
+    def test_comments_ordinal_binds_second_post(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            client = _FeedClient(status="claimed")
+            svc = _authed_svc(root / "s", client=client)
+            agent = _agent(root / "a", svc)
+            agent.run("read my moltbook feed")
+            result = agent.run("what are the replies to the second one")
+            text = result.content or ""
+            self.assertIn("No replies", text)
+            calls = [c for c in client.calls
+                     if c["path"] == "/posts/p2/comments"]
+            self.assertTrue(calls)
+
+    def test_feed_snapshot_survives_in_store(self):
+        """Anaphora binding is durable — the remembered feed lives in
+        the drive data, not process memory."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            svc = _authed_svc(root / "s")
+            svc.remember_feed("moltbook", [
+                {"id": "p9", "title": "Trust chains",
+                 "agent": {"name": "vina"}}])
+            svc2 = _authed_svc(root / "s")
+            item = svc2._bind_referent(
+                "comments on that trust chains post", "moltbook")
+            self.assertEqual((item or {}).get("id"), "p9")
+
     def test_use_read_parks_and_resumes_on_ask(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -760,6 +826,63 @@ class SocialUseLaneTests(unittest.TestCase):
             resumed = agent.resume(result.task["id"], approved=True)
             self.assertIn("Scaling agent memory",
                           resumed.content or "")
+
+    def test_verification_done_resumes_blocked_use(self):
+        """'i have already done that' while a claim is pending — the
+        live connector is the authority: once status flips to claimed
+        the interrupted browse request resumes instead of dropping."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            client = _FeedClient(status="pending_claim")
+            vault = _FakeVault()
+            conn = _conn(root / "s", client=client, vault=vault)
+            conn.call("onboard")          # awaiting owner claim
+            svc = _svc(root / "s", conn=conn, vault=vault,
+                       perm=lambda p: "allow", level="autonomous")
+            conv = ConversationManager(root / "conv.json")
+            agent = _agent(root / "a", svc, conv=conv)
+            first = agent.run("browse moltbook and read posts")
+            self.assertIn("claim", (first.content or "").lower())
+            client._status = "claimed"    # user completed the claim
+            res = agent.run("i have already done that")
+            self.assertIn("Scaling agent memory", res.content or "")
+
+    def test_verification_done_still_pending_reports_truth(self):
+        """Claim not yet completed — poll reports the true state and
+        re-shows the link; no fake 'verified' and no fabricated feed."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            client = _FeedClient(status="pending_claim")
+            conn = _conn(root / "s", client=client)
+            conn.call("onboard")
+            svc = _svc(root / "s", conn=conn, perm=lambda p: "allow")
+            agent = _agent(root / "a", svc)
+            res = agent.run("i already did it")
+            self.assertIn("awaiting", (res.content or "").lower())
+            self.assertNotIn("Scaling agent memory",
+                             res.content or "")
+
+    def test_service_info_answers_from_connector_not_invention(self):
+        """'what is moltbook' — the connector's own blurb + live
+        account state answer; the model must never invent a service."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            svc = _authed_svc(root / "s")
+            agent = _agent(root / "a", svc)
+            res = agent.run("what is moltbook?")
+            text = (res.content or "").lower()
+            self.assertIn("social network", text)
+            self.assertIn("ai agents", text)
+            self.assertIn("verified", text)
+
+    def test_verification_done_ignored_when_nothing_pending(self):
+        """With no pending claim the same words are ordinary chat —
+        the gate is connector state, not the phrasing."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            svc = _authed_svc(root / "s")
+            self.assertIsNone(
+                svc.classify_social_query("i have already done that"))
 
 
 # ------------------------------------------------------------------
@@ -809,6 +932,25 @@ class PeerGraphTests(unittest.TestCase):
             # New instance — graph survives restart.
             st2 = SocialStore(Path(td))
             self.assertEqual(st2.peer_card("AgentX")["interactions"], 1)
+
+    def test_peer_graph_edges_are_evidence_derived(self):
+        """§21 — graph edges reflect real relationship evidence."""
+        with tempfile.TemporaryDirectory() as td:
+            st = SocialStore(Path(td))
+            st.record_interaction("Replier", "reply", ref="p1")
+            st.record_interaction("Lurker", "seen_post", ref="p2")
+            st.add_claim("kv cache scales", source_peer="Replier")
+            cid = st.claims_for(peer="Replier")[0]["id"]
+            st.promote_claim(cid, "tested", evidence="unit ok")
+            g = st.peer_graph(consults=[{
+                "target_peers": ["Replier"], "answered_by": "Replier"}])
+            edges = {e["to"]: set(e["types"]) for e in g["edges"]}
+            self.assertIn("interacted", edges["Replier"])
+            self.assertIn("consulted", edges["Replier"])
+            self.assertIn("learned_from", edges["Replier"])
+            self.assertEqual(edges["Lurker"], {"observed"})
+            names = {n["id"] for n in g["nodes"]}
+            self.assertEqual(names, {"nexus", "Replier", "Lurker"})
 
     def test_domain_expertise_is_contextual_not_global(self):
         with tempfile.TemporaryDirectory() as td:
@@ -974,6 +1116,172 @@ class EpistemicStoreTests(unittest.TestCase):
             st.finish_experiment(e2["id"], result="no effect",
                                  conclusion="failed", success=False)
             self.assertEqual(st.claim(c2["id"])["ladder"], "refuted")
+
+    def test_replication_measurements_never_merge_incompatible(self):
+        """§9/§10 — results under different environments are reported
+        side-by-side, never averaged into one number."""
+        with tempfile.TemporaryDirectory() as td:
+            st = SocialStore(Path(td))
+            e = st.add_experiment(
+                "flag X cuts VRAM", metric="VRAM GB",
+                environment={"model": "m1", "quantization": "q4",
+                             "context": "8k", "metric": "VRAM GB",
+                             "methodology": "peak", "hardware": "rtx"})
+            st.finish_experiment(e["id"], result="5.2",
+                                 conclusion="reproduced", success=True,
+                                 metric_value=5.2)
+            st.add_measurement(e["id"], who="PeerA", value=5.0,
+                               environment={"model": "m1",
+                                            "quantization": "q4",
+                                            "context": "8k",
+                                            "metric": "VRAM GB",
+                                            "methodology": "peak",
+                                            "hardware": "a100"})
+            st.add_measurement(e["id"], who="PeerB", value=7.9,
+                               environment={"model": "m1",
+                                            "quantization": "q8",
+                                            "context": "8k",
+                                            "metric": "VRAM GB",
+                                            "methodology": "peak"})
+            s = st.replication_summary(e["id"])
+            self.assertFalse(s["comparable"])
+            self.assertEqual(len(s["groups"]), 2)
+            self.assertTrue(s["uncertainty"])
+            same = [g for g in s["groups"] if g["n"] == 2][0]
+            self.assertTrue(same["reproduced_across_environments"])
+            self.assertIn("hardware", same["env_differences"])
+            self.assertAlmostEqual(same["spread"], 0.2, places=5)
+            self.assertIn("PeerA", s["participants"])
+            self.assertIn("PeerB", s["participants"])
+            # peer_graph picks up the reproduced edge
+            g = st.peer_graph()
+            et = {x["to"]: x["types"] for x in g["edges"]}
+            self.assertIn("reproduced", et["PeerA"])
+
+    def test_teaching_requires_verified_evidence_not_time(self):
+        """§11/§12 — untested or low-confidence lessons are never
+        published no matter how long they sit."""
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td))
+            svc.store.journal_add(
+                "KV cache at q8 trades 2%% VRAM for measurable ppl",
+                source="local", tested="bench: -18%% VRAM, +0.02 ppl",
+                confidence=0.8)
+            svc.store.journal_add(
+                "A hunch with no evidence behind it yet",
+                source="local", confidence=0.9)
+            svc.store.journal_add(
+                "Tested but unsure whether it generalises at all",
+                source="local", tested="one run", confidence=0.4)
+            cands = svc.teaching_candidates()
+            self.assertEqual(len(cands), 1)
+            self.assertIn("KV cache", cands[0]["learned"])
+
+    def test_teaching_parks_then_publishes_once(self):
+        """§11 — ask-level gate parks the candidate; approval publishes
+        and marks the journal entry taught so it never reposts."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            vault = _FakeVault()
+            conn = _conn(root, client=_FakeClient(status="claimed"),
+                         vault=vault)
+            conn.call("onboard")
+            conn.call("status")
+            svc = _svc(root, conn=conn, vault=vault,
+                       perm=lambda p: "ask", level="autonomous")
+            svc.store.journal_add(
+                "Lease-backed ownership prevents stale writers from "
+                "clobbering a lane", source="local",
+                tested="conflict dogfood: parked lane, dirty work kept",
+                confidence=0.85)
+            first = svc.consider_teaching()
+            self.assertTrue(first["needs_approval"])
+            posts = [c for c in conn._client.calls
+                     if c["method"] == "POST" and "/posts" in c["path"]]
+            self.assertEqual(posts, [])
+            second = svc.consider_teaching(approved=True)
+            self.assertTrue(second["published"])
+            posts = [c for c in conn._client.calls
+                     if c["method"] == "POST" and "/posts" in c["path"]]
+            self.assertEqual(len(posts), 1)
+            third = svc.consider_teaching(approved=True)
+            self.assertIsNone(third["candidate"])
+            posts = [c for c in conn._client.calls
+                     if c["method"] == "POST" and "/posts" in c["path"]]
+            self.assertEqual(len(posts), 1)
+
+    def test_epistemic_step_units_bounded(self):
+        """§14 — one item, one transition: peers→consult, plan→
+        experiment, plain→research, done→journal+resolved. Nothing
+        loops."""
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td))
+            svc.store.add_backlog(
+                "question", "KV cache paging",
+                question="does paged KV help 32k ctx", urgency=0.9,
+                candidate_peers=["PeerKV"])
+            svc.store.add_backlog(
+                "claim_verification", "flag X VRAM",
+                verification_plan="measure peak with flag", urgency=0.5)
+            svc.store.add_backlog(
+                "question", "open mystery", urgency=0.2)
+            out = svc.epistemic_step()
+            self.assertEqual(out["unit"], "consult")
+            svc.store.set_backlog_status(out["item"], "awaiting_response")
+            out = svc.epistemic_step()
+            self.assertEqual(out["unit"], "experiment")
+            out = svc.epistemic_step()
+            self.assertEqual(out["unit"], "research")
+            self.assertEqual(out["item"],
+                             svc.store.backlog_open()[-1]["id"])
+            done = svc.epistemic_step(
+                research={"output": "paged KV works on llama.cpp"},
+                item_id=out["item"])
+            self.assertEqual(done["unit"], "journal")
+            j = svc.store.journal_recent(limit=5)
+            self.assertTrue(any("Researched" in e.get("learned", "")
+                                for e in j))
+            # Nothing actionable remains — in-flight items wait.
+            self.assertEqual(svc.epistemic_step()["unit"], "waiting")
+
+    def test_epistemic_step_respects_off_level(self):
+        """§75 — 'off' means no background social learning at all."""
+        with tempfile.TemporaryDirectory() as td:
+            svc = _svc(Path(td), level="off")
+            svc.store.add_backlog("question", "topic", urgency=0.9)
+            out = svc.epistemic_step()
+            self.assertIsNone(out["unit"])
+            self.assertIn("off", out.get("skipped", ""))
+
+    def test_epistemic_step_research_wait_not_duplicated(self):
+        """An item already out for research waits — the step does not
+        attach a second unit or consult."""
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td))
+            it = svc.store.add_backlog("question", "deep question",
+                                       urgency=0.9)
+            svc.mark_research(it["id"], "m-x", "t-y")
+            out = svc.epistemic_step()
+            self.assertEqual(out["unit"], "waiting")
+
+    def test_replication_single_env_is_comparable(self):
+        with tempfile.TemporaryDirectory() as td:
+            st = SocialStore(Path(td))
+            env = {"model": "m1", "quantization": "q4",
+                   "context": "8k", "metric": "VRAM GB",
+                   "methodology": "peak"}
+            e = st.add_experiment("h", metric="VRAM GB",
+                                  environment=env)
+            st.add_measurement(e["id"], who="nexus", value=5.0,
+                               environment=env)
+            st.add_measurement(e["id"], who="PeerA", value=5.1,
+                               environment=env)
+            s = st.replication_summary(e["id"])
+            self.assertTrue(s["comparable"])
+            self.assertTrue(s["groups"][0][
+                "reproduced_across_environments"])
+            self.assertAlmostEqual(s["groups"][0]["spread"], 0.1,
+                                   places=5)
 
     def test_backlog_rich_states(self):
         """§5 — backlog items carry state + verification plan."""
@@ -1144,6 +1452,34 @@ class ServiceConsultTests(unittest.TestCase):
             self.assertTrue(sent.get("ok"), sent)
             self.assertEqual(svc.consults.get(cid)["status"],
                              "awaiting_response")
+
+    def test_user_requested_consult_survives_cold_peer_graph(self):
+        """The live dogfood bug: an explicit 'ask the community' with
+        zero known peers scored 0.019 EV and was vetoed — bootstrap
+        was impossible. User authority bypasses the veto; sanitize,
+        outbound-scan, and permission gates still apply."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            client = _FakeClient(status="claimed")
+            conn = _conn(root, client=client)
+            conn.call("onboard")
+            conn.call("status")
+            svc = _svc(root, conn=conn,
+                       perm=lambda p: "allow", level="autonomous")
+            # Autonomous — the EV veto still holds (no spam).
+            low = svc.consult("context compaction invariants",
+                              importance=0.5, uncertainty=0.5)
+            self.assertTrue(low.get("skipped"), low)
+            # User-requested — same question goes through.
+            out = svc.consult("context compaction invariants",
+                              user_requested=True)
+            self.assertTrue(out.get("ok"), out)
+            self.assertEqual(out["consult"]["status"],
+                             "awaiting_response")
+            posts = [c for c in client.calls
+                     if c["method"] == "POST"
+                     and c["path"] == "/posts"]
+            self.assertTrue(posts)
 
     def test_consult_for_mission_needs_failed_node(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1385,6 +1721,86 @@ class MissionPeerWaitTests(unittest.TestCase):
             self.assertTrue(res["ok"])
             self.assertIn("UNTRUSTED", res["output"])
             self.assertIn("epoch fencing", res["output"])
+
+    def test_sole_open_consult_matches_signalless_reply(self):
+        """Live: a sent consult whose send-envelope id shape wasn't
+        extracted has empty post_ref/targets — an inbound reply would
+        never match. With exactly one open ask, the reply resolves it."""
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td) / "s")
+            c = svc.consults.open("compaction invariants?",
+                                  domain="context", peers=[],
+                                  status="awaiting_response")
+            matched = svc.consults.record_reply(
+                "some_agent", "post-abc", "keep decisions verbatim")
+            self.assertEqual([m["id"] for m in matched], [c["id"]])
+            self.assertEqual(
+                svc.consults.get(c["id"])["matched_by"],
+                "sole_open_consult")
+
+    def test_red_team_opens_adversarial_consult(self):
+        """§7 — 'red-team this design' opens a critique-framed
+        consult marked adversarial_review; the question asks peers
+        to attack, not validate."""
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td) / "s")
+            q = svc.classify_social_query(
+                "red-team my mission ownership design")
+            self.assertIsNotNone(q)
+            self.assertEqual(q[0], "red_team")
+            out = svc.adversarial_review(
+                "File ownership leases with 10-min expiry and "
+                "lease-sweep reclaim on worker death",
+                user_requested=True)
+            self.assertTrue(out.get("ok"), out)
+            c = out["consult"]
+            self.assertEqual(c["kind"], "adversarial_review")
+            self.assertIn("WRONG", c["question"])
+            self.assertIn("restart", c["question"])
+            self.assertIn("attack", c["question"].lower())
+            # Criticism framing — not a consensus request
+            self.assertNotIn("do you agree", c["question"].lower())
+            # Council roster recorded — the store's council API has a
+            # real writer now.
+            councils = svc.store.councils()
+            self.assertTrue(any(k.startswith("redteam-")
+                                for k in councils), councils)
+
+    def test_red_team_needs_design_text(self):
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td) / "s")
+            out = svc.adversarial_review("")
+            self.assertFalse(out.get("ok"))
+
+    def test_submolt_caps_shape(self):
+        """Live API verified: GET /submolts and /submolts/{name} exist;
+        POST /submolts requires auth — creation is gated
+        social.account, reads are social.read."""
+        with tempfile.TemporaryDirectory() as td:
+            conn = _conn(Path(td), client=_FakeClient())
+            self.assertIn("submolts", conn.capabilities)
+            self.assertIn("submolt", conn.capabilities)
+            self.assertIn("create_submolt", conn.capabilities)
+            self.assertEqual(
+                conn._CAP_PERMISSION["create_submolt"],
+                "social.account")
+            # list call routes to the right endpoint
+            conn.call("submolts")
+            self.assertTrue(any(c["path"] == "/submolts"
+                                for c in
+                                conn._client.calls))
+
+    def test_sole_fallback_ignored_when_consult_has_signals(self):
+        with tempfile.TemporaryDirectory() as td:
+            svc = _active_svc(Path(td) / "s")
+            c = svc.consults.open("q", domain="sched",
+                                  peers=["Expert"],
+                                  status="awaiting_response")
+            matched = svc.consults.record_reply(
+                "random_passerby", "post-zzz", "unrelated reply")
+            self.assertFalse(matched)
+            self.assertEqual(svc.consults.get(c["id"])["status"],
+                             "awaiting_response")
 
     def test_expired_consult_resumes_without_answer(self):
         import time as _t

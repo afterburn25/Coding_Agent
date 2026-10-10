@@ -32,6 +32,8 @@ from typing import Any, Callable
 STATES = (
     "verified", "available", "degraded", "setup_required",
     "unauthorized", "unavailable", "broken", "experimental",
+    "permission_required", "disconnected", "temporarily_unavailable",
+    "policy_denied", "unsupported",
 )
 DISPOSITIONS = (
     "can_do_now", "setup_required", "authorization_required",
@@ -40,8 +42,9 @@ DISPOSITIONS = (
 )
 # States where the execution path does not exist right now — a claim of
 # having used one of these is a contradiction, not just unverified.
-HARD_NEGATIVE = {"unavailable", "broken", "unauthorized"}
-ALL_NEGATIVE = HARD_NEGATIVE | {"setup_required"}
+HARD_NEGATIVE = {"unavailable", "broken", "unauthorized",
+                 "disconnected", "policy_denied", "unsupported"}
+ALL_NEGATIVE = HARD_NEGATIVE | {"setup_required", "permission_required"}
 
 _STATE_DISPOSITION = {
     "verified": "can_do_now",
@@ -49,9 +52,14 @@ _STATE_DISPOSITION = {
     "degraded": "can_do_now",
     "setup_required": "setup_required",
     "unauthorized": "authorization_required",
+    "permission_required": "authorization_required",
     "unavailable": "explanation_only",
     "broken": "explanation_only",
     "experimental": "explanation_only",
+    "disconnected": "explanation_only",
+    "temporarily_unavailable": "explanation_only",
+    "policy_denied": "explanation_only",
+    "unsupported": "explanation_only",
 }
 
 CACHE_TTL_S = 30.0
@@ -73,6 +81,12 @@ class CapabilityReport:
     detail: str = ""
     requirements_met: list[str] = field(default_factory=list)
     requirements_unmet: list[str] = field(default_factory=list)
+    # What actually serves the capability right now (engine/model/build),
+    # when the probe can name it — "Playwright+Edge", "InvokeAI", ...
+    engine: str = ""
+    checked_at: float = 0.0
+    # Last time the capability probed positive — observed truth, not lore.
+    verified_at: float = 0.0
 
     @property
     def disposition(self) -> str:
@@ -85,6 +99,9 @@ class CapabilityReport:
             "state": self.state,
             "disposition": self.disposition,
             "detail": self.detail,
+            "engine": self.engine,
+            "checked_at": self.checked_at,
+            "verified_at": self.verified_at,
             "requirements_met": list(self.requirements_met),
             "requirements_unmet": list(self.requirements_unmet),
         }
@@ -102,6 +119,13 @@ class CapabilitySpec:
     # capability — used to catch stale self-knowledge ("I don't have a
     # browser") contradicting a live positive state.
     denial_terms: tuple[str, ...] = ()
+    # Other capability ids this one needs working — the truth graph's
+    # edges. A degraded dependency explains a degraded dependent.
+    depends_on: tuple[str, ...] = ()
+    # Optional bounded live exercise (e.g. open a page, hit an API).
+    # Called only on explicit request, rate-limited by the registry —
+    # never from the per-turn prompt path. Signature: (env) -> (ok, detail)
+    selftest: Callable[[dict[str, Any]], tuple[bool, str]] | None = None
 
 
 def _tool(env: dict[str, Any], name: str) -> dict[str, Any] | None:
@@ -245,6 +269,8 @@ def _probe_browser_preview(env, r: CapabilityReport) -> None:
     state = str(_call(env, "browser_state", default="") or "")
     if state == "ready":
         r.state, r.detail = "verified", "browser automation ready"
+        r.engine = str(_call(env, "browser_engine", default="playwright")
+                       or "playwright")
         r.requirements_met.extend(("playwright", "browser"))
         return
     if state == "no_browser":
@@ -302,6 +328,9 @@ def _probe_image_generation(env, r: CapabilityReport) -> None:
         return
     r.requirements_met.append("image_enabled")
     backend = str(_call(env, "image_backend_state", default="") or "")
+    engine = str(_call(env, "image_backend_engine", default="") or "")
+    if engine:
+        r.engine = engine
     if backend in ("running", "healthy", "starting", "loading"):
         r.state, r.detail = "verified", f"image backend {backend}"
         r.requirements_met.append("image_backend")
@@ -410,7 +439,8 @@ def _default_specs() -> list[CapabilitySpec]:
         CapabilitySpec("code_editing", "Code editing",
                        _probe_code_editing,
                        ("applied", "patched", "refactored", "edited",
-                        "modified")),
+                        "modified"),
+                       depends_on=("filesystem",)),
         CapabilitySpec("terminal", "Terminal commands",
                        _probe_terminal,
                        ("command", "terminal", "ran", "executed", "shell"),
@@ -423,7 +453,8 @@ def _default_specs() -> list[CapabilitySpec]:
         CapabilitySpec("github", "GitHub", _probe_github,
                        ("github", "pushed", "push", "pull request", "pr",
                         "remote", "synced", "ci"),
-                       ("github",)),
+                       ("github",),
+                       depends_on=("git", "web_access")),
         CapabilitySpec("compilation", "Build toolchain",
                        _probe_toolchains,
                        ("compiled", "build", "built", "packaged")),
@@ -469,7 +500,8 @@ def _default_specs() -> list[CapabilitySpec]:
                        ("moltbook", "the agent community",
                         "an agent community", "ai community",
                         "the agent network", "a social network",
-                        "social platforms", "an ai community")),
+                        "social platforms", "an ai community"),
+                       depends_on=("web_access",)),
     ]
 
 
@@ -478,11 +510,17 @@ class CapabilityRegistry:
 
     def __init__(self, env: dict[str, Callable] | None = None,
                  specs: list[CapabilitySpec] | None = None,
-                 ttl_s: float = CACHE_TTL_S) -> None:
+                 ttl_s: float = CACHE_TTL_S,
+                 extra_lines: list | None = None) -> None:
         self._env = dict(env or {})
         self._specs = list(specs or _default_specs())
         self._ttl = max(1.0, float(ttl_s))
         self._reports: dict[str, tuple[float, CapabilityReport]] = {}
+        self._selftest_at: dict[str, float] = {}
+        # Live-state callables appended to capability_brief — fine-grained
+        # facts (e.g. which image model is the configured default) that
+        # self-knowledge answers must quote accurately.
+        self._extra_lines = list(extra_lines or [])
 
     # -- evaluation --------------------------------------------------------
 
@@ -502,6 +540,9 @@ class CapabilityRegistry:
             except Exception as exc:
                 report.state = "broken"
                 report.detail = f"probe failed: {type(exc).__name__}"
+        report.checked_at = now
+        if report.state in ("verified", "available", "degraded"):
+            report.verified_at = now
         self._reports[cap_id] = (now, report)
         return report
 
@@ -604,10 +645,123 @@ class CapabilityRegistry:
         come from probed state rather than remembered lore."""
         ups = [r.name for r in self.evaluate().values()
                if r.state in ("verified", "available", "degraded")]
-        if not ups:
+        extras: list[str] = []
+        for fn in self._extra_lines:
+            try:
+                line = str(fn() or "").strip()
+            except Exception:
+                line = ""
+            if line:
+                extras.append(line)
+        if not ups and not extras:
             return ""
-        return ("Live capability check — currently available: "
+        parts: list[str] = []
+        if ups:
+            parts.append(
+                "Live capability check — currently available: "
                 + "; ".join(ups[:14])
                 + ". Answer ability questions from this list and the "
                   "unavailable list, never from memory.")
+        parts.extend(extras)
+        return " ".join(parts)
+
+    # -- truth graph ----------------------------------------------------------
+
+    _SELFTEST_MIN_GAP_S = 300.0
+
+    def blockers(self, cap_id: str) -> list[dict[str, Any]]:
+        """Dependency-aware explanation: the failing requirements of the
+        capability itself plus any dependencies that aren't positive.
+        'github is down' vs 'github is fine but the network is offline'
+        produce different answers only if the chain is walked."""
+        spec = next((s for s in self._specs if s.id == cap_id), None)
+        if spec is None:
+            return [{"capability": cap_id, "state": "unknown",
+                     "detail": "unknown capability"}]
+        out: list[dict[str, Any]] = []
+        report = self.evaluate_one(cap_id)
+        for req in report.requirements_unmet:
+            out.append({"capability": cap_id, "requirement": req,
+                        "state": report.state, "detail": report.detail})
+        for dep_id in spec.depends_on:
+            dep = self.evaluate_one(dep_id)
+            if dep.state in ("verified", "available", "degraded"):
+                continue
+            out.append({"capability": dep_id, "required_by": cap_id,
+                        "state": dep.state, "detail": dep.detail})
+            # One level deeper — "github down because web_access down
+            # because offline policy" is the honest explanation.
+            dep_spec = next((s for s in self._specs if s.id == dep_id),
+                            None)
+            if dep_spec:
+                for sub in dep_spec.depends_on:
+                    sub_r = self.evaluate_one(sub)
+                    if sub_r.state in ("verified", "available",
+                                       "degraded"):
+                        continue
+                    out.append({"capability": sub,
+                                "required_by": dep_id,
+                                "state": sub_r.state,
+                                "detail": sub_r.detail})
+        return out
+
+    def run_selftest(self, cap_id: str, *, force: bool = False) -> dict[str, Any]:
+        """Bounded live exercise of one capability — explicit, rate-limited.
+
+        Probes answer 'is the path present'; a selftest answers 'did it
+        actually work'. Results update the report's state honestly:
+        success → verified; failure → temporarily_unavailable with the
+        test's detail (persistent breakage still shows via probes).
+        """
+        spec = next((s for s in self._specs if s.id == cap_id), None)
+        if spec is None:
+            return {"ok": False, "error": f"unknown capability '{cap_id}'"}
+        if spec.selftest is None:
+            return {"ok": False, "capability": cap_id,
+                    "error": "no self-test defined for this capability"}
+        now = time.time()
+        last = self._selftest_at.get(cap_id, 0.0)
+        if not force and now - last < self._SELFTEST_MIN_GAP_S:
+            return {"ok": False, "capability": cap_id,
+                    "error": "self-test rate limited",
+                    "retry_after_s": int(self._SELFTEST_MIN_GAP_S
+                                         - (now - last))}
+        self._selftest_at[cap_id] = now
+        try:
+            ok, detail = spec.selftest(self._env)
+        except Exception as exc:
+            ok, detail = False, f"self-test failed: {type(exc).__name__}"
+        report = self.evaluate_one(cap_id, force=True)
+        if ok:
+            report.state = "verified"
+            report.verified_at = now
+            if detail:
+                report.detail = detail
+        else:
+            # Don't overclaim brokenness on a single failed exercise.
+            if report.state in ("verified", "available"):
+                report.state = "temporarily_unavailable"
+            report.detail = detail or report.detail
+        report.checked_at = now
+        self._reports[cap_id] = (now, report)
+        return {"ok": bool(ok), "capability": cap_id, "detail": detail,
+                "state": report.state}
+
+    def graph(self, *, force: bool = False) -> dict[str, Any]:
+        """The Capability Truth Graph — nodes (live reports) + edges
+        (dependency declarations) + per-node blocker chains."""
+        reports = self.evaluate(force=force)
+        nodes = []
+        for spec in self._specs:
+            r = reports.get(spec.id) or self.evaluate_one(spec.id)
+            row = r.as_dict()
+            row["depends_on"] = list(spec.depends_on)
+            row["has_selftest"] = spec.selftest is not None
+            row["blockers"] = self.blockers(spec.id) \
+                if r.state in ALL_NEGATIVE else []
+            nodes.append(row)
+        edges = [{"from": s.id, "to": d}
+                 for s in self._specs for d in s.depends_on]
+        return {"time": time.time(), "nodes": nodes, "edges": edges,
+                "states": list(STATES)}
 

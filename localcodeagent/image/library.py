@@ -50,15 +50,6 @@ class ImageAssetLibrary:
         self.lora_dir.mkdir(parents=True, exist_ok=True)
         self._install_jobs: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
-        self._clean_orphan_parts()
-
-    def _clean_orphan_parts(self) -> None:
-        for part in self.models_dir.rglob("*.part"):
-            try:
-                if part.is_file():
-                    part.unlink()
-            except OSError:
-                pass
 
     def resolve(self, value: str) -> Path:
         p = Path(value).expanduser()
@@ -267,30 +258,53 @@ class ImageAssetLibrary:
                 return {"path":str(target),"status":"existing","size_bytes":size}
             raise RuntimeError(f"Existing model file failed verification: {target}. Use repair to replace it.")
 
-        req=urllib.request.Request(url, headers={"User-Agent":"LocalCodeAgent/0.4"})
         tmp=target.with_suffix(target.suffix+".part")
+        done=0
+        headers={"User-Agent":"LocalCodeAgent/0.4"}
+        if tmp.is_file():
+            partial=tmp.stat().st_size
+            if expected_size and partial==expected_size:
+                # Previous attempt died between download and verification —
+                # verify the part in place instead of re-fetching.
+                if (not expected_hash) or _sha256(tmp).lower()==expected_hash:
+                    replace_with_retry(tmp,target)
+                    return {"path":str(target),"status":"downloaded","size_bytes":target.stat().st_size}
+                tmp.unlink(missing_ok=True)
+            elif expected_size and partial>expected_size:
+                tmp.unlink(missing_ok=True)
+            elif partial>0:
+                headers["Range"]=f"bytes={partial}-"
+                done=partial
+        req=urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
-                total=int(resp.headers.get("Content-Length") or 0)
-                need=total or expected_size
+                remaining=int(resp.headers.get("Content-Length") or 0)
+                mode="ab" if done else "wb"
+                if done and getattr(resp,"status",None)!=206:
+                    # Server ignored the Range request — restart cleanly.
+                    done=0; mode="wb"
+                    remaining=int(resp.headers.get("Content-Length") or 0)
+                total=done+remaining if remaining else expected_size
+                need=remaining or expected_size
                 free=shutil.disk_usage(target.parent).free
                 if need and free < need + 512*1024*1024:
                     raise OSError("Insufficient disk space for model download plus safety reserve")
-                done=0
-                with tmp.open("wb") as out:
+                with tmp.open(mode) as out:
                     while True:
                         chunk=resp.read(4*1024*1024)
                         if not chunk: break
                         out.write(chunk); done+=len(chunk); progress(done,total)
             if expected_size and tmp.stat().st_size != expected_size:
+                tmp.unlink(missing_ok=True)
                 raise RuntimeError(f"Downloaded size mismatch for {target.name}")
             if expected_hash and _sha256(tmp).lower() != expected_hash:
+                tmp.unlink(missing_ok=True)
                 raise RuntimeError(f"SHA256 mismatch for {target.name}")
             replace_with_retry(tmp,target)
             return {"path":str(target),"status":"downloaded","size_bytes":target.stat().st_size}
         except Exception:
-            try: tmp.unlink(missing_ok=True)
-            except Exception: pass
+            # Mid-stream failures keep the .part so the next attempt resumes;
+            # verification failures above already removed the corrupt file.
             raise
 
     def start_install(self, profile: ImageModelProfile, *, repair: bool = False) -> dict[str, Any]:

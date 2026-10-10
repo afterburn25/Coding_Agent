@@ -905,12 +905,9 @@ class PersonaRenderer:
             step = str(nexts[0]).rstrip(".")
             return fam, f"Next: {step}." if not step.lower().startswith(
                 ("want", "say", "i can")) else step[0].upper() + step[1:] + "."
-        if fam == "question" and (g.get("questions", {})
-                                  .get("frequency", 0) > 0.4):
-            pool = ("Want me to dig deeper?",
-                    "Should I keep going on this?",
-                    "More detail on any of it?")
-            return fam, self._choose(pool, "closing", g)
+        # Fabricated-question closers ("Want me to dig deeper?") read as
+        # trailing filler after every answer — a real person stops when
+        # they've answered. Only a genuine next_step may close.
         if fam == "light_comment":
             q = self._humor_quip(g, ctx)
             return (fam, q) if q else ("hard_stop", "")

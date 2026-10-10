@@ -295,29 +295,53 @@ class MissionPlanner:
         ws_ids: dict[str, str] = {}   # lane title → workstream id
         import uuid as _uuid
         lane_ws: list[dict] = []
+        # Replan-safe identity: a workstream row is durable — matching by
+        # title REUSES the existing record (keeps status, worktree,
+        # history, reservations) instead of appending an orphaned
+        # duplicate whose node_ids point at a graph that was rebuilt.
+        existing_ws = {w.get("title"): w
+                       for w in (mission.get("workstreams") or [])}
         for i, lane in enumerate(lanes):
-            ws = {
-                "id": f"ws-{_uuid.uuid4().hex[:10]}",
-                "title": str(lane["title"]),
+            ws = existing_ws.pop(str(lane["title"]), None)
+            if ws is None:
+                ws = {
+                    "id": f"ws-{_uuid.uuid4().hex[:10]}",
+                    "title": str(lane["title"]),
+                    "status": "planned",
+                    "worktree": None,
+                    "blocker": "",
+                    "result": "",
+                    "created_at": time.time(),
+                }
+                mission.setdefault("workstreams", []).append(ws)
+            ws.update({
                 "objective": str(lane.get("instruction") or
                                  lane["title"])[:2000],
-                "status": "planned",
                 "priority": lane.get("priority") or "p2",
                 "role": str(lane.get("role") or "coding"),
                 "scope": list(lane.get("scope") or []),
                 "depends_on": list(lane.get("depends") or []),
                 "node_ids": [],
-                "worktree": None,
                 "acceptance": list(lane.get("acceptance") or []),
-                "blocker": "",
-                "result": "",
-                "created_at": time.time(),
                 "updated_at": time.time(),
-            }
+            })
+            # A replanned lane restarts from the front unless it already
+            # reached a terminal state (integrated/abandoned/failed keep
+            # their outcome — replans must not resurrect finished lanes).
+            if str(ws.get("status")) not in \
+                    {"integrated", "abandoned", "failed"}:
+                ws["status"] = "planned"
             lane_ws.append(ws)
             ws_ids[lane["title"]] = ws["id"]
-        mission.setdefault("workstreams", []).extend(lane_ws)
         mission["workstreams"] = mission["workstreams"][-40:]
+        # Lanes dropped by the replan keep their record but stop being
+        # live — their node_ids point at the old graph.
+        for stale in existing_ws.values():
+            if str(stale.get("status")) not in \
+                    {"integrated", "abandoned", "failed"}:
+                stale["status"] = "abandoned"
+                stale["blocker"] = "lane removed by replan"
+                stale["updated_at"] = time.time()
         # Workstream-level dependencies: a lane whose "depends" names
         # another lane's title waits on that lane's final node.
         lane_dep_ids: dict[str, list[str]] = {}
@@ -376,7 +400,7 @@ class MissionPlanner:
              "Objective: " + objective),
             kind="review", deps=[integrate["id"]], priority=39,
             verify="none", max_retries=1,
-            model_role="deep",
+            model_role="deep_reasoner",
             metadata={"worker_role": "reviewer"})
         tasks += [integrate, review]
 

@@ -1031,7 +1031,31 @@ class ProvisioningManager:
         if self._fleet_model_present(backend, it):
             self._verify_model(it)
             return
-        job = backend.install_model(str(it.payload["source"]))
+        # Dedup before download: a verified-size checkpoint already on
+        # disk (InvokeAI store or the shared Nexus model dir) registers
+        # in place — a second ~7 GB copy is never fetched for the same
+        # logical model.
+        source = str(it.payload["source"])
+        inplace = False
+        try:
+            from .image.fleet import FLEET_BY_ID, find_fleet_checkpoint
+            spec = FLEET_BY_ID.get(str(it.payload.get("fleet_id") or ""))
+            if spec is not None:
+                roots = []
+                mgr = self.image_manager
+                for cand in (getattr(mgr, "_invokeai_models_root", None),
+                             getattr(mgr, "models_dir", None)):
+                    try:
+                        roots.append(cand() if callable(cand) else cand)
+                    except Exception:
+                        pass
+                local = find_fleet_checkpoint(spec, [r for r in roots if r])
+                if local is not None:
+                    source, inplace = str(local), True
+        except Exception:
+            source, inplace = str(it.payload["source"]), False
+        job = (backend.install_model(source, inplace=True) if inplace
+               else backend.install_model(source))
         job_id = job.get("id")
         if job_id is None:
             raise RuntimeError(f"model install rejected: {job}")

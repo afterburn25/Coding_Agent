@@ -21,6 +21,25 @@ function renderBackendCard(b,fallbackName){
   const state=b.healthy?'online':(installed?(rt.state==='loading'?'starting…':'offline'):'not installed');
   return `<div class="backend-card"><strong>${esc(b.type||fallbackName)}</strong><br><span class="state ${b.healthy?'healthy':'error'}">${state}</span><br><small>${esc(b.endpoint||'')}${rt.managed?' · managed':''}</small></div>`;
 }
+function fmtGBv(n){return `${(Number(n||0)/(1024**3)).toFixed(1)} GB`;}
+function renderFleetRow(m){
+  const st=m.state||'missing';
+  const stateCls={installed:'installed',missing:'missing',downloading:'partial',verifying:'partial',failed:'missing'}[st]||'missing';
+  const p=m.progress||{},done=Number(p.bytes_done||0),total=Number(p.bytes_total||m.size_bytes||0);
+  const frac=total>0?done/total:0;
+  const prog=(st==='downloading'||st==='verifying')
+    ?`<div class="bar"><span style="width:${st==='verifying'?98:Math.round(frac*100)}%"></span></div><small>${st==='verifying'?'verifying model registration…':`${esc(p.file||m.display_name)} — ${fmtGBv(done)} / ${fmtGBv(total)} (${Math.round(frac*100)}%)`}</small>`:'';
+  const err=m.error?`<small class="muted">${esc(m.error)}</small>`:'';
+  const tags=(m.tags||[]).map(t=>`<span class="backend-chip">${esc(t)}</span>`).join(' ');
+  const lic=m.license?` · ${esc(m.license)}`:'';
+  const adult=m.adult_default?' <span class="backend-chip">adult default</span>':'';
+  const fmt=m.backend_model?.format?` · ${esc(m.backend_model.format)}`:'';
+  const actions=[];
+  if(st==='missing'||st==='failed')actions.push(`<button class="mini-button fleet-install" data-fleet="${esc(m.id)}">${st==='failed'?'Retry install':'Install'}</button>`);
+  if(st==='installed'){actions.push(`<button class="mini-button fleet-verify" data-fleet="${esc(m.id)}">Verify</button>`);actions.push(`<button class="mini-button fleet-remove" data-fleet="${esc(m.id)}">Remove</button>`);}
+  if(st==='failed')actions.push(`<button class="mini-button fleet-install" data-fleet="${esc(m.id)}" data-repair="1">Reinstall</button>`);
+  return `<div class="model"><strong>${esc(m.display_name)}</strong><small><span class="backend-chip">${esc(m.backend||'invokeai')}</span> ${tags} · ~${esc(m.size_gb)} GB${lic}${adult}${fmt}</small><small>${esc((m.supported_operations||[]).join(', '))}</small><div class="model-status ${stateCls}">${esc(st)}${st==='installed'?' in InvokeAI':''}</div>${prog}${err}<div class="model-actions">${actions.join('')}</div></div>`;
+}
 function render(data){
   const backends=data.backends||{};
   const b=data.backend||{};
@@ -30,8 +49,16 @@ function render(data){
   $('#imageBackend').innerHTML=`${renderBackendCard(invoke,'invokeai')}${renderBackendCard(comfy,'comfyui')}<small>Preference: <strong>${esc(pref)}</strong>${pref==='auto'?' — picks the best engine per job':''}</small>`;
   const statusById=Object.fromEntries((data.model_status||[]).map(x=>[x.id,x]));
   const bf=($('#modelBackendFilter')?.value||'');
-  const modelRows=[...(data.models||[]).map(m=>({...m,_backend:m.backend||'comfyui'})),...(invoke?.models||[]).filter(x=>x.type==='main').map(x=>({id:x.fleet_id||`invokeai:${x.key}`,display_name:x.display_name||x.name,family:x.base||'invokeai',backend:'invokeai',capability_class:x.capability_class,restriction_status:x.restriction_status,fleet_role:x.fleet_role,license:x.license,_remote:true}))];
-  $('#imageModels').innerHTML=modelRows.filter(m=>!bf||m._backend===bf||m.backend===bf).map(m=>{
+  const fleetData=data.fleet||[];const fleetIds=new Set(fleetData.map(f=>f.id));
+  const fleetHtml=fleetData.filter(m=>!bf||m.backend===bf).map(renderFleetRow).join('');
+  const ads=$('#adultDefaultSel');
+  if(ads&&document.activeElement!==ads){
+    const cur=data.adult_default_model||'auto';
+    ads.innerHTML='<option value="auto">Auto — trait scoring</option>'+fleetData.map(f=>`<option value="${esc(f.id)}">${esc(f.display_name)}${f.adult_capable?' · adult-capable':''}${f.installed?'':' (not installed)'}</option>`).join('');
+    ads.value=cur||'auto';if(ads.value!==cur)ads.value='auto';
+  }
+  const modelRows=[...(data.models||[]).map(m=>({...m,_backend:m.backend||'comfyui'})),...(invoke?.models||[]).filter(x=>x.type==='main'&&!(x.fleet_id&&fleetIds.has(x.fleet_id))).map(x=>({id:x.fleet_id||`invokeai:${x.key}`,display_name:x.display_name||x.name,family:x.base||'invokeai',backend:'invokeai',capability_class:x.capability_class,restriction_status:x.restriction_status,fleet_role:x.fleet_role,license:x.license,_remote:true}))];
+  $('#imageModels').innerHTML=(fleetHtml+modelRows.filter(m=>!bf||m._backend===bf||m.backend===bf).map(m=>{
     const engine=m._backend||m.backend||'comfyui';
     const cls=m.capability_class&&m.capability_class!=='unknown'?` · ${esc(m.capability_class.replace(/_/g,' '))}`:'';
     const restr=m.restriction_status&&m.restriction_status!=='unknown_capability'?` · ${esc(m.restriction_status.replace(/_/g,' '))}`:'';
@@ -49,7 +76,7 @@ function render(data){
       return `<div class="workflow-row"${detail}><span><strong>${esc(w.operation)}</strong><small>${esc(w.name)} · <span class="workflow-state ${state}">${state}</span></small></span><button class="mini-button import-workflow" data-model="${esc(m.id)}" data-operation="${esc(w.operation)}">Import API</button></div>`;
     }).join('');
     return `<div class="model"><strong>${esc(m.display_name||m.id)}</strong><small><span class="backend-chip">${esc(engine)}</span> ${esc(m.tagline||m.family)}${m.tagline?' · '+esc(m.family):''} · ${esc(m.speed_tier)} · ${esc(m.quality_tier)}${cls}${restr}</small><small>${esc((m.capabilities||[]).join(', '))}</small><div class="model-status ${esc(st.status)}">${esc(st.status)}${missing.length?' · missing '+esc(missing.join(', ')):''}${wfMissing?' · '+wfMissing+' workflow(s) missing':''}${wfInvalid?' · '+wfInvalid+' workflow(s) invalid':''}</div><div class="model-actions"><button class="mini-button install-model" data-model="${esc(m.id)}">Install missing</button><button class="mini-button remove-model" data-model="${esc(m.id)}">Remove weights</button></div><details class="workflow-details"><summary>Workflows (${(st.workflows||[]).length})</summary>${workflowRows||'<small>No workflows configured.</small>'}</details></div>`;
-  }).join('')||'<span class="muted">No image models configured.</span>';
+  }).join(''))||'<span class="muted">No image models configured.</span>';
   const sel=$('#imageModel');const prev=sel.value;const sortedModels=[...(data.models||[])].sort((a,b)=>(b.priority||0)-(a.priority||0));const remoteSel=modelRows.filter(m=>m._remote);sel.innerHTML='<option value="auto">Auto</option>'+remoteSel.map(m=>`<option value="${esc(m.id)}"${m.fleet_role?` title="${esc(m.fleet_role.replace(/_/g,' '))}"`:''}>${esc(m.display_name||m.id)}</option>`).join('')+sortedModels.map(m=>`<option value="${esc(m.id)}"${m.tagline?` title="${esc(m.tagline)}"`:''}>${esc(m.display_name||m.id)}</option>`).join(''); if([...sel.options].some(x=>x.value===prev))sel.value=prev;
   $('#imageInventory').innerHTML=(data.inventory||[]).map(x=>`<div>${esc(x.name)}<br><small>${esc(x.family)} · ${esc(x.size_gb)} GB</small></div>`).join('')||'<span class="muted">No local image weights discovered.</span>';
   renderSetup(data);
@@ -110,5 +137,7 @@ $('#startImageBackend').addEventListener('click',async()=>{const be=$('#imageBac
 $('#stopImageBackend').addEventListener('click',async()=>{const be=$('#imageBackendSel')?.value||'comfyui';const target=be==='auto'?'invokeai':be;try{await postJson('/api/image/backend/stop',{backend:target});await load();}catch(e){$('#imageStatus').textContent=e.message;}});
 $('#installImageBackend')?.addEventListener('click',async()=>{const be=$('#imageBackendSel')?.value||'auto';const target=be==='auto'?'invokeai':be;try{$('#imageStatus').textContent=`Installing ${target}…`;const d=await postJson('/api/image/backend/install',{backend:target,approve:true});if(d.needs_approval){$('#imageStatus').textContent='Install needs approval — approve it in the Tools page.';}else if(!d.ok){$('#imageStatus').textContent=d.error||'Install could not start.';}else{$('#imageStatus').textContent=`${target} install started.`;}await load();}catch(e){$('#imageStatus').textContent=e.message;}});
 $('#imageBackendSel')?.addEventListener('change',async e=>{try{await postJson('/api/image/backend/preference',{backend:e.target.value});await load();}catch(err){$('#imageStatus').textContent=err.message;}});
+$('#adultDefaultSel')?.addEventListener('change',async e=>{try{await postJson('/api/image/adult-default',{model:e.target.value});$('#imageStatus').textContent='Adult-content default updated — routing preference only; safety policy still applies.';await load();}catch(err){$('#imageStatus').textContent=err.message;}});
+$('#imageModels').addEventListener('click',async e=>{const inst=e.target.closest('.fleet-install'),rem=e.target.closest('.fleet-remove'),ver=e.target.closest('.fleet-verify');if(!inst&&!rem&&!ver)return;try{if(inst){inst.disabled=true;const d=await postJson('/api/image/fleet/install',{fleet_id:inst.dataset.fleet,repair:inst.dataset.repair==='1'});$('#imageStatus').textContent=d.install?.state==='completed'?`${inst.dataset.fleet} is already installed.`:`Installing ${inst.dataset.fleet} — download progress shows in the model card.`;}if(rem){if(!confirm(`Remove ${rem.dataset.fleet} from InvokeAI? Its weights are deleted; other models are untouched.`))return;rem.disabled=true;const d=await postJson('/api/image/fleet/remove',{fleet_id:rem.dataset.fleet});$('#imageStatus').textContent=d.ok?(d.removed?'Model removed.':'Model was not registered.'):(d.error||'Remove failed.');}if(ver){ver.disabled=true;$('#imageStatus').textContent=`Verifying ${ver.dataset.fleet} — hash check on a multi-GB file takes a moment…`;const d=await postJson('/api/image/fleet/verify',{fleet_id:ver.dataset.fleet,deep_hash:true});const v=d.verify||{};$('#imageStatus').textContent=v.ok?`${v.display_name} verified — registered${v.hash_ok?' + SHA-256 matches':''}.`:`${v.display_name} verification failed — ${!v.registered?'not registered in InvokeAI':!v.file_found?'checkpoint file missing':!v.size_ok?'size mismatch':v.hash_ok===false?'SHA-256 mismatch':'unknown'}.`;}await load();}catch(err){$('#imageStatus').textContent=err.message;}finally{setTimeout(load,800);}});
 $('#modelBackendFilter')?.addEventListener('change',()=>render(latest));
 load();setInterval(load,2500);

@@ -145,6 +145,13 @@ class MoltbookConnector(Connector):
     consequential call.
     """
 
+    # Canonical answer to "what is moltbook?" — the deterministic
+    # social-info lane reads this so the model can never invent a
+    # different service.
+    SERVICE_BLURB = (
+        "a social network for AI agents — agents post, comment, and "
+        "consult each other there")
+
     name = "moltbook"
     capabilities = (
         "onboard", "status", "me", "profile", "update_profile",
@@ -152,6 +159,7 @@ class MoltbookConnector(Connector):
         "notifications", "home", "mark_read",
         "post", "comment", "verify",
         "vote", "follow", "unfollow", "subscribe", "unsubscribe",
+        "submolts", "submolt", "create_submolt",
     )
     permission = "social.read"
     # Moltbook allows 60 reads + 30 writes per minute; stay conservative
@@ -169,6 +177,9 @@ class MoltbookConnector(Connector):
         "unfollow": "social.follow",
         "subscribe": "social.follow",
         "unsubscribe": "social.follow",
+        # Creating a Nexus-owned community is an account-level act —
+        # the same gate as onboarding, always approval-worthy.
+        "create_submolt": "social.account",
     }
 
     def __init__(self, *, base_url: str = DEFAULT_API_BASE,
@@ -541,3 +552,27 @@ class MoltbookConnector(Connector):
                          **_: Any) -> dict[str, Any]:
         n = urllib.parse.quote(str(submolt or ""), safe="")
         return self._client.request("DELETE", f"/submolts/{n}/subscribe")
+
+    def _cap_submolts(self, **_: Any) -> dict[str, Any]:
+        out = self._client.request("GET", "/submolts")
+        return self._socialize(out) if out.get("ok") else out
+
+    def _cap_submolt(self, submolt: str = "", name: str = "",
+                     **_: Any) -> dict[str, Any]:
+        n = urllib.parse.quote(str(submolt or name or ""), safe="")
+        out = self._client.request("GET", f"/submolts/{n}")
+        return self._socialize(out) if out.get("ok") else out
+
+    def _cap_create_submolt(self, name: str = "",
+                            display_name: str = "",
+                            description: str = "",
+                            **_: Any) -> dict[str, Any]:
+        blocked = self._scan_outbound(str(name or ""),
+                                      str(description or ""))
+        if blocked is not None:
+            return blocked
+        return self._client.request(
+            "POST", "/submolts",
+            body={"name": str(name or "")[:60],
+                  "display_name": str(display_name or name or "")[:120],
+                  "description": str(description or "")[:2000]})

@@ -27,6 +27,17 @@ _JOIN_RE = re.compile(
     re.IGNORECASE)
 
 
+def _sent_ref(data: dict) -> str:
+    """Post/comment id out of a send response — the API has returned
+    both flat `{id}` and nested `{post|comment: {id}}` envelopes; an
+    empty ref silently breaks reply-matching, so try every shape."""
+    for row in (data, data.get("post"), data.get("comment"),
+                data.get("data"), (data.get("post") or {}).get("post")):
+        if isinstance(row, dict) and row.get("id"):
+            return str(row["id"])
+    return ""
+
+
 class SocialService:
     def __init__(self, *, config: Any = None, vault: Any = None,
                  permission_check: Callable[[str], str] | None = None,
@@ -214,6 +225,143 @@ class SocialService:
                 "notify": bool(re.search(
                     r"\bnotifications?\b", t, re.IGNORECASE))}
 
+    # Referents that point back at a recent feed item — "that trust
+    # chains post", "the second one", "it". The referent binds against
+    # the last feed snapshot remembered from an actual read, never a
+    # guessed post id.
+    _CONTINUE_RE = re.compile(
+        r"\b(?:comments?|repl(?:y|ies)|responses?|discussion|thread|"
+        r"reactions?)\b", re.IGNORECASE)
+    _REF_RE = re.compile(
+        r"\b(?:on|to|about|of|in|under|for)?\s*"
+        r"(?:that|the|this|those|their|its?)\s+"
+        r"(.+?)\s*(?:post|thread|topic|one|discussion)?\s*[?.!]*$",
+        re.IGNORECASE)
+    _ORDINALS = {"top": 0, "first": 0, "1st": 0, "latest": 0,
+                 "second": 1, "2nd": 1, "third": 2, "3rd": 2,
+                 "fourth": 3, "4th": 3, "last": -1}
+    _STOPWORDS = frozenset(
+        "a an and are as at be by for from has have how i in is it its "
+        "of on or that the this to was what when where which who will "
+        "with you your post thread one discussion comments replies "
+        "about did say said".split())
+
+    def remember_feed(self, service: str, posts: list) -> None:
+        """Snapshot the last feed read so anaphoric follow-ups can bind
+        'that post' to a real post id. Stored on the drive (durable) —
+        titles only, full bodies stay on the wire."""
+        items: list[dict[str, Any]] = []
+        for p in posts or []:
+            if not isinstance(p, dict):
+                continue
+            pid = str(p.get("id") or p.get("post_id") or "")
+            title = str(p.get("title") or p.get("content") or "")
+            if not pid or not title:
+                continue
+            agent = p.get("agent") or p.get("author")
+            author = (agent.get("name") if isinstance(agent, dict)
+                      else agent) or ""
+            items.append({"id": pid, "title": title[:140],
+                          "author": str(author)})
+        key = f"last_feed_{service}"
+        self.store.drive.data[key] = items[:25]
+        self.store.drive.save()
+
+    def remembered_feed(self, service: str) -> list:
+        return list(self.store.drive.data.get(
+            f"last_feed_{service}") or [])
+
+    def _bind_referent(self, text: str, service: str) -> dict | None:
+        """Bind 'that trust chains post' / 'the second one' / 'it' to a
+        remembered feed item. Returns the item dict or None."""
+        items = self.remembered_feed(service)
+        if not items:
+            return None
+        t = str(text or "").lower()
+        m = self._REF_RE.search(t)
+        ref = (m.group(1).strip() if m else "").strip()
+        # Ordinal referents — 'the top post', 'the second one', 'it'.
+        for word, idx in self._ORDINALS.items():
+            if re.search(rf"\b{word}\b", ref or t):
+                try:
+                    return items[idx]
+                except IndexError:
+                    return items[-1] if idx == -1 else None
+        words = {w for w in re.findall(r"[a-z0-9]+", ref)
+                 if w not in self._STOPWORDS and len(w) > 2}
+        if not words:
+            # Bare 'it'/'that post'/'the thread' — most recent item.
+            if re.search(
+                    r"\bit\b|\b(?:that|the|this)\s+"
+                    r"(?:post|thread|topic|one|discussion)\b", t):
+                return items[0]
+            return None
+        best, best_score = None, 0
+        for it in items:
+            title_words = {w for w in re.findall(
+                r"[a-z0-9]+", str(it.get("title") or "").lower())
+                if w not in self._STOPWORDS}
+            score = len(words & title_words)
+            if score > best_score:
+                best, best_score = it, score
+        return best if best_score > 0 else None
+
+    def resolve_use_continuation(self, text: str) -> dict | None:
+        """Anaphoric follow-up — 'read the comments on that post',
+        'what did people say about it', 'the second one's replies'.
+        Claims the turn only when a comments/discussion verb AND a
+        resolvable feed referent are both present."""
+        t = str(text or "")
+        if not t or self._connectors is None or \
+                not self._CONTINUE_RE.search(t):
+            return None
+        # A write verb wins — 'comment on that post saying X' is a
+        # compose request, handled by the write path.
+        if self._WRITE_VERB_RE.search(t) and \
+                re.search(r"\b(?:saying|about|that|with)\s+[\"']", t):
+            return None
+        name = None
+        for row in (self._connectors.status() or []):
+            cand = str(row.get("name") or "")
+            if not cand:
+                continue
+            conn = (self._connectors.connectors.get(cand) or {}
+                    ).get("conn")
+            if conn is None or "comments" not in getattr(
+                    conn, "capabilities", ()):
+                continue
+            if re.search(rf"\b{re.escape(cand)}\b", t, re.IGNORECASE):
+                name = cand
+                break
+        if name is None:
+            # No service named — the referent must still bind; use the
+            # service whose remembered feed produced the best match.
+            candidates = [str(r.get("name") or "")
+                          for r in (self._connectors.status() or [])]
+            best_name, best_item = None, None
+            for cand in candidates:
+                if not cand:
+                    continue
+                it = self._bind_referent(t, cand)
+                if it is not None:
+                    best_name, best_item = cand, it
+                    break
+            if best_name is None:
+                return None
+            return {"service": best_name, "read": True, "write": False,
+                    "content": "", "notify": False,
+                    "comments_for": best_item.get("id"),
+                    "post_title": best_item.get("title"),
+                    "post_author": best_item.get("author")}
+        item = self._bind_referent(t, name)
+        if item is None:
+            return None
+        return {"service": name, "read": True, "write": False,
+                "content": "", "notify": False,
+                "comments_for": item.get("id"),
+                "post_title": item.get("title"),
+                "post_author": item.get("author")}
+
     def call_capability(self, service: str, capability: str, *,
                         approved: bool = False,
                         **params: Any) -> dict[str, Any]:
@@ -281,6 +429,13 @@ class SocialService:
     # -- provenance-grounded social queries ------------------------------------
 
     _SOCIAL_QUERY_RES = (
+        ("service_info", re.compile(
+            r"\bwhat\s+(?:is|'s|does)\s+(?:a\s+|an\s+|the\s+)?"
+            r"(?:this\s+)?moltbook\b|"
+            r"\bwhat'?s\s+moltbook\b|"
+            r"\b(?:explain|describe|tell\s+me\s+about)\s+moltbook\b|"
+            r"\bmoltbook\s+(?:explained|meaning)\b",
+            re.IGNORECASE)),
         ("claim_link", re.compile(
             r"\b(?:claim|verification|verify|sign[ -]?up)\s*"
             r"(?:link|url|page)\b|"
@@ -310,6 +465,15 @@ class SocialService:
             r"(?:moltbook|the\s+community)\b|"
             r"\bwhich\s+agents?\s+do\s+you\s+know\b",
             re.IGNORECASE)),
+        ("red_team", re.compile(
+            r"\b(?:red[ -]?team|adversarial(?:ly)?\s+review|"
+            r"stress[ -]?test|poke\s+holes\s+in|"
+            r"critique)\s+(?:the\s+|this\s+|my\s+|our\s+)?"
+            r"(.+?)\s*$|"
+            r"\battack\s+(?:the\s+|this\s+|my\s+|our\s+)?"
+            r"((?:design|architecture|plan|approach|system|code)"
+            r".*?)\s*$",
+            re.IGNORECASE)),
         ("ask_peer", re.compile(
             r"\b(?:ask|consult|pose\s+(?:this|that|it)\s+to|"
             r"post\s+(?:a\s+)?(?:question|this)\s+(?:to|on))\s+"
@@ -326,7 +490,8 @@ class SocialService:
         for kind, rx in self._SOCIAL_QUERY_RES:
             m = rx.search(t)
             if m:
-                return kind, (m.group(1).strip() if m.groups() else "")
+                subject = next((g for g in m.groups() if g), "")
+                return kind, subject.strip()
         # State-gated shorthands — 'resend it', 'have you joined?',
         # 'where's the link?' only claim the turn when a live account
         # state makes the referent unambiguous. The gate is connector
@@ -343,6 +508,19 @@ class SocialService:
                 r"\b(?:have|did)\s+you\s+join\w*\b", t,
                 re.IGNORECASE):
             return "account_state", ""
+        # 'i already did that' / 'done' / 'verified it' — a completion
+        # report whose referent resolves to the outstanding claim. Only
+        # claimed while verification is genuinely pending; the gate is
+        # connector state, not the phrasing alone.
+        if pending and re.search(
+                r"\b(?:i\s+(?:have\s+)?already|already)\s+"
+                r"(?:done|did|verified|claimed|finished)\b|"
+                r"\b(?:i'?ve|i\s+have)\s+(?:already\s+)?"
+                r"(?:done|verified|claimed|finished)\b|"
+                r"\b(?:it|that)(?:'s| is)\s+done\b|"
+                r"\bdid\s+(?:it|that)\b|"
+                r"^\s*done\b", t, re.IGNORECASE):
+            return "verification_done", ""
         return None
 
     def pending_claim_url(self) -> str:
@@ -381,6 +559,26 @@ class SocialService:
                     "poll Moltbook.")
         return ("There's no pending registration — say 'join Moltbook' "
                 "and I'll start one.")
+
+    def service_info_text(self, name: str = "moltbook") -> str:
+        """'What is Moltbook?' — answered from the connector's own
+        blurb plus live account state, never model invention."""
+        conn = self.connector(name)
+        if conn is None:
+            return f"I don't have a {name} connector on this install."
+        blurb = str(getattr(conn, "SERVICE_BLURB", "") or "")
+        acct = str(self.connector_state(name).get("account") or "")
+        base = (f"{name.title()} is {blurb}." if blurb
+                else f"{name.title()} is a service I can connect to.")
+        if acct == "active":
+            who = "I have a verified account there."
+        elif acct == "awaiting_owner_verification":
+            who = ("I've registered an account — it's awaiting your "
+                   "ownership verification.")
+        else:
+            who = ("I haven't joined yet — say 'join Moltbook' and "
+                   "I'll register.")
+        return f"{base} {who}"
 
     def account_state_text(self) -> str:
         """'Have you joined?' — live account state, with the claim
@@ -494,10 +692,11 @@ class SocialService:
 
     # -- heartbeat -------------------------------------------------------------------
 
-    def heartbeat(self) -> dict[str, Any]:
+    def heartbeat(self, *, approved: bool = False) -> dict[str, Any]:
         """One social check-in — notifications, followed threads,
-        learning opportunities. What it does is bounded by the level
-        and permissions; it never posts just because time passed."""
+        learning opportunities, and at most one bounded teaching
+        decision. What it does is bounded by the level and
+        permissions; it never posts just because time passed."""
         if not self.drive.allows("read"):
             return {"ok": True, "skipped": "social level is off"}
         conn = self.connector("moltbook")
@@ -520,6 +719,15 @@ class SocialService:
                     {"kind": "consults_expired",
                      "count": len(expired)})
             self.store.interest_decay()
+            teach = self.consider_teaching(approved=approved)
+            if teach.get("candidate"):
+                cand = teach["candidate"]
+                summary["actions"].append({
+                    "kind": "teach_candidate",
+                    "title": str(cand.get("learned") or "")[:140],
+                    "published": bool(teach.get("published")),
+                    "needs_approval": bool(teach.get("needs_approval")),
+                    "permission": teach.get("permission")})
             self.drive.heartbeat_done()
         except Exception as exc:
             summary["ok"] = False
@@ -698,15 +906,18 @@ class SocialService:
                 backlog_id: str = "", thread_ref: str = "",
                 peers: list[str] | None = None,
                 importance: float = 0.5, uncertainty: float = 0.5,
-                urgency: float = 0.5, approved: bool = False
-                ) -> dict[str, Any]:
+                urgency: float = 0.5, approved: bool = False,
+                user_requested: bool = False) -> dict[str, Any]:
         """Expected-value peer consultation, full lifecycle:
 
         EV gate → sanitize (minimum sufficient context) → outbound
         secret scan → permission/level gate → post → record. Returns
         ``needs_approval`` for the caller to park instead of posting.
         A low-value ask returns ``skipped`` — peers are not bothered
-        with questions local evidence can answer.
+        with questions local evidence can answer. ``user_requested``
+        marks an explicit user instruction: the EV gate then informs
+        the record instead of vetoing — the user's authority decides,
+        sanitization and permission gates still apply.
         """
         conn = self.connector("moltbook")
         if conn is None or conn.account_state() != "active":
@@ -719,12 +930,17 @@ class SocialService:
                     "familiarity": 0.5, "claims_upheld": 0,
                     "claims_failed": 0}
                    for p in peers] if peers else None)
-        if not ev["consult"] and not approved:
+        if not ev["consult"] and not approved and not user_requested:
             self.store.ledger_append(
                 "consult_skipped", ref=domain,
                 score=ev["value"], reason="; ".join(ev["reasons"][:2]))
             return {"ok": False, "skipped": "expected value too low",
                     "eval": ev}
+        if not ev["consult"] and user_requested:
+            self.store.ledger_append(
+                "consult_low_ev", ref=domain,
+                score=ev["value"],
+                reason="user-requested — EV recorded, not vetoed")
         san = sanitize_question(
             question, context,
             redactor=getattr(self._vault, "redact", None))
@@ -764,9 +980,7 @@ class SocialService:
                                               "send failed"),
                     "consult": c}
         data = send.get("data") if isinstance(send.get("data"), dict) else {}
-        post_ref = str(data.get("id")
-                       or (data.get("comment") or {}).get("id", "")
-                       or "")
+        post_ref = _sent_ref(data)
         self.consults.mark_sent(c["id"], post_ref=post_ref)
         self.drive.record("consult", ref=post_ref or c["id"],
                           score=ev["value"],
@@ -777,6 +991,60 @@ class SocialService:
                                "consult": c["id"], "peers": targets})
         return {"ok": True, "consult": c, "eval": ev,
                 "post_ref": post_ref}
+
+    # §7 — Red-Team Council prompts: the point is criticism, not
+    # consensus. Peers are asked to ATTACK the design.
+    _ADVERSARIAL_PROMPTS = (
+        "What is wrong with this design?",
+        "What failure mode am I missing?",
+        "What assumption is weak?",
+        "What happens during restart?",
+        "What happens under concurrency?",
+        "What security failure do you see?",
+        "How would you attack this architecture?",
+    )
+
+    def adversarial_review(self, design: str, *, domain: str = "",
+                           context: str = "", mission_id: str = "",
+                           approved: bool = False,
+                           user_requested: bool = False
+                           ) -> dict[str, Any]:
+        """§7/§8 Red-Team Council — ask relevant peers to attack a
+        design before it locks in. Rides the existing consult
+        machinery (EV eval, sanitize, outbound scan, permission gate,
+        post, reply-matching) with a critique frame; the consult row
+        is marked kind='adversarial_review' so findings can feed back
+        as mission evidence. External review stays optional and
+        non-blocking."""
+        body = str(design or "").strip()
+        if not body:
+            return {"ok": False, "error": "no design text provided"}
+        prompts = "\n".join(f"- {p}" for p in self._ADVERSARIAL_PROMPTS)
+        question = (
+            "Red-team this design — I'm looking for what's WRONG "
+            "with it, not validation.\n\n" + body[:900] +
+            "\n\nAnswer any that apply:\n" + prompts)
+        out = self.consult(
+            question, context=context,
+            domain=domain or "design_review",
+            mission_id=mission_id,
+            importance=0.8, uncertainty=0.7,
+            approved=approved, user_requested=user_requested)
+        c = out.get("consult")
+        if isinstance(c, dict):
+            c["kind"] = "adversarial_review"
+            self.consults.consults.save()
+            # Council roster — who was asked to attack this. The
+            # store's council record finally has a real writer.
+            try:
+                self.store.set_council(
+                    f"redteam-{c.get('id', '')[-8:]}",
+                    domain or "design_review",
+                    members=list(c.get("target_peers") or []))
+            except Exception:
+                pass
+        out["kind"] = "adversarial_review"
+        return out
 
     def consult_for_mission(self, mission: dict, *,
                             approved: bool = False) -> dict[str, Any]:
@@ -820,6 +1088,81 @@ class SocialService:
         rows = self.consults.consults.rows()
         rows.sort(key=lambda r: -float(r.get("created_at", 0)))
         return rows[:limit]
+
+    # -- distributed replication (§9/§10) ----------------------------------------
+
+    def local_env(self, *, model: str = "", quantization: str = "",
+                  context: str = "") -> dict[str, Any]:
+        """Nexus's normalized environment for replication records —
+        hardware/software from the live runtime where available."""
+        env: dict[str, Any] = {}
+        try:
+            from ..runtime.hardware import detect_hardware
+            snap = detect_hardware()
+            gpus = getattr(snap, "gpus", None) or []
+            if gpus:
+                env["hardware"] = getattr(
+                    gpus[0], "name", "") or str(gpus[0])[:60]
+            env["ram_gb"] = round(getattr(snap, "total_ram_gb",
+                                          0) or 0, 1)
+            import platform as _pl
+            env["os"] = _pl.system().lower()
+        except Exception:
+            pass
+        if model:
+            env["model"] = model
+        if quantization:
+            env["quantization"] = quantization
+        if context:
+            env["context"] = context
+        return env
+
+    def open_replication(self, hypothesis: str, *, claim_id: str = "",
+                         source: str = "", plan: str = "",
+                         metric: str = "", model: str = "",
+                         quantization: str = "", context: str = ""
+                         ) -> dict[str, Any]:
+        """Open a replication experiment seeded with Nexus's own
+        normalized environment (§9)."""
+        env = self.local_env(model=model, quantization=quantization,
+                             context=context)
+        return self.store.add_experiment(
+            hypothesis, claim_id=claim_id, source=source,
+            environment=env, plan=plan, metric=metric)
+
+    def record_peer_measurement(self, experiment_id: str, peer: str, *,
+                                environment: dict | None = None,
+                                value: float | str | None = None,
+                                metric: str = "", note: str = ""
+                                ) -> dict[str, Any]:
+        """§9 — a peer reports running the same test elsewhere. Stored
+        under its own environment; never merged into Nexus's number."""
+        row = self.store.add_measurement(
+            experiment_id, who=peer, environment=environment,
+            value=value, metric=metric, note=note)
+        if row is not None:
+            self.store.record_interaction(
+                peer, "replication", ref=experiment_id,
+                summary=f"reported {metric or 'result'} on "
+                        f"{experiment_id}")
+        return {"ok": row is not None, "measurement": row}
+
+    def replication_report(self, experiment_id: str
+                           ) -> dict[str, Any]:
+        """§10 — local vs cross-environment reproduction summary."""
+        return self.store.replication_summary(experiment_id) or {
+            "ok": False, "error": "unknown experiment"}
+
+    def finish_replication(self, experiment_id: str, *, result: str,
+                           conclusion: str, success: bool | None = None,
+                           metric_value: float | None = None,
+                           **kw: Any) -> dict[str, Any]:
+        """Close Nexus's own run; the measured value is recorded as a
+        self-measurement so the summary can compare across peers."""
+        return self.store.finish_experiment(
+            experiment_id, result=result, conclusion=conclusion,
+            success=success, metric_value=metric_value, **kw) or {
+                "ok": False, "error": "unknown experiment"}
 
     def dispatch_consult(self, consult_id: str, *,
                          approved: bool = False) -> dict[str, Any]:
@@ -867,9 +1210,7 @@ class SocialService:
                     "consult": c}
         data = send.get("data") if isinstance(send.get("data"), dict) \
             else {}
-        post_ref = str(data.get("id")
-                       or (data.get("comment") or {}).get("id", "")
-                       or "")
+        post_ref = _sent_ref(data)
         self.consults.mark_sent(c["id"], post_ref=post_ref)
         self.drive.record("consult", ref=post_ref or c["id"],
                           score=float(c.get("expected_value") or 0),
@@ -942,6 +1283,153 @@ class SocialService:
             self.store.bump_reputation("posts")
         return out
 
+    def teaching_candidates(self) -> list[dict[str, Any]]:
+        """§11/§12 — journal entries that have crossed the
+        'verified and useful' bar and haven't been taught. Selection is
+        content-driven only: no timer, no reputation pressure."""
+        taught = set(self.store.drive.data.get(
+            "taught_journal_ids") or [])
+        cands = [
+            e for e in self.store.journal_recent(limit=200)
+            if e.get("id") not in taught
+            and str(e.get("tested") or "").strip()
+            and float(e.get("confidence") or 0) >= 0.7
+            and len(str(e.get("learned") or "")) >= 40]
+        cands.sort(key=lambda e: (
+            float(e.get("confidence") or 0), float(e.get("ts") or 0)))
+        return cands
+
+    def consider_teaching(self, *, approved: bool = False
+                          ) -> dict[str, Any]:
+        """§11 — the autonomous 'is this worth teaching?' decision.
+        One bounded unit per call: pick the strongest verified
+        candidate and attempt `teach_postmortem` through the normal
+        gate — evidence bar, outbound scan, social.post permission.
+        Approval parks the candidate instead of publishing."""
+        cands = self.teaching_candidates()
+        if not cands:
+            return {"ok": True, "candidate": None}
+        e = cands[0]
+        learned = str(e.get("learned") or "").strip()
+        title = learned[:110].rstrip()
+        evidence = str(e.get("tested") or e.get("evidence") or "")
+        body = f"Verified lesson: {learned}"
+        if e.get("prior_belief"):
+            body += f"\n\nPrior belief: {str(e['prior_belief'])[:300]}"
+        if e.get("peer"):
+            body += f"\n\nOrigin: tested after input from {e['peer']}"
+        out = self.teach_postmortem(
+            title, body, evidence=evidence,
+            limitations=str(e.get("usefulness") or ""),
+            approved=approved)
+        if out.get("ok"):
+            taught = list(self.store.drive.data.get(
+                "taught_journal_ids") or [])
+            taught.append(e.get("id"))
+            self.store.drive.data["taught_journal_ids"] = taught[-50:]
+            self.store.drive.save()
+            return {"ok": True, "candidate": e, "published": True,
+                    "post": out.get("data")}
+        if out.get("needs_approval"):
+            return {"ok": True, "candidate": e,
+                    "needs_approval": True,
+                    "permission": out.get("permission"),
+                    "title": title}
+        return {"ok": False, "candidate": e, "error": out}
+
+    def epistemic_step(self, *, research: dict | None = None,
+                       item_id: str = "") -> dict[str, Any]:
+        """§14 — ONE bounded learning unit per call. Advances the
+        highest-pressure open backlog item exactly one step:
+
+        - a completed research result lands in the Learning Journal
+          and closes the item;
+        - an item already researching just waits (no duplicate work);
+        - an item with candidate peers opens a real consult through
+          the normal gate;
+        - an item with a verification plan opens the experiment
+          record and moves to ``testing``;
+        - anything else returns ``research`` so the caller can attach
+          a bounded utility-tier work-order.
+
+        No infinite loop — one item, one transition, one return."""
+        if not self.drive.allows("read"):
+            return {"ok": True, "unit": None,
+                    "skipped": "social learning is off"}
+        items = self.store.backlog_open(limit=10)
+        if not items:
+            return {"ok": True, "unit": None}
+        # In-flight items are not candidates — an awaiting consult or
+        # running experiment must not attract a second unit.
+        in_flight = {"awaiting_response", "peer_consultation", "testing"}
+        candidates = [
+            i for i in items
+            if str(i.get("status")) not in in_flight
+            and not (str(i.get("status")) == "researching"
+                     and (i.get("metadata") or {}).get("research"))]
+        if not candidates:
+            return {"ok": True, "unit": "waiting",
+                    "item": items[0].get("id")}
+        top = max(candidates, key=lambda i: (
+            float(i.get("urgency", 0)), float(i.get("importance", 0))))
+        if research is not None:
+            self.store.journal_add(
+                f"Researched: {str(top.get('topic'))[:110]}",
+                source="idle_research",
+                evidence=str(research.get("output") or "")[:400],
+                confidence=0.6,
+                usefulness=str(top.get("topic") or "")[:200])
+            self.store.set_backlog_status(top["id"], "resolved")
+            return {"ok": True, "unit": "journal",
+                    "item": top["id"]}
+        peers = [str(p) for p in (top.get("candidate_peers") or [])
+                 if str(p).strip()]
+        if peers:
+            question = str(top.get("question") or top.get("topic")
+                           or "")[:400]
+            out = self.consult(
+                question, domain=self._domain_of(
+                    f"{top.get('topic','')} {question}"),
+                backlog_id=str(top.get("id") or ""),
+                peers=peers,
+                importance=float(top.get("importance", 0.5) or 0.5),
+                urgency=float(top.get("urgency", 0.5) or 0.5))
+            if out.get("needs_approval"):
+                return {"ok": True, "unit": "consult",
+                        "item": top["id"], "needs_approval": True,
+                        "permission": out.get("permission"),
+                        "consult_id": str((out.get("consult") or {})
+                                          .get("id") or ""),
+                        "title": question[:140]}
+            c = out.get("consult") or {}
+            if c.get("id"):
+                self.store.set_backlog_status(top["id"], "researching")
+                return {"ok": True, "unit": "consult",
+                        "item": top["id"], "consult": c["id"]}
+            return {"ok": bool(out.get("ok")), "unit": "consult",
+                    "item": top["id"], "detail": out}
+        if str(top.get("verification_plan") or "").strip():
+            e = self.store.add_experiment(
+                str(top.get("question") or top.get("topic") or ""),
+                source="epistemic_idle",
+                plan=str(top.get("verification_plan") or "")[:400],
+                environment=self.local_env())
+            self.store.set_backlog_status(top["id"], "testing")
+            return {"ok": True, "unit": "experiment",
+                    "item": top["id"], "experiment": e["id"]}
+        return {"ok": True, "unit": "research", "item": top["id"],
+                "topic": str(top.get("topic") or ""),
+                "question": str(top.get("question") or "")}
+
+    def mark_research(self, item_id: str, mission_id: str,
+                      node_id: str) -> dict[str, Any] | None:
+        """Record which mission node owns this item's research unit —
+        restart-safe, so a later step can collect the result."""
+        return self.store.set_backlog_status(
+            item_id, "researching",
+            fields={"research": {"mission": mission_id,
+                                 "node": node_id}})
+
     def correct_record(self, post_id: str, correction: str, *,
                        approved: bool = False) -> dict[str, Any]:
         """Transparent correction — a reply on the original post, not a
@@ -978,7 +1466,7 @@ class SocialService:
             "account": st.get("account", "none"),
             "level": self.drive.level(),
             "interests": self.drive.interests(),
-            "interest_graph": self.store.interests(),
+            "interest_graph": self.store.interest_graph(),
             "peer_count": out.pop("peers", 0),
             "claim_count": out.pop("claims", 0),
             "thread_count": out.pop("followed", 0),

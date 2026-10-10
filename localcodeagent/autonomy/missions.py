@@ -10,6 +10,7 @@ import re
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Callable
 
 from .state import AutonomyStore
@@ -509,6 +510,40 @@ class MissionStore:
                     node["stale_requirement"] = True
                     node.setdefault("metadata", {}).setdefault(
                         "superseded_requirements", []).extend(matched)
+                # §18 — propagate beyond the task tier. The mission's
+                # superseded list is the audit trail; workstream
+                # acceptance rows and durable decisions that still
+                # assert the old value stop being treated as live.
+                sup = row.setdefault("superseded_requirements", [])
+                for s in stale:
+                    if s not in sup:
+                        sup.append(s)
+                row["superseded_requirements"] = sup[-20:]
+                crit = row.get("acceptance_criteria") or []
+                if crit:
+                    keep = [c for c in crit
+                            if not any(n in str(c).lower()
+                                       for n in stale)]
+                    if len(keep) != len(crit):
+                        row["acceptance_criteria"] = keep
+                for ws in (row.get("workstreams") or []):
+                    hay = (str(ws.get("title") or "") + " "
+                           + " ".join(str(a) for a in
+                                      ws.get("acceptance") or [])).lower()
+                    hit = [n for n in stale if n in hay]
+                    if hit:
+                        ws.setdefault("requirement_flags", []).append({
+                            "ts": time.time(),
+                            "superseded": hit[:4]})
+                        ws["updated_at"] = time.time()
+                for d in (row.get("decisions") or []):
+                    if d.get("superseded"):
+                        continue
+                    if any(n in str(d.get("decision") or "").lower()
+                           for n in stale):
+                        d["superseded"] = True
+                        d["superseded_by"] = "requirement change"
+                        d["superseded_at"] = time.time()
                 row.setdefault("history", []).append({
                     "ts": time.time(),
                     "event": "requirement_changed",
@@ -650,6 +685,149 @@ class MissionStore:
         return [d for d in (mission.get("decisions") or [])
                 if not d.get("superseded")]
 
+    # -- plain-English report ----------------------------------------------
+
+    def mission_report(self, mission: dict,
+                       *, requirements: list[dict] | None = None) -> dict:
+        """GET /api/missions/<id>/report payload — a durable, plain-English
+        rollup of what the mission set out to do, what happened, and what
+        is left. Built only from the mission record + workstream rollup
+        so it stays truthful for completed, failed and in-flight missions.
+        """
+        nodes = (mission.get("graph") or {}).get("nodes") or []
+        rollup = self.workstream_rollup(mission)
+        done_states = {"completed", "skipped"}
+        tasks_done = sum(1 for n in nodes if n.get("state") in done_states)
+        tasks_total = len(nodes)
+        ws_done = sum(1 for w in rollup
+                      if w.get("status") in TERMINAL_WORKSTREAM_STATES
+                      and w.get("status") != "failed")
+        ws_total = len(rollup)
+        running = [n for n in nodes
+                   if n.get("state") in {"running", "verifying"}]
+        failed = [n for n in nodes if n.get("state") == "failed"]
+        artifacts = sorted({
+            str(a)[:240]
+            for n in nodes
+            for a in ((n.get("result") or {}).get("artifacts") or [])
+        })
+
+        verifs = mission.get("verification_history") or []
+        verif_passed = sum(1 for v in verifs if v.get("ok") or
+                           v.get("status") in {"passed", "ok", "success"})
+        blockers = [str(b)[:200]
+                    for b in ((mission.get("context_capsule") or {})
+                              .get("blockers") or [])]
+        if mission.get("blocked_reason"):
+            blockers.insert(0, str(mission["blocked_reason"])[:200])
+        failed_ws = [w for w in rollup if w.get("status") == "failed"]
+
+        pct = (round(tasks_done / tasks_total * 100)
+               if tasks_total else
+               (round(ws_done / ws_total * 100) if ws_total else 0))
+        status = str(mission.get("status") or "unknown")
+        if status in TERMINAL_MISSION_STATUSES:
+            verb = {"completed": "completed",
+                    "completed_with_warnings": "completed with warnings",
+                    "failed": "failed",
+                    "cancelled": "was cancelled"}.get(status, status)
+            headline = (f"Mission {verb} — {tasks_done}/{tasks_total} tasks, "
+                        f"{ws_done}/{ws_total} workstreams integrated.")
+        elif running:
+            headline = (f"Running — {tasks_done}/{tasks_total} tasks done "
+                        f"({pct}%); currently: "
+                        f"{str(running[0].get('title') or '')[:80]}.")
+        elif blockers:
+            headline = f"{status} — {blockers[0][:140]}"
+        else:
+            headline = (f"{status} — {tasks_done}/{tasks_total} tasks, "
+                        f"{ws_done}/{ws_total} workstreams done.")
+
+        criteria = []
+        for c in mission.get("acceptance_criteria") or []:
+            if isinstance(c, dict):
+                criteria.append({
+                    "description": str(c.get("description") or
+                                     c.get("text") or c)[:240],
+                    "status": str(c.get("status") or "unchecked")})
+            else:
+                criteria.append({"description": str(c)[:240],
+                                 "status": "unchecked"})
+
+        reqs = []
+        for r in requirements or []:
+            reqs.append({"id": str(r.get("id") or "")[:40],
+                         "description": str(r.get("description") or
+                                          r.get("text") or "")[:240],
+                         "status": str(r.get("status") or "unknown"),
+                         "inferred": bool(r.get("inferred"))})
+
+        started = mission.get("started_at")
+        finished = mission.get("completed_at") or mission.get("updated_at")
+        elapsed = None
+        if started and finished:
+            try:
+                elapsed = max(0.0, float(finished) - float(started))
+            except (TypeError, ValueError):
+                elapsed = None
+
+        next_steps = []
+        if status in {"paused", "blocked"}:
+            next_steps.append("Resume or reprioritize from the "
+                              "Missions page or chat lane.")
+        if failed:
+            next_steps.append(
+                f"Investigate {len(failed)} failed task(s): "
+                + ", ".join(str(n.get("title") or n.get("id"))[:40]
+                            for n in failed[:3]))
+        if failed_ws:
+            next_steps.append(
+                "Failed workstreams can be dropped or retried: "
+                + ", ".join(str(w.get("title") or w.get("id"))[:40]
+                            for w in failed_ws[:3]))
+        if status not in TERMINAL_MISSION_STATUSES and not next_steps:
+            next_steps.append(
+                "Mission is in flight — progress updates land in the "
+                "activity feed as lanes report.")
+
+        hist = mission.get("history") or []
+        return {
+            "mission_id": mission.get("id"),
+            "title": mission.get("title") or "",
+            "status": status,
+            "phase": mission.get("phase") or "",
+            "objective": mission.get("objective") or "",
+            "generated_at": time.time(),
+            "headline": headline,
+            "progress": {
+                "percent": pct,
+                "tasks_done": tasks_done,
+                "tasks_total": tasks_total,
+                "workstreams_done": ws_done,
+                "workstreams_total": ws_total,
+            },
+            "timeline": {
+                "created_at": mission.get("created_at"),
+                "started_at": started,
+                "completed_at": mission.get("completed_at"),
+                "elapsed_s": elapsed,
+            },
+            "acceptance": criteria,
+            "requirements": reqs,
+            "workstreams": rollup,
+            "decisions": self.active_decisions(mission)[:10],
+            "verification": {
+                "runs": len(verifs),
+                "passed": verif_passed,
+                "failed": len(verifs) - verif_passed,
+                "latest": verifs[-1] if verifs else None,
+            },
+            "artifacts": artifacts[:40],
+            "blockers": blockers[:10],
+            "next_steps": next_steps[:5],
+            "events_tail": hist[-8:],
+        }
+
     # -- ownership reservations -------------------------------------------
 
     OWNERSHIP_LEASE_S = 600.0
@@ -786,3 +964,414 @@ class MissionStore:
                 m["unresolved_questions"][-30:]
         out = self.mutate(mission_id, _fn)
         return rec if out is not None else None
+
+    # -- mission context (§4-§7) ------------------------------------------
+    #
+    # The capsule is the compact durable layer: raw history/evidence stay
+    # on the mission untouched; the capsule is what a fresh worker/model
+    # reads instead of the whole record. ``refresh_capsule`` rebuilds it
+    # from live state; ``maybe_compact`` is the same rebuild triggered by
+    # growth, plus durable-fact extraction.
+
+    def refresh_capsule(self, mission_id: str) -> dict | None:
+        """Rebuild ``context_capsule`` from live mission state — the
+        state a worker needs without reading full history (§4)."""
+        m = self.get(mission_id)
+        if m is None:
+            return None
+        nodes = (m.get("graph") or {}).get("nodes") or []
+        done_titles = [str(n.get("title") or "")[:90]
+                       for n in nodes
+                       if n.get("state") in TERMINAL_WORKSTREAM_NODE_STATES]
+        running = [str(n.get("title") or "")[:90]
+                   for n in nodes
+                   if n.get("state") in {"running", "verifying", "ready"}]
+        ws_rows = self.workstream_rollup(m)
+        files: list[str] = []
+        for n in nodes:
+            meta = n.get("metadata") or {}
+            for p in (meta.get("scope") or meta.get("paths") or []):
+                p = str(p)
+                if p and p not in files:
+                    files.append(p)
+        for a in m.get("artifacts") or []:
+            p = str((a or {}).get("path") or (a or {}).get("name") or "")
+            if p and p not in files:
+                files.append(p)
+        failures = [str(f.get("detail") or f.get("error") or "")[:160]
+                    for f in (m.get("failure_history") or [])[-6:]]
+        open_q = [str(q.get("question") or "")[:200]
+                  for q in (m.get("unresolved_questions") or [])
+                  if not q.get("resolved")]
+        cap = {
+            "objective": str(m.get("objective") or "")[:800],
+            "acceptance_criteria":
+                [str(c)[:200] for c in
+                 (m.get("acceptance_criteria") or [])][:12],
+            "constraints": [str(c)[:200] for c in
+                            (m.get("constraints") or [])][:10],
+            "decisions": [str(d.get("decision") or "")[:240]
+                          for d in self.active_decisions(m)][:10],
+            "workstreams": [
+                {"id": w.get("id"), "title": w.get("title"),
+                 "status": w.get("status"), "progress": w.get("progress")}
+                for w in ws_rows],
+            "tasks_done": done_titles[-MAX_CAPSULE_ITEMS:],
+            "tasks_active": running[:MAX_CAPSULE_ITEMS],
+            "known_failures": [f for f in failures if f],
+            "blockers": ([str(m.get("blocked_reason") or "")]
+                         if m.get("blocked_reason") else [])
+                        + ([f"waiting: {m.get('waiting_for')}"]
+                           if m.get("waiting_for") else [])
+                        + open_q,
+            "relevant_files": files[:MAX_CAPSULE_ITEMS],
+            "superseded_requirements": [
+                str(s)[:160] for s in
+                (m.get("superseded_requirements") or [])][-8:],
+            "built_at": time.time(),
+            "version": int((m.get("context_capsule") or {})
+                           .get("version") or 0) + 1,
+        }
+
+        def _fn(row: dict) -> None:
+            row["context_capsule"] = cap
+        self.mutate(mission_id, _fn)
+        return cap
+
+    def maybe_compact(self, mission_id: str) -> bool:
+        """§5 auto-compaction — when the raw record grows past bounds,
+        extract durable facts into the capsule and record the event.
+        Raw history/evidence is NEVER deleted; the capsule is simply
+        what workers read next."""
+        m = self.get(mission_id)
+        if m is None:
+            return False
+        big = (len(m.get("history") or []) >= 180
+               or len(m.get("conversation") or []) >= 50
+               or len(m.get("failure_history") or []) >= 12)
+        if not big:
+            return False
+        cap = self.refresh_capsule(mission_id)
+        if cap is None:
+            return False
+        self.bump_metric(mission_id, "compactions")
+        self.append_history(
+            mission_id, "compact",
+            f"context capsule v{cap.get('version')} rebuilt")
+        return True
+
+    def context_package(self, mission: dict, node: dict,
+                        *, nexus_md: str = "") -> str:
+        """Per-worker context package (§6) — only what this node needs:
+        objective, its workstream contract, in-force decisions, scope,
+        recent same-workstream failures. Rendered as a bounded text
+        block the executor prepends to the instruction."""
+        cap = mission.get("context_capsule") or {}
+        meta = node.get("metadata") or {}
+        ws_id = str(meta.get("workstream") or "")
+        ws = next((w for w in self.workstream_rollup(mission)
+                   if w.get("id") == ws_id), None)
+        lines: list[str] = ["[Mission context]"]
+        obj = str(mission.get("objective") or "").strip()
+        if obj:
+            lines.append("Objective: " + obj[:400])
+        crit = cap.get("acceptance_criteria") or \
+            mission.get("acceptance_criteria") or []
+        if crit:
+            lines.append("Acceptance criteria:")
+            lines += ["- " + str(c)[:160] for c in crit[:8]]
+        if ws is not None:
+            lines.append(
+                f"Workstream: {ws.get('title')} "
+                f"(status {ws.get('status')}, "
+                f"{int(float(ws.get('progress') or 0) * 100)}% done)")
+            if ws.get("objective"):
+                lines.append("Workstream goal: "
+                             + str(ws["objective"])[:240])
+            if ws.get("acceptance"):
+                lines.append("Workstream acceptance:")
+                lines += ["- " + str(a)[:160]
+                          for a in (ws.get("acceptance") or [])[:6]]
+        decisions = cap.get("decisions") or [
+            str(d.get("decision") or "")[:200]
+            for d in self.active_decisions(mission)][:8]
+        if decisions:
+            lines.append("Decisions in force (do not revisit):")
+            lines += ["- " + str(d)[:160] for d in decisions[:8]]
+        cons = mission.get("constraints") or []
+        if cons:
+            lines.append("Constraints:")
+            lines += ["- " + str(c)[:160] for c in cons[:6]]
+        scope = meta.get("scope") or (ws or {}).get("scope") or []
+        if scope:
+            lines.append("Your scope: "
+                         + ", ".join(str(s)[:80] for s in scope[:8]))
+        # §13 — a lane running in an isolated checkout must write there,
+        # not the main workspace, or the integrate step has nothing to
+        # merge. Absolute paths under the repo are allowed by the file
+        # tools, and git tools take this path explicitly.
+        wt_path = str(meta.get("worktree_path") or "")
+        if wt_path:
+            lines.append(
+                "Isolated checkout: " + wt_path[:200] +
+                " — make ALL file edits under this directory "
+                "(branch " +
+                str(meta.get("worktree_branch") or "")[:80] + "). "
+                "Pass it as the 'path' arg to git tools.")
+        prior_artifacts = list(
+            (node.get("result") or {}).get("artifacts") or [])
+        if prior_artifacts:
+            lines.append(
+                "A previous attempt already changed: "
+                + ", ".join(str(a)[:60] for a in prior_artifacts[:10])
+                + " — that work is in your checkout; continue from it "
+                  "rather than starting over.")
+        ws_failures: list[str] = []
+        for n in (mission.get("graph") or {}).get("nodes") or []:
+            if ws_id and (n.get("metadata") or {}).get(
+                    "workstream") != ws_id:
+                continue
+            res = n.get("result") or {}
+            err = str(res.get("error") or "")
+            if n.get("state") == "failed" and err:
+                ws_failures.append(
+                    f"{str(n.get('title') or '')[:60]}: {err[:120]}")
+        if ws_failures:
+            lines.append("Known failures in this workstream:")
+            lines += ["- " + f for f in ws_failures[-4:]]
+        # §23-24 — review/integration nodes get the evidence packet, not
+        # a blind instruction: what each predecessor produced, which
+        # files it touched, and which lane it came from. The reviewer
+        # is a fresh worker — this is what makes the review independent
+        # in practice instead of the implementer grading itself.
+        if str(node.get("kind") or "") in {"review", "integrate"}:
+            impl = []
+            for n in (mission.get("graph") or {}).get("nodes") or []:
+                if n.get("kind") != "agent" \
+                        or n.get("state") != "completed":
+                    continue
+                res = n.get("result") or {}
+                arts = [str(a) for a in (res.get("artifacts") or [])]
+                lane = str(((n.get("metadata") or {})
+                            .get("workstream")) or "")[:14]
+                impl.append(
+                    f"- {str(n.get('title') or '')[:70]}"
+                    + (f" [{lane}]" if lane else "")
+                    + ": files "
+                    + (", ".join(arts[:8]) if arts else "not recorded"))
+            if impl:
+                lines.append(
+                    "Work under review (you did NOT implement this — "
+                    "audit it against the acceptance criteria):")
+                lines += impl[:12]
+            roll = self.workstream_rollup(mission)
+            if roll:
+                lines.append("Lane status:")
+                lines += [
+                    f"- {str(w.get('title') or '')[:60]}: "
+                    f"{w.get('status')} "
+                    f"({w.get('tasks_done', 0)}/{w.get('tasks', 0)})"
+                    + (f" · branch {str((w.get('worktree') or {}).get('branch'))[:60]}"
+                       + (f" — MERGE CONFLICT: {str((w.get('worktree') or {}).get('merge_error'))[:120]}"
+                          if (w.get('worktree') or {}).get('state') == 'conflict'
+                          else "")
+                       if (w.get('worktree') or {}).get('branch') else "")
+                    for w in roll[:8]]
+        if nexus_md:
+            lines.append("Repository guide (NEXUS.md, excerpt):")
+            lines.append(nexus_md[:1200])
+        return "\n".join(lines)[:3000]
+
+
+    # -- live steering (§19-§20) ---------------------------------------------
+    #
+    # The user redirects a running mission without restarting it:
+    # "pause the frontend", "make installer reliability the priority",
+    # "forget the image work". These are durable record edits — the
+    # supervisor reads workstream state every dispatch cycle.
+
+    def pause_workstream(self, mission_id: str, ws_id: str,
+                         *, reason: str = "user") -> dict | None:
+        """Freeze one workstream — its pending nodes stop dispatching;
+        running nodes finish the current step. Other workstreams
+        continue (§29)."""
+        def _fn(m: dict) -> None:
+            ws = self._ws_mut(m, ws_id)
+            if ws is None:
+                return
+            ws["status"] = "paused"
+            ws["blocker"] = f"paused by {reason}"
+            ws["updated_at"] = time.time()
+            ws_nodes = set(ws.get("node_ids") or [])
+            for n in (m.get("graph") or {}).get("nodes") or []:
+                if n.get("id") in ws_nodes or \
+                        (n.get("metadata") or {}).get("workstream") == ws_id:
+                    if n.get("state") in {"planned", "ready",
+                                          "waiting_dependency"}:
+                        n["state"] = "blocked"
+                        n["queue_reason"] = "workstream_paused"
+                        n["queue_detail"] = "paused by user"
+        out = self.mutate(mission_id, _fn)
+        if out is not None:
+            self.append_history(mission_id, "steer",
+                                f"workstream {ws_id} paused ({reason})")
+        return out
+
+    def resume_workstream(self, mission_id: str, ws_id: str) -> dict | None:
+        def _fn(m: dict) -> None:
+            ws = self._ws_mut(m, ws_id)
+            if ws is None:
+                return
+            ws["status"] = "ready"
+            ws["blocker"] = ""
+            ws["updated_at"] = time.time()
+            ws_nodes = set(ws.get("node_ids") or [])
+            for n in (m.get("graph") or {}).get("nodes") or []:
+                if (n.get("id") in ws_nodes or
+                        (n.get("metadata") or {}).get("workstream")
+                        == ws_id) and n.get("state") == "blocked" \
+                        and n.get("queue_reason") == "workstream_paused":
+                    n["state"] = "ready"
+                    n.pop("queue_reason", None)
+                    n.pop("queue_detail", None)
+        out = self.mutate(mission_id, _fn)
+        if out is not None:
+            self.append_history(mission_id, "steer",
+                                f"workstream {ws_id} resumed")
+        return out
+
+    def reprioritize_workstream(self, mission_id: str, ws_id: str,
+                                priority: str) -> dict | None:
+        """Dynamic priority (§20) — p0..p3 maps onto node priorities so
+        the scheduler naturally picks the raised work first."""
+        priority = str(priority or "").lower()
+        if priority not in WORKSTREAM_PRIORITIES:
+            return None
+        band = {"p0": 10, "p1": 16, "p2": 20, "p3": 26}[priority]
+
+        def _fn(m: dict) -> None:
+            ws = self._ws_mut(m, ws_id)
+            if ws is None:
+                return
+            ws["priority"] = priority
+            ws["updated_at"] = time.time()
+            ws_nodes = set(ws.get("node_ids") or [])
+            for n in (m.get("graph") or {}).get("nodes") or []:
+                if (n.get("id") in ws_nodes or
+                        (n.get("metadata") or {}).get("workstream")
+                        == ws_id) and n.get("state") in \
+                        {"planned", "ready", "waiting_dependency",
+                         "blocked"}:
+                    n["priority"] = band
+        out = self.mutate(mission_id, _fn)
+        if out is not None:
+            self.append_history(mission_id, "steer",
+                                f"workstream {ws_id} -> {priority}")
+        return out
+
+    def drop_workstream(self, mission_id: str, ws_id: str,
+                        *, reason: str = "user") -> dict | None:
+        """Abandon a workstream — pending nodes cancelled; running nodes
+        finish their current step but dependents no longer wait on this
+        scope. Completed work stays in history."""
+        def _fn(m: dict) -> None:
+            ws = self._ws_mut(m, ws_id)
+            if ws is None:
+                return
+            ws["status"] = "abandoned"
+            ws["blocker"] = f"dropped by {reason}"
+            ws["updated_at"] = time.time()
+            ws_nodes = set(ws.get("node_ids") or [])
+            for n in (m.get("graph") or {}).get("nodes") or []:
+                if n.get("id") in ws_nodes or \
+                        (n.get("metadata") or {}).get("workstream") == ws_id:
+                    if n.get("state") in {"planned", "ready",
+                                          "waiting_dependency",
+                                          "blocked"}:
+                        n["state"] = "cancelled"
+                        n["queue_reason"] = "workstream_dropped"
+            # Dependents that only waited on cancelled work must not
+            # hang — repoint them onto the cancelled nodes' remaining
+            # deps (a cancelled dep counts as satisfied-with-warnings).
+            cancelled = {n.get("id") for n in
+                         (m.get("graph") or {}).get("nodes") or []
+                         if n.get("state") == "cancelled"}
+            for n in (m.get("graph") or {}).get("nodes") or []:
+                deps = [d for d in (n.get("deps") or [])
+                        if d not in cancelled]
+                if deps != list(n.get("deps") or []):
+                    n["deps"] = deps
+        out = self.mutate(mission_id, _fn)
+        if out is not None:
+            self.append_history(mission_id, "steer",
+                                f"workstream {ws_id} dropped ({reason})")
+        return out
+
+    def find_workstream(self, mission: dict, needle: str) -> dict | None:
+        """Steering-language lookup — 'the frontend', 'installer',
+        'voice' resolve against workstream titles/objectives. Fuzzy but
+        conservative: unique substring match only."""
+        t = str(needle or "").strip().lower()
+        if not t or len(t) < 3:
+            return None
+        hits = []
+        for ws in self.workstream_rollup(mission):
+            hay = (str(ws.get("title") or "") + " "
+                   + str(ws.get("objective") or "")).lower()
+            if t in hay:
+                hits.append(ws)
+        return hits[0] if len(hits) == 1 else None
+
+
+def discover_nexus_md(root: Any) -> str:
+    """Repository-local operating instructions (§15) — NEXUS.md at the
+    workspace root, read once per mission and injected into worker
+    context. Project guidance only: it can inform work, it cannot relax
+    permissions, safety, or credential rules."""
+    try:
+        p = Path(str(root)) / "NEXUS.md"
+        if p.is_file():
+            return p.read_text(encoding="utf-8",
+                               errors="replace")[:4000]
+    except Exception:
+        pass
+    return ""
+
+
+def draft_nexus_md(mission: dict) -> str:
+    """§16 — propose a NEXUS.md from what the mission already learned:
+    active decisions, constraints, workstream lanes/scopes, acceptance
+    criteria. Returned as a PROPOSAL — writing it into the repo goes
+    through the normal file-edit permission path; nothing here ever
+    lands silently."""
+    lines = ["# Nexus Engineering Instructions", ""]
+    roll = mission.get("workstreams") or []
+    if roll:
+        lines.append("## Workstreams")
+        for w in roll[:12]:
+            scope = ", ".join(str(s) for s in
+                              (w.get("scope") or [])[:6])
+            lines.append(
+                f"- {str(w.get('title') or '')[:80]}"
+                + (f" — owns: {scope}" if scope else ""))
+        lines.append("")
+    decs = [d for d in (mission.get("decisions") or [])
+            if not d.get("superseded")]
+    if decs:
+        lines.append("## Decisions in force")
+        for d in decs[:12]:
+            lines.append(f"- {str(d.get('decision') or '')[:160]}"
+                         + (f" ({str(d.get('reason') or '')[:80]})"
+                            if d.get("reason") else ""))
+        lines.append("")
+    cons = mission.get("constraints") or []
+    if cons:
+        lines.append("## Do not")
+        lines += [f"- {str(c)[:160]}" for c in cons[:12]]
+        lines.append("")
+    crit = mission.get("acceptance_criteria") or []
+    if crit:
+        lines.append("## Acceptance criteria")
+        lines += [f"- {str(c)[:160]}" for c in crit[:12]]
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"

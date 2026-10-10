@@ -2,6 +2,205 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## 0.42.0 — Adaptive Intelligence Phase A
+
+Umbrella milestone "Adaptive Intelligence + Persistent Nexus Identity",
+staged per its release strategy. Phase A shipped:
+
+- **`localcodeagent/identity_mgr.py`** — `IdentityManager`: durable
+  `data/identity.json` (canonical name, primary email + backing account,
+  recovery_owner=`user`, per-service account records, audit trail).
+  `credential_ref` is a vault key *name*; secret values stay in
+  `secrets.vault`. Live probes (`GitHubAccountService.status()`,
+  connector `account()`/`auth_state()`) merge over durable rows.
+- **Creation workflow** — `begin_account_creation` → `creating` →
+  `awaiting_verification`/`awaiting_human` (CAPTCHA/phone/ToS/security
+  challenges park, never bypassed) → `verifying_login` → `active` only
+  via `verify_login(probe)`. Gated by `identity.account_create`.
+- **`identity.*` permission keys** — 6 keys with PERMISSION_INFO;
+  mutations in `AUTONOMY_NEVER_AUTO` + offline-profile denies.
+- **`capabilities.py`** — truth graph: `depends_on` edges on specs,
+  `blockers()` dependency-chain explanation, new states
+  (`permission_required`, `disconnected`, `temporarily_unavailable`,
+  `policy_denied`, `unsupported`), `engine`/`checked_at`/`verified_at`
+  on reports, rate-limited `run_selftest()`, `graph()` export.
+- **`nexus_state.build_situation`/`situation_text`** — the Situation
+  Model: conversation topic/goal (state graph), missions+workstreams,
+  jobs/installs/downloads, resident models, approvals, services,
+  waiting consults, failures, project. "what's going on?" answers in
+  `_mission_command`.
+- **Endpoints/UI** — `GET /api/situation`, `GET /api/identity`,
+  `GET /api/identity/audit`, `GET /api/capabilities/graph`, POSTs for
+  account lifecycle + `/api/capabilities/selftest`; `web/intel.html`
+  Intelligence Center (Situation/Capabilities/Identity), nav-wired
+  into all pages.
+- **Deferred within Phase A scope:** automated Gmail signup (browser
+  flow + OAuth connect) — the workflow/state machine + verification
+  contract are in place; real signup automation lands with the
+  browser-drive work in a later phase.
+
+**Verify:** `pytest tests/test_identity_situation.py` (19 tests);
+adjacent `test_capabilities.py` + `test_permissions_ui.py` +
+`test_conversation_state.py` green.
+
+## 0.41.0 — RealVisXL V5.0 first-class image model
+
+The `realvisxl-v5` fleet spec becomes a normal member of the image-model
+family — visible in the Image Model Manager before install, installed by
+the recommended provisioning plan, deduplicated against checkpoints
+already on disk, and selectable as the deterministic default for
+permitted adult-content requests.
+
+- **`manager.py`** — `fleet_status()` merges every fleet spec into one
+  inventory row (display/tags/~size/license/`adult_capable`/ops, live
+  `installed`/`missing`/`downloading`/`verifying`/`failed` state,
+  matched backend registration, byte progress). `start_fleet_install`,
+  `verify_fleet_model` (registration + size + optional deep SHA),
+  `remove_fleet_model` (InvokeAI registry delete — only that model's
+  tracked weights), `describe_fleet_defaults`.
+- **`fleet.py`** — `fleet_tags()` + `find_fleet_checkpoint()` dedup
+  helper (finds a size-verified checkpoint in the InvokeAI store or
+  `models/image` → registers in place, no duplicate ~6.9 GB download).
+- **`router.py`** — `adult_default` hook: on adult-classified,
+  fleet-capable requests with no manual override, an installed +
+  resource-fit configured default wins outright (reason
+  `adult-content preference: <model>`); missing/unfit → recorded
+  fallback to trait scoring. Non-adult and specialized ops untouched.
+- **`config.py`** — `image_adult_default_model` (default
+  `realvisxl-v5`; `auto` = pure trait scoring) merges into existing
+  configs on upgrade; `image_backend` is now actually loaded (previously
+  persisted but never read back — silently reset to `auto` on restart).
+- **`provisioning.py`** — disk dedup before InvokeAI download
+  (`inplace`); `model-realvisxl-v5` remains in the recommended plan.
+- **`server.py`** — `/api/image/fleet/install|verify|remove` +
+  `/api/image/adult-default` endpoints; capability brief gains an
+  `image_model_state` line (`describe_fleet_defaults`) so "which model
+  do you use for adult content?" answers honestly, including
+  "configured but not installed".
+- **`self_knowledge`** — `image_adult_default_model` SettingSpec
+  (choice `auto|fleet id`, aliases) under the image feature.
+- **`web/image.*`** — merged fleet cards (state chips, tags, progress,
+  lifecycle buttons), deduplicated against registry rows; Adult default
+  dropdown in the topbar.
+- **Safety** — `ImageSafetyPolicy` + creator-locked adult gate still
+  run before selection; `adult_capable` remains routing metadata.
+
+**Live dogfood (2026-10-09, D:\Nexus_Core v0.41.0):**
+
+- `model-realvisxl-v5` was `waiting_approval` → approved → downloaded
+  (~6.9 GB) → **registered + verified** in InvokeAI; `fleet_status`
+  reports `installed`. Adult-classified request routed to
+  `invokeai:<realvis key>` with reason
+  `adult-content preference: RealVisXL V5.0` (job cancelled after
+  capture — no generation). Non-adult landscape fell back honestly
+  (sole installed InvokeAI model at the time).
+- Two live crash paths found and fixed during the install:
+  `invokeai.yaml` missing `schema_version` → `load_and_migrate_config`
+  KeyError (managed-block writer now seeds it, commit `3753c762`);
+  `safetensors.torch.load_file` segfault (exit 139) on the 6.9 GB
+  checkpoint during classification — `_apply_load_file_guard` routes
+  >2 GiB safetensors through per-tensor `safe_open` (commit `3753c762`,
+  also patched live into the deployed venv).
+- **InvokeAI venv has CPU-only torch (2.14.1+cpu)** — generation via
+  InvokeAI runs on CPU until a CUDA wheel is installed into
+  `tools/InvokeAI`. Provisioning gap: the InvokeAI install should pull
+  the CUDA torch index for GPU hosts.
+- A ComfyUI Juggernaut job failed `cudaErrorUnknown` at VAEDecode with
+  0.3 GB free VRAM — `auto` fell back to ComfyUI only because the
+  InvokeAI registry was empty during the crash-loop. Preference stayed
+  `auto`; not a regression.
+- Tools page "Image Model Packs" now merges fleet rows (previously
+  configured profiles only — RealVis invisible there).
+
+**Verify:** `pytest tests/test_image_fleet.py` (30 tests) +
+`tests/test_provisioning.py` + `tests/test_image.py` — 147 + 36 green.
+Live dogfood (install via provisioning → registry check → adult +
+non-adult routing) still pending on the workstation.
+
+Also this session: splash `mediaDuck` strict-mode ReferenceError fix
+(commit `efda36e8`) — fault/retry animations play again.
+
+## 2026-10-09 post-deploy incident — live state wipe (P0)
+
+After the v0.40.0 rebuild+deploy+relaunch, the entire per-user state
+root (`%LOCALAPPDATA%\NexusCore\{data,.agent,output}` — junctioned
+from the install dir) contained only fresh files: `missions.json`
+(mission `m-6541468d68c1` and all history), profiles, the social store
+(consults, peer graph, claims), approvals, `secrets.vault` (Moltbook +
+connector keys) and conversations were all gone. The host log shows
+`data/` arrived at `EnsureStateJunctions` as a **real dir** — the
+pre-existing junction was already gone before first launch — and a
+conflict-merge that lets "target wins" then `recursive: true`-deletes
+the losing side is a verified silent-loss path. An isolated robocopy
+/MIR + /XD repro proved the deploy mirror alone does NOT purge a
+junction's target; the exact deletion path remains unproven (watch for
+recurrence).
+
+**Hardening landed:**
+
+- `scripts/deploy_local.ps1` — `/XJ` added so the mirror never
+  traverses or deletes junction points (defense-in-depth over `/XD`).
+- `Program.cs` — `MigrateDirectoryContents` now *parks* conflicting
+  source files under `target\.conflicts\<stamp>\` instead of deleting
+  them; nothing is silently dropped during state migration.
+
+**Recovery status:**
+
+- Onboarding re-completed (profile `9ca0ab4a…`); APIs unlocked.
+- `secrets.vault` must be re-populated (Moltbook API key etc.) —
+  user action required; social connectors are unauthenticated until
+  then.
+- Mission `m-6541468d68c1` (report endpoint + UI) lost with the wipe —
+  the feature was rebuilt directly: `MissionStore.mission_report`,
+  `GET /api/missions/<id>/report`, Report panel in `missions.js`,
+  payload-shape tests, `ARCHITECTURE.md` Engineering Missions section.
+- Onboarding-lock note: the lock observed post-deploy was *correct*
+  behavior — the profile store was genuinely empty, not a gate bug.
+
+## 0.40.0 — Engineering Missions
+
+The autonomy layer grows the durable engineering hierarchy — Mission →
+Workstream → Task → Subtask → Verification — on top of the existing
+MissionPlanner/MissionStore/AutonomousSupervisor/TaskGraph (no parallel
+framework). Mission lifetime no longer depends on any model's context
+window.
+
+- **`missions.py`** — workstream records (`add_workstream`,
+  `workstream_rollup`, `find_workstream`, pause/resume/drop/
+  reprioritize ops, status sync `planned→active→awaiting_review→
+  integration_ready→integrated`); durable `record_decision`/
+  `active_decisions`; `reserve_paths`/`release_paths`/`sweep_ownership`
+  (glob overlap + lease expiry); `refresh_capsule`/`maybe_compact`/
+  `context_package`/`discover_nexus_md`; `bump_metric`.
+- **`planner.py`** — `derive_acceptance_criteria` runs before
+  decomposition; decomposed lanes write durable workstreams and link
+  every node (including per-lane integrate/review) via
+  `metadata.workstream`.
+- **`supervisor.py`** — dispatch reserves declared scopes first;
+  conflicts park the node (`queue_reason: ownership_conflict`,
+  metric counted once); expired leases swept each executing step;
+  `steer(mission, text)` maps "pause the frontend" / "forget the voice
+  work" / "make X the priority" to workstream ops; thrash detection
+  (same `failure_signature` ≥2 → `model_role: deep` + thrash event);
+  `_goal_drift_check` flags task titles unrelated to the objective;
+  `nexus/<mission>/<label>` git tags at baseline/final.
+- **Completion unchanged** — `MissionEvaluator` still gates on
+  machine-checked `success_criteria`; `acceptance_criteria` is the
+  human-readable contract injected into workers/reviewers/UI.
+- **API** — `GET /api/missions/:id/workstreams` (rollup + criteria +
+  decisions + capsule + checkpoints + metrics + open questions);
+  `POST /api/missions/:id/steer`; `POST /api/missions/:id/workstreams/
+  :ws/{pause,resume,drop,reprioritize}`.
+- **Chat** — mission command lane handles workstream steering and
+  "what are you working on" status from live state.
+- **UI** — `missions.js` renders workstream cards (progress, priority,
+  acceptance, Pause/Resume/P0/Drop) + a mission context section
+  (decisions, failures, blockers, metrics).
+- **Tests** — `EngineeringMissionTests` (8): workstream integration +
+  capsule, scoped context packages, compaction, NEXUS.md, ownership
+  park + release, steer pause/resume/drop, thrash escalation, git
+  checkpoints. 137 autonomy + full suite green.
+
 ## 0.39.0 — Peer Intelligence Network
 
 Moltbook becomes a real peer-learning network rather than a posting
@@ -4248,3 +4447,40 @@ Checkpoint: **2911 tests** (2911 passed + 3 env skips).
 - Restore the V6 synthetic character only as a **single post-generation DSP pass**: neural/glass/micro layers + original tonal lift. This is intentional; the prior barrel defect was double-processing (processed reference + another pass), not the V6 character itself.
 - Center output (`stereo_width=0`) and keep ambience off. Loudness target: -12.5 LUFS, limiter ceiling ~-1 dBFS.
 - Preset signature: `approved-v7-v6-character-louder`.
+
+## 2026-10-09 — v0.42.0 Phase A deployed + InvokeAI GPU remediation (5bb5098f)
+
+Phase A (Identity Manager + Capability Truth Graph + Situation Model +
+Intelligence Center) is deployed and live-verified — see CHANGELOG.
+Then live image-runtime remediation landed three real fixes:
+
+- **CUDA provisioning**: `tools/manifests/invokeai.json` had no PyTorch
+  index → pip installed `torch 2.14.1+cpu` on an RTX 3080 Ti. Manifest
+  now adds `--extra-index-url https://download.pytorch.org/whl/cu130`.
+  Deployed venv repaired live to `torch 2.14.1+cu130` — `cuda: True`.
+- **Orphaned queue work**: InvokeAI persists its queue in sqlite and
+  RESUMES in-flight items on restart. A cancel that never landed left a
+  30-step job grinding ~40min on CPU after the owning process died.
+  Fix: failure/timeout now cancels the backend queue item; cancels that
+  fail against an unreachable backend persist to
+  `data/image/pending_cancels.json` and flush on the next healthy
+  `ensure_ready`. Verified live: cancel landed, queue drained.
+- **Fleet resource estimates**: synthesized InvokeAI profiles never
+  inherited `estimated_vram_gb`/`estimated_ram_gb` from the fleet spec,
+  so the pre-job arbiter had no estimate to act on (observed ~148s/step
+  spilled with qwen3-14b resident). Profiles now inherit both.
+
+Live dogfood after deploy: 768×768 / 6-step RealVisXL job via InvokeAI
+finished in 28.9s end-to-end (10.5s graph wall) producing a valid PNG —
+no cudaErrorUnknown. Earlier ComfyUI `cudaErrorUnknown` traced to 0.3GB
+free VRAM during the InvokeAI crash-loop fallback window — VRAM
+starvation, not a routing or checkpoint defect.
+
+Deploy gotcha hit and fixed: robocopy rc=11 (one locked exe) threw AFTER
+stopping the app but BEFORE relaunch — and the retry saw nothing running
+so it skipped relaunch. `deploy_local.ps1` now relaunches on the failure
+path too when the app was running.
+
+Tests: tests/test_image.py +5 cancel-propagation cases,
+tests/test_image_fleet.py +3 (manifest CUDA index, dedicated venv,
+fleet resource-estimate inheritance). 140 image tests pass.
