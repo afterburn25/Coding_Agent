@@ -133,6 +133,26 @@ class ConversationManagerTests(unittest.TestCase):
             for secret in ("hunter2", "s3cret!", "4820", "correct horse"):
                 self.assertNotIn(secret, ctx)
 
+    def test_credential_declaratives_never_persist(self):
+        """'the wifi password is X' / 'the api key is Y' are learning
+        writes too — a bare declarative naming a credential must refuse,
+        not bank (BUG-081: 'the wifi password is hunter2' banked live)."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for q in (
+                "the wifi password is hunter2",
+                "the api key is abc123xyz",
+                "our ssh key is AAAAB3NzaCfakekey",
+                "the access token is xyz1234567",
+            ):
+                learned = memory.learn_from_user(q)
+                self.assertIn("locked", learned, q)
+                self.assertEqual(learned["facts"], [], q)
+            self.assertEqual(memory.snapshot()["facts"], [])
+            # Policy statements mentioning credentials still bank.
+            out = memory.learn_from_user("the password policy is 90 days")
+            self.assertEqual(out["facts"], ["password policy is 90 days"])
+
     def test_credential_questions_are_not_hijacked(self):
         """A question merely mentioning a credential must still reach the
         normal answer lanes — the guard only refuses learning writes."""
@@ -1028,6 +1048,90 @@ class CrossChatMemoryTests(unittest.TestCase):
                     "what is the build server called")],
                 ["build server is titan"])
 
+    def test_time_value_never_retargets_qualified_slot(self):
+        """'the deploy is at noon' must mint a fresh fact — a schedule
+        value landing on 'deploy region' (a broader-hint containment
+        match) would clobber a region with a time."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("the deploy region is eu-west-2")
+            out = memory.learn_from_user("the deploy is at noon tomorrow")
+            self.assertEqual(out["facts"], ["deploy is at noon tomorrow"])
+            self.assertEqual(out["superseded"], [])
+            # Exact-subject supersession still lands.
+            out = memory.learn_from_user("the deploy region is us-west-1")
+            self.assertEqual(out["facts"], ["deploy region is us-west-1"])
+            self.assertEqual(out["superseded"],
+                             ["deploy region is eu-west-2"])
+
+    def test_dont_forget_embeds_a_learn(self):
+        """'don't forget the meeting is friday' is a retain-imperative
+        — the declarative tail banks. A bare noun tail ('don't forget
+        the keys') banks nothing."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            out = memory.learn_from_user(
+                "don't forget the meeting is friday")
+            self.assertEqual(out["facts"], ["meeting is friday"])
+            out = memory.learn_from_user(
+                "don't forget that the port is 9090")
+            self.assertEqual(out["facts"], ["port is 9090"])
+            out = memory.learn_from_user("don't forget the keys")
+            self.assertEqual(out["facts"], [])
+            self.assertEqual(out["behavior_rules"], [])
+
+    def test_compound_split_uses_full_predicate_set(self):
+        """'the cache is flushed nightly and the logs rotate weekly' —
+        the and-split's completeness check must know the same
+        predicates the single-decl matcher does ('rotate', 'moves',
+        'renews'), or the whole conjunction banks verbatim and a probe
+        for either half dumps both."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            out = memory.learn_from_user(
+                "the cache is flushed nightly and the logs rotate weekly")
+            self.assertEqual(sorted(out["facts"]),
+                             ["cache is flushed nightly",
+                              "logs rotate weekly"])
+            out = memory.learn_from_user(
+                "the standup moves to fridays and the retro renews monthly")
+            self.assertEqual(sorted(out["facts"]),
+                             ["retro renews monthly",
+                              "standup moves to fridays"])
+            # Shared-predicate 'both' compounds split per subject so
+            # each can supersede on its own.
+            out = memory.learn_from_user(
+                "the staging api and the prod api are both on 443")
+            self.assertEqual(sorted(out["facts"]),
+                             ["prod api is on 443",
+                              "staging api is on 443"])
+            # Non-compounds stay whole.
+            out = memory.learn_from_user("the stack is python and sqlite")
+            self.assertEqual(out["facts"], ["stack is python and sqlite"])
+
+    def test_imperative_and_embedded_clause_never_fact_subjects(self):
+        """'go back to what we were talking about' is a request — a
+        'were' inside it must not mint a fact whose subject is 'go back
+        to what we'. Never-noun imperative leads and embedded
+        interrogative/relative clauses are rejected."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for junk in ("go back to what we were talking about",
+                         "get the report to me by friday",
+                         "remind me that the standup is at 9",
+                         "the thing that we built is live",
+                         "the uses are many"):
+                out = memory.learn_from_user(junk)
+                self.assertEqual(out["facts"], [], junk)
+            self.assertEqual(memory.snapshot()["facts"], [])
+            # Noun-final subjects + verb predicates still parse right.
+            out = memory.learn_from_user("the deploy ships friday")
+            self.assertEqual(out["facts"], ["deploy ships friday"])
+            out = memory.learn_from_user("the deploy is at noon tomorrow")
+            self.assertEqual(out["facts"], ["deploy is at noon tomorrow"])
+            out = memory.learn_from_user("the queue drains every hour")
+            self.assertEqual(out["facts"], ["queue drains every hour"])
+
     def test_negated_copula_correction_and_retraction(self):
         """'X is not Y, it's Z' must bank 'X is Z' — not the verbatim
         negated sentence. Bare 'X isn't Y anymore' retracts the unique
@@ -1399,6 +1503,52 @@ class CrossChatMemoryTests(unittest.TestCase):
             # the discriminator, not the declarative shape.
             learned = memory.learn_from_user("the port is 9090")
             self.assertTrue(learned["facts"])
+
+    def test_hedged_claim_acknowledged_never_banked(self):
+        # BUG-082 — hedged first-person claims ("i think the registry
+        # mount is at HKLM") are unverified like hearsay: banking a
+        # hunch as fact would masquerade belief as evidence, while
+        # dropping the turn hands it to a model that once parroted a
+        # credential refusal from history. The `hedged` marker yields
+        # an honest "noted, unverified" ack with zero writes.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for utterance in (
+                "i think the registry mount is at HKLM",
+                "i believe the port is 9090",
+                "i guess the cache is stale",
+                "i don't think the build is broken",
+                "imo the api is slow",
+            ):
+                learned = memory.learn_from_user(utterance)
+                self.assertFalse(learned["facts"], utterance)
+                self.assertEqual(len(learned.get("hedged") or []), 1,
+                                 utterance)
+            self.assertFalse(
+                [r for r in memory._data["facts"] if r.get("active")])
+            # "i think so" carries no claim — nothing to note.
+            self.assertFalse(
+                memory.learn_from_user("i think so").get("hedged"))
+            # Unhedged declaratives still bank.
+            learned = memory.learn_from_user(
+                "the registry mount is at HKLM")
+            self.assertTrue(learned["facts"])
+
+    def test_stated_plan_banks_as_plan(self):
+        # BUG-082 — "we're switching to mysql next week" declares
+        # intent, not current use; unhandled it fell to a model that
+        # riffed fabricated context into the ack.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            learned = memory.learn_from_user(
+                "we're switching to mysql next week")
+            self.assertEqual(
+                learned["facts"],
+                ["we are switching to mysql next week"])
+            learned = memory.learn_from_user(
+                "we are moving to postgres")
+            self.assertEqual(
+                learned["facts"], ["we are moving to postgres"])
 
     def test_compound_turns_learn_first_clause_only(self):
         # A compound turn's second clause is a separate intent, not part

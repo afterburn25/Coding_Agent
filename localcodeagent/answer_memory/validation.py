@@ -99,7 +99,10 @@ def references_conversation(text: str) -> bool:
 # Secret / credential indicators — suppress persistent learning entirely.
 _SECRET_PATTERNS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-    re.compile(r"\b(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|secret[_-]?key|client[_-]?secret)\b\s*[:=]\s*[^\s]{6,}", re.I),
+    re.compile(r"\b(?:api[_\s-]?key|apikey|access[_\s-]?token|"
+               r"auth[_\s-]?token|secret[_\s-]?key|client[_\s-]?secret|"
+               r"ssh[_\s-]?key|private[_\s-]?key|signing[_\s-]?key)\b"
+               r"\s*(?:[:=]|\bis\b)\s*[^\s]{6,}", re.I),
     re.compile(r"\b(?:password|passwd|pwd|passcode|pass[\s_-]?phrase)\b"
                r"\s*[:=]\s*[^\s]{4,}", re.I),
     re.compile(r"\b(?:my\s+)?(?:password|passwd|pwd|passcode|"
@@ -178,6 +181,26 @@ def is_ack_answer(text: str) -> bool:
     """True when the reply is confirmation-shaped rather than answer-
     shaped — a banked ack replays a write-claim, not knowledge."""
     return bool(_ACK_ANSWER_RE.match(str(text or "")))
+
+
+# Refusal-shaped replies — "I won't store credentials…", "I can't do
+# that" — decline the turn's request; they answer the *attempt*, not
+# the text, so banked they replay as nonsense on lookalike turns. A
+# model that parrots a refusal it saw in history produces exactly this
+# shape; suppress it like the ack family.
+_REFUSAL_ANSWER_RE = re.compile(
+    r"^\s*(?:(?:sorry|unfortunately|afraid)[,.!]?\s*)?"
+    r"i\s+(?:won'?t|will\s+not|wont|can'?t|cannot|can\s+not|"
+    r"refuse(?:\s+to)?|mustn'?t|must\s+not|am\s+(?:not\s+able|unable)\s+to|"
+    r"don'?t\s+(?:store|keep|save|remember|log|persist|retain))\b",
+    re.I)
+
+
+def is_refusal_answer(text: str) -> bool:
+    """True when the reply is refusal-shaped — it declines the user's
+    attempt rather than conveying knowledge, so it must never be
+    banked as a reusable answer."""
+    return bool(_REFUSAL_ANSWER_RE.match(str(text or "")))
 
 
 # Machine-authored work-order scaffolds — mission/autonomy lanes issue

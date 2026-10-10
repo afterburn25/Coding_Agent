@@ -4020,8 +4020,9 @@ class AgentOrchestrator:
         restated = learned.get("restated") or []
         miss = learned.get("forgotten_miss") or []
         hearsay = learned.get("hearsay") or []
+        hedged = learned.get("hedged") or []
         if not (facts or rules or examples or forgotten or locked or restated
-                or miss or hearsay):
+                or miss or hearsay or hedged):
             return None
         parts = []
         if locked:
@@ -4043,6 +4044,12 @@ class AgentOrchestrator:
             # learned fact or a verified report.
             parts.append(
                 f"Noted — {hearsay[0]} — though that's secondhand, "
+                "so I'll treat it as unverified.")
+        elif hedged:
+            # Hedged first-person claims ("i think X is Y") are
+            # acknowledged but never banked — a hunch isn't evidence.
+            parts.append(
+                f"Noted — {hedged[0]} — though that's a hunch, "
                 "so I'll treat it as unverified.")
         elif not parts and not miss:
             parts.append("Got it.")

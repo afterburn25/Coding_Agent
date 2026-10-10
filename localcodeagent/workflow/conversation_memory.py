@@ -306,6 +306,54 @@ class ConversationMemory:
         r"loves?|should stay|should be|must be|will be|stays?|"
         r"remains?)\s+)(.+?)$", re.IGNORECASE)
 
+    # The full declarative-predicate alternation — shared by the
+    # compound `and`-split completeness check and the single-decl
+    # matcher so a new predicate can't bank alone yet split-fail in a
+    # compound.
+    _DECL_PRED_ALT = (
+        r"runs on|is built on|is written in|"
+        r"depends on|ends? in|starts? with|"
+        r"ends? with|(?:is|are|was|were|gets?|"
+        r"is being)\s+(?:now\s+)?"
+        r"(?:called|named|known as)|equals?|"
+        r"lives? (?:at|in|on)|reports? to|"
+        r"works? (?:on|at|for)|belongs? to|comes? from|"
+        r"scheduled for|due (?:on|by|in)|"
+        r"hosted (?:at|on)|"
+        # Simple-verb predicates. Every one of these is also a common
+        # noun, so a candidate followed by a copula is really the last
+        # word of the subject ("the deploy is…", "the moves were…") —
+        # the lookahead keeps the verb parse off those.
+        r"(?:uses?|prefers?|equals?|expires?|ends?|starts?|runs?|"
+        r"lifts?|holds?|begins?|resumes?|"
+        r"pass(?:es)?|fails?|ships?|lands?|"
+        r"moves?|renews?|rotates?|continues?|pauses?|"
+        r"archives?|syncs?|rebuilds?|backs? up|drains?|scales?|"
+        r"restarts?|resets?|clears?|purges?|cleans?|collects?|"
+        r"deploys?|releases?|scans?|polls?|fires?|triggers?|"
+        r"suspends?|sweeps?|prunes?|compacts?|flushes?|checks?|"
+        r"wakes?|sleeps?|spins? (?:up|down)|ramps? (?:up|down)|"
+        r"serves?|costs?|lasts?)"
+        r"(?!\s+(?:is|are|was|were|been|being)\b)|"
+        r"was|were|is|are")
+
+    _TIME_VALUE_RE = re.compile(
+        r"\b(?:today|tomorrow|tonight|tonite|noon|midnight|daily|"
+        r"weekdays?|weekends?|mornings?|afternoons?|evenings?|"
+        r"nights?|monday|tuesday|wednesday|thursday|friday|saturday|"
+        r"sunday|january|february|march|april|may|june|july|august|"
+        r"september|october|november|december|"
+        r"\d{1,2}(?::\d{2})?\s*(?:am|pm))\b",
+        re.IGNORECASE)
+
+    @classmethod
+    def _value_type_incompatible(cls, existing: str, new: str) -> bool:
+        """Coarse value-type guard for qualified-subject retargets —
+        a time-shaped value must not overwrite a non-time slot or vice
+        versa. 'the deploy is at noon' is never a 'deploy region'."""
+        return (bool(cls._TIME_VALUE_RE.search(str(existing or "")))
+                != bool(cls._TIME_VALUE_RE.search(str(new or ""))))
+
     def _retarget_latest_fact(
         self, new_value: str, superseded_out: list | None = None,
         *, preference_only: bool = False,
@@ -377,14 +425,26 @@ class ConversationMemory:
                               subject_hint.strip().lower())
                 candidates = rows
                 if hint:
-                    hits = [
-                        row for row in reversed(rows)
-                        if (m2 := pred.match(str(row.get("text") or "")))
-                        and re.search(
-                            r"\b" + re.escape(hint) + r"\b",
-                            re.sub(r"^(?:my|the|our)\s+", "",
-                                   m2.group(1).strip().lower()))
-                    ]
+                    hits = []
+                    for row in reversed(rows):
+                        m2 = pred.match(str(row.get("text") or ""))
+                        if not m2:
+                            continue
+                        fsubj = re.sub(r"^(?:my|the|our)\s+", "",
+                                       m2.group(1).strip().lower())
+                        if not re.search(
+                                r"\b" + re.escape(hint) + r"\b", fsubj):
+                            continue
+                        # A hint that is only a prefix of the subject
+                        # ('deploy' vs 'deploy region') names a broader
+                        # entity — the qualified sub-attribute slot may
+                        # only be rewritten by a compatible value: a
+                        # schedule can't land on a region slot.
+                        if (fsubj != hint
+                                and self._value_type_incompatible(
+                                    m2.group(2), new)):
+                            continue
+                        hits.append(row)
                     if not hits:
                         return None
                     candidates = hits[:1]
@@ -548,14 +608,32 @@ class ConversationMemory:
         """Question/command-shaped openings are not fact subjects."""
         if not subj:
             return False
-        return subj.split()[0].casefold() not in {
-            "i", "we", "you", "they", "he", "she", "it",
-            "what", "which", "who", "whom", "whose", "why", "how",
-            "when", "where", "y", "does", "do", "did", "can", "could",
-            "should", "would", "shall", "may", "might",
-            "is", "are", "was", "were", "will", "this", "that",
-            "tell", "show", "if", "let",
-            "nm", "isnt", "arent", "doesnt", "dont", "don't"}
+        if subj.split()[0].casefold() in {
+                "i", "we", "you", "they", "he", "she", "it",
+                "what", "which", "who", "whom", "whose", "why", "how",
+                "when", "where", "y", "does", "do", "did", "can", "could",
+                "should", "would", "shall", "may", "might",
+                "is", "are", "was", "were", "will", "this", "that",
+                "tell", "show", "if", "let",
+                # Never-noun imperative leads — "go back to X", "get
+                # me Y", "remind me to Z" are requests wearing a
+                # declarative parse (a verb-only first token with no
+                # article is an imperative, not a subject).
+                "go", "get", "put", "take", "look", "give", "send",
+                "bring", "ask", "remind", "ping", "grab", "fetch",
+                "forward", "say", "thank", "please", "come", "wait",
+                "help", "listen", "watch", "sit", "stand", "hold",
+                "talk", "speak", "gimme",
+                "nm", "isnt", "arent", "doesnt", "dont", "don't"}:
+            return False
+        # Embedded interrogative/relative clauses are commands in
+        # disguise — "go back to what we were talking about" parses a
+        # 'were' declarative with 'what we' inside the subject.
+        return not re.search(
+            r"\b(?:what|which|who|whom|whose|why|how|when|where)\s+"
+            r"(?:i|we|you|they|he|she|it)\b"
+            r"|\bthat\s+(?:i|we|you|they|he|she|it)\b",
+            subj, flags=re.IGNORECASE)
 
     @staticmethod
     def _fact_slot(text: str) -> str:
@@ -990,8 +1068,8 @@ class ConversationMemory:
                 r"agreed)|let'?s\b|the\s+plan\s+is)",
                 raw, flags=re.IGNORECASE)
             or ("?" not in raw
-                and re.match(r"^my\s+.{1,40}\s+is\s+.+$", raw,
-                             flags=re.IGNORECASE)))
+                and re.match(r"^(?:my|the|our)\s+.{1,40}\s+is\s+.+$",
+                             raw, flags=re.IGNORECASE)))
         if is_learning_write and contains_secret(raw):
             result.setdefault("locked", []).append(
                 "I won't store credentials or secrets in memory — "
@@ -1014,6 +1092,24 @@ class ConversationMemory:
                     result.setdefault(key, []).extend(value)
             return result
 
+        # Shared-predicate compound — "the staging api and the prod api
+        # are both on 443" states the same fact for two subjects;
+        # splitting lets each subject supersede on its own.
+        both = re.match(
+            r"^((?:my|the|our)\s+[a-z0-9][a-z0-9 ._-]{0,38}?)\s+and\s+"
+            r"((?:my|the|our)\s+[a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+            r"(?:are|is|were|was)\s+both\s+(.+?)[.!?]?$",
+            raw, flags=re.IGNORECASE)
+        if both:
+            for subj in (both.group(1), both.group(2)):
+                sub = self.learn_from_user(
+                    f"{subj} is {both.group(3)}",
+                    project_id=project_id,
+                    conversation_id=conversation_id)
+                for key, value in sub.items():
+                    result.setdefault(key, []).extend(value)
+            return result
+
         # Coordinated declaratives — "my shell is zsh and my terminal
         # is alacritty" states two facts. Only split when EVERY part is
         # a complete subject+predicate statement; "ham and eggs" and
@@ -1022,8 +1118,8 @@ class ConversationMemory:
         if len(and_parts) > 1:
             decl = re.compile(
                 r"^(?:my|the|our|i|we|it)\b.{1,60}?\b"
-                r"(?:is|are|was|were|uses?|runs on|prefers?|likes?|"
-                r"loves?)\s+\S", re.IGNORECASE)
+                r"(?:" + self._DECL_PRED_ALT + r")\s+\S",
+                re.IGNORECASE)
             if all(decl.match(p.strip()) for p in and_parts):
                 for part in and_parts:
                     sub = self.learn_from_user(
@@ -1053,6 +1149,30 @@ class ConversationMemory:
             # require a real clause before calling it hearsay.
             if len(claim.split()) >= 2:
                 result["hearsay"] = [claim]
+                return result
+
+        # Hedged first-person claims — "i think the registry mount is
+        # at HKLM", "i guess the cache is stale" — are unverified like
+        # hearsay: banking them would let a hunch masquerade as fact,
+        # and dropping them hands the turn to a model that riffs or
+        # parrots whatever it last saw. Same honest ack, same zero
+        # writes, distinct marker so the reply can say "hunch" instead
+        # of "secondhand".
+        hedged = re.match(
+            r"^(?:i\s+(?:don'?t\s+|do\s+not\s+)?"
+            r"(?:think|believe|guess|suppose|reckon|figure|"
+            r"feel\s+like|suspect)|i'?d\s+say|imo\b|imho\b|"
+            r"in\s+my\s+(?:opinion|view)|my\s+(?:guess|hunch|"
+            r"understanding|impression)\s+is)\s*[,:—-]*\s*"
+            r"(?:that\s+)?(.+?)[.!?]?$",
+            raw, flags=re.IGNORECASE)
+        if hedged:
+            claim = hedged.group(1).strip()
+            # "i think so" / "i think not" carry no claim — and a
+            # hedged refusal ("i don't think we should") is still a
+            # claim worth noting, so only the length guard applies.
+            if len(claim.split()) >= 2:
+                result["hedged"] = [claim]
                 return result
 
         with self._lock:
@@ -1150,6 +1270,21 @@ class ConversationMemory:
                     if self._fact_subject_ok(subj) and value:
                         fact = f"{subj} uses {value}"
                 elif fact is None:
+                    # Stated plan — "we're switching to mysql next
+                    # week" declares intent rather than current use;
+                    # bank it as the plan it is so the turn gets an
+                    # honest ack instead of a model riff.
+                    plan = re.match(
+                        r"^we(?:'re|\s+are|\s+will)\s+"
+                        r"(switching|moving|migrating|changing|"
+                        r"transitioning|upgrading|downgrading)\s+"
+                        r"(?:over\s+)?to\s+(.+?)[.!?]?$",
+                        body, flags=re.IGNORECASE)
+                    if plan:
+                        value = self._clean_value(plan.group(2))
+                        if value:
+                            fact = (f"we are {plan.group(1).lower()} "
+                                    f"to {value}")
                     # Corrections — "correction: the port is 5433",
                     # "no, I meant SQLite", "actually it was Redis not
                     # Postgres". The 'X not Y' form supersedes the fact
@@ -1446,21 +1581,15 @@ class ConversationMemory:
                                 fact = f"{subj} uses {value}"
                     elif not imperative_body:
                         decl = re.match(
-                            r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
-                            r"(uses?|runs on|is built on|is written in|"
-                            r"depends on|prefers?|ends? in|starts? with|"
-                            r"ends? with|(?:is|are|was|were|gets?|"
-                            r"is being)\s+(?:now\s+)?"
-                            r"(?:called|named|known as)|equals?|"
-                            r"lives? (?:at|in|on)|reports? to|"
-                            r"works? (?:on|at|for)|belongs? to|comes? from|"
-                            r"scheduled for|due (?:on|by|in)|"
-                            r"expires?|ends?|starts?|runs?|"
-                            r"lifts?|holds?|begins?|resumes?|"
-                            r"pass(?:es)?|fails?|ships?|lands?|"
-                            r"moves?|renews?|rotates?|continues?|pauses?|"
-                            r"hosted (?:at|on)|serves?|costs?|lasts?|"
-                            r"was|were|is|are)\s+(.+)$",
+                            r"^(?:project\s+)?"
+                            # Article is an optional prefix — the
+                            # subject can never reduce to a bare 'the'/
+                            # 'my', which would let a noun-final
+                            # subject word get eaten as the predicate
+                            # ('the deploy ships friday').
+                            r"((?:(?:my|the|our|a|an|your|its|their)\s+)?"
+                            r"[a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+                            r"(" + self._DECL_PRED_ALT + r")\s+(.+)$",
                             body, flags=re.IGNORECASE,
                         )
                         if decl:
@@ -1998,6 +2127,26 @@ class ConversationMemory:
                     r"^(?:forget|remember|miss|lose|skip|worry|"
                     r"hesitate|bother|stop|delay|hold\s+off)\b",
                     action, flags=re.IGNORECASE)
+                # "don't forget the meeting is friday" — the imperative
+                # wrapper asks us to RETAIN the embedded statement:
+                # learn the declarative tail on its own. A bare
+                # noun tail ('don't forget the keys') banks nothing.
+                if inversion:
+                    tail = re.sub(
+                        r"^(?:forget|remember|miss)\s+"
+                        r"(?:that\s+|about\s+|to\s+)?",
+                        "", action.strip(), flags=re.IGNORECASE)
+                    if tail and tail != action.strip() \
+                            and re.search(
+                                r"\b(?:is|are|was|were|has|have|"
+                                r"starts|ends|runs|ships)\b",
+                                tail, flags=re.IGNORECASE):
+                        nested = self.learn_from_user(
+                            tail, project_id=project_id,
+                            conversation_id=conversation_id)
+                        for k, v in nested.items():
+                            if isinstance(v, list) and v:
+                                result.setdefault(k, []).extend(v)
                 if (not revoked and not ephemeral and not inversion
                         and self._rule_terms(action)):
                     # Nothing to retract — the phrase is itself a durable
