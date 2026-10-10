@@ -40,6 +40,27 @@ map in `docs/SURFACE_INVENTORY.md`:
   existing conversations.json — new traffic is isolated.
 - **Queued-notice polish** — no more machine-authored mission work
   orders pasted as status detail; user prompts cut on word boundaries.
+- **BUG-012 (P1, project memory)** — fresh chats still got stale repair
+  context after BUG-011: `remember_task` recorded every completed task
+  unconditionally (mission work orders + pure conversational replies —
+  wrong answers self-reinforced). Now only real work (files/tools/
+  mission lane) is remembered; `context_for` skips mission rows incl.
+  legacy via `TaskStore.mission_ids()`; restart-recovery recall gated;
+  12 poisoned rows scrubbed from the live store; env-gated
+  `NEXUS_DEBUG_PROMPT_DUMP` added for prompt forensics.
+- **BUG-013 (P2)** — `active_error` bound ANY failed task from the
+  global ledger (incl. self-repair crashes) into unrelated chats; now
+  lane-scoped.
+- **BUG-014 (P2)** — `.repair-worktrees` (587 scratch paths) were
+  indexed as project files; added to ignore sets.
+- **BUG-015 (P1, runtime)** — llama zombie-listener (process alive,
+  socket dead) is now proactively reaped by the watchdog via
+  `reap_zombie_listeners()` — busy/loading listeners untouched.
+- **BUG-016 (P1, answer memory)** — fragmentary/context-bound replies
+  (`— no auto`) were learned as canonical answers and echoed into
+  unrelated fresh chats; `is_context_dependent` covers "did you just
+  say"/"last suggestion" forms and `is_fragment_answer` filters
+  continuation fragments at learn AND lookup time.
 
 Live dogfood verified this pass: fast_path math ~280ms, `and of Japan?`
 ellipsis → Tokyo, `don't open Chrome` preempted a mission drive

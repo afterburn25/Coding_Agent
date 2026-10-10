@@ -447,7 +447,8 @@ class ConversationMemory:
             and str(row.get("content", "")).strip()
         ]
 
-    def record_exchange(self, user_text: str, assistant_text: str) -> None:
+    def record_exchange(self, user_text: str, assistant_text: str,
+                        conversation_id: str | None = None) -> None:
         if not self.enabled:
             return
         user = str(user_text or "").strip()[:12000]
@@ -478,6 +479,11 @@ class ConversationMemory:
             # follow-up like "option 1" can be resolved instead of falling
             # through to the model as an ambiguous fragment.
             self._data["pending_options"] = self.extract_options(assistant)
+            # Options bind to the conversation that produced them — a
+            # bare "option 2" in a different conversation must not
+            # resolve against another conversation's proposal.
+            self._data["pending_options_conversation"] = (
+                str(conversation_id) if conversation_id else None)
             self._save()
 
     @staticmethod
@@ -512,12 +518,16 @@ class ConversationMemory:
             return []
         return [t for _, t in options]
 
-    def resolve_option_selection(self, user_text: str) -> str | None:
+    def resolve_option_selection(self, user_text: str,
+                                 conversation_id: str | None = None) -> str | None:
         """Expand a bare selection ("option 1", "the second option",
         "go with 2") into the option text from the most recent assistant
         proposal, so downstream routing sees the real intent."""
         options = self._data.get("pending_options") or []
         if len(options) < 2:
+            return None
+        tagged = self._data.get("pending_options_conversation")
+        if tagged is not None and tagged != conversation_id:
             return None
         text = self._clean(user_text, 200)
         if not text:

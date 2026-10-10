@@ -808,8 +808,7 @@ class AgentOrchestrator:
         memory_event = {"type": "answer_memory", **memory_meta}
         self._safe_emit(event_callback, {"type": "model", "event": memory_event})
         self._safe_emit(event_callback, {"type": "task", "task": completed_task.as_dict()})
-        if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(user_text, answer_text)
+        self._record_conversation_exchange(user_text, answer_text)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(
                 user_text,
@@ -936,7 +935,7 @@ class AgentOrchestrator:
         self._safe_emit(event_callback, {"type": "model", "event": evt})
         self._safe_emit(event_callback, {"type": "task", "task": completed_task.as_dict()})
         if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(user_text, text)
+            self._record_conversation_exchange(user_text, text)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(
                 user_text, text, intent="conversation", model_id="builtin-local")
@@ -1226,7 +1225,7 @@ class AgentOrchestrator:
                         "data": result.data}})
         self._safe_emit(event_callback, {"type": "task", "task": completed_task.as_dict()})
         if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(user_text, text)
+            self._record_conversation_exchange(user_text, text)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(
                 user_text, text, intent="conversation", model_id="builtin-local")
@@ -2911,7 +2910,7 @@ class AgentOrchestrator:
         self._safe_emit(
             event_callback, {"type": "task", "task": done.as_dict()})
         if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(user_text, text)
+            self._record_conversation_exchange(user_text, text)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(
                 user_text, text,
@@ -3061,7 +3060,7 @@ class AgentOrchestrator:
         self._safe_emit(
             event_callback, {"type": "task", "task": done.as_dict()})
         if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(
+            self._record_conversation_exchange(
                 " | ".join(p.action_text for p in plans), text)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(
@@ -4401,6 +4400,29 @@ class AgentOrchestrator:
         if normalized.startswith("FINDINGS"):
             return False
         return None
+
+    def _record_conversation_exchange(
+        self, user_text: str, assistant_text: str
+    ) -> None:
+        """Record a user-facing exchange into rolling conversation memory.
+
+        Always tags the exchange with the active conversation id so
+        conversation-scoped artifacts (pending numbered options) can
+        never resolve across conversations.
+        """
+        if self.conversation_memory is None:
+            return
+        conversation_id = None
+        try:
+            if self.conversation_manager is not None:
+                conversation_id = (
+                    str(self.conversation_manager.active().get("id") or "")
+                    or None
+                )
+        except Exception:
+            conversation_id = None
+        self.conversation_memory.record_exchange(
+            user_text, assistant_text, conversation_id=conversation_id)
 
     def _record_outcome(
         self,
@@ -6664,7 +6686,7 @@ class AgentOrchestrator:
             verification_passed=(None if not current_round else not verification_failed),
         )
         if self.conversation_memory is not None and not mission_attributed:
-            self.conversation_memory.record_exchange(session.user_text, session.main_content)
+            self._record_conversation_exchange(session.user_text, session.main_content)
         if self.conversation_manager is not None and not mission_attributed:
             self.conversation_manager.record_exchange(
                 session.user_text,
@@ -7492,7 +7514,7 @@ class AgentOrchestrator:
         self._record_outcome(session, "step_limit")
         mission_attributed = self._mission_attributed(session.task_id)
         if self.conversation_memory is not None and not mission_attributed:
-            self.conversation_memory.record_exchange(session.user_text, session.main_content)
+            self._record_conversation_exchange(session.user_text, session.main_content)
         if self.conversation_manager is not None and not mission_attributed:
             self.conversation_manager.record_exchange(
                 session.user_text,
@@ -7740,7 +7762,7 @@ class AgentOrchestrator:
         )
         self._safe_emit(event_callback, {"type": "task", "task": completed.as_dict()})
         if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(user_text, content)
+            self._record_conversation_exchange(user_text, content)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(
                 user_text,
@@ -7961,10 +7983,20 @@ class AgentOrchestrator:
         # Resolve "option 1" / "the first option" style replies against the
         # assistant's most recent numbered proposal before anything else
         # sees the fragment — otherwise the model can't tell which option.
+        # Options are bound to the conversation that produced them.
+        active_conv_id = None
+        if self.conversation_manager is not None:
+            try:
+                active_conv_id = (
+                    str(self.conversation_manager.active().get("id") or "")
+                    or None
+                )
+            except Exception:
+                active_conv_id = None
         if self.conversation_memory is not None:
             try:
                 resolved = self.conversation_memory.resolve_option_selection(
-                    user_text)
+                    user_text, conversation_id=active_conv_id)
                 if resolved:
                     user_text = resolved
             except Exception:
@@ -8212,7 +8244,7 @@ class AgentOrchestrator:
                         "correlation_id": brain_envelope.get("correlation_id"),
                         "latency_ms": brain_envelope.get("latency_ms")}})
                 if self.conversation_memory is not None:
-                    self.conversation_memory.record_exchange(
+                    self._record_conversation_exchange(
                         user_text, str(brain_envelope["answer"]))
                 if self.conversation_manager is not None:
                     self.conversation_manager.record_exchange(
@@ -8412,7 +8444,7 @@ class AgentOrchestrator:
                 user_text, task.id, event_callback, env=env)
             if social_reply is not None:
                 if self.conversation_memory is not None:
-                    self.conversation_memory.record_exchange(
+                    self._record_conversation_exchange(
                         user_text, social_reply.content or "")
                 if self.conversation_manager is not None:
                     self.conversation_manager.record_exchange(
@@ -8567,7 +8599,7 @@ class AgentOrchestrator:
             self._safe_emit(event_callback, {"type": "model", "event": builtin_event})
             self._safe_emit(event_callback, {"type": "task", "task": completed_task.as_dict()})
             if self.conversation_memory is not None:
-                self.conversation_memory.record_exchange(user_text, local_response)
+                self._record_conversation_exchange(user_text, local_response)
             if self.conversation_manager is not None:
                 self.conversation_manager.record_exchange(
                     user_text,

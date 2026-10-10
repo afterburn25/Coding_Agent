@@ -12334,7 +12334,11 @@ class Handler(BaseHTTPRequestHandler):
                         project_id=str(self.state.workspace),
                         conversation_id=str(self.state.conversation_manager.active().get("id") or ""),
                     )
-                    self.state.conversation_memory.record_exchange(user_text, assistant_text)
+                    self.state.conversation_memory.record_exchange(
+                        user_text, assistant_text,
+                        conversation_id=str(
+                            self.state.conversation_manager.active().get("id") or "")
+                        or None)
                 self.state.conversation_manager.record_exchange(
                     user_text,
                     assistant_text,
