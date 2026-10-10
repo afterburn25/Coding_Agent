@@ -511,8 +511,19 @@ class TestCorrectionChains(unittest.TestCase):
         cm.learn_from_user("my backup label is alpha")
         cm.learn_from_user("the backup label is now named zeta")
         active = self._active(cm)
-        self.assertIn("backup label is zeta", active)
-        self.assertNotIn("backup label is alpha", active)
+        self.assertIn("my backup label is zeta", active)
+        self.assertNotIn("my backup label is alpha", active)
+
+    def test_entity_rename_binds_name_slot(self):
+        # "the render box is now named titan" restates the entity's
+        # name-slot fact — it must not fork a parallel 'render box'
+        # fact beside 'render box name'.
+        cm = self._mem()
+        cm.learn_from_user("my render box name is cobalt")
+        cm.learn_from_user("the render box is now named titan")
+        active = self._active(cm)
+        self.assertIn("my render box name is titan", active)
+        self.assertEqual(len(active), 1)
 
     def test_marker_context_legitimizes_called(self):
         # "that's wrong — it's called cobalt" — the head marker supplies
@@ -521,8 +532,8 @@ class TestCorrectionChains(unittest.TestCase):
         cm.learn_from_user("my render box name is blade")
         cm.learn_from_user("that's wrong — it's called cobalt")
         active = self._active(cm)
-        self.assertIn("render box name is cobalt", active)
-        self.assertNotIn("render box name is blade", active)
+        self.assertIn("my render box name is cobalt", active)
+        self.assertNotIn("my render box name is blade", active)
 
     def test_vague_called_phrase_does_not_corrupt(self):
         # "it's called having standards" is idiom, not a rename — the

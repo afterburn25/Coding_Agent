@@ -168,6 +168,7 @@ class ConversationMemory:
     _SUBJECT_ADVERBS = frozenset({
         "now", "currently", "today", "recently", "actually", "finally",
         "just", "also", "still", "really", "meanwhile", "anyway",
+        "again",
     })
 
     _CLAUSE_BOUNDARY_RE = re.compile(
@@ -295,6 +296,7 @@ class ConversationMemory:
     def _retarget_latest_fact(
         self, new_value: str, superseded_out: list | None = None,
         *, preference_only: bool = False,
+        subject_hint: str = "",
     ) -> str | None:
         """'make that X' / 'set it to X' — a bare re-set of the most
         recently stated value. The referent's subject+predicate is kept
@@ -351,7 +353,29 @@ class ConversationMemory:
                 target = cands[0]
                 m = pred.match(str(target.get("text") or ""))
             else:
-                for row in reversed(rows):
+                # A subject hint ("the render box is now named titan")
+                # binds the update to the same entity's slot — 'render
+                # box' retargets 'render box name is cobalt' rather than
+                # forking a parallel 'render box' fact. Word-boundary
+                # containment counts. A hint with no match fails the
+                # retarget — an explicit subject isn't referential, and
+                # rewriting the unrelated latest fact would be a guess.
+                hint = re.sub(r"^(?:my|the|our)\s+", "",
+                              subject_hint.strip().lower())
+                candidates = rows
+                if hint:
+                    hits = [
+                        row for row in reversed(rows)
+                        if (m2 := pred.match(str(row.get("text") or "")))
+                        and re.search(
+                            r"\b" + re.escape(hint) + r"\b",
+                            re.sub(r"^(?:my|the|our)\s+", "",
+                                   m2.group(1).strip().lower()))
+                    ]
+                    if not hits:
+                        return None
+                    candidates = hits[:1]
+                for row in reversed(candidates):
                     m = pred.match(str(row.get("text") or ""))
                     if m:
                         if (str(row.get("text") or "").strip().lower()
@@ -1150,6 +1174,18 @@ class ConversationMemory:
                                 value = self._clean_value(decl.group(3))
                                 if value:
                                     fact = f"{subj} {pred} {value}"
+                                if naming and value:
+                                    # "the render box is now named
+                                    # titan" restates the entity's name
+                                    # slot ('render box name is
+                                    # cobalt') — retarget it instead of
+                                    # forking a parallel 'render box'
+                                    # fact.
+                                    tgt = self._retarget_latest_fact(
+                                        value, result["superseded"],
+                                        subject_hint=subj)
+                                    if tgt is not None:
+                                        fact = tgt
                                 if (pred in {"is", "are"} and value
                                         and not naming
                                         and not (
@@ -1333,13 +1369,23 @@ class ConversationMemory:
                                      ren_subj.group(2)).strip())
                                 val = self._clean_value(
                                     ren_subj.group(3))
-                                if (self._fact_subject_ok(subj)
+                                # The entity's own name-slot fact
+                                # ("render box name is cobalt") is the
+                                # referent — 'the render box is now
+                                # named titan' restates it, it doesn't
+                                # spawn a parallel 'render box' fact.
+                                fact = self._retarget_latest_fact(
+                                    val, result["superseded"],
+                                    subject_hint=subj)
+                                if (fact is None
+                                        and self._fact_subject_ok(subj)
                                         and val):
                                     fact = f"{subj} is {val}"
                         if fact is None:
                             ren = re.search(
                                 r"\b(?:renamed\s+to|"
-                                r"rename\s+(?:it|that|this)\s+to|"
+                                r"rename\s+(?:it|that|this)"
+                                r"(?:\s+back)?\s+to|"
                                 r"call(?:ing)?\s+it)\s+"
                                 r"([a-z0-9][a-z0-9 ._-]{0,38}?)"
                                 r"[.!?]?\s*$",
