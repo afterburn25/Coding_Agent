@@ -2601,6 +2601,24 @@ class AgentOrchestrator:
             match_text, project_id=project_id,
             conversation_id=conversation_id)
         if not rows:
+            # Possessive probes ("what's my editor", "did I tell you my
+            # port") can only be answered by taught facts — an empty
+            # store is itself the honest answer; don't fall to the
+            # model to improvise a denial or a guess.
+            if re.search(r"\bmy\b", match_text, re.IGNORECASE):
+                topic = self._FACT_RECALL_RE.sub(
+                    "", match_text).strip().rstrip("?.!")
+                topic = re.sub(
+                    r"^(?:is|are|was|were|do|does|did)\s+|^about\s+",
+                    "", topic, flags=re.IGNORECASE).strip()
+                topic = re.sub(r"\bmy\b", "your", topic,
+                               flags=re.IGNORECASE).strip()
+                topic = topic or "it"
+                canonical = (f"You haven't told me about {topic} — "
+                             f"there's nothing like that in memory.")
+                from ..context.realize import RenderedReply
+                return RenderedReply(text=canonical,
+                                     speech_act="answer")
             return None
         # Precision gate: pronoun/context-anchored queries ("my X",
         # "are we using", "remind me") are clearly memory lookups, so
