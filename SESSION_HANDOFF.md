@@ -4864,7 +4864,21 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
 - Environment note: 21/25 soak failures were the external llama:8391
   dying (socket dead, process alive). Managed-reaper can't see external
   runtimes; `qwen3-4b-all` IS managed and self-heals on next request.
-- Full suite green at 3705 passed before V4 rounds; canonical rerun in
-  flight after BUG-020 + QA changes.
-- Still open: UI click-dogfood, installer cycle, tool fuzzing /
-  permission matrix / false-success audit parts, dead-code deep sweep.
+- Round-10 verification (final): canonical suite **3710 passed,
+  4 skipped, 530 subtests**; clean 81-turn soak on latest code →
+  **1 failure only**, an environmental llama mid-response disconnect —
+  every scenario semantically green incl. quoted-negated under the new
+  `no_mutating_tools` assertion.
+- Live GET sweep: all 104 literal routes probed, zero 500s; 8 primary
+  UI pages serve. `/api/storage/audit` scratch-dir skips added.
+- Test-infra flake fixed: leaked `warmup-*` daemon ping consumed a
+  scripted urlopen inside another test's patch window; counting fakes
+  now gated by `_completions_only(fn, 9999, 1)`.
+- Tool fuzz: 15 fs/search tools × 9 type-confused arg shapes — zero
+  crashes, all return error strings. Permission matrix: NEVER_AUTO
+  keys ⊆ PERMISSION_INFO, all builtin tool permissions resolve;
+  `audio.*` synthesizes correctly via `_PREFIX_CATEGORY`.
+- Still open: UI click-dogfood (needs interactive browser), installer
+  cycle, dead-code deep sweep, external llama:8391 intermittent
+  disconnects (environment fragility — managed reaper covers managed
+  runtimes only).
