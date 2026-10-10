@@ -65,7 +65,7 @@ class DetectorUnitTests(unittest.TestCase):
         f = detect_crash_storm({"crash_history": lambda n: rows})
         self.assertIsNotNone(f)
         self.assertEqual(f["route"], "repair")
-        self.assertGreaterEqual(f["confidence"], 0.6)
+        self.assertGreaterEqual(f["confidence"], 0.75)
 
     def test_crash_storm_ignores_old_and_sparse(self):
         rows = [{"time": NOW - 7200}] * 5      # all outside window
