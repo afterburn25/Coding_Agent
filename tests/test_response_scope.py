@@ -554,6 +554,30 @@ class TestCorrectionChains(unittest.TestCase):
         cm.learn_from_user("the stack is python and sqlite")
         self.assertIn("stack is python and sqlite", self._active(cm))
 
+    def test_moved_to_retargets_entity_slot(self):
+        # "the standup moved to 10am" restates the standup's time slot —
+        # it must not mint a parallel 'standup uses 10am' fact beside
+        # 'standup is at 9am'.
+        cm = self._mem()
+        cm.learn_from_user("my standup is at 9am on weekdays")
+        learned = cm.learn_from_user("actually the standup moved to 10am")
+        active = self._active(cm)
+        self.assertIn("my standup is 10am", active)
+        self.assertNotIn("my standup is at 9am on weekdays", active)
+        self.assertEqual(len(active), 1)
+
+    def test_and_marker_clause_splits(self):
+        # "the deadline is friday, and actually make the standup
+        # 10:30" — the 'and <marker>' boundary splits statement from
+        # correction; banking the chain verbatim loses both.
+        cm = self._mem()
+        cm.learn_from_user(
+            "the deadline is friday, and actually make the standup "
+            "10:30")
+        active = self._active(cm)
+        self.assertIn("deadline is friday", active)
+        self.assertIn("standup is 10:30", active)
+
     def test_marker_context_legitimizes_called(self):
         # "that's wrong — it's called cobalt" — the head marker supplies
         # correction intent, so 'called' without 'now' still retargets.

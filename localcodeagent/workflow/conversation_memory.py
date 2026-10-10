@@ -740,8 +740,16 @@ class ConversationMemory:
         Returns [] for ordinary statements — the existing pipeline
         handles them unchanged.
         """
+        # 'and <marker>' is also a boundary — "the deadline is friday,
+        # and actually make the standup 10:30" carries a statement then
+        # a correction; banking the chain verbatim loses both.
         parts = [p.strip() for p in
-                 re.split(r"(?<=[.!?])\s+|\s*;\s*", text) if p.strip()]
+                 re.split(
+                     r"(?<=[.!?])\s+|\s*;\s*|,?\s+and\s+"
+                     r"(?=actually|no\b|wait\b|instead|sorry|"
+                     r"never\s*mind|nevermind|nm\b|scratch\s+that|"
+                     r"on\s+second\s+thought|i\s+mean|i\s+meant|"
+                     r"correction)", text) if p.strip()]
         if len(parts) < 2:
             return []
         marker = re.compile(
@@ -1160,7 +1168,18 @@ class ConversationMemory:
                     if subj_switch:
                         subj = self._clean_subject(subj_switch.group(1))
                         value = self._clean_value(subj_switch.group(2))
+                        # A move on a fact-tracked entity restates its
+                        # slot — "the standup moved to 10am" updates
+                        # 'standup is at 9am', it isn't 'standup uses
+                        # 10am'. Retarget keeps the original predicate;
+                        # only genuinely new entities mint 'uses'.
                         if self._fact_subject_ok(subj) and value:
+                            fact = self._retarget_latest_fact(
+                                value, result["superseded"],
+                                subject_hint=subj)
+                        if (fact is None
+                                and self._fact_subject_ok(subj)
+                                and value):
                             fact = f"{subj} uses {value}"
                     elif not imperative_body:
                         decl = re.match(
@@ -1300,6 +1319,30 @@ class ConversationMemory:
                             value = self._clean_value(imp2.group(2))
                             if self._fact_subject_ok(subj) and value:
                                 fact = f"{subj} is {value}"
+                        if fact is None:
+                            # "make the standup 10:30", "move the
+                            # meeting to 4pm" — connector-less value
+                            # sets; the value must look literal or
+                            # 'make the report short' banks adjectives.
+                            imp3 = re.match(
+                                r"^(?:make|change|move|schedule|shift|"
+                                r"push)\s+(?:the\s+|my\s+|our\s+|a\s+)?"
+                                r"([a-z0-9][a-z0-9 ._-]{0,28}?)\s+"
+                                r"(?:to\s+)?"
+                                r"([a-z0-9][a-z0-9 _+./\\#:-]{0,38}?)"
+                                r"[.!?]?$",
+                                body, flags=re.IGNORECASE)
+                            if imp3 and re.search(
+                                    r"[\d_+./\\#:-]", imp3.group(2)):
+                                subj = self._clean_subject(imp3.group(1))
+                                value = self._clean_value(imp3.group(2))
+                                if self._fact_subject_ok(subj) and value:
+                                    fact = (
+                                        self._retarget_latest_fact(
+                                            value,
+                                            result["superseded"],
+                                            subject_hint=subj)
+                                        or f"{subj} is {value}")
                 if fact is None:
                     # Bare re-set of the last stated value — "actually
                     # make that 8090", "no, set it to 9000". The newest
