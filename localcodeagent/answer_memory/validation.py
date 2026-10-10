@@ -157,6 +157,26 @@ def is_fragment_answer(text: str) -> bool:
     return bool(_FRAGMENT_ANSWER_RE.match(t))
 
 
+# Machine-authored work-order scaffolds — mission/autonomy lanes issue
+# fixed template prompts ("Work the scoped lane of this mission…",
+# "A mission task failed. Diagnose the concrete cause…",
+# "Apply the diagnosis to make progress on the mission objective…").
+# A response to a template is mission evidence, not a user question;
+# replaying it as a learned answer injects mission state into chats.
+_MACHINE_QUESTION_RE = re.compile(
+    r"^\s*(?:work the scoped lane of (?:this|the) mission\b|"
+    r"a mission task failed\b[.\s]*diagnose\b|"
+    r"apply the diagnosis to make progress on the mission\b)",
+    re.I | re.S)
+
+
+def is_machine_authored_question(text: str) -> bool:
+    """True when the stored 'question' is a machine-authored work-order
+    scaffold rather than something a user asked — mission traffic must
+    never be replayed as user-facing memory (BUG-011/016 lineage)."""
+    return bool(_MACHINE_QUESTION_RE.match(str(text or "")))
+
+
 # Capability probes — "can you see my screen", "can you browse websites",
 # "can you hear me". The truthful answer lives in live capability state;
 # a cached answer goes stale the moment a subsystem toggles. Classify as

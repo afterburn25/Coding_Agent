@@ -221,6 +221,8 @@ function renderBackups(list){
      <div class="meta">${esc(b.label||'')}${b.created_at?' · '+fmtTs(b.created_at):''}${b.files!=null?' · '+b.files+' files':''}</div>
      ${b.corrupt?'':`<div class="actions">
        <button class="mini-button" data-verify="${esc(b.name)}">Verify (dry-run)</button>
+       <button class="mini-button" data-restoretest="${esc(b.name)}">Restore-test</button>
+       <button class="mini-button" data-restoresel="${esc(b.name)}">Selective…</button>
        <button class="mini-button danger" data-restore="${esc(b.name)}">Restore</button></div>`}
     </div>`).join('')||'<div class="off">No backups yet.</div>';
 }
@@ -392,6 +394,17 @@ document.addEventListener('click',async e=>{
   }else if(t.dataset.verify){
     const r=await api('/api/backups/restore','POST',{backup:t.dataset.verify,dry_run:true});
     alert(r.ok?`Verified — would restore ${r.would_restore} files.`:`Verification failed: ${r.error||'hash mismatch'}`);
+  }else if(t.dataset.restoretest){
+    const r=await api('/api/backups/restore_test','POST',{backup:t.dataset.restoretest});
+    alert(r.ok?`Restore-test passed — ${r.checked}/${r.total} files copied and re-hashed clean.`
+         :`Restore-test failed: ${r.error||(r.failures||[]).slice(0,3).join(', ')||'unknown'}`);
+  }else if(t.dataset.restoresel){
+    const raw=prompt(`Restore only specific paths from ${t.dataset.restoresel}?\nEnter workspace-relative paths or directory prefixes, comma-separated:`);
+    if(raw==null)return;
+    const paths=raw.split(',').map(s=>s.trim()).filter(Boolean);
+    if(!paths.length)return;
+    const r=await api('/api/backups/restore','POST',{backup:t.dataset.restoresel,paths});
+    alert(r.ok?`Restored ${r.restored} files (selection).`:`Restore failed: ${r.error||'unknown'}`);
   }else if(t.dataset.restore){
     if(!confirm(`Restore backup ${t.dataset.restore}? Current files are stashed under data/backups/pre-restore-* first.`))return;
     const r=await api('/api/backups/restore','POST',{backup:t.dataset.restore});

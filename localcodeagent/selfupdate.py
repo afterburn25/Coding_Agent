@@ -48,11 +48,13 @@ def _git(source: Path, *args: str, timeout: int = 60) -> subprocess.CompletedPro
 
 class SelfUpdate:
     def __init__(self, app_dir: Path, source_dir: Path, lkg,
-                 *, runner: Callable | None = None) -> None:
+                 *, runner: Callable | None = None,
+                 data_backup: Callable | None = None) -> None:
         self.app_dir = Path(app_dir)
         self.source_dir = Path(source_dir)
         self.lkg = lkg
         self._runner = runner or self._default_runner
+        self._data_backup = data_backup
 
     @staticmethod
     def _default_runner(cmd: list[str], cwd: Path, timeout: int) -> dict:
@@ -186,6 +188,18 @@ class SelfUpdate:
         if not snap.get("ok"):
             return stage("lkg_snapshot", False, "snapshot failed")
         stage("lkg_snapshot", True, snap["name"])
+
+        # 4b — data snapshot: the LKG covers the app binary; the user's
+        # durable state gets its own verified backup before staging.
+        if self._data_backup is not None:
+            try:
+                snap = self._data_backup(
+                    label=f"pre-update {plan['installed_version']}")
+                stage("data_snapshot", bool(snap.get("ok")),
+                      str(snap.get("backup") or snap.get("error") or ""))
+            except Exception as exc:
+                stage("data_snapshot", False,
+                      f"{type(exc).__name__}: {exc}")
 
         # 5 — stage to backend-new/ (atomic-ish: fresh dir, flag last)
         staged = self.app_dir / "backend-new"

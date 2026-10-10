@@ -187,7 +187,10 @@ class AnswerMemory:
                 if isinstance(r, dict)
                 and (validation.is_error_answer(str(r.get("answer_text") or ""))
                      or validation.is_fragment_answer(
-                         str(r.get("answer_text") or "")))
+                         str(r.get("answer_text") or ""))
+                     or validation.is_machine_authored_question(
+                         str(r.get("canonical_question")
+                             or r.get("normalized_question") or "")))
             ]
             for r in bad:
                 try:
@@ -196,6 +199,10 @@ class AnswerMemory:
                         "error output stored as answer"
                         if validation.is_error_answer(
                             str(r.get("answer_text") or ""))
+                        else "machine-authored question"
+                        if validation.is_machine_authored_question(
+                            str(r.get("canonical_question")
+                                or r.get("normalized_question") or ""))
                         else "fragment answer stored as answer")
                 except Exception:
                     pass
@@ -353,6 +360,12 @@ class AnswerMemory:
         # standalone answer — learned, it replays as nonsense hints on
         # unrelated questions.
         if validation.is_fragment_answer(answer):
+            out["suppressed"] = True
+            self.store.bump("suppressed_experiences")
+            return out
+        # A machine-authored work-order scaffold is not a user question —
+        # its response is mission evidence, never a replayable answer.
+        if validation.is_machine_authored_question(question):
             out["suppressed"] = True
             self.store.bump("suppressed_experiences")
             return out

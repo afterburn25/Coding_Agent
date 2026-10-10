@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import http.client
 import inspect
+import hashlib
 import json
 import os
 import re
@@ -195,6 +196,14 @@ _QUESTION_LEAD_RE = re.compile(
 _CONVERSATION_TOOL_PERMS = frozenset({
     "filesystem.read", "network.read", "github.read", "image.read",
     "clipboard.read", "desktop.view", "screen.capture",
+})
+
+# Connector capabilities with external side effects — these claim an
+# exactly-once operation row before executing (F4). Reads (feed,
+# notifications, search, me, comments-listing) never need the guard.
+_SOCIAL_MUTATING_CAPS = frozenset({
+    "post", "comment", "reply", "message", "send", "upvote", "downvote",
+    "vote", "follow", "unfollow", "subscribe", "unsubscribe", "join",
 })
 
 
@@ -462,6 +471,7 @@ class AgentOrchestrator:
         action_ledger=None,
         artifacts=None,
         social=None,
+        state_db=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -547,6 +557,9 @@ class AgentOrchestrator:
         # Callable returning the SocialService — lazy because AppState
         # builds the orchestrator during its own construction.
         self._social = social
+        # Transactional state layer — durable exactly-once operation
+        # claims for external side effects (social sends, …).
+        self.state_db = state_db
         # Requirement-change propagation — AppState wires this to the
         # mission store so a superseded conversation fact flags
         # in-flight mission nodes referencing the stale value.
@@ -2110,7 +2123,8 @@ class AgentOrchestrator:
         # Capability truth first: with GitHub disabled the tools are never
         # registered — executing would surface the raw "unknown tool"
         # string instead of the honest "not connected" answer.
-        if not getattr(self.config, "github_enabled", True):
+        if not getattr(getattr(self, "config", None),
+                       "github_enabled", True):
             return self._github_blocked_reply(
                 user_text,
                 "TOOL_NOT_INSTALLED: github tools are disabled in this setup",
@@ -5634,10 +5648,16 @@ class AgentOrchestrator:
                     params={"consult": consult_id}, task_id=task_id)
             except Exception:
                 ledger_entry = None
-        try:
-            out = svc.dispatch_consult(consult_id, approved=True)
-        except Exception as exc:
-            out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        op_id = f"social:moltbook:consult:{task_id}"
+        out, op_claimed = self._social_op_claim(
+            op_id, "moltbook.consult", {"consult": consult_id})
+        if out is None:
+            try:
+                out = svc.dispatch_consult(consult_id, approved=True)
+            except Exception as exc:
+                out = {"ok": False,
+                       "error": f"{type(exc).__name__}: {exc}"}
+        self._social_op_settle(op_id, op_claimed, out)
         ok = bool(out.get("ok"))
         if self.action_ledger is not None and ledger_entry is not None:
             try:
@@ -5679,10 +5699,15 @@ class AgentOrchestrator:
                     params={"service": service}, task_id=task_id)
             except Exception:
                 ledger_entry = None
-        try:
-            out = svc.join(service, approved=approved)
-        except Exception as exc:
-            out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        op_id = f"social:{service}:onboard:{task_id}"
+        out, op_claimed = self._social_op_claim(
+            op_id, f"{service}.onboard", {"service": service})
+        if out is None:
+            try:
+                out = svc.join(service, approved=approved)
+            except Exception as exc:
+                out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        self._social_op_settle(op_id, op_claimed, out)
         ok = bool(out.get("ok"))
         state = str(out.get("state") or "")
         claim_url = str(out.get("claim_url") or "")
@@ -5800,6 +5825,59 @@ class AgentOrchestrator:
              "role": "utility", "reason": "social action lane"},
             event_callback, approved=True)
 
+    def _social_op_claim(
+        self, op_id: str, target: str, params: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """Exactly-once claim for a social side effect (F4).
+
+        Returns (out, claimed): a non-None `out` is the terminal
+        result to use WITHOUT executing (replay of a 'done' claim, or
+        a refusal for 'interrupted'/'in_flight' — the action may have
+        already taken effect). `claimed=True` means we hold the claim
+        and must record complete/fail after the call."""
+        if self.state_db is None or not op_id:
+            return None, False
+        try:
+            claim = self.state_db.op_begin(
+                op_id,
+                intent_hash=hashlib.sha256(
+                    json.dumps(params, sort_keys=True, default=str)
+                    .encode()).hexdigest()[:32],
+                target=target)
+            state = str(claim.get("state") or "")
+            if state == "done":
+                try:
+                    out = (json.loads(claim["result"])
+                           if claim.get("result") else {"ok": True})
+                except (TypeError, ValueError):
+                    out = {"ok": True}
+                return out, False
+            if state != "started":
+                svc_name, cap_name = target.split(".", 1)
+                return {"ok": False, "error": (
+                    f"cannot safely retry — a prior {cap_name} attempt "
+                    f"on {svc_name} was {state} and may already have "
+                    "taken effect")}, False
+            return None, True
+        except Exception:
+            # State layer down → unguarded call; the action ledger still
+            # records the attempt.
+            return None, False
+
+    def _social_op_settle(
+        self, op_id: str, claimed: bool, out: dict[str, Any]
+    ) -> None:
+        if claimed and self.state_db is not None:
+            try:
+                if bool(out.get("ok")):
+                    self.state_db.op_complete(
+                        op_id, result=json.dumps(out, default=str)[:8000])
+                else:
+                    self.state_db.op_fail(
+                        op_id, result=str(out.get("error") or "failed")[:500])
+            except Exception:
+                pass  # operation bookkeeping must never break the call
+
     def _run_social_call(self, svc, service: str, task_id: str,
                          cap: str, args: dict, event_callback=None):
         """Resume of an approved connector capability (feed/post/…) —
@@ -5824,11 +5902,25 @@ class AgentOrchestrator:
                     params=dict(params), task_id=task_id)
             except Exception:
                 ledger_entry = None
-        try:
-            out = svc.call_capability(service, cap, approved=True,
-                                      **params)
-        except Exception as exc:
-            out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        # Exactly-once for side-effecting calls: a crash after the
+        # connector call but before the ledger finish would otherwise let
+        # a retry double-post. 'done' replays the stored result;
+        # 'interrupted'/'in_flight' refuses to re-run — the action may
+        # already have taken effect, and silently re-sending is worse
+        # than surfacing the uncertainty.
+        op_id = (
+            f"social:{service}:{cap}:{task_id}"
+            if cap in _SOCIAL_MUTATING_CAPS else ""
+        )
+        out, op_claimed = self._social_op_claim(
+            op_id, f"{service}.{cap}", params)
+        if out is None:
+            try:
+                out = svc.call_capability(service, cap, approved=True,
+                                          **params)
+            except Exception as exc:
+                out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        self._social_op_settle(op_id, op_claimed, out)
         ok = bool(out.get("ok"))
         if self.action_ledger is not None and ledger_entry is not None:
             try:

@@ -220,6 +220,103 @@ class StateDB:
                 (time.time(), domain, str(action)[:120],
                  str(detail)[:4000]))
 
+    # -- exactly-once operations ------------------------------------------------
+
+    def op_begin(self, operation_id: str, *, intent_hash: str = "",
+                 target: str = "") -> dict[str, Any]:
+        """Claim an operation id for an external side effect.
+
+        Returns one of:
+          {"state": "started"}    — caller may perform the action now.
+          {"state": "done", "result": …} — already completed; replay
+                the stored result instead of re-executing.
+          {"state": "in_flight"}  — another thread holds the claim.
+          {"state": "interrupted"} — a prior attempt died mid-flight;
+                the action MAY have executed — callers must not
+                auto-retry (exactly-once can't be proven), surface the
+                uncertainty instead.
+          {"state": "failed"}     — recorded failure; caller decides.
+        """
+        oid = str(operation_id)
+        with self._lock:
+            with self._conn() as conn:
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO operations"
+                    "(operation_id, intent_hash, target, state,"
+                    " started_at) VALUES(?, ?, ?, 'running', ?)",
+                    (oid, str(intent_hash), str(target)[:500],
+                     time.time()))
+                claimed = cur.rowcount > 0
+                row = conn.execute(
+                    "SELECT state, result, verification FROM operations"
+                    " WHERE operation_id=?", (oid,)).fetchone()
+        if claimed:
+            return {"state": "started", "operation_id": oid}
+        if row is None:
+            return {"state": "started", "operation_id": oid}
+        state = str(row[0])
+        if state == "done":
+            return {"state": "done", "operation_id": oid,
+                    "result": row[1], "verification": row[2]}
+        if state == "running":
+            return {"state": "in_flight", "operation_id": oid}
+        return {"state": state, "operation_id": oid, "result": row[1]}
+
+    def op_complete(self, operation_id: str, *, result: str = "",
+                    verification: str = "") -> bool:
+        """Mark a claimed operation done with its result. Only a
+        'running' claim can complete — a completed row is never
+        rewritten (first completion wins)."""
+        with self._lock:
+            with self._conn() as conn:
+                cur = conn.execute(
+                    "UPDATE operations SET state='done', result=?,"
+                    " verification=? WHERE operation_id=?"
+                    " AND state='running'",
+                    (str(result)[:8000], str(verification)[:2000],
+                     str(operation_id)))
+                return cur.rowcount > 0
+
+    def op_fail(self, operation_id: str, *, result: str = "") -> bool:
+        """Record a known failure — the action provably did NOT take
+        effect (call returned an error). Distinct from 'interrupted',
+        where the outcome is uncertain."""
+        with self._lock:
+            with self._conn() as conn:
+                cur = conn.execute(
+                    "UPDATE operations SET state='failed', result=?"
+                    " WHERE operation_id=? AND state='running'",
+                    (str(result)[:2000], str(operation_id)))
+                return cur.rowcount > 0
+
+    def op_get(self, operation_id: str) -> dict[str, Any] | None:
+        rows = self.execute(
+            "SELECT state, intent_hash, target, started_at, result,"
+            " verification FROM operations WHERE operation_id=?",
+            (str(operation_id),))
+        if not rows:
+            return None
+        state, intent_hash, target, started_at, result, verification = \
+            rows[0]
+        return {"operation_id": str(operation_id), "state": str(state),
+                "intent_hash": str(intent_hash),
+                "target": str(target), "started_at": float(started_at),
+                "result": result, "verification": verification}
+
+    def op_reap_interrupted(self, *, older_than_s: float = 0.0) -> int:
+        """Mark stale 'running' operations 'interrupted' — used at boot
+        so a crash mid-side-effect leaves an honest uncertainty marker
+        rather than a forever-in-flight row that silently blocks a
+        legitimate retry."""
+        cutoff = time.time() - max(0.0, float(older_than_s))
+        with self._lock:
+            with self._conn() as conn:
+                cur = conn.execute(
+                    "UPDATE operations SET state='interrupted'"
+                    " WHERE state='running' AND started_at < ?",
+                    (cutoff,))
+                return int(cur.rowcount or 0)
+
     # -- integrity ------------------------------------------------------------
 
     def integrity(self, *, parse_probe: bool = True) -> dict[str, Any]:

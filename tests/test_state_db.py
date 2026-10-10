@@ -200,6 +200,46 @@ class DocStoreTests(unittest.TestCase):
         self.assertFalse(doc.degraded)
 
 
+class ExactlyOnceTests(unittest.TestCase):
+    """F4: operations-table exactly-once claims for external side
+    effects — started/done/in_flight/interrupted semantics."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = StateDB(Path(self.tmp.name) / "state.db")
+        self.addCleanup(self.db.close)
+
+    def test_claim_complete_replay(self):
+        claim = self.db.op_begin("op-1", intent_hash="h", target="svc.post")
+        self.assertEqual(claim["state"], "started")
+        # A second claim while running reports in-flight, not a re-run.
+        self.assertEqual(self.db.op_begin("op-1")["state"], "in_flight")
+        self.assertTrue(self.db.op_complete("op-1", result='{"ok": true}'))
+        # A later claim replays the stored result — never re-executes.
+        replay = self.db.op_begin("op-1")
+        self.assertEqual(replay["state"], "done")
+        self.assertEqual(replay["result"], '{"ok": true}')
+        # First completion wins — a rewrite is refused.
+        self.assertFalse(self.db.op_complete("op-1", result="other"))
+
+    def test_fail_and_interrupted(self):
+        self.db.op_begin("op-f")
+        self.assertTrue(self.db.op_fail("op-f", result="remote 500"))
+        self.assertEqual(self.db.op_begin("op-f")["state"], "failed")
+        # A running claim ages into 'interrupted' — uncertain outcome,
+        # never an auto-skip.
+        self.db.op_begin("op-i")
+        reaped = self.db.op_reap_interrupted(older_than_s=-1)
+        self.assertEqual(reaped, 1)
+        self.assertEqual(self.db.op_begin("op-i")["state"], "interrupted")
+        self.assertEqual(self.db.op_get("op-i")["state"], "interrupted")
+        # 'done' rows are never reaped.
+        self.db.op_begin("op-d")
+        self.db.op_complete("op-d")
+        self.assertEqual(self.db.op_reap_interrupted(older_than_s=-1), 0)
+
+
 class StoreIntegrationTests(unittest.TestCase):
     """The migrated Tier-1 stores behave identically DB-backed."""
 

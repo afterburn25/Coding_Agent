@@ -61,6 +61,27 @@ map in `docs/SURFACE_INVENTORY.md`:
   unrelated fresh chats; `is_context_dependent` covers "did you just
   say"/"last suggestion" forms and `is_fragment_answer` filters
   continuation fragments at learn AND lookup time.
+- **BUG-017 (P2)** — `pending_options` bound globally: a bare
+  "option 2" in a fresh conversation resolved against a different
+  conversation's numbered proposal. Options now tagged with the
+  producing conversation id; all 11 orchestrator write sites converged
+  on `_record_conversation_exchange()`. Live-verified: fresh chat
+  "option 2" asks for clarification instead of inheriting another
+  conversation's proposal.
+- **F2 Recovery Center closed** — selective restore (`paths=` exact or
+  directory-prefix selection on `/api/backups/restore`), `restore_test`
+  (`/api/backups/restore_test` copies manifest files to scratch +
+  re-hashes the copies), `data_snapshot` stage wired into self-update
+  after `lkg_snapshot`; System page has Restore-test + Selective
+  restore buttons. F3 (A/B update + LKG rollback) was already landed:
+  `selfupdate.py` staged-apply + `lkg.py` snapshot/flags/auto-rollback.
+- **F4 exactly-once landed** — `StateDB` operations API
+  (`op_begin`/`op_complete`/`op_fail`/`op_get`/`op_reap_interrupted`);
+  mutating social-connector calls claim `social:{svc}:{cap}:{task_id}`
+  — `done` replays stored result, `interrupted`/`in_flight` refuses
+  auto-retry ("may already have taken effect"), so a crash can never
+  double-post. Boot reaps stale running claims. Remaining consumer
+  candidates: mission tool stages, approval-resume replays.
 
 Live dogfood verified this pass: fast_path math ~280ms, `and of Japan?`
 ellipsis → Tokyo, `don't open Chrome` preempted a mission drive

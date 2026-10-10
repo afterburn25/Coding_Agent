@@ -1087,6 +1087,7 @@ class AppState:
             action_ledger=self.action_ledger,
             artifacts=self.artifacts,
             social=lambda: self.social,
+            state_db=self.state_db,
         )
         # The /shutdown /exit /restart commands run the same graceful
         # close as the /api/shutdown endpoint — wired here because the
@@ -1121,6 +1122,13 @@ class AppState:
         except Exception:
             self.state_integrity = {"ok": False,
                                     "quick_check": "check failed"}
+        # Operations claimed by a prior run that never completed —
+        # mark them 'interrupted' so exactly-once callers see honest
+        # uncertainty instead of a forever-in-flight claim.
+        try:
+            self.state_db.op_reap_interrupted()
+        except Exception:
+            pass
         self.queue.enrich = self._queue_enrich_mission
         # Requirement-change propagation — a superseded conversation fact
         # flags in-flight mission nodes that still reference the stale
@@ -1880,8 +1888,9 @@ class AppState:
                     break
         if src is None:
             src = Path(self.workspace)
+        data_backup = getattr(getattr(self, "backups", None), "create", None)
         return SelfUpdate(Path(self.config_path).parent.resolve(),
-                          src, self.lkg)
+                          src, self.lkg, data_backup=data_backup)
 
     def _build_capability_registry(self, config) -> "CapabilityRegistry":
         """First-class Capability Registry — probed real states for what
@@ -8500,9 +8509,16 @@ class Handler(BaseHTTPRequestHandler):
                 label=str(body.get("label", ""))))
             return True
         if path == "/api/backups/restore":
+            sel = body.get("paths")
             out = self.state.backups.restore(
                 str(body.get("backup", "")),
-                dry_run=bool(body.get("dry_run", False)))
+                dry_run=bool(body.get("dry_run", False)),
+                paths=[str(p) for p in sel] if isinstance(sel, list) else None)
+            self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/backups/restore_test":
+            out = self.state.backups.restore_test(
+                str(body.get("backup", "")))
             self._json(out, 400 if not out.get("ok") else 200)
             return True
         if path == "/api/changes/undo":
