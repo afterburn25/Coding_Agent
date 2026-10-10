@@ -1030,6 +1030,29 @@ class SecretVaultTests(unittest.TestCase):
             self.assertIn("abc stays", out)
             self.assertEqual(vault.redact(""), "")
 
+    def test_corrupt_key_quarantined_never_rekeyed(self):
+        # Tier-2 audit: a truncated key file used to trigger silent
+        # regeneration → re-key → the next _save overwrote the vault with
+        # fresh-key ciphertext, destroying every stored secret.
+        from localcodeagent.secrets import SecretsKeyCorrupt
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            path = Path(td) / "s.vault"
+            vault = SecretVault(path)
+            vault.set("api.key", "ghp_secret_value_123")
+            blob_before = path.read_text()
+            key_path = path.with_name("s.key")
+            key_path.write_text(key_path.read_text()[:10])  # truncate
+
+            degraded = SecretVault(path)
+            # Reads degrade to empty — honest, not a silent reset.
+            self.assertIsNone(degraded.get("api.key"))
+            # Writes fail loudly instead of re-keying over the vault.
+            with self.assertRaises(SecretsKeyCorrupt):
+                degraded.set("other", "x")
+            # Evidence preserved: key quarantined, vault untouched.
+            self.assertTrue(key_path.with_name("s.key.corrupt").is_file())
+            self.assertEqual(path.read_text(), blob_before)
+
 
 class CodeIntelTests(unittest.TestCase):
     def test_extract_symbols_python(self):

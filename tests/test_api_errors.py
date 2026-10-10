@@ -175,6 +175,32 @@ class TestApiErrors(unittest.TestCase):
                              {"id": "asm-nope", "state": "verified"})
         self.assertEqual(code, 404)
 
+    def test_service_errors_map_to_4xx_not_500(self):
+        # Live POST-fuzz found these handlers leaking service-layer
+        # ValueError/RuntimeError as raw 500s on an empty body.
+        code, raw = self._post("/api/conversations/feedback", {})
+        self.assertEqual(code, 400, raw)
+        self.assertIn("rating", raw.decode())
+
+        code, raw = self._post("/api/policy/mode", {})
+        self.assertEqual(code, 400, raw)
+        code, raw = self._post("/api/policy/mode", {"mode": "balanced"})
+        self.assertEqual(code, 200, raw)
+
+        code, raw = self._post("/api/nexus-brain/initialize", {})
+        self.assertEqual(code, 400, raw)
+
+        code, raw = self._post("/api/nexus-brain/unlock", {})
+        self.assertIn(code, (400, 409), raw)
+
+        code, raw = self._post("/api/model-growth/job", {})
+        self.assertEqual(code, 400, raw)
+
+        # ComfyUI absent in test env: must be a clean dependency error
+        # (503) or unknown-backend 400 — never a raw 500.
+        code, raw = self._post("/api/image/backend/start", {})
+        self.assertIn(code, (400, 503), raw)
+
 
 if __name__ == "__main__":
     unittest.main()

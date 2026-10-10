@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import threading
+
+from ..fsutil import atomic_write_text
 import time
 import urllib.parse
 from pathlib import Path
@@ -95,7 +97,7 @@ class ResearchCoordinator:
             row["results"] += max(0, int(results))
             row["elapsed_sum"] += max(0.0, float(elapsed))
             try:
-                self._stats_path.write_text(
+                atomic_write_text(self._stats_path,
                     json.dumps({"version": 1, "providers": self._provider_stats}, ensure_ascii=False),
                     encoding="utf-8")
             except OSError:

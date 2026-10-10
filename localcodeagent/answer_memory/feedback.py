@@ -95,10 +95,6 @@ def is_positive(text: str) -> bool:
     return any(re.match(p, t) for p in _POSITIVE_PATTERNS)
 
 
-def is_negative(text: str) -> bool:
-    return is_correction(text)
-
-
 def is_learn_command(text: str) -> bool:
     t = str(text or "").strip().lower()
     return any(re.match(p, t) for p in _LEARN_PATTERNS)
@@ -125,15 +121,6 @@ def correction_answer(text: str) -> str:
         m = re.search(pat, t, flags=re.IGNORECASE | re.DOTALL)
         if m:
             return m.group(1).strip()
-    return ""
-
-
-def correction_question(text: str) -> str:
-    """Extract which prior answer a correction targets, e.g.
-
-    "No, Qwen isn't the default anymore" → corrected statement, not a question;
-    returns '' so the caller falls back to the previous exchange's question.
-    """
     return ""
 
 

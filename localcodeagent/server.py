@@ -11409,20 +11409,31 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/nexus-brain/initialize":
-                state = self.state.nexus_brain.initialize_creator(
-                    str(body.get("creator_name", "")).strip(),
-                    str(body.get("passcode", "")),
-                )
+                try:
+                    state = self.state.nexus_brain.initialize_creator(
+                        str(body.get("creator_name", "")).strip(),
+                        str(body.get("passcode", "")),
+                    )
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
                 synced = self.state.sync_nexus_brain()
                 token = self.state.open_brain_creator_session()
                 self._json({"ok": True, "brain": state, "synced": synced, "creator_token": token})
                 return
 
             if path == "/api/nexus-brain/unlock":
-                state = self.state.nexus_brain.unlock(
-                    str(body.get("creator_name", "")).strip(),
-                    str(body.get("passcode", "")),
-                )
+                try:
+                    state = self.state.nexus_brain.unlock(
+                        str(body.get("creator_name", "")).strip(),
+                        str(body.get("passcode", "")),
+                    )
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+                except RuntimeError as exc:
+                    self._json({"error": str(exc)}, 409)
+                    return
                 synced = self.state.sync_nexus_brain()
                 token = self.state.open_brain_creator_session()
                 self._json({"ok": True, "brain": state, "synced": synced, "creator_token": token})
@@ -11527,10 +11538,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/policy/mode":
-                saved = self.state.set_conversation_policy_mode(
-                    str(body.get("mode", "")),
-                    ethical_temperature=body.get("ethical_temperature"),
-                )
+                try:
+                    saved = self.state.set_conversation_policy_mode(
+                        str(body.get("mode", "")),
+                        ethical_temperature=body.get("ethical_temperature"),
+                    )
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
                 self._json({"ok": True, **saved})
                 return
 
@@ -11752,7 +11767,11 @@ class Handler(BaseHTTPRequestHandler):
                 if runtime is None:
                     self._json({"error": f"unknown image backend '{name}'"}, 400)
                     return
-                runtime.start()
+                try:
+                    runtime.start()
+                except RuntimeError as exc:
+                    self._json({"error": str(exc)}, 503)
+                    return
                 self._json({"ok": True, "image": self.state.images.summary()})
                 return
 
@@ -12403,12 +12422,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/conversations/feedback":
-                saved = self.state.conversation_manager.add_feedback(
-                    message_id=str(body.get("message_id", "")),
-                    rating=str(body.get("rating", "")),
-                    note=str(body.get("note", "")),
-                    conversation_id=str(body.get("conversation_id", "")) or None,
-                )
+                try:
+                    saved = self.state.conversation_manager.add_feedback(
+                        message_id=str(body.get("message_id", "")),
+                        rating=str(body.get("rating", "")),
+                        note=str(body.get("note", "")),
+                        conversation_id=str(body.get("conversation_id", "")) or None,
+                    )
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
                 self.state.model_growth.import_conversation_feedback(
                     self.state.conversation_manager.snapshot()
                 )
@@ -12516,15 +12539,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/model-growth/job":
-                job = self.state.model_growth.create_training_job(
-                    base_model_id=str(body.get("base_model_id", "qwen3-14b")).strip(),
-                    dataset_path=str(body.get("dataset_path", "")).strip(),
-                    method=str(body.get("method", "lora")).strip(),
-                    output_name=str(body.get("output_name", "")).strip(),
-                    trainer_backend=str(body.get("trainer_backend", self.state.config.trainer_backend)).strip(),
-                    trainer_command=str(body.get("trainer_command", self.state.config.trainer_command)).strip(),
-                    hyperparameters=dict(body.get("hyperparameters") or {}),
-                )
+                try:
+                    job = self.state.model_growth.create_training_job(
+                        base_model_id=str(body.get("base_model_id", "qwen3-14b")).strip(),
+                        dataset_path=str(body.get("dataset_path", "")).strip(),
+                        method=str(body.get("method", "lora")).strip(),
+                        output_name=str(body.get("output_name", "")).strip(),
+                        trainer_backend=str(body.get("trainer_backend", self.state.config.trainer_backend)).strip(),
+                        trainer_command=str(body.get("trainer_command", self.state.config.trainer_command)).strip(),
+                        hyperparameters=dict(body.get("hyperparameters") or {}),
+                    )
+                except (ValueError, FileNotFoundError) as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
                 self._json({"ok": True, "job": job})
                 return
 

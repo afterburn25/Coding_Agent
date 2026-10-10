@@ -3268,29 +3268,69 @@ class AgentOrchestrator:
         r"merged|checked|inspected|scanned|reviewed|fixed|repaired|"
         r"restarted|launched|rebuilt|recreated|generated|attached|"
         r"uploaded|downloaded|fetched|grabbed|did|found|scoped|flagged|"
-        r"started|finished|completed)\b)"
-        # Progressive claims — "I'm already connecting", "I've been watching".
-        + r"|\b(?:i['’]m|i am)\s+" + _CLAIM_ADVERBS +
+        r"started|finished|completed|updated|created|written|wrote|"
+        r"modified|edited|deleted|removed|saved|added|renamed|moved|"
+        r"copied|implemented|refactored|reverted|migrated|configured|"
+        r"enabled|disabled|stopped|cleaned|wiped|reworked|rewrote)\b)"
+        # Simple-past execution claims — "I updated the file", "I ran
+        # the tests". Phrasal-verb guards keep "I ran into an error",
+        # "I checked out a movie", "I started up" from flagging, and
+        # "changed"/"made" require a concrete object so "I changed my
+        # mind" / "I made a mistake" stay conversational.
+        + r"|\bi\s+" + _CLAIM_ADVERBS +
+        r"(?:committed|pushed|applied|patched|deployed|installed|executed|"
+        r"verified|tested|merged|inspected|scanned|reviewed|fixed|"
+        r"repaired|restarted|rebuilt|recreated|generated|attached|"
+        r"uploaded|downloaded|fetched|scoped|flagged|finished|completed|"
+        r"updated|created|wrote|modified|edited|deleted|removed|saved|"
+        r"added|renamed|moved|copied|implemented|refactored|reverted|"
+        r"migrated|configured|enabled|disabled|cleaned|wiped|found)\b"
+        + r"|\bi\s+" + _CLAIM_ADVERBS +
+        r"(?:ran|checked|started|stopped|built|launched)\s+"
+        r"(?!into\b|out\b|up\b|down\b|off\b|over\b|through\b|away\b|by\b)"
+        + r"|\bi\s+" + _CLAIM_ADVERBS + r"changed\s+(?!my\b)"
+        + r"|\bi\s+" + _CLAIM_ADVERBS +
+        r"made\s+(?:the|your|those|all|every|requested)\b"
+        + r"|\b(?:i['’]ve|i have|i['’]d|i just)\s+" + _CLAIM_ADVERBS +
+        r"made\s+(?:the|your|those|all|every|requested)\b"
+        # Progressive claims — "I'm already connecting", "I've been
+        # watching".
+        + r"|\b(?:i['’]m|i am|i['’]ve been|i have been)\s+"
+        + _CLAIM_ADVERBS +
         r"(?:connecting|syncing|pulling|cloning|pushing|committing|"
         r"applying|patching|deploying|installing|executing|verifying|"
         r"testing|merging|checking|inspecting|scanning|reviewing|fixing|"
         r"repairing|restarting|building|generating|regenerating|"
         r"reprocessing|sending|queuing|preparing|setting up|"
         r"working on|pulling|uploading|downloading|"
-        r"fetching|watching|flagging|running)\b"
+        r"fetching|watching|flagging|running|updating|creating|writing|"
+        r"modifying|editing|deleting|removing|saving|adding|renaming|"
+        r"moving|copying|implementing|refactoring|reverting|migrating|"
+        r"configuring|enabling|disabling|stopping|cleaning|wiping|"
+        r"changing|rewriting|reworking)\b"
         # Vaguer "I did it/that/what you asked" — still an execution claim
         # when nothing actually ran.
         + r"|\bi did\s+" + _CLAIM_ADVERBS +
         r"(?:it|that|all|everything|what you \w+|so|the \w+)\b"
         r"|✅|☑|☒|✔"
-        r"|\b(?:patch|fix|commit|changes?|update|build|code)\s+"
-        r"(?:has been |is |was )?(?:successfully\s+)?"
-        r"(?:applied|committed|pushed|deployed|installed)\b"
+        r"|\b(?:patch|fix|commit|changes?|update|build|code|bug|error|"
+        r"issue|files?|config(?:uration)?|module|migration|feature)\s+"
+        r"(?:has been |is |was |are )?(?:successfully\s+)?"
+        r"(?:applied|committed|pushed|deployed|installed|created|updated|"
+        r"fixed|resolved|saved|removed|deleted|added|written|modified|"
+        r"edited|implemented|merged|built|done|completed)\b"
+        # Habitual/historical readings disclaim this-turn work:
+        # "updated automatically", "applied upstream", "deleted last
+        # week", "resolved by the vendor".
+        r"(?!\s+(?:automatically|every\b|each\b|by\b|upstream|"
+        r"last\s+\w+|previously|earlier|historically|"
+        r"in\s+(?:version|release|v\d)))"
         r"|\ball\s+(?:the\s+)?tests?\s+(?:suite\s+)?(?:now\s+)?"
         r"pass(?:es|ed|ing)?\b"
         r"|\btests?\s+(?:suite\s+)?(?:now\s+)?pass(?:es|ed)\b"
         r"|\b(?:successfully|confirmed|verified)\s+"
-        r"(?:applied|connected|synced|pushed|committed|installed|fixed)\b",
+        r"(?:applied|connected|synced|pushed|committed|installed|fixed|"
+        r"created|updated|saved|removed|added|deleted|built|deployed)\b",
         re.I | re.S)
     _PROMISE_CLAIM_RE = re.compile(
         # Forward promises that never resolve — "I'll pull up the

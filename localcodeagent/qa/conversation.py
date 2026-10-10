@@ -527,9 +527,6 @@ def generate_scenarios(
     return scenarios
 
 
-def pool_categories() -> list[str]:
-    return list(_POOL)
-
 
 # ----------------------------------------------------------------------
 # §24 — composed hard-pattern generation

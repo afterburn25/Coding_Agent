@@ -578,6 +578,49 @@ class TruthGateTests(RecoveryLoopTests):
                        "✅ CI now passes.")
             self.assertTrue(hits)
 
+    def test_detector_catches_simple_past_and_work_verbs(self):
+        # Part-28 audit: the most common fabrication shapes missed —
+        # simple-past "I ran/updated" and the everyday work vocabulary
+        # (created/wrote/deleted/modified/edited/saved/made).
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            det = agent._executed_action_claims
+            for claim in (
+                "I ran the test suite — all green.",
+                "I updated the config file for you.",
+                "I created the file as requested.",
+                "I wrote the new module.",
+                "I deleted the stale cache.",
+                "I modified the handler to catch that.",
+                "I edited the file — it now returns 400.",
+                "I've made the requested changes.",
+                "I changed the port to 9000.",
+                "The bug is fixed.",
+                "The file has been created successfully.",
+                "Your changes are saved.",
+                "I've been rewriting the module.",
+                "I found the root cause in the logs.",
+            ):
+                self.assertTrue(det(claim), claim)
+
+    def test_detector_ignores_non_claim_shapes(self):
+        # Guards: phrasal-verb non-claims, mind-change hedges, and
+        # habitual/historical passive statements must not badge.
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            det = agent._executed_action_claims
+            for text in (
+                "I ran into an error trying that.",
+                "I checked out the new store downtown.",
+                "I made a mistake earlier, sorry.",
+                "I changed my mind about that.",
+                "The config is updated automatically on every release.",
+                "It says the file was deleted last week.",
+                "The bug was fixed upstream in v2.",
+                "Patches are applied by the vendor.",
+            ):
+                self.assertFalse(det(text), text)
+
 
 class _DeadProcess:
     def poll(self):
