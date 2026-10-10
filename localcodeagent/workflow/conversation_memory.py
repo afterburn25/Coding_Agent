@@ -1532,6 +1532,29 @@ class ConversationMemory:
                                     val, result["superseded"],
                                     subject_hint=hint)
                     if not reset and fact is None:
+                        # "the deploy region used to be us-east-1 but
+                        # now it's eu-west-1" — temporal supersession:
+                        # 'used to be' names the old value, the 'now'
+                        # tail carries the new one. Value-match first,
+                        # then the named subject's slot.
+                        utb = re.match(
+                            r"^(?:(?:the\s+|my\s+|our\s+)?"
+                            r"([a-z0-9][a-z0-9 '_-]{0,38}?)\s+)?"
+                            r"used\s+to\s+be\s+(.+?)\s*,?\s*"
+                            r"but\s+(?:now\s+)?"
+                            r"(?:it'?s|it\s+is|it\s+was)\s+"
+                            r"(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if utb:
+                            old_v = self._clean_value(utb.group(2))
+                            new_v = self._clean_value(utb.group(3))
+                            fact = self._correct_fact_value(old_v, new_v)
+                            if fact is None and utb.group(1):
+                                hint = self._clean_subject(utb.group(1))
+                                fact = self._retarget_latest_fact(
+                                    new_v, result["superseded"],
+                                    subject_hint=hint)
+                    if not reset and fact is None:
                         # Referential "it's X" after a correction marker —
                         # "never mind, it's 60" re-states the latest
                         # fact's value. Literal-shaped values only

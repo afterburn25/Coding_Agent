@@ -645,6 +645,20 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertTrue(learned["forgotten_miss"])
         self.assertEqual(self._active(cm), [])
 
+    def test_used_to_be_now_its_supersedes(self):
+        # "the deploy region used to be us-east-1 but now it's
+        # eu-west-1" — temporal supersession, value-matched.
+        cm = self._mem()
+        cm.learn_from_user("deploy region is us-east-1")
+        cm.learn_from_user("my editor is vim")
+        cm.learn_from_user(
+            "the deploy region used to be us-east-1 but now it's "
+            "eu-west-1")
+        active = self._active(cm)
+        self.assertIn("deploy region is eu-west-1", active)
+        self.assertNotIn("deploy region is us-east-1", active)
+        self.assertIn("my editor is vim", active)
+
     def test_disuse_retracts_usage_fact(self):
         # "i no longer use slack for comms" — the 'for comms' tail is
         # context; the usage fact mentioning slack retracts.
