@@ -1423,7 +1423,7 @@ class ConversationMemory:
                             r"pass(?:es)?|fails?|ships?|lands?|"
                             r"moves?|renews?|rotates?|continues?|pauses?|"
                             r"hosted (?:at|on)|serves?|costs?|lasts?|"
-                            r"is|are)\s+(.+)$",
+                            r"was|were|is|are)\s+(.+)$",
                             body, flags=re.IGNORECASE,
                         )
                         if decl:
@@ -2405,6 +2405,24 @@ class ConversationMemory:
             rows = [r for i, r in enumerate(rows)
                     if not any(overlaps[i] < overlaps[j]
                                for j in range(len(rows)))]
+        if len(rows) > 1:
+            # Past-tense reports ("the port was 8080") are history —
+            # when the same subject has a present-tense row, the 'was'
+            # row is background, not the answer.
+            def _tense_subject(row):
+                m = re.match(
+                    r"^(.+?)\s+(is|are|was|were)\b",
+                    str(row.get("text", "")).strip(),
+                    flags=re.IGNORECASE)
+                return (m.group(1).lower(), m.group(2).lower()) if m \
+                    else ("", "")
+
+            present = {_tense_subject(r)[0] for r in rows
+                       if _tense_subject(r)[1] in ("is", "are")}
+            if present:
+                rows = [r for r in rows
+                        if not (_tense_subject(r)[1] in ("was", "were")
+                                and _tense_subject(r)[0] in present)]
         return rows
 
     def active_facts(

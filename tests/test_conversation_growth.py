@@ -1321,6 +1321,30 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertEqual(learned["facts"], ["port is 8081"])
             self.assertIn("port is 8080", learned["superseded"])
 
+    def test_past_tense_banks_but_never_outranks_present(self):
+        # 'the tests were passing yesterday' is a self-qualifying
+        # historical report — banks, and yields to a same-subject
+        # present-tense fact in recall regardless of write order.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            learned = memory.learn_from_user(
+                "the tests were passing yesterday")
+            self.assertEqual(learned["facts"],
+                             ["tests were passing yesterday"])
+            memory.learn_from_user("the port was 8080")
+            memory.learn_from_user("the port is 8081")
+            self.assertEqual(
+                [r["text"] for r in memory.recall_facts(
+                    "what is the port")],
+                ["port is 8081"])
+            memory2 = ConversationMemory(Path(td) / "m2.json")
+            memory2.learn_from_user("the port is 8081")
+            memory2.learn_from_user("the port was 8080")
+            self.assertEqual(
+                [r["text"] for r in memory2.recall_facts(
+                    "what is the port")],
+                ["port is 8081"])
+
     def test_hearsay_acknowledged_never_banked(self):
         # BUG-073 — reported speech ("i heard the port is 9090",
         # "someone said the build is green") is a secondhand claim:
