@@ -4990,6 +4990,24 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   banked "my favorite color is my editor is neovim" — stacked-marker
   strip + bare-value copula guard + post-copula adverb strip. Live
   store repaired; "what's my editor?" → "your editor is emacs".
+- **BUG-033** (P1 forget lane): `forget the staging port fact` missed
+  (trailing "fact" broke the probe) then fell to a down model → 503.
+  Trailing container-nouns strip; no-match forgets get a deterministic
+  honest miss reply; referential probes ("forget it") can't
+  substring-match the store.
+- **BUG-034** (P2 write gate): `?`-less questions ("y do ppl use rust")
+  and abortive markers ("nm that last thing") banked as facts via the
+  generic decl pattern. Subject reject set covers colloquial leads;
+  `nm` = nevermind across forget/correction/marker-strip with
+  abortive-vs-statement tail split.
+- **BUG-035** (P1 negation): `X is not Y, it's Z` banked verbatim;
+  `X isn't Y anymore` claimed "Updated" while the fact stayed live.
+  New negated-copula matcher: with Z → canonical `X is Z` supersession;
+  bare → unique-fact retraction into `forgotten` (honest ack).
+- Live store repaired across all of these (corrupt rows invalidated,
+  legacy split-brain slots consolidated, stale facts retracted).
+  Batteries: 135 + 579 green across conversation_growth, netdiag,
+  self_knowledge, semantic_frame, answer_memory, autonomy.
 - Still open: UI click-dogfood (needs interactive browser), installer
   cycle execution, model-lane churn under shared-GPU contention
   (environmental — balanced-policy eviction + deployed instance).
