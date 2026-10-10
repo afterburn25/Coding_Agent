@@ -5020,10 +5020,17 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
 - **BUG-038** (P1 routing): `"what's running"` fell to the model which
   hallucinated "nothing's running" mid-execution. Bare running-queries
   now hit the deterministic inventory lane.
+- **BUG-039** (P1 regression, CI-flagged by the self-repair watcher):
+  the BUG-032 marker strip sent `"actually i prefer green now"` down the
+  `i prefer` fast-path, so it banked fresh instead of superseding
+  `favorite color`. Marker-prefixed preference restatements now retarget
+  the unique same-class fact first.
 - Ops note: backend launch args are `--workspace .dogfood --config
   .dogfood/config.json --host 127.0.0.1 --port 8790 --server` — a
   `--data-dir` restart attempt silently failed earlier this session and
   left a stale-code process serving; verify the pid/CLI after restart.
+  Detached launches need PowerShell `Start-Process` — a `(… &)` subshell
+  dies with its parent.
 - Live store repaired across all of these (corrupt rows invalidated,
   legacy split-brain slots consolidated, stale facts retracted).
   Batteries: 135 + 579 + 149 autonomy green across conversation_growth,

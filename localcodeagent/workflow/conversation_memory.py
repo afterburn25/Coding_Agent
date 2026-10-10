@@ -888,6 +888,27 @@ class ConversationMemory:
                 if match:
                     fact = (match.group(1).strip() if match.lastindex
                             else body.rstrip(".!?"))
+                    # A marker-prefixed preference restatement —
+                    # "actually i prefer green now" — corrects the
+                    # same-class preference fact ("my favorite color is
+                    # blue"), it isn't a brand-new fact. Try the
+                    # preference retarget before banking it fresh.
+                    if body != raw:
+                        pm = re.match(
+                            r"^i\s+(prefer|like|love)\s+(.+?)"
+                            r"(?:\s+(?:now|instead|today|this\s+time))?"
+                            r"[.!?]?$",
+                            fact, flags=re.IGNORECASE)
+                        if pm:
+                            tgt = self._retarget_latest_fact(
+                                pm.group(2), result["superseded"],
+                                preference_only=True)
+                            # No unique same-class referent — bank the
+                            # restated preference itself, trailer-free,
+                            # rather than corrupting an unrelated fact.
+                            fact = (tgt if tgt is not None
+                                    else f"i {pm.group(1).lower()} "
+                                         f"{pm.group(2)}")
                     break
             if fact is None:
                 # An imperative-led body is a request, not a statement —
