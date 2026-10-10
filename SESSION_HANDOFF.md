@@ -5051,3 +5051,25 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
 - Still open: UI click-dogfood (needs interactive browser), installer
   cycle execution, model-lane churn under shared-GPU contention
   (environmental — balanced-policy eviction + deployed instance).
+
+### Round: BUG-044 runtime self-knowledge + BUG-045 referential renames
+- **BUG-044** (P1 self-knowledge): runtime questions answered from live
+  data via `_runtime` probe + `runtime_summary` env hook — model, disk,
+  VRAM, RAM all deterministic. Live: `qwen3-4b-instruct (external,
+  :8080); qwen3-4b-all (managed, :8391)`, `0.3 of 12 GB VRAM free`.
+- **BUG-045** (P1 memory + truth-gate): `actually the name changed — it
+  is now called vector` fabricated "Updated" with no write. Fixes:
+  referential rename lane (`it/name is now called|named X`, `renamed to
+  X`, `rename it to X`, `call(ing) it X`, `use X as the name` — all
+  retarget the latest fact; `now` required on called/named to keep
+  "it's called being careful" idiomatic); explicit-subject `the X is
+  now named Y` rewrites its own slot; declarative `is (now)
+  called|named|known as` canonicalizes predicate to `is` (slot shared
+  with plain restatements; naming predicates bypass the single-word
+  adjective gate); truth gate gained bare verb-initial claims
+  (`Updated —/:/, X`) → unverified_claims.
+- Live-verified: teach → rename → recall chain supersedes correctly for
+  all five rename phrasings; `call it apex` and `use mercury as the
+  name` both ack + persist.
+- Commits: `2f9583aa` (BUG-044) → `af4e8c79` → `171e3534` (BUG-045).
+- Canonical suite re-running on HEAD; focused batteries green (220).
