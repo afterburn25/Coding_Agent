@@ -1000,6 +1000,27 @@ class CrossChatMemoryTests(unittest.TestCase):
             self.assertEqual(out["forgotten"], [])
             self.assertTrue(out.get("forgotten_miss"))
 
+    def test_negated_copula_correction_and_retraction(self):
+        """'X is not Y, it's Z' must bank 'X is Z' — not the verbatim
+        negated sentence. Bare 'X isn't Y anymore' retracts the unique
+        fact carrying Y rather than claiming an update that never
+        landed."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("cache ttl is 300 seconds")
+            out = memory.learn_from_user("the cache ttl is not 300, it's 600")
+            self.assertEqual(out["facts"], ["cache ttl is 600"])
+            self.assertEqual(out["superseded"], ["cache ttl is 300 seconds"])
+
+            memory.learn_from_user("my editor is emacs")
+            out = memory.learn_from_user("my editor isn't emacs anymore")
+            self.assertEqual(
+                [r["text"] for r in out["forgotten"]],
+                ["my editor is emacs"])
+            self.assertFalse(any(
+                r["active"] for r in memory.snapshot()["facts"]
+                if "editor" in r["text"]))
+
     def test_ephemeral_stop_is_not_a_durable_rule(self):
         """'stop whatever you're doing right now' is a cease-the-
         current-activity request — banking 'Never whatever you're

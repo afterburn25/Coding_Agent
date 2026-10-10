@@ -395,6 +395,26 @@ class ConversationMemory:
         text = str(hits[0].get("text", "")).strip()
         return text[: len(text) - len(old)].rstrip() + " " + new
 
+    def _retract_fact_value(self, old_value: str) -> list[dict[str, Any]]:
+        """'X isn't Y (anymore)' with no replacement — retire the unique
+        active fact whose value tail is Y. Same precision rule as
+        corrections: exactly one match, or guess nothing."""
+        old = str(old_value or "").strip().lower()
+        if not old:
+            return []
+        with self._lock:
+            hits = [
+                row for row in self._data.get("facts", [])
+                if isinstance(row, dict) and row.get("active", True)
+                and str(row.get("text", "")).strip().lower().endswith(old)
+            ]
+            if len(hits) != 1:
+                return []
+            hits[0]["active"] = False
+            hits[0]["updated_at"] = time.time()
+            self._save()
+            return [dict(hits[0])]
+
     @staticmethod
     def _fact_subject_ok(subj: str) -> bool:
         """Question/command-shaped openings are not fact subjects."""
@@ -924,6 +944,39 @@ class ConversationMemory:
                             # its subject — the corrected statement can be
                             # learned even when no old-value fact exists.
                             fact = f"{subj_txt} is {new_v}"
+                    elif not imperative_body and (neg := re.match(
+                            r"^(?:actually[,]?\s+|no[,]?\s+|wait[,]?\s+)?"
+                            r"(it|that|this|(?:my|the|our)\s+[a-z0-9]"
+                            r"[a-z0-9 ._-]{0,34}?|"
+                            r"[a-z0-9][a-z0-9 ._-]{0,34}?)\s+"
+                            r"(?:is|are|was|were)"
+                            r"(?:\s+not|\s+no\s+longer|n'?t)\s+(.+?)"
+                            r"(?:\s*,\s*(?:it'?s|it\s+is)\s+(.+?))?"
+                            r"\s*(?:anymore|any\s+more|any\s+longer)?"
+                            r"[.!?]?$",
+                            body, flags=re.IGNORECASE)):
+                        # "X is not Y, it's Z" corrects to Z; bare
+                        # "X isn't Y (anymore)" retracts the unique fact
+                        # carrying Y. Storing the negated sentence
+                        # verbatim ('cache ttl is not 300, it's 600')
+                        # answers nothing and misleads recall.
+                        subj_txt = self._clean_subject(neg.group(1))
+                        old_v = self._clean_value(neg.group(2))
+                        new_v = (self._clean_value(neg.group(3))
+                                 if neg.group(3) else "")
+                        if new_v:
+                            fact = self._correct_fact_value(old_v, new_v)
+                            if (
+                                fact is None
+                                and subj_txt
+                                and subj_txt.casefold() not in {
+                                    "it", "that", "this"}
+                                and self._fact_subject_ok(subj_txt)
+                            ):
+                                fact = f"{subj_txt} is {new_v}"
+                        else:
+                            result["forgotten"].extend(
+                                self._retract_fact_value(old_v))
                     elif corr:
                         inner = corr.group(1).strip()
                         inner_nyc = re.match(
