@@ -898,6 +898,26 @@ class ConversationMemory:
                     result.setdefault(key, []).extend(value)
             return result
 
+        # Coordinated declaratives — "my shell is zsh and my terminal
+        # is alacritty" states two facts. Only split when EVERY part is
+        # a complete subject+predicate statement; "ham and eggs" and
+        # "the stack is python and sqlite" stay whole.
+        and_parts = re.split(r"\s+and\s+", raw)
+        if len(and_parts) > 1:
+            decl = re.compile(
+                r"^(?:my|the|our|i|we|it)\b.{1,60}?\b"
+                r"(?:is|are|was|were|uses?|runs on|prefers?|likes?|"
+                r"loves?)\s+\S", re.IGNORECASE)
+            if all(decl.match(p.strip()) for p in and_parts):
+                for part in and_parts:
+                    sub = self.learn_from_user(
+                        part.strip(),
+                        project_id=project_id,
+                        conversation_id=conversation_id)
+                    for key, value in sub.items():
+                        result.setdefault(key, []).extend(value)
+                return result
+
         with self._lock:
             fact: str | None = None
             # Discourse/correction marker prefixes ride the front of a
@@ -1305,6 +1325,22 @@ class ConversationMemory:
                                 r"[\d_+./\\#-]", use_reset.group(1)):
                             reset = use_reset
                     if not reset:
+                        # "no not cobalt, it's onyx" — the negated value
+                        # is the old one, 'it's X' supplies the new. The
+                        # explicit contrast legitimizes word values the
+                        # bare-'it's' lane would reject.
+                        nyc = re.match(
+                            r"^(?:(?:actually|no|wait|instead|sorry|"
+                            r"never\s*mind|nm)[,]?\s+)*"
+                            r"(?:not|nope|nah|not\s+really)\s+"
+                            r"[^,;]{1,40}?[,;—]?\s+"
+                            r"(?:it'?s|it\s+is|the\s+\w+\s+is)\s+"
+                            r"(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if nyc:
+                            fact = self._retarget_latest_fact(
+                                nyc.group(1), result["superseded"])
+                    if not reset and fact is None:
                         # Referential "it's X" after a correction marker —
                         # "never mind, it's 60" re-states the latest
                         # fact's value. Literal-shaped values only

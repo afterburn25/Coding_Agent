@@ -525,6 +525,35 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertIn("my render box name is titan", active)
         self.assertEqual(len(active), 1)
 
+    def test_not_old_its_new_retargets(self):
+        # "no not cobalt, it's onyx" — explicit old/new contrast; the
+        # negated head legitimizes a word value the bare-'it's' lane
+        # would reject as non-literal.
+        cm = self._mem()
+        cm.learn_from_user("my render box name is cobalt")
+        cm.learn_from_user("no not cobalt, it's onyx")
+        active = self._active(cm)
+        self.assertIn("my render box name is onyx", active)
+        self.assertNotIn("my render box name is cobalt", active)
+
+    def test_and_coordinated_declaratives_split(self):
+        # "my shell is zsh and my terminal is alacritty" is two facts —
+        # banking the compound verbatim makes per-slot supersession and
+        # precise recall impossible.
+        cm = self._mem()
+        cm.learn_from_user(
+            "my shell is zsh and my terminal is alacritty")
+        active = self._active(cm)
+        self.assertIn("my shell is zsh", active)
+        self.assertIn("my terminal is alacritty", active)
+
+    def test_single_subject_and_compound_stays_whole(self):
+        # "the stack is python and sqlite" — one subject, compound
+        # value; the 'and' is inside the fact, not between facts.
+        cm = self._mem()
+        cm.learn_from_user("the stack is python and sqlite")
+        self.assertIn("stack is python and sqlite", self._active(cm))
+
     def test_marker_context_legitimizes_called(self):
         # "that's wrong — it's called cobalt" — the head marker supplies
         # correction intent, so 'called' without 'now' still retargets.
