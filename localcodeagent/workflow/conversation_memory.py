@@ -793,7 +793,7 @@ class ConversationMemory:
             return result
 
         forget_match = re.match(
-            r"^(?:forget(?:\s+(?:that|about))?|nevermind(?:\s+about)?|"
+            r"^(?:forget(?:\s+(?:that|about))?|never\s*mind(?:\s+about)?|"
             r"nm(?:\s+about)?|"
             r"stop\s+remembering|delete\s+(?:the\s+)?facts?"
             r"(?:\s+about)?)[,:]?\s*(.+)$",
@@ -805,10 +805,12 @@ class ConversationMemory:
             # re-enters the learning pipeline. True forget verbs keep
             # statement-shaped targets ('forget that my editor is
             # emacs' deletes that verbatim fact).
-            abortive = bool(re.match(r"^(?:nm|nevermind)\b", raw,
+            abortive = bool(re.match(r"^(?:nm|never\s*mind)\b", raw,
                                      flags=re.IGNORECASE))
             if not abortive or not re.search(
-                    r"\b(?:is|are|was|were|use|uses|go\s+with|set)\b",
+                    r"\b(?:is|are|was|were|use|uses|go\s+with|set|"
+                    r"make|change)\b"
+                    r"|it'?s\b",
                     forget_body, flags=re.IGNORECASE):
                 forgotten = self.forget(forget_body)
                 result["forgotten"].extend(forgotten)
@@ -871,7 +873,7 @@ class ConversationMemory:
             body = re.sub(
                 r"^(?:(?:actually|by\s+the\s+way|btw|also|so|fyi|note|"
                 r"quick\s+note|for\s+the\s+record|just\s+so\s+you\s+know|"
-                r"no|wait|sorry|nm|i\s+mean(?:t)?)[,:\s]+)+",
+                r"no|wait|sorry|nm|never\s*mind|i\s+mean(?:t)?)[,:\s]+)+",
                 "", raw, flags=re.IGNORECASE)
             for pattern in (
                 r"^remember\s+that\s+(.+)$",
@@ -1235,6 +1237,21 @@ class ConversationMemory:
                         if use_reset and re.search(
                                 r"[\d_+./\\#-]", use_reset.group(1)):
                             reset = use_reset
+                    if not reset:
+                        # Referential "it's X" after a correction marker —
+                        # "never mind, it's 60" re-states the latest
+                        # fact's value. Literal-shaped values only
+                        # (digits/versions/paths): "it's fine" is an
+                        # acknowledgement, not a correction.
+                        its = re.match(
+                            r"^(?:(?:actually|no|wait|instead|"
+                            r"never\s*mind|scratch\s+that|sorry|nm)"
+                            r"[,]?\s+)*it'?s\s+(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if (its and re.search(
+                                r"[\d_+./\\#-]", its.group(1))):
+                            fact = self._retarget_latest_fact(
+                                its.group(1), result["superseded"])
                     if reset:
                         val = reset.group(1)
                         # A class-known value ("green") prefers the

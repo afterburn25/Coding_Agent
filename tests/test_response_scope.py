@@ -471,6 +471,25 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertIn("my favorite color is blue", active)
         self.assertNotIn("my favorite color is green", active)
 
+    def test_nevermind_referential_update_retargets(self):
+        # "never mind, it's 60" — spelled-out abortive marker + "it's X"
+        # tail is a referential update of the latest fact, not a forget
+        # and not a model turn.
+        cm = self._mem()
+        cm.learn_from_user("the api timeout is 45 seconds")
+        learned = cm.learn_from_user("never mind, it's 60")
+        active = self._active(cm)
+        self.assertIn("api timeout is 60", active)
+        self.assertNotIn("api timeout is 45 seconds", active)
+
+    def test_nonliteral_its_does_not_corrupt(self):
+        # "it's fine" is an acknowledgement — no literal value means no
+        # retarget, and the latest fact survives untouched.
+        cm = self._mem()
+        cm.learn_from_user("the api timeout is 45 seconds")
+        cm.learn_from_user("never mind, it's fine")
+        self.assertIn("api timeout is 45 seconds", self._active(cm))
+
     def test_restatement_acknowledgement(self):
         from localcodeagent.agent.orchestrator import AgentOrchestrator
         ack = AgentOrchestrator.training_acknowledgement(
