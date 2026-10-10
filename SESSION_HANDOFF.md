@@ -5137,6 +5137,17 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
 - **BUG-064** P0: acked-but-unbanked fact (`code freeze lifts`) — added `lifts/holds/begins/resumes` predicates; **split-brain store**: `reload_model_configuration` built a second ConversationMemory while `agent.brain.hippocampus` kept the stale instance → stale snapshot saves clobbered fresh rows. Reload now reuses the live store and re-points hippocampus handles. Generic `when do X run` status regex narrowed to generic subjects; precision gate is plural-tolerant with trailing-verb retry (`7c6cc9ee` + `6d88bdce`).
 - Canonical suite: **3764 passed, 4 skipped, 530 subtests** (mid-session run). All probes live-verified on latest.
 
+### BUG-065..072 round (scoped undo + truth-gate + spelling magnets)
+- **BUG-065** `undo that <X> change` binds the named referent — journal subject match first, else `ConversationMemory.revert_fact()` restores the superseded row; unmatched referents get an honest miss, never a blind latest-row revert. Status-verb family (`pass/fail/ship/land`) banks declaratively (`c2c2c307`).
+- **BUG-066** P0: `respond(execute=False)` dry-run (the `would_answer` no-model probe) ran `_scoped_undo` for real — probe restored quasar, real call then reverted *again* to pulsar. Journal + memory branches are now read-only under dry run (`3ca4cbf8`).
+- **BUG-067** named referent beats session `last_executed` undo (`revert the printer change` no longer reverts `worker_ceiling`) (`a7e7617a`).
+- **BUG-068** loose referential forms (`undo the correction to the editor`) scope on entity terms; `is now/currently/just X` strips leading adverbs (`a9da7507` + `8ef2b5a8` — `undo the last change` stopword reduction).
+- **BUG-069** recall retry only drops trailing *verb* tokens — `what color is the sky` can no longer hijack `favorite color` (`52f31235`).
+- **BUG-070/072** spelling normalizer name-mangling: boundary appends (`vega`→`vegas`) blocked; off-skeleton candidates (`boson`→`boston`, `fermion`→`version`) need a ≥4-char shared prefix — **context presence deliberately does NOT legitimate** (a corrupted value in history self-perpetuated the fix) (`ff17678b` + `3207c7e7`).
+- **BUG-071** `put/switch/take/move <X> back` + `roll back the <X>` feed the scoped resolver; pronoun/quantifier captures stay generic (`3a839788`).
+- Canonical suite on `52f31235`: **3752 passed, 4 skipped, 530 subtests** all green. Scoped undo live-verified end-to-end incl. across restart (memory-fact restore with no journal row) and repeated toggles (falcon↔orion, dart↔wisp).
+- **Watch**: deterministic undo replies still get Answer-Memory repeat wrappers (`Unchanged from last time — Reverted …`) — cosmetic only; state verified correct via store. If a mutating turn ever replays a *stale* reply instead of executing, that's a P0 — re-check if seen.
+
 ### Ops notes
 - Kill backend by LISTENING PORT only — a filter containing 'localcodeagent' self-kills the powershell; `Start-Process` detaches fine.
 - Live dogfood store: `.dogfood/.dogfood/runtime/data/conversation_memory.json` (nested — workspace `.dogfood` + config-relative path).
