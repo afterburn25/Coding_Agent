@@ -1352,6 +1352,40 @@ class AutonomyApiTests(unittest.TestCase):
                 if getattr(state, "autonomy", None) is not None:
                     state.autonomy.stop()
 
+    def test_memory_command_never_spawns_goal(self):
+        # BUG-083 — "forget db backups run nightly and the logs archive
+        # weekly" carried the cadence word 'weekly' inside the forget
+        # target; the mission lane read it as a schedule request and
+        # minted a standing goal. Memory writes/erases are never work
+        # requests; "remember to check X weekly" stays a reminder.
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import AppState
+            ws = Path(td)
+            cfg = AgentConfig(profiles_onboarding_gate=False,
+                models=[ModelProfile(
+                    id="fake", endpoint="http://127.0.0.1:1/v1",
+                    model="fake-model", roles=["primary_coder"],
+                    runtime="external")],
+                process_watchdog=False, research_enabled=False,
+            )
+            state = AppState(cfg, ws, ws / ".runtime")
+            try:
+                for msg in (
+                    "forget db backups run nightly and the logs archive weekly",
+                    "forget the wifi password",
+                    "remember the deploy is friday",
+                    "delete the facts about the port",
+                ):
+                    self.assertIsNone(state._mission_command(msg), msg)
+                out = state._mission_command(
+                    "remember to check the deploys weekly")
+                self.assertIsNotNone(out)
+                self.assertIn("Standing goal", out["content"])
+            finally:
+                if getattr(state, "autonomy", None) is not None:
+                    state.autonomy.stop()
+
 
 class ChatAttachmentTests(unittest.TestCase):
     """Chat '+' attachments: text files inline into the model's user
