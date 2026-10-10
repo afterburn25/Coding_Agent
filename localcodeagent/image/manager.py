@@ -2015,7 +2015,7 @@ class ImageManager:
             _atomic_json_write(self.history_path, history[:2000])
         for output in job.outputs:
             meta=Path(output).with_suffix(Path(output).suffix+".json")
-            meta.write_text(json.dumps(row, indent=2), encoding="utf-8")
+            _atomic_json_write(meta, row)
 
     def _discard_backend_work(self, job: "ImageJob") -> None:
         """Best-effort cancel of the job's backend queue item. Never raises —
