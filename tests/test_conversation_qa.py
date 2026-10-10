@@ -770,6 +770,32 @@ class MissionConversationIsolationTests(unittest.TestCase):
                 any("fix the tests" in str(m.get("content"))
                     for m in hist), hist)
 
+    def test_pure_chat_reply_not_project_work(self):
+        # BUG-012: a conversational answer (no tools, no files) is not
+        # "recent project work" — recording it lets a wrong answer
+        # echo back into later prompts via token overlap.
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, _ = _make(Path(td))
+            agent.run("hello there")
+            self.assertEqual(
+                agent.memory._data.get("task_history"), [])
+
+    def test_work_order_memory_marked_and_excluded(self):
+        # Mission work still reaches project memory (its own lane reads
+        # it), but tagged so chat recall can never surface it — even for
+        # topically overlapping queries.
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, _ = _make(Path(td))
+            agent.run_work_order(
+                "Work the scoped lane of this mission — fix the file")
+            hist = agent.memory._data.get("task_history", [])
+            self.assertTrue(hist)
+            self.assertTrue(all(r.get("mission") for r in hist))
+            ctx = agent.memory.context_for(
+                "the scoped lane work",
+                exclude_task_ids=agent.tasks.mission_ids())
+            self.assertNotIn("scoped lane", ctx)
+
 
 class UnresolvedReferentNudgeTests(unittest.TestCase):
     """A command verb over a referent bound to nothing ("rename it —

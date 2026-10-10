@@ -276,6 +276,18 @@ class TaskStore:
         with self._lock:
             return [self._tasks[i].as_dict() for i in self._order[-max(1, limit):]][::-1]
 
+    def mission_ids(self) -> set[str]:
+        """Ids of tasks owned by a mission/autonomy lane — machine work
+        orders, never user utterances. Used to exclude their memory
+        records from conversational recall (incl. rows recorded before
+        the lane flag existed)."""
+        with self._lock:
+            return {
+                t.id for t in self._tasks.values()
+                if t.mission_id
+                or str(t.mode) in {"work_order", "autonomy", "self_repair"}
+            }
+
     def by_status(self, *statuses: str) -> list[dict[str, Any]]:
         """All tasks with any of ``statuses``, newest first — the full-ledger
         alternative to bounded ``recent()`` windows for correctness-sensitive

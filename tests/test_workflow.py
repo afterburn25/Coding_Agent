@@ -1809,6 +1809,45 @@ class ProjectMemoryRelevanceTests(unittest.TestCase):
             self.assertEqual(
                 mem.context_for("what did you work on?"), "")
 
+    def test_mission_records_never_reach_chat_recall(self):
+        # BUG-012: a mission work order shares topical tokens with casual
+        # questions ("fix", "test", "worktree") — token overlap alone
+        # can't keep machine-authored work prose out of chat context.
+        # Mission-tagged rows are excluded regardless of overlap.
+        with tempfile.TemporaryDirectory() as td:
+            mem = self._mem(Path(td))
+            mem.remember_task(
+                task_id="m1",
+                prompt="Apply the diagnosis — Self-repair incident "
+                       "ri-98c0c16b2b in the repair worktree",
+                summary="The test file tests/test_voice_polish.py is "
+                        "missing from repair worktree ri-98c0c16b2b",
+                files_changed=["tests/test_voice_polish.py"],
+                mission=True)
+            out = mem.context_for("what's inside that worktree?")
+            self.assertEqual(out, "")
+            self.assertNotIn("98c0c16b2b", out)
+
+    def test_legacy_mission_rows_excluded_by_task_id(self):
+        # Rows recorded before the mission flag existed carry no flag —
+        # the live ledger's mission task-id set still excludes them.
+        with tempfile.TemporaryDirectory() as td:
+            mem = self._mem(Path(td))
+            mem.remember_task(
+                task_id="legacy-mission",
+                prompt="Work the scoped lane for the repair worktree",
+                summary="repair worktree ri-98c0c16b2b is missing "
+                        "tests/test_voice_polish.py",
+                files_changed=["tests/test_voice_polish.py"])
+            out = mem.context_for(
+                "what's inside that worktree?",
+                exclude_task_ids={"legacy-mission"})
+            self.assertEqual(out, "")
+            # Without the exclusion set the legacy row still matches —
+            # proving the guard, not the token gate, did the work.
+            self.assertIn("98c0c16b2b",
+                          mem.context_for("what's inside that worktree?"))
+
 
 if __name__ == "__main__":
     unittest.main()

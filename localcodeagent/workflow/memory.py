@@ -34,7 +34,7 @@ class ProjectMemory:
     def _save(self) -> None:
         atomic_write_text(self.path, json.dumps(self._data, indent=2, ensure_ascii=False))
 
-    def remember_task(self, *, task_id: str, prompt: str, summary: str, files_changed: list[str], review: str = "") -> None:
+    def remember_task(self, *, task_id: str, prompt: str, summary: str, files_changed: list[str], review: str = "", mission: bool = False) -> None:
         with self._lock:
             self._data.setdefault("task_history", []).append({
                 "task_id": task_id,
@@ -43,6 +43,7 @@ class ProjectMemory:
                 "summary": summary[:4000],
                 "files_changed": files_changed[:100],
                 "review": review[:2000],
+                "mission": bool(mission),
             })
             self._data["task_history"] = self._data["task_history"][-50:]
             self._save()
@@ -74,19 +75,28 @@ class ProjectMemory:
         return set(re.findall(r"[a-z0-9_]{4,}", str(text).lower()))
 
     def context_for(self, query: str, *, limit: int = 6,
-                    max_items: int = 3) -> str:
+                    max_items: int = 3,
+                    exclude_task_ids: set | None = None) -> str:
         """Relevance-gated recall for the conversation lane: only task
         records that share a content token with the query are injected.
         Returns "" when nothing matches — a chat turn about an unrelated
         topic must not get six verbatim mission/workstream summaries
-        dumped into its context (the model reliably echoes them)."""
+        dumped into its context (the model reliably echoes them).
+        Mission/work-order records are excluded entirely — machine-
+        authored work prose is not conversational context. ``exclude_task_ids``
+        catches legacy rows recorded before the ``mission`` flag existed
+        (the row's stored task id resolves against the live ledger)."""
         qt = self._tokens(query) - self._QUERY_GENERIC
         if not qt:
             return ""
+        exclude = set(exclude_task_ids or ())
         with self._lock:
             items = list(self._data.get("task_history", [])[-max(1, limit):])
         scored = []
         for item in reversed(items):  # newest first
+            if (item.get("mission")
+                    or str(item.get("task_id") or "") in exclude):
+                continue
             hay = self._tokens(
                 f"{item.get('prompt','')} {item.get('summary','')} "
                 f"{' '.join(map(str, item.get('files_changed', [])))}")

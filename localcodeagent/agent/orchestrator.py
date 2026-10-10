@@ -4,6 +4,7 @@ import base64
 import http.client
 import inspect
 import json
+import os
 import re
 import secrets
 import threading
@@ -4600,7 +4601,10 @@ class AgentOrchestrator:
 
         profile = self.router.get_profile(decision.model_id)
         provider = self._provider_for(profile)
-        project_memory = self.memory.context()
+        project_memory = self.memory.context_for(
+            task.prompt or "",
+            exclude_task_ids=self.tasks.mission_ids()) \
+            or self.memory.context()
         index_summary = self.repository_index.ensure()
         recovered_self_hosting = self._self_hosting_context()
         try:
@@ -6634,13 +6638,21 @@ class AgentOrchestrator:
         self._act_update(session.task_id, act, state="completed", callback=session.event_callback)
         if self.activities is not None:
             self.activities.close_open(session.task_id, "completed")
-        self.memory.remember_task(
-            task_id=task.id,
-            prompt=task.prompt,
-            summary=task.summary,
-            files_changed=task.files_changed,
-            review=task.review,
-        )
+        mission_attributed = self._mission_attributed(session.task_id)
+        # Project memory is WORK memory — a pure conversational reply
+        # (no files changed, no tools ran) is not "recent project work".
+        # Recording it both pollutes recall with chat prose and lets a
+        # wrong answer echo back into later prompts (BUG-012: a stale
+        # repair verdict re-injected itself via "cache" overlap).
+        if task.files_changed or session.tool_events or mission_attributed:
+            self.memory.remember_task(
+                task_id=task.id,
+                prompt=task.prompt,
+                summary=task.summary,
+                files_changed=task.files_changed,
+                review=task.review,
+                mission=mission_attributed,
+            )
         if task.files_changed:
             try:
                 self.repository_index.build()
@@ -6651,7 +6663,6 @@ class AgentOrchestrator:
             status,
             verification_passed=(None if not current_round else not verification_failed),
         )
-        mission_attributed = self._mission_attributed(session.task_id)
         if self.conversation_memory is not None and not mission_attributed:
             self.conversation_memory.record_exchange(session.user_text, session.main_content)
         if self.conversation_manager is not None and not mission_attributed:
@@ -9351,7 +9362,8 @@ class AgentOrchestrator:
             # queries get no task-history dump at all (the model reliably
             # echoes whatever memory block it is shown). Work lanes keep
             # the full recency window — recency IS their context.
-            project_memory = self.memory.context_for(user_text)
+            project_memory = self.memory.context_for(
+                user_text, exclude_task_ids=self.tasks.mission_ids())
             index_act = self._act(
                 task.id, "investigating", "Investigating",
                 "Scanning repository index and project context",
@@ -9476,6 +9488,16 @@ class AgentOrchestrator:
                 messages.extend(reversed(kept))
             messages.append({"role": "user", "content": self._vision_user_content(
                 user_content, vision_image_paths, profile)})
+        # Debug hook — NEXUS_DEBUG_PROMPT_DUMP=<path> writes the exact
+        # model-facing message list for QA/contamination tracing.
+        _dump = os.environ.get("NEXUS_DEBUG_PROMPT_DUMP")
+        if _dump:
+            try:
+                Path(_dump).write_text(
+                    json.dumps(messages, ensure_ascii=False, indent=1),
+                    encoding="utf-8")
+            except Exception:
+                pass
         session = _AgentSession(
             task_id=task.id,
             user_text=user_text,
