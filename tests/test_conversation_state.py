@@ -187,6 +187,19 @@ class TopicTests(unittest.TestCase):
         drive(ctx, "back to Isabella")
         self.assertIn("Isabella", ctx.active_topic)
 
+    def test_emdash_return_keeps_active_topic(self):
+        # "anyway — back to the voice" — discourse dash must not hide the
+        # return marker, and an unresolvable referent falls back to the
+        # parked/active topic rather than minting a bogus one.
+        ctx = ActiveContext()
+        drive(ctx, "i'm trying to tune the kokoro voice preset — it sounds flat")
+        drive(ctx, "what's the weather like in tokyo right now?")
+        drive(ctx, "anyway — back to the voice. what preset were we discussing?")
+        self.assertIn("kokoro", ctx.active_topic)
+        drive(ctx, "what time is it?")
+        drive(ctx, "ok continue")
+        self.assertIn("kokoro", ctx.active_topic)
+
     def test_nested_topics(self):
         ctx = ActiveContext()
         drive(ctx, "topic: the installer")

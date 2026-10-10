@@ -399,6 +399,7 @@ _ACTION_LEAD_RE = re.compile(
     r"render|remember|forget|tell|explain|describe|summari[sz]e|print|"
     r"export|import|schedule|post|share|clean|sync|publish|merge|test|"
     r"verify|apply|use|try|switch|launch|revert|undo|redo|reset|"
+    r"continue|proceed|carry\s+on|go\s+on|keep\s+going|"
     r"diagnos\w*|inspect|scaffold|clone|answer|help|join|sign|log|read|"
     r"watch|review|design|redesign|document|improve|optimize|translate|"
     r"record|attach|insert|calculate|compute|evaluate|solve|retry|"

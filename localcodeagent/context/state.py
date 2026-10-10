@@ -55,7 +55,9 @@ _CANON_ENTITIES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
      ("isabella", "the voice", "her voice", "your voice", "the preset")),
     (r"\bchatterbox\b(?:\s*turbo)?\b", "voice-engine:chatterbox",
      "engine", ("chatterbox", "chatterbox turbo", "the engine")),
-    (r"\bkokoro\b", "voice-engine:kokoro", "engine", ("kokoro",)),
+    (r"\bkokoro\b", "voice-engine:kokoro", "engine",
+     ("kokoro", "the voice", "the voice preset",
+      "kokoro voice preset", "the engine")),
     (r"\bdevin\b", "agent:devin", "agent", ("devin",)),
     (r"\bgithub\b", "service:github", "service", ("github", "the remote")),
     (r"\bcomfyui\b", "app:comfyui", "app", ("comfyui", "comfy")),
@@ -279,7 +281,22 @@ def derive_topic(text: str, env: Any = None,
     if entities:
         top = max(entities, key=lambda e: e.get("conf", 0))
         if top.get("conf", 0) >= 0.8:
-            return top["label"][:60]
+            label = top["label"][:60]
+            # Prefer the fuller noun phrase the user actually wrote —
+            # 'kokoro voice preset' over the bare 'kokoro' alias, so
+            # parked/recalled topics keep their descriptive name.
+            m = re.search(
+                r"\b" + re.escape(label.lower()) +
+                r"((?:\s+[a-z][a-z0-9'/-]*){1,3})", t.lower())
+            if m:
+                words = (label.lower() + m.group(1)).split()
+                while len(words) > 1 and \
+                        (words[-1] in _WORD_STOP
+                         or words[-1] in _ENTITY_STOP):
+                    words.pop()
+                if len(words) > 1:
+                    label = " ".join(words)[:60]
+            return label
     return ""
 
 
@@ -417,7 +434,7 @@ def extract_decision(text: str, env: Any = None) -> dict | None:
 # ---------------------------------------------------------------------------
 
 _RETURN_RE = re.compile(
-    r"^\s*(?:(?:okay|ok|so|anyway|alright)[,!\s]*)*"
+    r"^\s*(?:(?:okay|ok|so|anyway|alright)[,!\s—–]*)*"
     r"(?:let'?s\s+|we\s+)?(?:go\s+)?back\s+to\s+([^—–]{1,60}?)"
     r"(?:\s*[—–,.;]|\s*$)|"
     r"^\s*(?:returning|back)\s+to\s+([^—–]{1,60}?)(?:\s*[—–,.;]|\s*$)",
@@ -648,14 +665,33 @@ def update_state(ctx: Any, env: Any, text: str,
         except Exception:
             ent = None
         if ent is not None:
+            lab = str(ent.get("label") or target)
+            if ctx.active_topic and \
+                    lab.lower() in ctx.active_topic.lower():
+                # The richer active label already names this entity —
+                # 'kokoro voice preset' covers 'kokoro'; don't park it
+                # for a shorter alias.
+                return
             if ctx.active_topic:
                 ctx.topic_stack.insert(0, {
                     "label": ctx.active_topic, "ts": now,
                     "status": "paused"})
                 ctx.topic_stack = ctx.topic_stack[:12]
-            ctx.active_topic = str(ent.get("label") or target)
+            ctx.active_topic = lab
         elif target:
-            ctx.active_topic = target
+            if ctx.topic_stack:
+                # "back to the voice" with an unresolvable referent —
+                # the parked topic is what the user left, not a new
+                # subject. Restore it rather than minting a bogus
+                # topic label and stranding the real one.
+                hit = ctx.topic_stack.pop(0)
+                if ctx.active_topic:
+                    ctx.topic_stack.insert(0, {
+                        "label": ctx.active_topic, "ts": now,
+                        "status": "paused"})
+                ctx.active_topic = hit.get("label", ctx.active_topic)
+            else:
+                ctx.active_topic = target
 
     if ret_m:
         _restore(next((g for g in ret_m.groups() if g), ""))

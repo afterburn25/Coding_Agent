@@ -442,7 +442,8 @@ _TOPIC_SHIFT_RE = re.compile(
 # Return-to-topic markers (§21) — the target may be anaphoric; the
 # resolver decides what it restores.
 _TOPIC_RETURN_RE = re.compile(
-    r"^(?:back\s+to|let'?s\s+(?:go\s+)?back\s+to|return(?:ing)?\s+to|"
+    r"^(?:(?:okay|ok|so|anyway|alright)[,!\s—–]*)*"
+    r"(?:back\s+to|let'?s\s+(?:go\s+)?back\s+to|return(?:ing)?\s+to|"
     r"go\s+back\s+to|get(?:ting)?\s+back\s+to|resume|resuming|"
     r"continu(?:e|ing)\s+(?:the|that|with))\b[,\s]*(.{0,80})",
     re.IGNORECASE)
