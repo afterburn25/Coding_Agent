@@ -130,7 +130,7 @@ if ($rc -ge 8) {
     # Observed: a locked exe mid-mirror threw here and left the app DOWN —
     # the next clean run saw nothing running and skipped relaunch too.
     if ($running) {
-        Write-Host "Partial deploy — relaunching NexusCore.exe ..."
+        Write-Host "Partial deploy - relaunching NexusCore.exe ..."
         Start-Process (Join-Path $Dest "NexusCore.exe")
     }
     throw "robocopy failed with exit code $rc"
