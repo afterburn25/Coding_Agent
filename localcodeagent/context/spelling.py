@@ -377,6 +377,15 @@ def _candidates(token: str, ctx_words: set[str], *,
         # 'jira'->'ira', 'kanye'->'kane', 'slack'->'lack'.
         if word == token[1:] or word == token[:-1]:
             continue
+        # The mirror image is just as unsafe: a candidate that is the
+        # token PLUS one edge character assumes the user dropped a
+        # letter at the boundary — 'vega'->'vegas', 'priya'->'priyam'.
+        # True letter-drop typos almost always happen mid-word
+        # ('desrt'->'dessert', 'chek'->'check' stay allowed); edge
+        # shapes on an unknown token are names, not mistakes.
+        if (len(word) == len(token) + 1
+                and (word[:-1] == token or word[1:] == token)):
+            continue
         # Short tokens fix conservatively — every letter the user typed
         # must survive in the fix (insertions 'desrt'->'dessert' and
         # 'chek'->'check' qualify), and pure anagrams must be a single

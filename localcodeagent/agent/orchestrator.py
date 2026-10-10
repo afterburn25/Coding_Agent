@@ -2619,6 +2619,9 @@ class AgentOrchestrator:
                     r"^(?:is|are|was|were|do|does|did)\s+|^about\s+",
                     "", topic, flags=re.IGNORECASE).strip()
                 topic = re.sub(
+                    r"\s+(?:called|named|known\s+as)\s*$",
+                    "", topic, flags=re.IGNORECASE).strip()
+                topic = re.sub(
                     r"\s+(?:now|anymore|any\s+more|any\s+longer|"
                     r"today|currently|these\s+days)\s*$",
                     "", topic, flags=re.IGNORECASE).strip()

@@ -189,6 +189,18 @@ class TestNormalizeUserText(unittest.TestCase):
         ):
             self.assertEqual(self.norm(sent), sent, sent)
 
+    def test_boundary_append_never_a_fix(self):
+        """'vega' -> 'vegas' corrupted a named monitor live. A candidate
+        that is the token plus one edge character assumes the user
+        dropped a boundary letter — names die to it. Mid-word letter
+        drops ('desrt'->'desert') still fix."""
+        for sent in (
+            "my monitor is named vega",
+            "the project is vega",
+            "meet me at the vega diner",
+        ):
+            self.assertEqual(self.norm(sent), sent, sent)
+
     def test_dictionary_words_never_mangled(self):
         """The protective dictionary (SCOWL-60 + proper names) shields
         real words the curated vocab never listed — 'threw', 'spilled',
