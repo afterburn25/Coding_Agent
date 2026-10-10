@@ -3206,5 +3206,28 @@ class EngineeringMissionTests(unittest.TestCase):
             sup.stop()
 
 
+class LearningConsolidateInternalTests(unittest.TestCase):
+    def test_no_governor_reports_unwired(self):
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            res = sup._default_internal(
+                {}, {"instruction": "internal:learning_consolidate"})
+            self.assertTrue(res["ok"])
+            self.assertIn("no governor wired", res["output"])
+            sup.stop()
+
+    def test_runs_governor_consolidate(self):
+        from localcodeagent.learning.governor import LearningGovernor
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            sup.learning = LearningGovernor(Path(td) / "learning")
+            res = sup._default_internal(
+                {}, {"instruction": "internal:learning_consolidate"})
+            self.assertTrue(res["ok"])
+            out = json.loads(res["output"])
+            self.assertIn("skill_proposals_pending", out)
+            sup.stop()
+
+
 if __name__ == "__main__":
     unittest.main()

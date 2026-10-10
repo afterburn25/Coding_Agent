@@ -187,6 +187,19 @@ class TopicTests(unittest.TestCase):
         drive(ctx, "back to Isabella")
         self.assertIn("Isabella", ctx.active_topic)
 
+    def test_emdash_return_keeps_active_topic(self):
+        # "anyway — back to the voice" — discourse dash must not hide the
+        # return marker, and an unresolvable referent falls back to the
+        # parked/active topic rather than minting a bogus one.
+        ctx = ActiveContext()
+        drive(ctx, "i'm trying to tune the kokoro voice preset — it sounds flat")
+        drive(ctx, "what's the weather like in tokyo right now?")
+        drive(ctx, "anyway — back to the voice. what preset were we discussing?")
+        self.assertIn("kokoro", ctx.active_topic)
+        drive(ctx, "what time is it?")
+        drive(ctx, "ok continue")
+        self.assertIn("kokoro", ctx.active_topic)
+
     def test_nested_topics(self):
         ctx = ActiveContext()
         drive(ctx, "topic: the installer")
@@ -274,6 +287,47 @@ class DecisionTests(unittest.TestCase):
              if d["status"] == "active" and d["subject"] == "port"]
         self.assertEqual(d[0]["value"], "9000")
 
+    def test_make_that_reassertion_supersedes(self):
+        """'make that port 9600 instead' corrects the active port
+        decision — the reassertion claims the 'port' slot, not a
+        free-floating 'general' entry."""
+        ctx = ActiveContext()
+        drive(ctx, "let's use port 9500 for the dev server")
+        drive(ctx, "actually, make that port 9600 instead")
+        act = [d for d in ctx.decisions if d["status"] == "active"]
+        self.assertEqual(len(act), 1)
+        self.assertEqual(act[0]["subject"], "port")
+        self.assertEqual(act[0]["value"], "9600")
+        sup = [d for d in ctx.decisions if d["status"] == "superseded"]
+        self.assertEqual(sup[0]["value"], "9500")
+        self.assertEqual(sup[0]["superseded_by"], "9600")
+
+    def test_named_slot_abandonment_supersedes(self):
+        """'forget the port idea, we'll use whatever's free' — the new
+        value claims the slot the turn names, so the stale port value
+        does not stay active beside a floating 'general' decision."""
+        ctx = ActiveContext()
+        drive(ctx, "let's use port 9500 for the dev server")
+        drive(ctx, "actually, make that port 9600 instead")
+        drive(ctx, "never mind — forget the port idea entirely, "
+                   "we'll use whatever's free")
+        act = [d for d in ctx.decisions if d["status"] == "active"]
+        self.assertEqual(len(act), 1)
+        self.assertEqual(act[0]["subject"], "port")
+        self.assertIn("free", act[0]["value"])
+
+    def test_superseded_by_records_immediate_successor(self):
+        """An already-superseded decision keeps the value that actually
+        displaced it — the audit trail is not rewritten by later ones."""
+        ctx = ActiveContext()
+        drive(ctx, "use port 9500")
+        drive(ctx, "make that port 9600 instead")
+        drive(ctx, "use port 9700")
+        d9500 = [d for d in ctx.decisions if d["value"] == "9500"][0]
+        d9600 = [d for d in ctx.decisions if d["value"] == "9600"][0]
+        self.assertEqual(d9500["superseded_by"], "9600")
+        self.assertEqual(d9600["superseded_by"], "9700")
+
 
 # ---------------------------------------------------------------------------
 # Open loops
@@ -334,6 +388,32 @@ class ReqSpecTests(unittest.TestCase):
         drive(ctx, "let's work on the installer")
         drive(ctx, "it should verify dll copies")
         self.assertTrue(any("installer" in k for k in ctx.req_spec))
+
+    def test_spec_imperative_edits(self):
+        # Imperative adds/retires inside an active spec session —
+        # "make X", "no Y, use Z instead", "drop W" (dogfood 'requirements'
+        # pack regression: 'manual save button' must land, 'auto-save'
+        # and 'markdown' must retire).
+        ctx = ActiveContext()
+        drive(ctx, "let's spec a small feature: a notes widget")
+        drive(ctx, "it should auto-save every 30 seconds")
+        drive(ctx, "make the font monospace")
+        drive(ctx, "add markdown rendering")
+        drive(ctx, "actually — no auto-save, use a manual save button instead")
+        drive(ctx, "drop the markdown rendering, plain text is fine")
+        spec = next(iter(ctx.req_spec.values()))
+        reqs = spec["requirements"]
+        self.assertTrue(any("manual save button" in r for r in reqs))
+        self.assertFalse(any("auto-save" in r for r in reqs))
+        self.assertFalse(any("markdown" in r for r in reqs))
+        self.assertTrue(any("auto-save" in r for r in spec["retired"]))
+
+    def test_spec_edits_ignored_without_session(self):
+        # Imperatives outside a spec session must not bank requirements.
+        ctx = ActiveContext()
+        drive(ctx, "use port 9000")
+        drive(ctx, "make it fast")
+        self.assertFalse(ctx.req_spec)
 
 
 # ---------------------------------------------------------------------------

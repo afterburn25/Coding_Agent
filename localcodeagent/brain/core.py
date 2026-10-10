@@ -43,7 +43,7 @@ class NexusBrain:
                  health=None, hardware_probe=None, crash_history=None,
                  answer_memory=None, knowledge_graph=None,
                  knowledge_memory=None, conversation_memory=None,
-                 locked_vault=None, activity_source=None,
+                 locked_vault=None, activity_source=None, procedures=None,
                  mission_planner=None, mission_store=None,
                  evaluator=None, tool_router=None, sandbox=None,
                  model_catalog=None, model_router=None,
@@ -63,7 +63,8 @@ class NexusBrain:
             answer_memory=answer_memory, knowledge_graph=knowledge_graph,
             knowledge_memory=knowledge_memory,
             conversation_memory=conversation_memory,
-            locked_vault=locked_vault, activity_source=activity_source)
+            locked_vault=locked_vault, activity_source=activity_source,
+            procedures=procedures)
         self.thalamus = Thalamus(
             self.bus, hippocampus=self.hippocampus, brainstem=self.brainstem,
             classify_intent=classify_intent, research_class=research_class,

@@ -758,6 +758,55 @@ class CrossChatMemoryTests(unittest.TestCase):
                           "let us go with option B for the parser"):
                 self.assertEqual(memory2.learn_from_user(noise)["facts"], [])
 
+    def test_copula_decision_and_attribute_predicates_capture(self):
+        """Long-session anchors must persist: copula decisions ('we
+        decided X is Y'), attribute predicates ('X ends in Y'), named
+        attribute subjects ('the contact for V is N'), and wanted-format
+        statements ('i want X delivered as Y') all canonicalize into
+        recallable facts."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            learned = memory.learn_from_user(
+                "for the record, the staging build id ends in xq72")
+            self.assertEqual(learned["facts"],
+                             ["staging build id ends in xq72"])
+            learned = memory.learn_from_user(
+                "we decided the cache ttl is 300 seconds")
+            self.assertEqual(learned["facts"],
+                             ["cache ttl is 300 seconds"])
+            learned = memory.learn_from_user(
+                "the primary contact for the vendor is maria chen")
+            self.assertEqual(learned["facts"],
+                             ["primary contact for the vendor is maria chen"])
+            learned = memory.learn_from_user(
+                "i want the report delivered as csv, not pdf")
+            self.assertEqual(learned["facts"], ["report is csv"])
+
+    def test_anchor_facts_recall_by_term_overlap(self):
+        """Spaced recall probes answer from stored facts — including a
+        conjugated-predicate mismatch ('ends in' vs 'end in')."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user(
+                "for the record, the staging build id ends in xq72")
+            memory.learn_from_user(
+                "we decided the cache ttl is 300 seconds")
+            memory.learn_from_user(
+                "the primary contact for the vendor is maria chen")
+            memory.learn_from_user(
+                "i want the report delivered as csv, not pdf")
+
+            rows = memory.recall_facts(
+                "what did the staging build id end in?")
+            self.assertTrue(any("xq72" in r["text"] for r in rows))
+            rows = memory.recall_facts("what cache ttl did we decide on?")
+            self.assertTrue(any("300" in r["text"] for r in rows))
+            rows = memory.recall_facts("who's the vendor contact?")
+            self.assertTrue(any("maria chen" in r["text"] for r in rows))
+            rows = memory.recall_facts(
+                "what format did i want the report in?")
+            self.assertTrue(any("csv" in r["text"] for r in rows))
+
     def test_corrections_supersede_unique_fact(self):
         """'X not Y' corrections rewrite the fact carrying Y — but only
         when Y identifies exactly one active fact; ambiguous or absent

@@ -150,9 +150,19 @@ class ConversationMemory:
     @classmethod
     def _content_terms(cls, text: str) -> set[str]:
         """Content-bearing terms used for relevance-gated recall."""
-        return {
+        terms = {
             t for t in re.findall(r"[a-z0-9_+.#-]{3,}", str(text or "").lower())
             if t not in cls._CONTENT_STOPWORDS and not t.isdigit()
+        }
+        # Gentle singular fold: 'the build id ends in xq72' must answer
+        # 'what did it end in' — a trailing plural/conjugated 's' adds the
+        # base form alongside the original so both sides of the
+        # comparison share the lemma. 'ss/us/is' tails stay ('status',
+        # 'alias') so real words don't collapse.
+        return terms | {
+            t[:-1] for t in terms
+            if len(t) >= 4 and t.endswith("s")
+            and not t.endswith(("ss", "us", "is"))
         }
 
     _SUBJECT_ADVERBS = frozenset({
@@ -807,6 +817,33 @@ class ConversationMemory:
                             body = inner
                             corr_body = inner.rstrip(".!?")
                 if fact is None:
+                    # Reported copula decisions — "we decided the cache
+                    # ttl is 300", "i agreed the deadline was Friday".
+                    # The named subject keeps the supersession slot, so a
+                    # restated value retires the earlier one.
+                    dec_fact = re.match(
+                        r"^(?:we|i)\s+(?:decided|agreed|settled|chose|"
+                        r"picked)\s+(?:that\s+|on\s+)?"
+                        r"(?:the\s+|our\s+|a\s+|an\s+)?"
+                        r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+                        r"(?:is|are|was|were|should\s+be|to\s+be|"
+                        r"stays?|remains?)\s+(.+?)[.!?]?$",
+                        body, flags=re.IGNORECASE,
+                    )
+                    if dec_fact:
+                        subj = self._clean_subject(dec_fact.group(1))
+                        value = self._clean_value(dec_fact.group(2))
+                        # A modal tail isn't a subject — 'we agreed the
+                        # API should stay REST' belongs to the
+                        # should/must agreement lane below, not copula
+                        # canonicalization ('API should is REST').
+                        if subj.split()[-1].casefold() in {
+                                "should", "must", "will", "shall", "can",
+                                "could", "would", "to", "be"}:
+                            subj = ""
+                        if self._fact_subject_ok(subj) and value:
+                            fact = f"{subj} is {value}"
+                if fact is None:
                     # Decision statements — "we decided to use SQLite for
                     # the store", "the plan is Postgres for production",
                     # "let's go with Redis". Canonicalize to
@@ -872,7 +909,14 @@ class ConversationMemory:
                         decl = re.match(
                             r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
                             r"(uses?|runs on|is built on|is written in|"
-                            r"depends on|prefers?|is|are)\s+(.+)$",
+                            r"depends on|prefers?|ends? in|starts? with|"
+                            r"ends? with|(?:is|are|was|were|gets?|is being)\s+"
+                            r"(?:called|named|known as)|equals?|"
+                            r"lives? (?:at|in|on)|reports? to|"
+                            r"works? (?:on|at|for)|belongs? to|comes? from|"
+                            r"scheduled for|due (?:on|by|in)|"
+                            r"hosted (?:at|on)|serves?|costs?|lasts?|"
+                            r"is|are)\s+(.+)$",
                             body, flags=re.IGNORECASE,
                         )
                         if decl:
@@ -908,6 +952,32 @@ class ConversationMemory:
                                     # adjectives ("the movie is great",
                                     # "the answer is no").
                                     fact = None
+                if fact is None:
+                    # Wanted format/medium — "i want the report delivered
+                    # as csv, not pdf", "i need the logs in json". The
+                    # attribute is implicit; canonical "subject is value"
+                    # answers 'what format did i want the report in' and
+                    # keeps the supersession slot aligned with later
+                    # restatements.
+                    want = re.match(
+                        r"^i\s+(?:want|need|would\s+like|prefer)\s+"
+                        r"(?:the\s+|a\s+|an\s+|my\s+|our\s+)?"
+                        r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+                        r"(?:delivered|sent|saved|written|exported|"
+                        r"formatted|rendered|generated|prepared|"
+                        r"provided|given|shown|displayed|output|"
+                        r"returned|produced|created|built|done|made|"
+                        r"kept|stored)?\s*(?:as|in)\s+"
+                        r"([a-z0-9][a-z0-9 ._-]{0,38}?)"
+                        r"(?:\s*[,.]?\s*(?:not|rather\s+than|instead\s+of)"
+                        r"\s+.+)?[.!?]?$",
+                        body, flags=re.IGNORECASE,
+                    )
+                    if want:
+                        subj = self._clean_subject(want.group(1))
+                        value = self._clean_value(want.group(2))
+                        if self._fact_subject_ok(subj) and value:
+                            fact = f"{subj} is {value}"
                 if fact is None:
                     # Imperative value-sets — "use port 8080", "set the
                     # theme to dark". Canonical "subject is value" keeps

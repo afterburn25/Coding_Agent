@@ -34,16 +34,56 @@ _CONTEXT_DEPENDENT_RE = re.compile(
     r"wtf|wth|huh|lol|lmao|rofl|haha+|omg|ugh|wow|damn+|shit|crap|"
     r"fuck(?:\s+(?:you|this|that|off|it|me|sake))?|"
     r"what\s+the\s+\w+|the\s+hell"
-    r")(?:[\s,]+(?:yes|yeah|please|ok(?:ay)?|sure|do it|go ahead|that|them))*"
+    r")(?:[\s,]+(?:yes|yeah|please|ok(?:ay)?|sure|do it|go ahead|that|"
+    r"them|continue|carry on|keep going|resume|go on|then|now))*"
     r"[\s.!?,]*$",
     re.I,
 )
 
 
+# Discourse references — the ask's referent is the live conversation
+# itself ("what were we talking about", "summarize our chat", "back to
+# the voice", "did we settle on a port"). No stored Q/A pair can answer
+# these: the correct content lives in the current history and injected
+# memory, and replaying an earlier exchange injects a stale answer from
+# an unrelated topic (the observed "As before — Voice: TTS…" reply to a
+# summarize-the-chat ask).
+_DISCOURSE_REF_RE = re.compile(
+    r"\bwhat\b[^.?!]{0,40}\bwe\b|"
+    r"\bwhere (?:were|did) we\b|"
+    r"\bwe (?:were|was) (?:just )?(?:talking|discussing|saying|working)\b|"
+    r"\b(?:summari[sz]e|recap|repeat|go back over|go over)\b[^.?!]{0,40}"
+    r"\b(?:chat|conversation|discuss\w*|talking|said|covered|went over|"
+    r"we were|we just|last thing|earlier|before)\b|"
+    r"\bdid we (?:ever )?(?:settle|decide|agree|pick|choose|land|"
+    r"end up|figure)\b|"
+    r"\b(?:the|that) (?:thing|stuff|issue|topic|one|part|option|file|"
+    r"version|preset|name)\s+(?:from |we |that )?(?:earlier|before|"
+    r"last time|just now)\b|"
+    r"\bback to (?:the|our|what)\b|"
+    r"\bdid\s+i\s+(?:just\s+)?(?:say|mention|tell|ask|name|call)\b|"
+    r"\b(?:what|which)\b[^.?!]{0,30}\b(?:again|earlier|before|"
+    r"just now)\b|"
+    r"\bthe (?:first|second|other|last) (?:thing|one|part|option)\b",
+    re.I)
+
+
 def is_context_dependent(text: str) -> bool:
     """True when the message only resolves against live conversation
-    context — affirmatives, deictic picks, bare continue/cancel."""
-    return bool(_CONTEXT_DEPENDENT_RE.match(str(text or "")))
+    context — affirmatives, deictic picks, bare continue/cancel, and
+    discourse references to the conversation itself."""
+    t = str(text or "")
+    return bool(_CONTEXT_DEPENDENT_RE.match(t)
+                or _DISCOURSE_REF_RE.search(t))
+
+
+def references_conversation(text: str) -> bool:
+    """True when the turn's referent is the conversation itself —
+    summary/recall/discourse asks whose answer lives in live history
+    ("summarize what we were talking about", "did we settle on a port").
+    Deterministic lanes (settings, status, Answer Memory) can never
+    carry that referent."""
+    return bool(_DISCOURSE_REF_RE.search(str(text or "")))
 
 # Secret / credential indicators — suppress persistent learning entirely.
 _SECRET_PATTERNS = [
@@ -61,6 +101,44 @@ _SECRET_PATTERNS = [
     re.compile(r"\b[A-Fa-f0-9]{40,}\b"),  # long hex blobs (keys/tokens)
     re.compile(r"\b(?:recovery|backup)\s+codes?\b\s*[:=]", re.I),
 ]
+
+# Assistant-side failure text — "I couldn't reach GitHub — unknown tool
+# 'x'", permission/infra refusals, tool errors. These are runtime events,
+# not knowledge: storing them learns "the answer to 'explain github' is a
+# connection error", which then replays to unrelated questions.
+_ANSWER_FAILURE_RE = re.compile(
+    r"\bunknown tool\b|"
+    r"\bi\s*(?:'m|am)?\s*(?:sorry\s*,?\s*|unfortunately\s*,?\s*)?"
+    r"(?:couldn['’]?t|could not|can['’]?t|cannot|wasn['’]?t able|"
+    r"was not able|failed|am unable)\s*(?:to\s+)?"
+    r"(?:reach|connect|contact|fetch|retrieve|load|access|open|"
+    r"run|execute|download|pull|complete|perform)\b|"
+    r"\bthe (?:request|tool call|command|operation|lookup) "
+    r"(?:failed|errored|timed out)\b|"
+    r"^\s*(?:error[:\s]|ap(?:proval_required)|permission_denied|"
+    r"creator_|tool_)\b",
+    re.I)
+
+
+def is_error_answer(text: str) -> bool:
+    """True when the text is an assistant failure report rather than an
+    answer — infra errors, permission refusals, 'couldn't reach X'. These
+    must never be learned or replayed: the failure is transient, and a
+    cached error parrots forever."""
+    return bool(_ANSWER_FAILURE_RE.search(str(text or "")))
+
+
+# Capability probes — "can you see my screen", "can you browse websites",
+# "can you hear me". The truthful answer lives in live capability state;
+# a cached answer goes stale the moment a subsystem toggles. Classify as
+# volatile so they are neither learned nor replayed from memory.
+_CAPABILITY_PROBE_RE = re.compile(
+    r"^\s*(?:can|could|are|do|did|will|would|is|were)\s+(?:you|u)\s+"
+    r"(?:currently\s+|still\s+|actually\s+|really\s+|able\s+to\s+)?"
+    r"(?:see|browse|surf|visit|access|open|hear|view|watch|listen|"
+    r"read|use|connect|control|click|type|look|check|execute|edit|"
+    r"remember|record|monitor|speak|talk|generate|draw|search)\b",
+    re.I)
 
 _LIVE_MARKERS = (
     "weather", "forecast", "stock price", "share price", "crypto price",
@@ -134,6 +212,8 @@ def classify_cacheability(text: str) -> str:
         return "task_specific"
     if is_context_dependent(text):
         return "task_specific"
+    if _CAPABILITY_PROBE_RE.search(str(text or "")):
+        return "volatile"
     if any(m in t for m in _LIVE_MARKERS):
         return "live"
     raw = str(text)

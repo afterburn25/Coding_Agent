@@ -55,7 +55,9 @@ _CANON_ENTITIES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
      ("isabella", "the voice", "her voice", "your voice", "the preset")),
     (r"\bchatterbox\b(?:\s*turbo)?\b", "voice-engine:chatterbox",
      "engine", ("chatterbox", "chatterbox turbo", "the engine")),
-    (r"\bkokoro\b", "voice-engine:kokoro", "engine", ("kokoro",)),
+    (r"\bkokoro\b", "voice-engine:kokoro", "engine",
+     ("kokoro", "the voice", "the voice preset",
+      "kokoro voice preset", "the engine")),
     (r"\bdevin\b", "agent:devin", "agent", ("devin",)),
     (r"\bgithub\b", "service:github", "service", ("github", "the remote")),
     (r"\bcomfyui\b", "app:comfyui", "app", ("comfyui", "comfy")),
@@ -279,7 +281,22 @@ def derive_topic(text: str, env: Any = None,
     if entities:
         top = max(entities, key=lambda e: e.get("conf", 0))
         if top.get("conf", 0) >= 0.8:
-            return top["label"][:60]
+            label = top["label"][:60]
+            # Prefer the fuller noun phrase the user actually wrote —
+            # 'kokoro voice preset' over the bare 'kokoro' alias, so
+            # parked/recalled topics keep their descriptive name.
+            m = re.search(
+                r"\b" + re.escape(label.lower()) +
+                r"((?:\s+[a-z][a-z0-9'/-]*){1,3})", t.lower())
+            if m:
+                words = (label.lower() + m.group(1)).split()
+                while len(words) > 1 and \
+                        (words[-1] in _WORD_STOP
+                         or words[-1] in _ENTITY_STOP):
+                    words.pop()
+                if len(words) > 1:
+                    label = " ".join(words)[:60]
+            return label
     return ""
 
 
@@ -319,6 +336,7 @@ _DECIDE_RE = re.compile(
     r"name|call|keep|take)\s+"
     r"(?:the\s+|a\s+|an\s+|it\s+|them\s+|this\s+|that\s+)?"
     r"([^,.;?!]{2,80})|"
+    r"\bmake\s+(?:that|it|this|them)\s+([^,.;?!]{2,80})|"
     r"\b(?:the\s+answer|the\s+choice|final\s+answer|the\s+decision)\s+"
     r"(?:is|was)\s+([^,.;?!]{2,80})|"
     r"\b(?:that'?s|it'?s)\s+(?:settled|decided|approved|final)\b\.?\s*"
@@ -416,7 +434,7 @@ def extract_decision(text: str, env: Any = None) -> dict | None:
 # ---------------------------------------------------------------------------
 
 _RETURN_RE = re.compile(
-    r"^\s*(?:(?:okay|ok|so|anyway|alright)[,!\s]*)*"
+    r"^\s*(?:(?:okay|ok|so|anyway|alright)[,!\s—–]*)*"
     r"(?:let'?s\s+|we\s+)?(?:go\s+)?back\s+to\s+([^—–]{1,60}?)"
     r"(?:\s*[—–,.;]|\s*$)|"
     r"^\s*(?:returning|back)\s+to\s+([^—–]{1,60}?)(?:\s*[—–,.;]|\s*$)",
@@ -499,6 +517,50 @@ def extract_requirement(text: str, env: Any = None) -> dict | None:
     if not value:
         return None
     return {"requirement": value, "confidence": 0.7}
+
+
+# ---------------------------------------------------------------------------
+# Spec edits inside an active requirements session — imperative adds
+# ('make the font monospace', 'use a manual save button') and retirements
+# ('no auto-save', 'drop the markdown rendering').
+# ---------------------------------------------------------------------------
+
+_SPEC_DROP_RE = re.compile(
+    r"\b(?:no|drop|remove|skip|cut|lose|forget|don'?t\s+need|"
+    r"do\s+not\s+need|without|get\s+rid\s+of)\s+"
+    r"(?:the\s+|a\s+|an\s+|that\s+)?([^,.;?!]{2,80})",
+    re.IGNORECASE)
+
+_SPEC_ADD_RE = re.compile(
+    r"\b(?:make|add|use|keep|include|support|render|show|enable|allow|"
+    r"give|have)\s+(?:it\s+|the\s+|a\s+|an\s+|us\s+)?([^,.;?!]{2,80})",
+    re.IGNORECASE)
+
+_SPEC_VALUE_TAIL_RE = re.compile(
+    r"\s+(?:instead|now|this\s+time|please)\s*$", re.IGNORECASE)
+
+
+def extract_spec_edits(text: str, env: Any = None) -> list[dict]:
+    """Imperative requirement edits — applied only while a spec session
+    is active for the topic (the caller gates on an existing req_spec
+    entry) so ordinary commands never bank as requirements. One turn can
+    retire and add in the same breath: 'no auto-save, use a manual save
+    button instead' returns both edits."""
+    frame = getattr(env, "semantic", None)
+    if frame is not None and frame.speech_act in (
+            "question", "hypothetical", "offer", "preference_question"):
+        return []
+    t = str(text or "")
+    edits: list[dict] = []
+    for m in _SPEC_DROP_RE.finditer(t):
+        val = _SPEC_VALUE_TAIL_RE.sub("", m.group(1)).strip(" .,;'\"")
+        if val:
+            edits.append({"requirement": val[:140], "retire": True})
+    for m in _SPEC_ADD_RE.finditer(t):
+        val = _SPEC_VALUE_TAIL_RE.sub("", m.group(1)).strip(" .,;'\"")
+        if val:
+            edits.append({"requirement": val[:140], "retire": False})
+    return edits
 
 
 # ---------------------------------------------------------------------------
@@ -603,14 +665,33 @@ def update_state(ctx: Any, env: Any, text: str,
         except Exception:
             ent = None
         if ent is not None:
+            lab = str(ent.get("label") or target)
+            if ctx.active_topic and \
+                    lab.lower() in ctx.active_topic.lower():
+                # The richer active label already names this entity —
+                # 'kokoro voice preset' covers 'kokoro'; don't park it
+                # for a shorter alias.
+                return
             if ctx.active_topic:
                 ctx.topic_stack.insert(0, {
                     "label": ctx.active_topic, "ts": now,
                     "status": "paused"})
                 ctx.topic_stack = ctx.topic_stack[:12]
-            ctx.active_topic = str(ent.get("label") or target)
+            ctx.active_topic = lab
         elif target:
-            ctx.active_topic = target
+            if ctx.topic_stack:
+                # "back to the voice" with an unresolvable referent —
+                # the parked topic is what the user left, not a new
+                # subject. Restore it rather than minting a bogus
+                # topic label and stranding the real one.
+                hit = ctx.topic_stack.pop(0)
+                if ctx.active_topic:
+                    ctx.topic_stack.insert(0, {
+                        "label": ctx.active_topic, "ts": now,
+                        "status": "paused"})
+                ctx.active_topic = hit.get("label", ctx.active_topic)
+            else:
+                ctx.active_topic = target
 
     if ret_m:
         _restore(next((g for g in ret_m.groups() if g), ""))
@@ -701,9 +782,23 @@ def update_state(ctx: Any, env: Any, text: str,
                 pick = (in_value or typed)
                 if pick:
                     dec["subject"] = pick[0]["type"]
+            if not dec.get("subject"):
+                # The turn names an active slot by word — 'forget the
+                # port idea, we'll use whatever's free' — so the new
+                # value claims that slot instead of floating under
+                # 'general' while the stale decision stays active.
+                for d in reversed(ctx.decisions):
+                    if d.get("status") != "active":
+                        continue
+                    s = str(d.get("subject") or "")
+                    if s and re.search(rf"\b{re.escape(s)}\b", text,
+                                       re.IGNORECASE):
+                        dec["subject"] = s
+                        break
             subj_key = _slug(dec["subject"] or "general")
         for d in ctx.decisions:
-            if _slug(d.get("subject", "")) == subj_key:
+            if _slug(d.get("subject", "")) == subj_key and \
+                    d.get("status") == "active":
                 d["status"] = "superseded"
                 d["superseded_at"] = now
                 d["superseded_by"] = dec["value"]
@@ -741,12 +836,55 @@ def update_state(ctx: Any, env: Any, text: str,
 
     # ---- requirement accumulation ---------------------------------------
     req = extract_requirement(text, env)
-    if req and ctx.active_topic:
-        spec = ctx.req_spec.setdefault(_slug(ctx.active_topic), {})
-        key = _slug(req["requirement"].split(" ", 1)[0] or "req")
+    topic_slug = _slug(ctx.active_topic) if ctx.active_topic else ""
+    if req:
+        # No active topic yet — the spec still seeds under a default
+        # bucket; a topic-less opener like "let's spec a feature" must
+        # not drop the first requirement.
+        spec = ctx.req_spec.setdefault(topic_slug or "_default", {})
         spec.setdefault("requirements", []).append(req["requirement"])
         spec["requirements"] = spec["requirements"][-24:]
         spec["updated_at"] = now
+    elif ctx.req_spec:
+        # Imperative spec edits — gated on a spec session so ordinary
+        # commands never bank as requirements. Targets the active topic's
+        # spec; topic labels drift mid-session ('make the font monospace'
+        # retitles the topic), so fall back to the spec touched within
+        # the last hour — a stale spec from an old session stays sealed.
+        spec = ctx.req_spec.get(topic_slug)
+        if spec is None:
+            cand = max(ctx.req_spec.values(),
+                       key=lambda s: float(s.get("updated_at") or 0.0))
+            if now - float(cand.get("updated_at") or 0.0) < 3600:
+                spec = cand
+        if spec is not None:
+            reqs = spec.setdefault("requirements", [])
+            retired = spec.setdefault("retired", [])
+            changed = False
+            for edit in extract_spec_edits(text, env):
+                val = str(edit.get("requirement") or "")
+                if not val:
+                    continue
+                if edit.get("retire"):
+                    q = set(re.findall(r"[a-z0-9]+", val.lower()))
+                    keep = []
+                    for r in reqs:
+                        rt = set(re.findall(r"[a-z0-9]+", r.lower()))
+                        if q and q <= rt:
+                            retired.append(r)
+                        else:
+                            keep.append(r)
+                    if len(keep) != len(reqs):
+                        spec["requirements"] = keep
+                        reqs = spec["requirements"]
+                        spec["retired"] = retired[-24:]
+                        changed = True
+                else:
+                    reqs.append(val)
+                    spec["requirements"] = reqs[-24:]
+                    changed = True
+            if changed:
+                spec["updated_at"] = now
 
     # ---- attitude -------------------------------------------------------
     att = detect_attitude(text)

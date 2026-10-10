@@ -123,13 +123,18 @@ class Hippocampus(BrainRegion):
                  answer_memory=None, knowledge_graph=None,
                  knowledge_memory=None, conversation_memory=None,
                  locked_vault=None, activity_source: Callable[[int], list[dict]] | None = None,
-                 embedder=None) -> None:
+                 procedures=None, embedder=None) -> None:
         super().__init__(bus)
         self.answer_memory = answer_memory
         self.knowledge_graph = knowledge_graph
         self.knowledge_memory = knowledge_memory
         self.conversation_memory = conversation_memory
         self.locked_vault = locked_vault
+        # The learning governor's ProceduralMemory — the store that
+        # consolidation actually promotes into. Consulted alongside the
+        # local SQLite procedures table so learned procedures surface in
+        # task-time recall instead of living behind /procedures only.
+        self.procedures = procedures
         self._activity_source = activity_source
         self._embedder = embedder
         self._lock = threading.RLock()
@@ -444,6 +449,27 @@ class Hippocampus(BrainRegion):
                 provenance="procedures", freshness=_freshness(r["last_used"]),
                 ts=float(r["last_used"] or r["created"]),
                 source_id=r["id"]))
+        if self.procedures is not None:
+            try:
+                for p in (self.procedures.match(query) or [])[:limit]:
+                    status = str(p.get("status") or "")
+                    steps = p.get("steps") or []
+                    conf = float(p.get("confidence") or 0.3)
+                    if status == "verified":
+                        conf = min(0.95, conf + 0.15)
+                    out.append(MemoryEntry(
+                        kind="procedural",
+                        text=f"{p.get('name')}: {len(steps)} steps "
+                             f"({p.get('success_count', 0)}×ok/"
+                             f"{p.get('failure_count', 0)}×fail) [{status}]",
+                        confidence=conf,
+                        provenance="learning_procedures",
+                        freshness=_freshness(
+                            p.get("last_used") or p.get("created") or 0),
+                        ts=float(p.get("last_used") or p.get("created") or 0),
+                        source_id=str(p.get("id") or "")))
+            except Exception:
+                pass
         return out[:limit]
 
     def _project(self, project_id: str, limit: int) -> list[MemoryEntry]:

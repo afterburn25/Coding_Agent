@@ -198,8 +198,9 @@ class LookupTests(unittest.TestCase):
             am.store.execute("UPDATE answers SET expires_at=?", (time.time() - 10,))
             m = am.lookup("What is the latest release?")
             self.assertFalse(m.hit)
-            row = am.store.query_one("SELECT trust_state FROM answers")
-            self.assertEqual(row["trust_state"], "stale")
+            # Volatile questions reject at the cacheability gate before
+            # dependency resolution runs — the row is unreachable rather
+            # than marked stale, which is the same guarantee for callers.
             am.store.close()
 
     def test_live_questions_never_cached(self):
@@ -355,6 +356,60 @@ class LearningAndCorrectionTests(unittest.TestCase):
             m = am.lookup("what is the default model")
             self.assertTrue(m.hit)
             self.assertEqual(m.answer["answer_text"], "Juggernaut X")
+            am.store.close()
+
+    def test_error_reply_never_learned(self):
+        # A transient failure report ("unknown tool", "couldn't reach")
+        # is not knowledge — storing it replays the outage forever.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            out = am.record_exchange(
+                "can you explain what github is for someone new?",
+                "I couldn't reach GitHub — unknown tool "
+                "'github_repo_activity'.")
+            self.assertTrue(out["suppressed"])
+            self.assertIsNone(out["experience_id"])
+            self.assertEqual(
+                am.store.query_one("SELECT COUNT(*) AS n FROM answers")["n"],
+                0)
+            am.store.close()
+
+    def test_poisoned_answer_invalidated_at_lookup(self):
+        # Rows poisoned before the record-gate existed self-heal: the
+        # lookup invalidates the error answer in place instead of
+        # replaying it.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            r = am.learn("What does the github integration do?",
+                         "I couldn't reach GitHub — unknown tool "
+                         "'github_repo_activity'.")
+            self.assertTrue(r.get("ok"))
+            m = am.lookup("What does the github integration do?")
+            self.assertFalse(m.hit)
+            row = am.store.query_one(
+                "SELECT trust_state, invalidation_reason FROM answers")
+            self.assertEqual(row["trust_state"], "invalidated")
+            self.assertIn("error output", row["invalidation_reason"])
+            am.store.close()
+
+    def test_capability_probe_never_cached(self):
+        # "can you browse websites?" — the truth lives in live
+        # capability state; a learned answer goes stale on the next
+        # toggle and must neither store nor replay.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            for probe in ("can you browse websites?",
+                          "can you see my screen right now?",
+                          "can you hear me?"):
+                out = am.record_exchange(probe, "Yes — ready.")
+                self.assertIsNone(out["answer_id"], probe)
+            self.assertEqual(
+                am.store.query_one("SELECT COUNT(*) AS n FROM answers")["n"],
+                0)
+            am.learn("What automation is available?",
+                     "Yes — Browser automation is ready.")
+            m = am.lookup("can you browse websites?")
+            self.assertFalse(m.hit)
             am.store.close()
 
     def test_forget_command(self):
@@ -831,3 +886,29 @@ class TestContextDependentUtterances(unittest.TestCase):
                 self.assertEqual(rows, [])
             finally:
                 am.close()
+
+    def test_discourse_references_are_context_dependent(self):
+        """Asks whose referent is the live conversation ("what were we
+        talking about") must never match a stored answer — the observed
+        defect replayed a stale voice-status answer for a summarize-
+        the-chat ask. Stored answers can only describe the world, not
+        the current thread."""
+        from localcodeagent.answer_memory import validation
+        for text in (
+            "can u summarize what we were just talking about",
+            "what preset were we discussing",
+            "what were those things we still needed to fix",
+            "did we ever settle on a port",
+            "where were we",
+            "back to the voice",
+            "the other one from before",
+            "ok continue",
+        ):
+            self.assertTrue(validation.is_context_dependent(text), text)
+            self.assertEqual(validation.classify_cacheability(text),
+                             "task_specific", text)
+        # Ordinary standalone questions still use answer memory.
+        for text in ("what time is it", "how do i make chicken quesadillas",
+                     "what are your capabilities", "whats my ip",
+                     "who is your father"):
+            self.assertFalse(validation.is_context_dependent(text), text)

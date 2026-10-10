@@ -735,6 +735,17 @@ class SelfKnowledgeService:
                      r"what did i (?:tell|say|mention)|"
                      r"did i (?:tell|say|mention))\b", t):
             return None
+        # Discourse references — the ask's referent is the live
+        # conversation ("summarize what we were just talking about"),
+        # never a Nexus setting. A gerund inside the reference clause
+        # can still trip an alias ("talking" → voice_enabled), so gate
+        # the whole lane, not the match.
+        try:
+            from ..answer_memory.validation import references_conversation
+            if references_conversation(t):
+                return None
+        except Exception:
+            pass
         feature = self.catalog.find(t)
         st = self.settings.find(t)
         if feature is not None or st is not None:
@@ -784,6 +795,16 @@ class SelfKnowledgeService:
                 r"\bis\b.{0,20}\b(on|off|enabled|disabled|muted|"
                 r"running|active)\b", t) and feature is None:
             return self._describe_setting(st)
+        # Everything below is interrogative-shaped ("what's the X",
+        # "how many X", "can you X"). An assertion that reached this
+        # point matched an alias incidentally — "i'm trying to tune the
+        # kokoro voice preset" is the user describing THEIR work, not
+        # asking about Nexus's configuration. Answering with a settings
+        # dump injects unrelated config data into the conversation and
+        # contaminates later recall.
+        frame = getattr(self, "_frame", None)
+        if frame is not None and frame.speech_act == "assertion":
+            return None
         # "how many workers" / "what's the worker count" — a live count
         # from the probe detail.
         if feature is not None and re.search(
