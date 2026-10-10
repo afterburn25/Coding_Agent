@@ -419,6 +419,41 @@ class LearningAndCorrectionTests(unittest.TestCase):
             self.assertIn("ack-shaped", row["invalidation_reason"])
             am.store.close()
 
+    def test_refusal_reply_never_learned(self):
+        # BUG-082 — a model that parrots the credential refusal it saw
+        # in history ("I won't store credentials or secrets…") banks a
+        # refusal as an answer; replayed on a harmless lookalike turn
+        # it answers an attempt nobody made. Refusal-shaped replies
+        # decline the request, they carry no knowledge — never bank.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            out = am.record_exchange(
+                "i think the registry mount is at HKLM",
+                "I won't store credentials or secrets in memory — "
+                "Brain unlock lives in the Trainer page instead.")
+            self.assertTrue(out["suppressed"])
+            self.assertEqual(
+                am.store.query_one("SELECT COUNT(*) AS n FROM answers")["n"],
+                0)
+            am.store.close()
+
+    def test_refusal_answer_poisoned_row_self_heals(self):
+        # Pre-gate refusal rows invalidate at lookup like error poison.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            r = am.learn("i think the registry mount is at HKLM",
+                         "I won't store credentials or secrets in "
+                         "memory — Brain unlock lives in the Trainer "
+                         "page instead.")
+            self.assertTrue(r.get("ok"))
+            m = am.lookup("i think the registry mount is at HKLM")
+            self.assertFalse(m.hit)
+            row = am.store.query_one(
+                "SELECT trust_state, invalidation_reason FROM answers")
+            self.assertEqual(row["trust_state"], "invalidated")
+            self.assertIn("refusal-shaped", row["invalidation_reason"])
+            am.store.close()
+
     def test_poisoned_answer_invalidated_at_lookup(self):
         # Rows poisoned before the record-gate existed self-heal: the
         # lookup invalidates the error answer in place instead of

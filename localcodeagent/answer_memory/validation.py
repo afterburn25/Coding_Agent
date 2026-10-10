@@ -183,6 +183,26 @@ def is_ack_answer(text: str) -> bool:
     return bool(_ACK_ANSWER_RE.match(str(text or "")))
 
 
+# Refusal-shaped replies — "I won't store credentials…", "I can't do
+# that" — decline the turn's request; they answer the *attempt*, not
+# the text, so banked they replay as nonsense on lookalike turns. A
+# model that parrots a refusal it saw in history produces exactly this
+# shape; suppress it like the ack family.
+_REFUSAL_ANSWER_RE = re.compile(
+    r"^\s*(?:(?:sorry|unfortunately|afraid)[,.!]?\s*)?"
+    r"i\s+(?:won'?t|will\s+not|wont|can'?t|cannot|can\s+not|"
+    r"refuse(?:\s+to)?|mustn'?t|must\s+not|am\s+(?:not\s+able|unable)\s+to|"
+    r"don'?t\s+(?:store|keep|save|remember|log|persist|retain))\b",
+    re.I)
+
+
+def is_refusal_answer(text: str) -> bool:
+    """True when the reply is refusal-shaped — it declines the user's
+    attempt rather than conveying knowledge, so it must never be
+    banked as a reusable answer."""
+    return bool(_REFUSAL_ANSWER_RE.match(str(text or "")))
+
+
 # Machine-authored work-order scaffolds — mission/autonomy lanes issue
 # fixed template prompts ("Work the scoped lane of this mission…",
 # "A mission task failed. Diagnose the concrete cause…",

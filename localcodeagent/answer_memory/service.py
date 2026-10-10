@@ -190,6 +190,8 @@ class AnswerMemory:
                          str(r.get("answer_text") or ""))
                      or validation.is_ack_answer(
                          str(r.get("answer_text") or ""))
+                     or validation.is_refusal_answer(
+                         str(r.get("answer_text") or ""))
                      or validation.is_machine_authored_question(
                          str(r.get("canonical_question")
                              or r.get("normalized_question") or "")))
@@ -207,6 +209,9 @@ class AnswerMemory:
                                 or r.get("normalized_question") or ""))
                         else "ack-shaped reply stored as answer"
                         if validation.is_ack_answer(
+                            str(r.get("answer_text") or ""))
+                        else "refusal-shaped reply stored as answer"
+                        if validation.is_refusal_answer(
                             str(r.get("answer_text") or ""))
                         else "fragment answer stored as answer")
                 except Exception:
@@ -365,6 +370,13 @@ class AnswerMemory:
         # transaction confirmation, not a reusable answer — banked, it
         # replays a write-claim nobody executed.
         if validation.is_ack_answer(answer):
+            out["suppressed"] = True
+            self.store.bump("suppressed_experiences")
+            return out
+        # Refusal-shaped text ("I won't store credentials…") declines
+        # the attempt, not the question — banked, it replays a refusal
+        # on harmless lookalike turns.
+        if validation.is_refusal_answer(answer):
             out["suppressed"] = True
             self.store.bump("suppressed_experiences")
             return out

@@ -1504,6 +1504,52 @@ class CrossChatMemoryTests(unittest.TestCase):
             learned = memory.learn_from_user("the port is 9090")
             self.assertTrue(learned["facts"])
 
+    def test_hedged_claim_acknowledged_never_banked(self):
+        # BUG-082 — hedged first-person claims ("i think the registry
+        # mount is at HKLM") are unverified like hearsay: banking a
+        # hunch as fact would masquerade belief as evidence, while
+        # dropping the turn hands it to a model that once parroted a
+        # credential refusal from history. The `hedged` marker yields
+        # an honest "noted, unverified" ack with zero writes.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for utterance in (
+                "i think the registry mount is at HKLM",
+                "i believe the port is 9090",
+                "i guess the cache is stale",
+                "i don't think the build is broken",
+                "imo the api is slow",
+            ):
+                learned = memory.learn_from_user(utterance)
+                self.assertFalse(learned["facts"], utterance)
+                self.assertEqual(len(learned.get("hedged") or []), 1,
+                                 utterance)
+            self.assertFalse(
+                [r for r in memory._data["facts"] if r.get("active")])
+            # "i think so" carries no claim — nothing to note.
+            self.assertFalse(
+                memory.learn_from_user("i think so").get("hedged"))
+            # Unhedged declaratives still bank.
+            learned = memory.learn_from_user(
+                "the registry mount is at HKLM")
+            self.assertTrue(learned["facts"])
+
+    def test_stated_plan_banks_as_plan(self):
+        # BUG-082 — "we're switching to mysql next week" declares
+        # intent, not current use; unhandled it fell to a model that
+        # riffed fabricated context into the ack.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            learned = memory.learn_from_user(
+                "we're switching to mysql next week")
+            self.assertEqual(
+                learned["facts"],
+                ["we are switching to mysql next week"])
+            learned = memory.learn_from_user(
+                "we are moving to postgres")
+            self.assertEqual(
+                learned["facts"], ["we are moving to postgres"])
+
     def test_compound_turns_learn_first_clause_only(self):
         # A compound turn's second clause is a separate intent, not part
         # of the value — "the port is 8080 — also, what is a mutex?"

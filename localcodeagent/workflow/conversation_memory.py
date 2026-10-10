@@ -1151,6 +1151,30 @@ class ConversationMemory:
                 result["hearsay"] = [claim]
                 return result
 
+        # Hedged first-person claims — "i think the registry mount is
+        # at HKLM", "i guess the cache is stale" — are unverified like
+        # hearsay: banking them would let a hunch masquerade as fact,
+        # and dropping them hands the turn to a model that riffs or
+        # parrots whatever it last saw. Same honest ack, same zero
+        # writes, distinct marker so the reply can say "hunch" instead
+        # of "secondhand".
+        hedged = re.match(
+            r"^(?:i\s+(?:don'?t\s+|do\s+not\s+)?"
+            r"(?:think|believe|guess|suppose|reckon|figure|"
+            r"feel\s+like|suspect)|i'?d\s+say|imo\b|imho\b|"
+            r"in\s+my\s+(?:opinion|view)|my\s+(?:guess|hunch|"
+            r"understanding|impression)\s+is)\s*[,:—-]*\s*"
+            r"(?:that\s+)?(.+?)[.!?]?$",
+            raw, flags=re.IGNORECASE)
+        if hedged:
+            claim = hedged.group(1).strip()
+            # "i think so" / "i think not" carry no claim — and a
+            # hedged refusal ("i don't think we should") is still a
+            # claim worth noting, so only the length guard applies.
+            if len(claim.split()) >= 2:
+                result["hedged"] = [claim]
+                return result
+
         with self._lock:
             fact: str | None = None
             # Discourse/correction marker prefixes ride the front of a
@@ -1246,6 +1270,21 @@ class ConversationMemory:
                     if self._fact_subject_ok(subj) and value:
                         fact = f"{subj} uses {value}"
                 elif fact is None:
+                    # Stated plan — "we're switching to mysql next
+                    # week" declares intent rather than current use;
+                    # bank it as the plan it is so the turn gets an
+                    # honest ack instead of a model riff.
+                    plan = re.match(
+                        r"^we(?:'re|\s+are|\s+will)\s+"
+                        r"(switching|moving|migrating|changing|"
+                        r"transitioning|upgrading|downgrading)\s+"
+                        r"(?:over\s+)?to\s+(.+?)[.!?]?$",
+                        body, flags=re.IGNORECASE)
+                    if plan:
+                        value = self._clean_value(plan.group(2))
+                        if value:
+                            fact = (f"we are {plan.group(1).lower()} "
+                                    f"to {value}")
                     # Corrections — "correction: the port is 5433",
                     # "no, I meant SQLite", "actually it was Redis not
                     # Postgres". The 'X not Y' form supersedes the fact
