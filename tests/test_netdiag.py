@@ -640,6 +640,27 @@ class TruthGateTests(RecoveryLoopTests):
             ):
                 self.assertTrue(det(claim), claim)
 
+    def test_detector_catches_bare_verb_openers(self):
+        # BUG-045: "Updated — your workstation is now called vector" is a
+        # memory-write claim with an implied subject; the I-subject and
+        # emoji shapes missed it, so a fabricated update sailed past the
+        # gate unmarked.
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            det = agent._executed_action_claims
+            for claim in (
+                "Updated — your workstation is now called vector.",
+                "Saved: the port is 9090.",
+                "Corrected, the tag is now v11.",
+            ):
+                self.assertTrue(det(claim), claim)
+            # Honest value-statements about the world are not claims.
+            for text in (
+                "The API timeout is now 60 seconds.",
+                "Updated rows appear automatically once a sync runs.",
+            ):
+                self.assertFalse(det(text), text)
+
     def test_echoed_notice_stripped_from_stored_reply(self):
         # BUG-029: the badge lives verbatim in stored history, so small
         # models learn to parrot it as their own sign-off. An echoed

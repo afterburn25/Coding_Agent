@@ -3375,6 +3375,13 @@ class AgentOrchestrator:
         # when nothing actually ran.
         + r"|\bi did\s+" + _CLAIM_ADVERBS +
         r"(?:it|that|all|everything|what you \w+|so|the \w+)\b"
+        # Bare verb-initial claims — "Updated — your workstation is now
+        # vector", "Saved: the port is 9090". The subject is implied
+        # (I did it); with no write landing it's the same fabrication
+        # class as "I updated the file".
+        + r"|\b(?:updated|saved|recorded|noted|logged|corrected|"
+        r"memorized|learned|stored|banked|changed|fixed)\s*[—–:,.]\s+"
+        r"(?:that|it|the|your|my|this|now|i)\b"
         # Checkmark emoji is a claim only next to an execution word
         # ("Done ✅") or as the whole message — decorative emoji after
         # honest prose ("we're holding off ✅") is not a work claim.

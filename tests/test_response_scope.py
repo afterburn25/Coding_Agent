@@ -490,6 +490,38 @@ class TestCorrectionChains(unittest.TestCase):
         cm.learn_from_user("never mind, it's fine")
         self.assertIn("api timeout is 45 seconds", self._active(cm))
 
+    def test_referential_rename_retargets(self):
+        # "actually the name changed — it is now called vector" — the
+        # referential tail rewrites the latest name-slot fact instead of
+        # falling through to a fabricated "Updated" model reply.
+        cm = self._mem()
+        cm.learn_from_user("my workstation name is beacon")
+        learned = cm.learn_from_user(
+            "actually the name changed — it is now called vector")
+        active = self._active(cm)
+        self.assertIn("my workstation name is vector", active)
+        self.assertNotIn("my workstation name is beacon", active)
+        self.assertIn("my workstation name is vector",
+                      learned.get("facts", []))
+
+    def test_referential_named_form(self):
+        # "the backup label is now named zeta" — the named/renamed
+        # shapes carry the same referential semantics as "called".
+        cm = self._mem()
+        cm.learn_from_user("my backup label is alpha")
+        cm.learn_from_user("the backup label is now named zeta")
+        active = self._active(cm)
+        self.assertIn("backup label is zeta", active)
+        self.assertNotIn("backup label is alpha", active)
+
+    def test_vague_called_phrase_does_not_corrupt(self):
+        # "it's called having standards" is idiom, not a rename — the
+        # latest fact must survive.
+        cm = self._mem()
+        cm.learn_from_user("the api timeout is 45 seconds")
+        cm.learn_from_user("it's called being careful")
+        self.assertIn("api timeout is 45 seconds", self._active(cm))
+
     def test_restatement_acknowledgement(self):
         from localcodeagent.agent.orchestrator import AgentOrchestrator
         ack = AgentOrchestrator.training_acknowledgement(
