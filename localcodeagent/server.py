@@ -1760,6 +1760,12 @@ class AppState:
             "github_test": _github_test,
             "safe_mode_exit": _safe_mode_exit,
             "self_repair_apply": _self_repair_apply,
+            # Live runtime picture — model residency, hardware, storage.
+            # Lets the status lane answer 'what model are you using' /
+            # 'how much disk space' with real numbers instead of a
+            # model riff or an underclaim.
+            "runtime_summary": lambda: self.runtime.summary(
+                probe_external=False),
             # Universal change journal — lets the control plane fall back
             # to the durable ledger for "undo that" and record every
             # registry-mediated settings write.

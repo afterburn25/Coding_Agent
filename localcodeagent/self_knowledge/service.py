@@ -134,6 +134,7 @@ class SelfKnowledgeService:
                 return None
             for probe in (self._followup, self._diagnostics,
                           self._control, self._where,
+                          self._runtime,
                           self._status_or_explain):
                 res = probe(t)
                 if res is not None:
@@ -719,6 +720,73 @@ class SelfKnowledgeService:
             truth={"kind": "action", "action": spec.id, "ok": False})
 
     # -- status / explain ---------------------------------------------------
+
+    # -- live runtime ----------------------------------------------------
+
+    _RUNTIME_Q_RE = re.compile(
+        r"\b(?:what|which)\s+(?:model|llm)\s+(?:are\s+you\s+"
+        r"(?:using|running|on)|is\s+(?:this|loaded|resident|serving))|"
+        r"\bwhat\s+model\b.{0,20}\b(?:powering|driving|serving)\b|"
+        r"\b(?:how\s+much|how\s+many)\s+(?:free\s+)?"
+        r"(?:disk|storage|drive|ram|memory|vram)\b|"
+        r"\bfree\s+(?:disk|storage|drive|ram|memory|vram)\s+"
+        r"(?:space|left|available|do\s+i\s+have)\b",
+        re.IGNORECASE)
+
+    def _runtime(self, t: str) -> Resolution | None:
+        """'What model are you using' / 'how much free disk space' —
+        answered from the live runtime summary, never a model riff or
+        an underclaim."""
+        if not self._RUNTIME_Q_RE.search(t):
+            return None
+        if not self._allows("feature_status"):
+            return None
+        fn = self._env.get("runtime_summary")
+        try:
+            info = fn() if callable(fn) else None
+        except Exception:
+            info = None
+        if not isinstance(info, dict):
+            return None
+        # Serving-model question — report the resident runtimes.
+        if re.search(r"\bmodel\b|\bllm\b", t) and not re.search(
+                r"\bdisk|storage|drive|ram|memory|vram\b", t):
+            live = [r for r in info.get("runtimes", [])
+                    if isinstance(r, dict)
+                    and str(r.get("state")) in ("running", "healthy",
+                                                "external")]
+            if live:
+                descs = []
+                for r in live[:4]:
+                    kind = ("external" if not r.get("managed")
+                            else "managed")
+                    descs.append(
+                        f"{r.get('model_id')} ({kind}, "
+                        f"{r.get('endpoint')})")
+                text = "Serving right now: " + "; ".join(descs) + "."
+            else:
+                text = ("No language model is resident right now — "
+                        "deterministic lanes answered this turn.")
+            return Resolution("answer", "model_status", text=text)
+        # Capacity question — report real numbers.
+        hw = info.get("hardware") or {}
+        store = info.get("model_storage") or {}
+        bits = []
+        if re.search(r"\bdisk|storage|drive\b", t):
+            free_gb = (store.get("free_bytes") or 0) / 1e9
+            if free_gb:
+                bits.append(f"{free_gb:,.0f} GB free on the models "
+                            f"drive ({store.get('path', '')})")
+        if re.search(r"\bvram\b", t):
+            bits.append(f"{hw.get('free_vram_gb', 0):.1f} of "
+                        f"{hw.get('total_vram_gb', 0):.0f} GB VRAM free")
+        elif re.search(r"\bram|memory\b", t):
+            bits.append(f"{hw.get('available_ram_gb', 0):.1f} of "
+                        f"{hw.get('total_ram_gb', 0):.0f} GB RAM free")
+        if not bits:
+            return None
+        return Resolution("answer", "capacity",
+                          text="; ".join(bits) + ".")
 
     def _status_or_explain(self, t: str) -> Resolution | None:
         """'Can you X', 'what is X', 'why can't you X', 'how do I X'."""
