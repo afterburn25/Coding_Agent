@@ -4676,13 +4676,16 @@ class AppState:
         # missions running" answers from the supervisor store, never the
         # model. Interrogative-shaped only; action phrasings ("stop the
         # mission", "run the tests daily") belong to their own lanes.
-        if (re.search(r"\b(?:standing\s+goals?|missions?)\b", low)
+        if ((re.search(r"\b(?:standing\s+goals?|missions?)\b", low)
                 and re.search(
                     r"\b(?:what|which|list|show|any|are\s+there|"
                     r"do\s+you\s+have|how\s+many|running|active)\b", low)
                 and not re.search(
                     r"\b(?:stop|cancel|pause|resume|create|make|start|"
-                    r"run|every|each|daily|weekly|hourly)\b", low)):
+                    r"run|every|each|daily|weekly|hourly)\b", low))
+                or re.search(
+                    r"\bwhat'?s\s+running\b|\bwhat\s+is\s+running\b|"
+                    r"\b(?:is\s+)?anything\s+running\b", low)):
             goals = [g for g in (sup.standing_goals() or [])
                      if g.get("enabled", True)]
             live_ms = [m for m in sup.missions.list()

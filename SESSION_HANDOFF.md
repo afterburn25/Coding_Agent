@@ -5015,7 +5015,15 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   fire — 9 identical `waiting_approval` epistemic missions. Both spawn
   paths (`_materialize_action` mission kind, `_spawn_goal_mission`) now
   dedupe on live same-`source_id` missions; terminal rows never block
-  the next run. Regression test + live-verified.
+  the next run. Live pileup drained: 15 stacked duplicates cancelled via
+  API (auditable), one instance kept. Regression test + live-verified.
+- **BUG-038** (P1 routing): `"what's running"` fell to the model which
+  hallucinated "nothing's running" mid-execution. Bare running-queries
+  now hit the deterministic inventory lane.
+- Ops note: backend launch args are `--workspace .dogfood --config
+  .dogfood/config.json --host 127.0.0.1 --port 8790 --server` — a
+  `--data-dir` restart attempt silently failed earlier this session and
+  left a stale-code process serving; verify the pid/CLI after restart.
 - Live store repaired across all of these (corrupt rows invalidated,
   legacy split-brain slots consolidated, stale facts retracted).
   Batteries: 135 + 579 + 149 autonomy green across conversation_growth,
