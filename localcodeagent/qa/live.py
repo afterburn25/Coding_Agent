@@ -15,6 +15,11 @@ Per-turn ``expect`` keys (subset of the scripted runner, plus live-only):
     no_reasoning_narration / max_sentences / max_chars / scope
                                                  — scope.py metrics
     no_tools                                     — tool_events must be empty
+    no_mutating_tools                            — only read-only permission
+                                                   classes may run (a search or
+                                                   page read to ground an answer
+                                                   is fine; acting on the world
+                                                   is not)
     tool_used                                    — tool_events non-empty and
                                                    containing this name
     model_called / no_model_call                 — model_events presence
@@ -272,6 +277,19 @@ class LiveRunner:
                        f"got {tr.task_status!r}")
         if expect.get("no_tools") and reply.tool_events:
             out.append(f"no_tools: ran {[tr.metrics['tool_events']]}")
+        if expect.get("no_mutating_tools"):
+            try:
+                from ..agent.orchestrator import AgentOrchestrator
+                read_only = AgentOrchestrator._READ_ONLY_TOOL_PERMS
+            except Exception:
+                read_only = frozenset({"filesystem.read"})
+            mutating = [
+                str(e.get("name") or e.get("tool") or e)[:60]
+                for e in reply.tool_events
+                if str(e.get("permission") or "") not in read_only
+            ]
+            if mutating:
+                out.append(f"no_mutating_tools: ran {mutating}")
         if "tool_used" in expect:
             names = " ".join(tr.metrics["tool_events"]).lower()
             if str(expect["tool_used"]).lower() not in names:
@@ -299,6 +317,7 @@ class LiveRunner:
                 self.corpus.record(CorpusEntry(
                     category={
                         "no_tools": "unexpected_tool_call",
+                        "no_mutating_tools": "unexpected_tool_call",
                         "tool_used": "bad_tool_choice",
                         "task_status": "task_not_completed",
                         "response": "irrelevant_answer",

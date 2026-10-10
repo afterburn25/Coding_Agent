@@ -38,3 +38,10 @@ P3 (cosmetic).
   stays a 500 — do not widen the 400 map.
 - Part 4 dead-code sweep, Part 6 tool fuzzing, Part 7 permission
   confusion matrix, Part 28 false-success audit: in progress.
+- Soak residual dispositions (81-turn run): spelled-math → BUG-020
+  (fixed); kokoro topic-return → external llama 503, not semantic
+  (the eventual reply was correct); `search_text` on the quoted-command
+  turn → judged correct grounding, not a defect — the tool event now
+  carries its `permission` and the live QA language gained
+  `no_mutating_tools` so the spec expresses "never act on the quote"
+  while permitting read-only lookup.

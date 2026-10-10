@@ -4833,6 +4833,7 @@ class AgentOrchestrator:
                 "arguments": args,
                 "result": result,
                 "phase": "recovered_approval",
+                "permission": permission,
             })
             redactor = self.tools.context.get("redactor")
             shown = redactor(result) if redactor else result
@@ -6156,19 +6157,19 @@ class AgentOrchestrator:
             return f"{name}:{args!r}"
 
     def _append_tool_result(self, session: _AgentSession, call: dict[str, Any], name: str, args: dict[str, Any], result: str) -> None:
+        try:
+            perm = str(self.tools.permission_for(name)[0] or "")
+        except Exception:
+            perm = ""
         if result.startswith(("ERROR", "PERMISSION_DENIED")):
             session.failures += 1
             session.failed_signatures.add(self._call_signature(name, args))
-        else:
+        elif perm and perm not in self._READ_ONLY_TOOL_PERMS:
             # A successful mutating call changes the workspace — a previously
             # failed call may now legitimately succeed, so unblock retries.
-            try:
-                perm = str(self.tools.permission_for(name)[0] or "")
-                if perm and perm not in self._READ_ONLY_TOOL_PERMS:
-                    session.failed_signatures.clear()
-            except Exception:
-                pass
-        event = {"name": name, "arguments": args, "result": result}
+            session.failed_signatures.clear()
+        event = {"name": name, "arguments": args, "result": result,
+                 "permission": perm}
         session.tool_events.append(event)
         redactor = self.tools.context.get("redactor")
         shown = redactor(result) if redactor else result
