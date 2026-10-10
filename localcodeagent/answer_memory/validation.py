@@ -99,7 +99,10 @@ def references_conversation(text: str) -> bool:
 # Secret / credential indicators — suppress persistent learning entirely.
 _SECRET_PATTERNS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-    re.compile(r"\b(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|secret[_-]?key|client[_-]?secret)\b\s*[:=]\s*[^\s]{6,}", re.I),
+    re.compile(r"\b(?:api[_\s-]?key|apikey|access[_\s-]?token|"
+               r"auth[_\s-]?token|secret[_\s-]?key|client[_\s-]?secret|"
+               r"ssh[_\s-]?key|private[_\s-]?key|signing[_\s-]?key)\b"
+               r"\s*(?:[:=]|\bis\b)\s*[^\s]{6,}", re.I),
     re.compile(r"\b(?:password|passwd|pwd|passcode|pass[\s_-]?phrase)\b"
                r"\s*[:=]\s*[^\s]{4,}", re.I),
     re.compile(r"\b(?:my\s+)?(?:password|passwd|pwd|passcode|"

@@ -1068,8 +1068,8 @@ class ConversationMemory:
                 r"agreed)|let'?s\b|the\s+plan\s+is)",
                 raw, flags=re.IGNORECASE)
             or ("?" not in raw
-                and re.match(r"^my\s+.{1,40}\s+is\s+.+$", raw,
-                             flags=re.IGNORECASE)))
+                and re.match(r"^(?:my|the|our)\s+.{1,40}\s+is\s+.+$",
+                             raw, flags=re.IGNORECASE)))
         if is_learning_write and contains_secret(raw):
             result.setdefault("locked", []).append(
                 "I won't store credentials or secrets in memory — "

@@ -133,6 +133,26 @@ class ConversationManagerTests(unittest.TestCase):
             for secret in ("hunter2", "s3cret!", "4820", "correct horse"):
                 self.assertNotIn(secret, ctx)
 
+    def test_credential_declaratives_never_persist(self):
+        """'the wifi password is X' / 'the api key is Y' are learning
+        writes too — a bare declarative naming a credential must refuse,
+        not bank (BUG-081: 'the wifi password is hunter2' banked live)."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for q in (
+                "the wifi password is hunter2",
+                "the api key is abc123xyz",
+                "our ssh key is AAAAB3NzaCfakekey",
+                "the access token is xyz1234567",
+            ):
+                learned = memory.learn_from_user(q)
+                self.assertIn("locked", learned, q)
+                self.assertEqual(learned["facts"], [], q)
+            self.assertEqual(memory.snapshot()["facts"], [])
+            # Policy statements mentioning credentials still bank.
+            out = memory.learn_from_user("the password policy is 90 days")
+            self.assertEqual(out["facts"], ["password policy is 90 days"])
+
     def test_credential_questions_are_not_hijacked(self):
         """A question merely mentioning a credential must still reach the
         normal answer lanes — the guard only refuses learning writes."""
