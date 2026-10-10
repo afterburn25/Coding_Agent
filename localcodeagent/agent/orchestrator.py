@@ -8102,6 +8102,11 @@ class AgentOrchestrator:
             # able to tell mission parks from interactive parks after a
             # restart (mission parks are mission work, never foreground).
             self.tasks.update(task.id, mission_id=mission_id)
+        if active_conv_id:
+            # Conversation provenance — error-referent binding ("fix that
+            # error") must never cross conversations.
+            self.tasks.update(
+                task.id, conversation_id=str(active_conv_id))
         event_callback = self._logging_callback(task.id, event_callback)
         self._last_callback = event_callback
         self._task_context(task.id)
@@ -8203,7 +8208,18 @@ class AgentOrchestrator:
         if active_ctx is not None and not getattr(
                 active_ctx, "active_error", ""):
             try:
+                active_cid = (
+                    str(self.conversation_manager.active().get("id") or "")
+                    if self.conversation_manager is not None else "")
                 for _t in self.tasks.recent(limit=5):
+                    # Same conversation only — a task tagged to another
+                    # chat (or untagged legacy mission traffic) must never
+                    # become this conversation's error referent.
+                    _t_cid = str(_t.get("conversation_id") or "")
+                    if _t_cid and active_cid and _t_cid != active_cid:
+                        continue
+                    if not _t_cid:
+                        continue  # untagged — provenance unknown, skip
                     if (str(_t.get("status")) == "failed"
                             and _t.get("error")
                             and not _t.get("mission_id")

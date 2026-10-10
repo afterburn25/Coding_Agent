@@ -38,6 +38,7 @@ class TaskRecord:
     recovery_count: int = 0
     response_source: str = ""
     mission_id: str = ""
+    conversation_id: str = ""
     memory: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:

@@ -796,6 +796,36 @@ class MissionConversationIsolationTests(unittest.TestCase):
                 exclude_task_ids=agent.tasks.mission_ids())
             self.assertNotIn("scoped lane", ctx)
 
+    def test_failed_task_error_binding_is_conversation_scoped(self):
+        # A failure in conversation A must never become conversation
+        # B's "the error" referent — the global-ledger fallback binds
+        # only same-conversation tagged tasks.
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, convos = _make(Path(td))
+            conv_a = convos.active().get("id")
+            agent.run("do some work")
+            a_task = agent.tasks.recent(1)[0]
+            self.assertEqual(str(a_task.get("conversation_id") or ""),
+                             str(conv_a))
+            agent.tasks.update(a_task["id"], status="failed",
+                               error="exploded badly")
+            # Conversation B: A's failure must NOT resolve "that error"
+            # — the model is asked to clarify (anaphoric advisory) and
+            # never sees A's error text.
+            convos.create()
+            conv_b = convos.active().get("id")
+            self.assertNotEqual(str(conv_a), str(conv_b))
+            agent.run("fix that error")
+            self.assertNotIn("exploded badly", provider.last_all_content)
+            self.assertIn("anaphoric", provider.last_all_content)
+            # B's OWN failed task DOES bind — the referent resolves and
+            # no ambiguity advisory is needed.
+            b_task = agent.tasks.recent(1)[0]
+            agent.tasks.update(b_task["id"], status="failed",
+                               error="b-side failure")
+            agent.run("fix that error")
+            self.assertNotIn("anaphoric", provider.last_all_content)
+
 
 class UnresolvedReferentNudgeTests(unittest.TestCase):
     """A command verb over a referent bound to nothing ("rename it —
