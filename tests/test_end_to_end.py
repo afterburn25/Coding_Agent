@@ -1326,6 +1326,32 @@ class AutonomyApiTests(unittest.TestCase):
                 if getattr(state, "autonomy", None) is not None:
                     state.autonomy.stop()
 
+    def test_copula_cadence_statement_is_not_a_goal(self):
+        # "the review cadence is weekly" states a property — 'weekly'
+        # is a copular complement, not an adverbial on a command; it
+        # must not mint a standing goal. "review my PRs weekly" does.
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import AppState
+            ws = Path(td)
+            cfg = AgentConfig(profiles_onboarding_gate=False,
+                models=[ModelProfile(
+                    id="fake", endpoint="http://127.0.0.1:1/v1",
+                    model="fake-model", roles=["primary_coder"],
+                    runtime="external")],
+                process_watchdog=False, research_enabled=False,
+            )
+            state = AppState(cfg, ws, ws / ".runtime")
+            try:
+                self.assertIsNone(
+                    state._mission_command("review cadence is weekly"))
+                out = state._mission_command("review my PRs weekly")
+                self.assertIsNotNone(out)
+                self.assertIn("Standing goal", out["content"])
+            finally:
+                if getattr(state, "autonomy", None) is not None:
+                    state.autonomy.stop()
+
 
 class ChatAttachmentTests(unittest.TestCase):
     """Chat '+' attachments: text files inline into the model's user

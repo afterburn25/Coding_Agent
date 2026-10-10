@@ -724,6 +724,10 @@ class ConversationMemory:
         "silent", "normal", "verbose", "debug", "release", "beta",
         "stable", "nightly", "production", "staging", "development",
         "high", "medium", "low", "on", "off",
+        # Cadence words — "the review cadence is weekly" states a fact,
+        # it doesn't schedule work.
+        "hourly", "daily", "weekly", "monthly", "quarterly",
+        "yearly", "annually", "fortnightly", "weekdays", "weekends",
     })
 
     @staticmethod
@@ -994,7 +998,20 @@ class ConversationMemory:
                 # imperatives ('set the theme to dark') are exempt — their
                 # dedicated matchers below still run.
                 from ..context.semantics import _ACTION_LEAD_RE
-                imperative_body = bool(_ACTION_LEAD_RE.match(body))
+                # A copula after the lead word makes the clause a
+                # statement, not a command — "review cadence is
+                # weekly" leads with 'review' but asserts a property;
+                # "review my PRs" (no copula) stays imperative. Verbs
+                # whose object is itself a clause ("remember the port
+                # is 8080") keep the imperative read.
+                imperative_body = bool(
+                    _ACTION_LEAD_RE.match(body)) and not re.match(
+                        r"^(?!(?:remember|remind|tell|note|show|"
+                        r"explain|describe|check|make|let|see|keep|"
+                        r"set|use|run|stop|start|get|do|please)\b)"
+                        r"[a-z]+(?:\s+[a-z0-9][a-z0-9 '._-]{0,38}?)?\s+"
+                        r"(?:is|are|was|were|isn't|aren't|ain't)\b",
+                        body, flags=re.IGNORECASE)
                 switch = re.match(
                     r"^we\s+(?:switched|moved|migrated|changed)\s+"
                     r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+to\s+(.+)$",
@@ -1094,7 +1111,16 @@ class ConversationMemory:
                             # when nothing structured matches.
                             body = inner
                             imperative_body = bool(
-                                _ACTION_LEAD_RE.match(body))
+                                _ACTION_LEAD_RE.match(inner)) and not re.match(
+                                    r"^(?!(?:remember|remind|tell|note|"
+                                    r"show|explain|describe|check|make|"
+                                    r"let|see|keep|set|use|run|stop|"
+                                    r"start|get|do|please)\b)"
+                                    r"[a-z]+(?:\s+[a-z0-9]"
+                                    r"[a-z0-9 '._-]{0,38}?)?\s+"
+                                    r"(?:is|are|was|were|isn't|aren't|"
+                                    r"ain't)\b",
+                                    inner, flags=re.IGNORECASE)
                             corr_body = inner.rstrip(".!?")
                 if fact is None:
                     # Reported copula decisions — "we decided the cache
@@ -1173,7 +1199,9 @@ class ConversationMemory:
                     # "Orion migrated off Postgres to Redis".
                     subj_switch = None if imperative_body else re.match(
                         r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
-                        r"(?:switched|moved|migrated|changed)"
+                        r"(?:(?:was|were|got|is|are|has\s+been|"
+                        r"have\s+been|being|just)\s+)*"
+                        r"(?:switched|moved|migrated|changed|pushed)"
                         r"(?:\s+(?:off|from|away from)\s+[a-z0-9][a-z0-9 ._-]{0,38}?)?"
                         r"\s+to\s+(.+)$",
                         body, flags=re.IGNORECASE,
@@ -1187,7 +1215,7 @@ class ConversationMemory:
                         # slot — "the standup moved to 10am" updates
                         # 'standup is at 9am', it isn't 'standup uses
                         # 10am'. Retarget keeps the original predicate;
-                        # only genuinely new entities mint 'uses'.
+                        # only genuinely new entities mint a fresh slot.
                         if self._fact_subject_ok(subj) and value:
                             fact = self._retarget_latest_fact(
                                 value, result["superseded"],
@@ -1195,7 +1223,20 @@ class ConversationMemory:
                         if (fact is None
                                 and self._fact_subject_ok(subj)
                                 and value):
-                            fact = f"{subj} uses {value}"
+                            # Time/date-shaped moves describe WHEN the
+                            # entity happens — "deadline was moved to
+                            # monday" mints 'deadline is monday'; tool
+                            # moves ("Orion moved to Redis") mint 'uses'.
+                            if re.fullmatch(
+                                    r"(?:next\s+|this\s+|every\s+)?"
+                                    r"(?:mon|tue|wed|thu|fri|sat|sun)"
+                                    r"[a-z]*|tomorrow|tonight|today|"
+                                    r"[a-z]+\s+\d{1,2}(?:st|nd|rd|th)?|"
+                                    r".*(?:am|pm)\b|\d{1,2}:\d{2}",
+                                    value, flags=re.IGNORECASE):
+                                fact = f"{subj} is {value}"
+                            else:
+                                fact = f"{subj} uses {value}"
                     elif not imperative_body:
                         decl = re.match(
                             r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"

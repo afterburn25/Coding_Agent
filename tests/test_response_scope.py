@@ -590,6 +590,29 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertNotIn("my standup is at 9am on weekdays", active)
         self.assertEqual(len(active), 1)
 
+    def test_passive_move_binds_entity_slot(self):
+        # "the deadline was moved to monday" — passive auxiliaries must
+        # not ride into the subject ('deadline was uses monday' was the
+        # live bug); a time-shaped value on a fresh entity mints 'is'.
+        cm = self._mem()
+        cm.learn_from_user("the deadline was moved to monday")
+        active = self._active(cm)
+        self.assertIn("deadline is monday", active)
+        self.assertNotIn("deadline was uses monday", active)
+
+    def test_passive_move_retargets_tracked_entity(self):
+        cm = self._mem()
+        cm.learn_from_user("my standup is at 9am on weekdays")
+        cm.learn_from_user("the standup was moved to 10am")
+        active = self._active(cm)
+        self.assertIn("my standup is 10am", active)
+        self.assertNotIn("my standup is at 9am on weekdays", active)
+
+    def test_tool_move_still_mints_uses(self):
+        cm = self._mem()
+        cm.learn_from_user("orion moved to redis")
+        self.assertIn("orion uses redis", self._active(cm))
+
     def test_and_marker_clause_splits(self):
         # "the deadline is friday, and actually make the standup
         # 10:30" — the 'and <marker>' boundary splits statement from

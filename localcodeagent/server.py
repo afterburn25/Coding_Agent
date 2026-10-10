@@ -4828,6 +4828,15 @@ class AppState:
             # act vetoes it. An embedded phrase mid-clause is reported
             # intent, not a command — "she told me to keep working on
             # this" reads complaint-ish yet requests nothing.
+            # A phrase right after a copula is a predicate complement
+            # describing a subject — "the review cadence IS weekly"
+            # states a property; it schedules nothing, even when the
+            # sentence leads with an action-shaped word ("review").
+            pre = masked.split(phrase, 1)[0]
+            if re.search(
+                    r"\b(?:is|are|was|were|be|been|being|seems?|"
+                    r"feels?|remains?)\s*$", pre):
+                return False
             if act not in (ASSERTION, QUESTION) and phrase in main:
                 head = main.split(phrase, 1)[0].strip(" ,—–-")
                 if act in (COMMAND, REQUEST) or len(head) <= 2:
