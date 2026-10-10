@@ -2531,7 +2531,9 @@ class AgentOrchestrator:
         r"^\s*(?:remind me\s+(?:of|about)\s+|what(?:'s|\s+s)?\s+|"
         r"whats\s+|which\s+|whichever\s+|who'?s?\s+|whos\s+|whose\s+|"
         r"who\s+(?:is|are|was|were)\s+|when\s+(?:is|are|was|were)\s+|"
-        r"where\s+(?:is|are|was|were)\s+|do you remember\s+)",
+        r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
+        r"(?:did|have|had)\s+i\s+(?:tell|told|mention)\w*\s+you\s+"
+        r"(?:about\s+)?)",
         re.IGNORECASE)
     _FACT_RECALL_SKIP_RE = re.compile(
         r"^\s*what\s+(?:do you|should|would|could|can|"

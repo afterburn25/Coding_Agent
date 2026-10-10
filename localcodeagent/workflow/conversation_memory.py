@@ -950,8 +950,17 @@ class ConversationMemory:
             ):
                 match = re.match(pattern, body, flags=re.IGNORECASE)
                 if match:
-                    fact = (match.group(1).strip() if match.lastindex
+                    cand = (match.group(1).strip() if match.lastindex
                             else body.rstrip(".!?"))
+                    # Negated copula — "my editor is not emacs" is a
+                    # retraction/correction for the neg lane, never a
+                    # verbatim fact.
+                    if re.search(
+                            r"\b(?:is|are|was|were)(?:n't|"
+                            r"\s+(?:not|no\s+longer|never))\b",
+                            cand, flags=re.IGNORECASE):
+                        break
+                    fact = cand
                     # A marker-prefixed preference restatement —
                     # "actually i prefer green now" — corrects the
                     # same-class preference fact ("my favorite color is
@@ -1062,6 +1071,12 @@ class ConversationMemory:
                         else:
                             result["forgotten"].extend(
                                 self._retract_fact_value(old_v))
+                        if fact is None:
+                            # Negated statements are constraints, not
+                            # facts — whether the retraction hit or
+                            # missed, never let a downstream matcher
+                            # bank "X is not Y" verbatim.
+                            body = ""
                     elif corr:
                         inner = corr.group(1).strip()
                         inner_nyc = re.match(

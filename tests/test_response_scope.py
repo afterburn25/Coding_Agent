@@ -578,6 +578,17 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertIn("deadline is friday", active)
         self.assertIn("standup is 10:30", active)
 
+    def test_negated_my_fact_retracts_not_banks(self):
+        # "my editor is not emacs" retracts the unique emacs fact — it
+        # must never bank the negation verbatim ('your editor is not
+        # emacs' misleads recall).
+        cm = self._mem()
+        cm.learn_from_user("my editor is emacs")
+        learned = cm.learn_from_user("my editor is not emacs")
+        self.assertEqual(self._active(cm), [])
+        self.assertFalse(learned.get("facts"))
+        self.assertTrue(learned.get("forgotten"))
+
     def test_marker_context_legitimizes_called(self):
         # "that's wrong — it's called cobalt" — the head marker supplies
         # correction intent, so 'called' without 'now' still retargets.
@@ -635,6 +646,17 @@ class TestFactsRecallLane(unittest.TestCase):
                   "what do you know about python",
                   "tell me about your father"):
             self.assertFalse(rx.search(q), q)
+
+    def test_recall_regex_covers_did_i_tell_you(self):
+        # "did I tell you my editor" probes stored memory — with no
+        # lane the model fabricated "you didn't tell me" over a live
+        # fact.
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        rx = AgentOrchestrator._FACT_RECALL_RE
+        for q in ("did i tell you my editor",
+                  "did i tell you about the port",
+                  "have i told you my timezone"):
+            self.assertTrue(rx.match(q), q)
 
     def test_second_person_conversion(self):
         from localcodeagent.agent.orchestrator import AgentOrchestrator
