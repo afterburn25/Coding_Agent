@@ -6651,9 +6651,10 @@ class AgentOrchestrator:
             status,
             verification_passed=(None if not current_round else not verification_failed),
         )
-        if self.conversation_memory is not None:
+        mission_attributed = self._mission_attributed(session.task_id)
+        if self.conversation_memory is not None and not mission_attributed:
             self.conversation_memory.record_exchange(session.user_text, session.main_content)
-        if self.conversation_manager is not None:
+        if self.conversation_manager is not None and not mission_attributed:
             self.conversation_manager.record_exchange(
                 session.user_text,
                 session.main_content,
@@ -6663,7 +6664,8 @@ class AgentOrchestrator:
                 artifact_ids=self._artifact_ids_from_events(session.tool_events),
                 attachments=session.attachments_meta,
             )
-        if self.answer_memory is not None and not session.unverified_claims:
+        if (self.answer_memory is not None and not session.unverified_claims
+                and not mission_attributed):
             try:
                 tool_names = [
                     str(e.get("name") or "")
@@ -7477,9 +7479,10 @@ class AgentOrchestrator:
             steps=session.steps,
         )
         self._record_outcome(session, "step_limit")
-        if self.conversation_memory is not None:
+        mission_attributed = self._mission_attributed(session.task_id)
+        if self.conversation_memory is not None and not mission_attributed:
             self.conversation_memory.record_exchange(session.user_text, session.main_content)
-        if self.conversation_manager is not None:
+        if self.conversation_manager is not None and not mission_attributed:
             self.conversation_manager.record_exchange(
                 session.user_text,
                 session.main_content,
@@ -7915,6 +7918,23 @@ class AgentOrchestrator:
 
     def _register_run_task(self, task_id: str) -> None:
         self._run_task_ids[threading.get_ident()] = task_id
+
+    def _mission_attributed(self, task_id: str) -> bool:
+        """True when the task is delegated mission/autonomy work rather
+        than a user utterance — its prompt is a machine work order and
+        must never enter user-facing conversation history."""
+        if self._mission_by_task.get(task_id):
+            return True
+        try:
+            row = self.tasks.get(task_id)
+        except Exception:
+            return False
+        if row is None:
+            return False
+        return bool(
+            getattr(row, "mission_id", "")
+            or str(getattr(row, "mode", ""))
+            in {"work_order", "autonomy", "self_repair"})
 
     def _run_impl(
         self,

@@ -739,6 +739,38 @@ class GitHubCapabilityTruthTests(unittest.TestCase):
             self.assertEqual(executed, [], "no tool may run unregistered")
 
 
+class MissionConversationIsolationTests(unittest.TestCase):
+    """Delegated work orders are not user utterances — their prompts and
+    outputs must never enter conversation history (the live dogfood
+    defect: mission work orders appeared as user turns and the model
+    echoed mission-failure text into unrelated questions)."""
+
+    def test_work_order_run_leaves_no_conversation_trace(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, convos = _make(Path(td))
+            agent.run_work_order(
+                "Work the scoped lane of this mission — fix the file")
+            hist = convos.history(limit=20)
+            self.assertFalse(
+                any("scoped lane" in str(m.get("content"))
+                    for m in hist), hist)
+
+    def test_user_turn_still_records(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, convos = _make(Path(td))
+            agent.run("hello there")
+            self.assertTrue(convos.history(limit=5))
+
+    def test_mission_attributed_run_isolated(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, convos = _make(Path(td))
+            agent.run("fix the tests", mission_id="mission-1")
+            hist = convos.history(limit=20)
+            self.assertFalse(
+                any("fix the tests" in str(m.get("content"))
+                    for m in hist), hist)
+
+
 class UnresolvedReferentNudgeTests(unittest.TestCase):
     """A command verb over a referent bound to nothing ("rename it —
     dusk sounds better", where 'it' is a conversation name, not a file)
