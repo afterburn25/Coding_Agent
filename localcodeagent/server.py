@@ -4676,7 +4676,7 @@ class AppState:
         # missions running" answers from the supervisor store, never the
         # model. Interrogative-shaped only; action phrasings ("stop the
         # mission", "run the tests daily") belong to their own lanes.
-        if ((re.search(r"\b(?:standing\s+goals?|missions?)\b", low)
+        if ((re.search(r"\b(?:standing\s+goals?|missions?|schedul\w*|triggers?)\b", low)
                 and re.search(
                     r"\b(?:what|which|list|show|any|are\s+there|"
                     r"do\s+you\s+have|how\s+many|running|active)\b", low)
@@ -4685,18 +4685,24 @@ class AppState:
                     r"run|every|each|daily|weekly|hourly)\b", low))
                 or re.search(
                     r"\bwhat'?s\s+running\b|\bwhat\s+is\s+running\b|"
-                    r"\b(?:is\s+)?anything\s+running\b", low)):
+                    r"\b(?:is\s+)?anything\s+running\b", low)
+                or re.search(
+                    r"\bwhen\s+(?:do|does|will|should)\b.{0,50}\bruns?\b",
+                    low)):
             goals = [g for g in (sup.standing_goals() or [])
                      if g.get("enabled", True)]
+            scheds = [s for s in (sup.scheduler.list() or [])
+                      if s.get("enabled", True)]
             live_ms = [m for m in sup.missions.list()
                        if m.get("status") in
                        {"ready", "active", "planning", "executing",
                         "verifying", "evaluating", "replanning",
-                        "waiting_dependency", "waiting_approval"}]
-            if not goals and not live_ms:
+                        "waiting_dependency", "waiting_approval",
+                        "paused", "blocked"}]
+            if not goals and not scheds and not live_ms:
                 return {"content": (
-                    "No standing goals or active missions right now. "
-                    "Tell me to check something on a schedule — "
+                    "No standing goals, schedules, or active missions "
+                    "right now. Tell me to check something on a schedule — "
                     "'every morning, run the smoke tests' — or "
                     "'make this a mission' to start autonomous work.")}
             parts = []
@@ -4706,6 +4712,25 @@ class AppState:
                     + ": "
                     + "; ".join(f'"{g.get("objective", "")[:80]}"'
                                 for g in goals[:5]))
+            if scheds:
+                def _sched_desc(s: dict) -> str:
+                    kind = s.get("kind")
+                    if kind == "interval":
+                        secs = int(s.get("interval_s") or 3600)
+                        if secs % 3600 == 0:
+                            return f"every {secs // 3600}h"
+                        if secs % 60 == 0:
+                            return f"every {secs // 60}m"
+                        return f"every {secs}s"
+                    if kind in ("daily", "weekly"):
+                        return (f"{kind} at {int(s.get('hour') or 0):02d}"
+                                f":{int(s.get('minute') or 0):02d}")
+                    return str(kind or "once")
+                parts.append(
+                    "Schedule" + ("s" if len(scheds) > 1 else "") + ": "
+                    + "; ".join(
+                        f'"{s.get("name") or s.get("id")}" '
+                        f'({_sched_desc(s)})' for s in scheds[:5]))
             if live_ms:
                 parts.append(
                     "Active mission" + ("s" if len(live_ms) > 1 else "")
