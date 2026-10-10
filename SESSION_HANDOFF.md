@@ -5004,10 +5004,22 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   `X isn't Y anymore` claimed "Updated" while the fact stayed live.
   New negated-copula matcher: with Z → canonical `X is Z` supersession;
   bare → unique-fact retraction into `forgotten` (honest ack).
+- **BUG-036** (P2 rules): `don't X` prohibitions had no lane (only
+  `don't X anymore`) — fell to a dead model → 503. Now banks `Never X`
+  with negation-of-positive + ephemeral guards; live-verified model-free.
+- Deterministic standing-goal/mission inventory lane added to
+  `_mission_command` — "what standing goals do you have?" answers from
+  the autonomy store with no model. Stale BUG-027-contaminated goal
+  disabled via API (SQLite DocStore is authoritative; JSON is shadow).
+- **BUG-037** (P1 autonomy): recurring schedule stacked one mission per
+  fire — 9 identical `waiting_approval` epistemic missions. Both spawn
+  paths (`_materialize_action` mission kind, `_spawn_goal_mission`) now
+  dedupe on live same-`source_id` missions; terminal rows never block
+  the next run. Regression test + live-verified.
 - Live store repaired across all of these (corrupt rows invalidated,
   legacy split-brain slots consolidated, stale facts retracted).
-  Batteries: 135 + 579 green across conversation_growth, netdiag,
-  self_knowledge, semantic_frame, answer_memory, autonomy.
+  Batteries: 135 + 579 + 149 autonomy green across conversation_growth,
+  netdiag, self_knowledge, semantic_frame, answer_memory, autonomy.
 - Still open: UI click-dogfood (needs interactive browser), installer
   cycle execution, model-lane churn under shared-GPU contention
   (environmental — balanced-policy eviction + deployed instance).

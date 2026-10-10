@@ -4672,6 +4672,46 @@ class AppState:
                                  or "Nothing is running right now."),
                     "situation": sit}
 
+        # Inventory query — "what standing goals do you have" / "are any
+        # missions running" answers from the supervisor store, never the
+        # model. Interrogative-shaped only; action phrasings ("stop the
+        # mission", "run the tests daily") belong to their own lanes.
+        if (re.search(r"\b(?:standing\s+goals?|missions?)\b", low)
+                and re.search(
+                    r"\b(?:what|which|list|show|any|are\s+there|"
+                    r"do\s+you\s+have|how\s+many|running|active)\b", low)
+                and not re.search(
+                    r"\b(?:stop|cancel|pause|resume|create|make|start|"
+                    r"run|every|each|daily|weekly|hourly)\b", low)):
+            goals = [g for g in (sup.standing_goals() or [])
+                     if g.get("enabled", True)]
+            live_ms = [m for m in sup.missions.list()
+                       if m.get("status") in
+                       {"ready", "active", "planning", "executing",
+                        "verifying", "evaluating", "replanning",
+                        "waiting_dependency", "waiting_approval"}]
+            if not goals and not live_ms:
+                return {"content": (
+                    "No standing goals or active missions right now. "
+                    "Tell me to check something on a schedule — "
+                    "'every morning, run the smoke tests' — or "
+                    "'make this a mission' to start autonomous work.")}
+            parts = []
+            if goals:
+                parts.append(
+                    "Standing goal" + ("s" if len(goals) > 1 else "")
+                    + ": "
+                    + "; ".join(f'"{g.get("objective", "")[:80]}"'
+                                for g in goals[:5]))
+            if live_ms:
+                parts.append(
+                    "Active mission" + ("s" if len(live_ms) > 1 else "")
+                    + ": "
+                    + "; ".join(f'"{m.get("title", "")[:80]}" '
+                                f'({m.get("status", "?")})'
+                                for m in live_ms[:5]))
+            return {"content": "  ·  ".join(parts)}
+
         if any(p in low for p in ("cancel the mission", "stop the mission",
                                   "stop working on that mission",
                                   "cancel that mission", "stop that mission")):
