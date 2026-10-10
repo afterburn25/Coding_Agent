@@ -511,9 +511,11 @@ class _ScriptedProvider:
     def __init__(self, messages: list[dict]):
         self.queue = list(messages)
         self.calls = 0
+        self.last_messages = None
 
     def complete(self, *, messages, tools=None, max_tokens=None):
         self.calls += 1
+        self.last_messages = list(messages)
         msg = self.queue.pop(0) if self.queue else {
             "role": "assistant", "content": "Done."}
         return ProviderResponse(message=msg, raw={})
@@ -620,6 +622,53 @@ class TruthGateTests(RecoveryLoopTests):
                 "Patches are applied by the vendor.",
             ):
                 self.assertFalse(det(text), text)
+
+    def test_echoed_notice_stripped_from_stored_reply(self):
+        # BUG-029: the badge lives verbatim in stored history, so small
+        # models learn to parrot it as their own sign-off. An echoed
+        # notice is furniture — strip it before storage so it can't be
+        # banked into Answer Memory as a trusted answer.
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            provider = _ScriptedProvider([{
+                "role": "assistant",
+                "content": (
+                    "Got it — keeping at it.\n\n"
+                    "Everything's humming. ✅  \n\n"
+                    "⚠ **Unverified action claims** — no tools or "
+                    "commands ran in this reply. Statements asserting "
+                    "completed actions above are narrative, not "
+                    "confirmed execution."),
+            }])
+            agent._provider_for = lambda p, **kw: provider
+            result = agent.run("keep working on this")
+            self.assertNotIn("Unverified action claims", result.content)
+            self.assertIn("humming", result.content)
+
+    def test_badged_history_turns_are_stripped_for_model(self):
+        # BUG-029: a genuinely badged reply stays badged in the visible
+        # transcript, but annotation furniture must never re-enter the
+        # model's context — feeding it back teaches the model to append
+        # fake badges (and to imitate fabrication).
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            provider = _ScriptedProvider([{
+                "role": "assistant", "content": "Still here."}])
+            agent._provider_for = lambda p, **kw: provider
+            agent.run("how is it going", history=[
+                {"role": "user", "content": "did you run the tests?"},
+                {"role": "assistant",
+                 "content": (
+                     "I ran the tests — all green. ✅\n\n"
+                     "⚠ **Unverified action claims** — no tools or "
+                     "commands ran in this reply. Statements asserting "
+                     "completed actions above are narrative, not "
+                     "confirmed execution.")},
+            ])
+            sent = json.dumps(provider.last_messages or [],
+                              ensure_ascii=False)
+            self.assertNotIn("Unverified action claims", sent)
+            self.assertIn("all green", sent)
 
 
 class _DeadProcess:

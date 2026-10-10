@@ -409,6 +409,22 @@ class _AgentSession:
 # the notices appended below.
 UNVERIFIED_CLAIMS_MARKER = "Unverified action claims"
 
+# The notice below is UI furniture appended by the truth gate — but it
+# sits verbatim in stored assistant history, so small models learn to
+# parrot "reply ✅ + ⚠ Unverified action claims" as part of their own
+# voice. Strip it wherever content becomes model-facing or gets stored:
+# in injected history, and in fresh model output before the real scan.
+_UNVERIFIED_NOTICE_RE = re.compile(
+    r"\n{1,3}⚠\s*\*\*" + re.escape(UNVERIFIED_CLAIMS_MARKER)
+    + r"\*\*[^\n]*")
+
+
+def _strip_unverified_notice(text: str) -> str:
+    """Remove a truth-gate annotation block from content that is about
+    to be shown to a model or persisted as clean output. A genuinely
+    appended notice is always trailing; a parroted one may sit anywhere
+    — both are furniture, never semantic content."""
+    return _UNVERIFIED_NOTICE_RE.sub("", str(text or "")).rstrip()
 
 
 # Shared surface renderer for deterministic/builtin replies — the
@@ -7461,6 +7477,12 @@ class AgentOrchestrator:
                 # unambiguously wrong and safe to repair deterministically.
                 session.main_content = self._fix_address_inversion(
                     session.main_content)
+                # A reply parroting the truth-gate notice itself (it sits
+                # verbatim in history) stores the furniture, dodges the
+                # unverified gate, and lands in Answer Memory — strip the
+                # echo before the real claim scan below.
+                session.main_content = _strip_unverified_notice(
+                    session.main_content)
                 # HARD TRUTH RULE: a reply asserting executed actions while
                 # zero tools ran this turn is fabrication. The text may
                 # already have streamed, so enforcement appends a visible
@@ -9551,6 +9573,8 @@ class AgentOrchestrator:
                 kept: list[dict[str, Any]] = []
                 for msg in reversed(history[-history_turns:]):
                     content = str(msg.get("content") or "")
+                    if str(msg.get("role") or "") == "assistant":
+                        content = _strip_unverified_notice(content)
                     if not content or budget[0] <= 0:
                         continue
                     if len(content) > budget[0]:
@@ -9682,6 +9706,8 @@ class AgentOrchestrator:
                 kept = []
                 for msg in reversed(history[-24:]):
                     content = str(msg.get("content") or "")
+                    if str(msg.get("role") or "") == "assistant":
+                        content = _strip_unverified_notice(content)
                     if not content or budget[0] <= 0:
                         continue
                     if len(content) > budget[0]:
