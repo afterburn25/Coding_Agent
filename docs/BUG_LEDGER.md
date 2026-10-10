@@ -28,6 +28,7 @@ P3 (cosmetic).
 | BUG-018 | P2 | Context binding | **`active_error` fallback still scanned the GLOBAL task ledger** — BUG-013 excluded mission lanes but an interactive failure in conversation A could still resolve "fix that error" inside conversation B | task rows carried no conversation provenance | `TaskRecord.conversation_id` persisted at task create; fallback binds only same-conversation tagged failures (untagged/foreign rows skipped); unbound referent now surfaces the anaphoric ambiguity advisory → model asks which error instead of silently anchoring | `test_failed_task_error_binding_is_conversation_scoped` |
 | BUG-019 | P2 | Answer Memory | **Legacy mission work-orders replayable as learned answers** — 3 pre-BUG-011 `answers` rows stored responses to machine-authored scaffolds ("A mission task failed. Diagnose…", "Apply the diagnosis…", "Work the scoped lane…") — machine prompts, not user questions; a near-match could surface mission evidence into chat | work-order responses were learned before mission gating existed; no provenance filter at lookup | `is_machine_authored_question()` — work-order template scaffolds suppressed at `record_exchange` AND rejected/invalidated at lookup like error/fragment answers; 3 live rows invalidated | `test_machine_authored_questions_never_learned_or_replayed` |
 | BUG-020 | P2 | Fast-path router | **Spelled-out arithmetic fell through to the model** — "what's 8 plus 4?", "eight plus four", "two times three" were sent to the model backend instead of the deterministic math lane (soak: returned 503 with model down) | `Thalamus._math_expr` only extracted symbolic digit expressions; no word-number path | `_spelled_math()` — a bounded whole-candidate translator (number words incl. hundred/thousand/point/negative, operator words incl. "to the power of"/squared/cubed/divided by/over/mod); only attempted when an op word is present, any unknown token disqualifies the whole candidate — no phrase lists, and non-math sentences ("is it over yet", "times are hard", "twenty questions") cannot false-fire | `test_math_spelled_out` (10 forms) + widened `test_math_false_positives_not_caught` |
+| BUG-021 | P1 | API surface | **6 POST routes leaked service-layer exceptions as raw 500s on an empty `{}` body** (live POST-fuzz, 134 literals probed): `conversations/feedback` (invalid rating ValueError), `image/backend/start` (ComfyUI missing RuntimeError), `model-growth/job` (dataset FileNotFoundError), `nexus-brain/initialize` (ValueError), `nexus-brain/unlock` (not-initialized RuntimeError), `policy/mode` (ValueError) | handlers called the service layer without the established `except → _json(error, 4xx)` mapping other routes use | each handler now maps its validation/state/dependency errors: ValueError → 400, not-initialized RuntimeError → 409, missing-backend RuntimeError → 503, FileNotFoundError → 400 | `test_service_errors_map_to_4xx_not_500` (all six + valid-path sanity); live: all six return mapped JSON 4xx/503, `policy/mode {balanced}` → 200 |
 
 ## Discovery queues (carried)
 
@@ -36,8 +37,16 @@ P3 (cosmetic).
   covered by `_qint`, body fields by `_bnum`.
 - `ValueError` raised by internal logic (not input coercion) correctly
   stays a 500 — do not widen the 400 map.
-- Part 4 dead-code sweep, Part 6 tool fuzzing, Part 7 permission
-  confusion matrix, Part 28 false-success audit: in progress.
+- Audit results since last entry: Part 4 dead-code sweep done
+  (19 unreferenced symbols removed, `cded208c`); Part 6 tool fuzz
+  clean (15 tools × 9 malformed arg shapes, zero crashes); Part 7
+  permission matrix coherent (NEVER_AUTO ⊆ PERMISSION_INFO, all
+  builtin tool perms resolve); UI↔API consistency sweep clean
+  (317 call sites, zero missing routes); POST fuzz of 134 literals
+  found BUG-021 (6 raw-500 stragglers, fixed); live GET sweep of
+  104 routes found zero 500s. Remaining: Part 28 false-success
+  audit, UI click-dogfood (needs interactive browser), installer
+  cycle.
 - Test-infra flake fixed (suite-ordering): the `openai_compat` urlopen
   patch is module-global, and a leaked `warmup-*` daemon ping (posts
   to chat/completions up to 120s) consumed a scripted call in
