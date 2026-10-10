@@ -1696,6 +1696,33 @@ class ConversationMemory:
                                     new_v, result["superseded"],
                                     subject_hint=hint)
                     if not reset and fact is None:
+                        # "i thought the port was 8080 but it was
+                        # 8081" — a corrected belief. The 'but it was'
+                        # tail carries the true value; bank it on the
+                        # named subject's slot.
+                        tht = re.match(
+                            r"^i\s+(?:thought|assumed|believed|"
+                            r"figured)\s+(?:(?:the|my|our)\s+)?"
+                            r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
+                            r"(?:was|were|is|are)\s+(.+?)\s*,?\s*"
+                            r"but\s+(?:it\s+(?:was|is)|it'?s|"
+                            r"they\s+(?:were|are)|they'?re|"
+                            r"actually\s+(?:it\s+(?:was|is)|it'?s))\s+"
+                            r"(.+?)[.!?]?$",
+                            raw, flags=re.IGNORECASE)
+                        if tht:
+                            old_v = self._clean_value(tht.group(2))
+                            new_v = self._clean_value(tht.group(3))
+                            hint = self._clean_subject(tht.group(1))
+                            fact = self._correct_fact_value(
+                                old_v, new_v)
+                            if fact is None:
+                                fact = self._retarget_latest_fact(
+                                    new_v, result["superseded"],
+                                    subject_hint=hint)
+                            if fact is None and new_v and hint:
+                                fact = f"{hint} is {new_v}"
+                    if not reset and fact is None:
                         # "we used jira before, now it's linear" — past
                         # usage superseded by present usage. The old
                         # tool matches an existing 'we/i use X' fact for

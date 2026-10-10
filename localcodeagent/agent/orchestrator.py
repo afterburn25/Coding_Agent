@@ -9103,6 +9103,23 @@ class AgentOrchestrator:
             or policy_decision.has_url
             or policy_decision.level == _research_policy.WEB_REQUIRED
         )
+        # A stored answer only answers a question-shaped turn. Commands,
+        # requests, complaints, and assertions that replay a banked Q→A
+        # produce nonsense — 'if the build fails, ping me' replayed a
+        # stored incident investigation. Communicative imperatives
+        # ('explain X', 'describe the handshake') are questions in
+        # disguise and still qualify; context hints stay ungated.
+        am_hit_ok = True
+        _sem = getattr(env, "semantic", None)
+        _act = getattr(_sem, "speech_act", "") if _sem is not None else ""
+        if _act and _act != "question":
+            _masked = str(getattr(_sem, "masked", "") or user_text or "")
+            if _act not in ("command", "request") or not re.match(
+                    r"^(?:explain|describe|define|list|tell|show|"
+                    r"summari[sz]e|outline|detail|clarify|"
+                    r"walk(?:\s+me)?\s+through)\b",
+                    _masked.strip().lower()):
+                am_hit_ok = False
         if (
             mode == "auto"
             and self.answer_memory is not None
@@ -9150,7 +9167,7 @@ class AgentOrchestrator:
                 # user just attached — only context hints survive. With a
                 # persona driving, it also can't replay stored text — the
                 # model rephrases the same facts in her voice.
-                if (memory_match.hit and not mem_hit_bad
+                if (memory_match.hit and not mem_hit_bad and am_hit_ok
                         and not attach["image_paths"] and not persona_voice):
                     return self._answer_memory_result(
                         task, user_text, memory_match,

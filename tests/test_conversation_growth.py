@@ -1306,6 +1306,21 @@ class CrossChatMemoryTests(unittest.TestCase):
                 "we used jira before, now it's linear")
             self.assertEqual(learned["facts"], ["we use linear"])
 
+    def test_thought_was_but_was_belief_correction(self):
+        # 'i thought the port was 8080 but it was 8081' — a corrected
+        # belief banks the true value on the named subject's slot.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            learned = memory.learn_from_user(
+                "i thought the port was 8080 but it was 8081")
+            self.assertEqual(learned["facts"], ["port is 8081"])
+            memory2 = ConversationMemory(Path(td) / "m2.json")
+            memory2.learn_from_user("the port is 8080")
+            learned = memory2.learn_from_user(
+                "i thought the port was 8080 but it was 8081")
+            self.assertEqual(learned["facts"], ["port is 8081"])
+            self.assertIn("port is 8080", learned["superseded"])
+
     def test_hearsay_acknowledged_never_banked(self):
         # BUG-073 — reported speech ("i heard the port is 9090",
         # "someone said the build is green") is a secondhand claim:
