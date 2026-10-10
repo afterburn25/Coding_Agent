@@ -625,6 +625,26 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertIn("deadline is friday", active)
         self.assertIn("standup is 10:30", active)
 
+    def test_negated_preposition_value_retracts(self):
+        # "my standup isn't at 10:30 anymore" — 'at' is syntax around
+        # the denied value; the stored 'is 10:30' fact retracts.
+        cm = self._mem()
+        cm.learn_from_user("my standup is 10:30")
+        learned = cm.learn_from_user(
+            "my standup isn't at 10:30 anymore")
+        self.assertTrue(learned["forgotten"])
+        self.assertNotIn("my standup is 10:30", self._active(cm))
+
+    def test_negation_miss_reports_honestly(self):
+        # "my favorite color is not blue" with no blue fact — nothing
+        # retracts; the turn reports a miss, never banks a negation,
+        # never falls to the model.
+        cm = self._mem()
+        learned = cm.learn_from_user("my favorite color is not blue")
+        self.assertFalse(learned["facts"])
+        self.assertTrue(learned["forgotten_miss"])
+        self.assertEqual(self._active(cm), [])
+
     def test_negated_my_fact_retracts_not_banks(self):
         # "my editor is not emacs" retracts the unique emacs fact — it
         # must never bank the negation verbatim ('your editor is not

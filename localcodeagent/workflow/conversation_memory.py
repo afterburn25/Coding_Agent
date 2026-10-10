@@ -1086,8 +1086,22 @@ class ConversationMemory:
                             ):
                                 fact = f"{subj_txt} is {new_v}"
                         else:
-                            result["forgotten"].extend(
-                                self._retract_fact_value(old_v))
+                            # 'isn't AT 10:30' negates the time the
+                            # fact states — a leading prep is syntax,
+                            # not part of the value being denied.
+                            neg_v = re.sub(
+                                r"^(?:at|on|in|for|of|to)\s+", "",
+                                old_v, flags=re.IGNORECASE)
+                            retracted = self._retract_fact_value(
+                                neg_v or old_v)
+                            result["forgotten"].extend(retracted)
+                            if not retracted:
+                                # The retraction named a value nothing
+                                # stores — surface the miss so the reply
+                                # is an honest "nothing to forget", not
+                                # a model turn.
+                                result["forgotten_miss"] = [
+                                    f"{subj_txt or 'it'} is {old_v}"]
                         if fact is None:
                             # Negated statements are constraints, not
                             # facts — whether the retraction hit or
