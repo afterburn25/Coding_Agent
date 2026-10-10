@@ -132,6 +132,12 @@ class SemanticFrame:
     confidence: float = 0.5
     candidates: list[dict[str, Any]] = field(default_factory=list)
     rejected: list[dict[str, str]] = field(default_factory=list)
+    # True when the main clause carries no finite-verb predicate — a
+    # bare noun phrase. In a chat addressed to Nexus a fragment is
+    # pragmatically a request for the thing named ("a picture of a
+    # dragon" = "make me a picture of a dragon"); a clause with its own
+    # subject + predicate is a proposition ABOUT the world.
+    fragment: bool = False
 
     # -- lane contract ----------------------------------------------------
 
@@ -177,7 +183,12 @@ class SemanticFrame:
             return act == QUESTION and self.requested_slot in _QA_SLOTS
         if lane in ("control", "local_action", "image_action",
                     "git_action", "tool_action"):
-            return act in (COMMAND, REQUEST) and not self.prohibition
+            # Fragments count as request-shaped: in a chat addressed to
+            # Nexus the named thing IS the ask ("a picture of a dragon").
+            # A clause with its own predicate is a proposition — "the
+            # image on the wall needs a frame" describes the world.
+            return (act in (COMMAND, REQUEST) or self.fragment) \
+                and not self.prohibition
         if lane in ("github_status", "git_state", "memory_recall",
                     "github_read"):
             # github_read carries no topic vocabulary on purpose —
@@ -231,6 +242,7 @@ class SemanticFrame:
             "prohibition": self.prohibition,
             "hypothetical": self.hypothetical,
             "conditional": self.conditional,
+            "fragment": self.fragment,
             "quoted": len(self.quoted_spans),
             "main_clause": self.main_clause[:120],
             "supporting": len(self.supporting),
@@ -486,7 +498,9 @@ _LANE_TOPIC_RE: dict[str, str] = {
         r"origin|upstream|fork|commits?|push|pull|merge|clone)\b"),
     "git_state": (
         r"\b(?:git|github|branch(?:es)?|remotes?|"
-        r"repos(?:itory|itories)?|origin|upstream|fork)\b"),
+        r"repos(?:itory|itories)?|origin|upstream|fork|"
+        r"push|pull|commits?|merges?|rebase|checkout|clone|"
+        r"fetch|stash|pull\s+request|pr)\b"),
     # identity and memory_recall are absent on purpose: their claim lanes
     # already match structure on the masked text (identity.response_for,
     # _FACT_RECALL_RE), and a recall turn can name ANY stored fact — the
@@ -506,6 +520,71 @@ _NEGATED_SPAN_RE = re.compile(
     r"\b(?:don'?t|do\s+not|never|stop|no\s+need\s+to|"
     r"not\s+(?:asking|telling|saying))\s+([^,.;?!—]{2,80})",
     re.IGNORECASE)
+
+# Finite verbs — copulas, auxiliaries, and the common main-clause
+# predicates that turn a noun phrase into a proposition. A turn whose
+# main clause carries none of these (outside relative clauses) is a
+# bare phrase — pragmatically a request in a chat addressed to Nexus.
+# Coverage is deliberately broad rather than exhaustive: a missed rare
+# verb only under-detects propositions, never invents one.
+_FINITE_VERB_RE = re.compile(
+    r"\b(?:is|are|was|were|be|been|being|am|ain'?t|"
+    r"has|have|had|haven'?t|hasn'?t|hadn'?t|"
+    r"do|does|did|done|don'?t|doesn'?t|didn'?t|"
+    r"will|would|shall|should|can|could|may|might|must|"
+    r"won'?t|can'?t|cannot|couldn'?t|shouldn'?t|wouldn'?t|"
+    r"need|needs|needed|want|wants|wanted|"
+    r"seem|seems|seemed|look|looks|looked|feel|feels|felt|"
+    r"mean|means|meant|say|says|said|"
+    r"get|gets|got|gotten|keep|keeps|kept|"
+    r"go|goes|went|gone|come|comes|came|"
+    r"make|makes|made|take|takes|took|taken|work|works|worked|"
+    r"stay|stays|stayed|remain|remains|remained|"
+    r"belong|belongs|belonged|hang|hangs|hung|sit|sits|sat|"
+    r"stand|stands|stood|cost|costs|"
+    r"show|shows|shown|tell|tells|told|know|knows|knew|known|"
+    r"think|thinks|thought|like|likes|liked|love|loves|loved|"
+    r"hate|hates|hated|live|lives|lived|sound|sounds|sounded|"
+    r"exist|exists|existed|happen|happens|happened|"
+    r"fail|fails|failed|break|breaks|broke|broken|"
+    r"run|runs|ran|deserve|deserves|deserved|"
+    r"require|requires|required|contain|contains|contained|"
+    r"include|includes|included|fit|fits|fitted|suit|suits|suited|"
+    r"match|matches|matched|own|owns|owned|owe|owes|owed|"
+    r"lack|lacks|lacked|use|uses|used|"
+    r"become|becomes|became|crash|crashes|crashed|"
+    r"freeze|freezes|froze|frozen|stuck|hung)\b",
+    re.IGNORECASE)
+_RELATIVE_MARKERS = frozenset(
+    {"that", "which", "who", "whom", "whose", "where", "when"})
+_SUBJECT_PRONOUNS = frozenset({"i", "you", "we", "they", "he", "she"})
+
+
+def _main_clause_has_predicate(clause: str) -> bool:
+    """Whether the clause predicates — a finite verb that isn't embedded
+    in a relative clause modifying a noun phrase.
+
+    "the image on the wall NEEDS a frame" → proposition.
+    "a picture of a dog that NEEDS a frame" → the verb opens a relative
+    clause; the whole utterance is still one noun phrase (a fragment).
+    "a photo of the sunset WE SAW" → zero-relative — the pronoun+verb
+    sits inside the noun phrase, so it stays a fragment; but a clause
+    that *starts* with a subject pronoun ("we saw a dragon") is a real
+    proposition.
+    """
+    t = clause.lower()
+    starts_pronominal = bool(re.match(
+        r"^\s*(?:i|you|we|they|he|she|it|nexus|there|my|your|his|her|"
+        r"our|their|its)\s+(?=\S)", t))
+    for m in _FINITE_VERB_RE.finditer(t):
+        head = t[:m.start()].rstrip()
+        prev = head.rsplit(" ", 1)[-1] if head else ""
+        if prev in _RELATIVE_MARKERS:
+            continue  # verb opens a relative clause
+        if prev in _SUBJECT_PRONOUNS and not starts_pronominal:
+            continue  # zero-relative: "the sunset we saw"
+        return True
+    return False
 
 # Capability-inventory asks — the ONLY shapes that may claim the
 # inventory lane. "What can you do"-family: the user asks FOR the list.
@@ -761,6 +840,12 @@ def _analyze(raw: str) -> SemanticFrame:
         m.group(0) for m in _MODAL_RE.finditer(ml)))
 
     frame.speech_act = _speech_act(ml, raw_norm=masked)
+    # A bare noun phrase (no finite-verb predicate) is pragmatically a
+    # request for the named thing; a clause with subject + predicate is
+    # a proposition about the world. Only assertions need the flag —
+    # commands/questions/offers already carry their own act.
+    frame.fragment = (frame.speech_act == ASSERTION
+                      and not _main_clause_has_predicate(main))
     frame.target = _target(main, frame.speech_act)
     frame.requested_slot = _requested_slot(ml)
     frame.proposition = _proposition(main, frame.speech_act)
@@ -798,6 +883,16 @@ def _speech_act(clause: str, *, raw_norm: str) -> str:
     if _PROHIBITION_LEAD_RE.match(low) or _META_NEGATION_RE.search(low):
         return PROHIBITION
     if _OFFER_Q_RE.search(low):
+        # "should i run this?" / "the docs say X — should i?" asks
+        # advice about the USER's own action; only "should i give/get/
+        # add (you)…" is an actual offer to Nexus.
+        if re.match(r"^(?:should|shall)\s+i\b", low) and not re.match(
+                r"^(?:should|shall)\s+i\s+(?:give|get|add|offer|provide|"
+                r"set\s*up|install|teach|show|make|hook\s*up|grant|buy|"
+                r"bring|send|share|enable|build|connect|lend|donate|"
+                r"let|allow|permit|take|put)\b",
+                low):
+            return QUESTION
         return PREFERENCE_Q
     if _OFFER_DECL_RE.search(low) and not _INTERROGATIVE_LEAD_RE.match(low):
         return OFFER

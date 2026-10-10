@@ -319,6 +319,7 @@ _DECIDE_RE = re.compile(
     r"name|call|keep|take)\s+"
     r"(?:the\s+|a\s+|an\s+|it\s+|them\s+|this\s+|that\s+)?"
     r"([^,.;?!]{2,80})|"
+    r"\bmake\s+(?:that|it|this|them)\s+([^,.;?!]{2,80})|"
     r"\b(?:the\s+answer|the\s+choice|final\s+answer|the\s+decision)\s+"
     r"(?:is|was)\s+([^,.;?!]{2,80})|"
     r"\b(?:that'?s|it'?s)\s+(?:settled|decided|approved|final)\b\.?\s*"
@@ -701,9 +702,23 @@ def update_state(ctx: Any, env: Any, text: str,
                 pick = (in_value or typed)
                 if pick:
                     dec["subject"] = pick[0]["type"]
+            if not dec.get("subject"):
+                # The turn names an active slot by word — 'forget the
+                # port idea, we'll use whatever's free' — so the new
+                # value claims that slot instead of floating under
+                # 'general' while the stale decision stays active.
+                for d in reversed(ctx.decisions):
+                    if d.get("status") != "active":
+                        continue
+                    s = str(d.get("subject") or "")
+                    if s and re.search(rf"\b{re.escape(s)}\b", text,
+                                       re.IGNORECASE):
+                        dec["subject"] = s
+                        break
             subj_key = _slug(dec["subject"] or "general")
         for d in ctx.decisions:
-            if _slug(d.get("subject", "")) == subj_key:
+            if _slug(d.get("subject", "")) == subj_key and \
+                    d.get("status") == "active":
                 d["status"] = "superseded"
                 d["superseded_at"] = now
                 d["superseded_by"] = dec["value"]

@@ -831,3 +831,29 @@ class TestContextDependentUtterances(unittest.TestCase):
                 self.assertEqual(rows, [])
             finally:
                 am.close()
+
+    def test_discourse_references_are_context_dependent(self):
+        """Asks whose referent is the live conversation ("what were we
+        talking about") must never match a stored answer — the observed
+        defect replayed a stale voice-status answer for a summarize-
+        the-chat ask. Stored answers can only describe the world, not
+        the current thread."""
+        from localcodeagent.answer_memory import validation
+        for text in (
+            "can u summarize what we were just talking about",
+            "what preset were we discussing",
+            "what were those things we still needed to fix",
+            "did we ever settle on a port",
+            "where were we",
+            "back to the voice",
+            "the other one from before",
+            "ok continue",
+        ):
+            self.assertTrue(validation.is_context_dependent(text), text)
+            self.assertEqual(validation.classify_cacheability(text),
+                             "task_specific", text)
+        # Ordinary standalone questions still use answer memory.
+        for text in ("what time is it", "how do i make chicken quesadillas",
+                     "what are your capabilities", "whats my ip",
+                     "who is your father"):
+            self.assertFalse(validation.is_context_dependent(text), text)

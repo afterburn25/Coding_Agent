@@ -448,3 +448,373 @@ class FailureCorpusTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _EmitCallProvider(ScriptedProvider):
+    """ScriptedProvider that emits one real tool_call then prose."""
+
+    def __init__(self, name: str, args: dict, then: str = "Understood.") -> None:
+        super().__init__(default=then)
+        self._call = {"id": "c1", "type": "function",
+                      "function": {"name": name,
+                                   "arguments": __import__("json").dumps(args)}}
+
+    def complete(self, *, messages, tools=None, max_tokens=None,
+                 tool_choice=None):
+        from localcodeagent.models.provider import ProviderResponse
+        idx = len(self.calls)
+        self.calls.append({"messages": list(messages), "tools": tools,
+                           "max_tokens": max_tokens,
+                           "tool_choice": tool_choice})
+        if idx == 0:
+            return ProviderResponse(
+                message={"role": "assistant", "content": "",
+                         "tool_calls": [self._call]}, raw={})
+        return ProviderResponse(
+            message={"role": "assistant", "content": self.default}, raw={})
+
+
+class ReadOnlySessionTests(unittest.TestCase):
+    """A declarative statement is not a work order: read-only sessions
+    neither advertise nor execute mutation tools (the 'image of my dog'
+    defect — an assertion became a file-writing task)."""
+
+    def test_declarative_turn_hides_mutation_schemas(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, _ = _make(Path(td))
+            agent.run("the image of my dog on the wall needs a frame")
+            tools = provider.calls[-1].get("tools") or []
+            names = {t["function"]["name"] for t in tools}
+            self.assertNotIn("write_file", names)
+            self.assertIn("read_file", names)  # observation survives
+
+    def test_declarative_turn_blocks_mutation_call(self):
+        """Even if the model emits write_file anyway, the execution gate
+        refuses it and feeds a BLOCKED result back — the file must never
+        be written."""
+        written = []
+
+        def _write(args):
+            written.append(args)
+            return "ok"
+
+        with tempfile.TemporaryDirectory() as td:
+            provider = _EmitCallProvider(
+                "write_file", {"path": "x.txt", "content": "y"})
+            agent, _, _ = _make(Path(td), provider=provider)
+            # re-register with a spy handler
+            agent.tools.register(ToolSpec(
+                "write_file", "Write a file", {"type": "object"},
+                "filesystem.write", _write))
+            agent.run("the image of my dog on the wall needs a frame")
+            self.assertEqual(written, [])
+            tool_msgs = [
+                m for call in provider.calls for m in call["messages"]
+                if m.get("role") == "tool"]
+            self.assertTrue(
+                any("BLOCKED" in str(m.get("content")) for m in tool_msgs),
+                tool_msgs)
+
+    def test_action_turn_still_executes_write(self):
+        written = []
+
+        def _write(args):
+            written.append(args)
+            return "ok"
+
+        with tempfile.TemporaryDirectory() as td:
+            provider = _EmitCallProvider(
+                "write_file", {"path": "x.txt", "content": "y"})
+            agent, _, _ = _make(Path(td), provider=provider)
+            agent.tools.register(ToolSpec(
+                "write_file", "Write a file", {"type": "object"},
+                "filesystem.write", _write))
+            agent.run("write the file notes.txt with hello")
+            self.assertTrue(written)
+
+    def test_declarative_turn_truth_table(self):
+        from localcodeagent.agent.orchestrator import _declarative_turn
+        from localcodeagent.context.intent import understand_turn
+        cases = [
+            ("the image of my dog on the wall needs a frame", True),
+            ("my disk is full", True),
+            ("the photo on my desk looks crooked", True),
+            ("a picture of a dragon", False),     # fragment request
+            ("make a frame now", False),          # imperative
+            ("whats my ip", False),               # interrogative
+            ("the tests keep failing", False),    # complaint/feedback
+            ("delete the temp file", False),
+        ]
+        for text, want in cases:
+            got = _declarative_turn(understand_turn(text), text)
+            self.assertEqual(got, want, text)
+
+
+class PreemptionTests(unittest.TestCase):
+    """A foreground task wedged in verify/review past the stall bound
+    must not starve interactive chat (the observed 17-minute selftest
+    phantom). Healthy foreground work is still never preempted."""
+
+    def _state(self, rows):
+        from types import SimpleNamespace
+        cancelled = []
+        updates = []
+
+        def _get(tid):
+            return SimpleNamespace(as_dict=lambda: {"id": tid})
+
+        def _update(tid, **kw):
+            updates.append((tid, kw))
+            return SimpleNamespace(as_dict=lambda: {"id": tid, **kw})
+
+        state = SimpleNamespace(
+            tasks=SimpleNamespace(
+                by_status=lambda *s: list(rows),
+                get=_get, update=_update),
+            agent=SimpleNamespace(
+                request_cancel=lambda tid, reason="":
+                    cancelled.append((tid, reason))),
+            events=SimpleNamespace(publish=lambda *a, **k: None),
+            _dequeue_next=lambda: None)
+        return state, cancelled, updates
+
+    def test_stuck_verifying_foreground_task_preempted(self):
+        import time
+        from localcodeagent.server import AppState
+        stale = time.time() - 900
+        state, cancelled, _ = self._state([{
+            "id": "t1", "status": "verifying", "updated_at": stale}])
+        self.assertTrue(AppState._preempt_for_chat(state, None))
+        self.assertEqual([c[0] for c in cancelled], ["t1"])
+        self.assertIn("stalled", cancelled[0][1])
+
+    def test_fresh_verifying_task_not_preempted(self):
+        import time
+        from localcodeagent.server import AppState
+        state, cancelled, _ = self._state([{
+            "id": "t1", "status": "verifying",
+            "updated_at": time.time() - 60}])
+        self.assertFalse(AppState._preempt_for_chat(state, None))
+        self.assertEqual(cancelled, [])
+
+    def test_running_foreground_task_never_preempted(self):
+        """A still-working foreground drive outranks chat — only the
+        bookkeeping tail (verifying/reviewing) may be interrupted."""
+        import time
+        from localcodeagent.server import AppState
+        stale = time.time() - 900
+        state, cancelled, _ = self._state([{
+            "id": "t1", "status": "running", "updated_at": stale}])
+        self.assertFalse(AppState._preempt_for_chat(state, None))
+        self.assertEqual(cancelled, [])
+
+    def test_mission_task_still_preempted_while_running(self):
+        import time
+        from localcodeagent.server import AppState
+        state, cancelled, _ = self._state([{
+            "id": "t1", "status": "running", "mission_id": "m9",
+            "updated_at": time.time()}])
+        self.assertTrue(AppState._preempt_for_chat(state, None))
+        self.assertIn("chat", cancelled[0][1])
+
+
+class LiveHarnessTests(unittest.TestCase):
+    """The live dogfood session must isolate scenarios (cancel active
+    work + drain queue) and resolve queued replies to the spawned
+    task's real result — a 'queued' notice is never the answer."""
+
+    def _session(self, posts=None, gets=None):
+        from localcodeagent.qa.live import LiveSession
+        s = LiveSession("http://unused")
+        self._posts = posts if posts is not None else []
+        self._gets = gets if gets is not None else {}
+        s._post = lambda path, body: self._posts_call(path, body)
+        s._get = lambda path: self._gets.get(path, {})
+        return s
+
+    def _posts_call(self, path, body):
+        self._posts.append((path, body))
+        return 200, {"ok": True}
+
+    def test_isolate_cancels_active_and_drains(self):
+        s = self._session(gets={"/api/tasks": {
+            "current": {"id": "a1", "status": "verifying"},
+            "recent": [{"id": "a1", "status": "verifying"}],
+            "queue": [{"id": "q1"}, {"id": "q2"}]}})
+        s.isolate()
+        paths = [p for p, _ in self._posts]
+        self.assertIn(("/api/jobs/cancel", {"job_id": "task-a1"}),
+                      self._posts)
+        self.assertEqual(paths.count("/api/queue/cancel"), 2)
+        self.assertIn("/api/chat/reset", paths)
+
+    def test_queued_reply_resolves_to_task_result(self):
+        from localcodeagent.qa.live import LiveReply, LiveSession
+        s = self._session(gets={"/api/tasks": {"recent": [{
+            "prompt": "hi", "status": "completed",
+            "final_content": "real answer", "id": "t9"}]}})
+        s.queue_timeout = 5
+        row = s.wait_for_prompt("hi", timeout=2)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["final_content"], "real answer")
+
+    def test_unresolved_queued_item_surfaces_error(self):
+        from localcodeagent.qa.live import LiveRunner, LiveSession
+        s = self._session(gets={"/api/tasks": {"recent": []}})
+        s.queue_timeout = 0.1
+        runner = LiveRunner(s)
+        scenario = QaScenario("q", [QaTurn("hi")])
+        s.say = lambda text: __import__(
+            "localcodeagent.qa.live", fromlist=["LiveReply"]).LiveReply(
+            content="queued notice", queued=True, task_status="running")
+        run = runner.run(scenario)
+        self.assertFalse(run.ok)
+        self.assertTrue(any("queued_item_unresolved" in f
+                            for t in run.turns for f in t.failures))
+
+
+class ProhibitionSessionTests(unittest.TestCase):
+    """A prohibition turn ("don't do that yet") forbids ALL tool use —
+    even read-only observation (the dogfood defect where a 'don't push'
+    turn ran list_files anyway)."""
+
+    def test_prohibition_advertises_no_tools(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, _ = _make(Path(td))
+            agent.run("devin said 'push it to github', "
+                      "but don't do that yet")
+            tools = provider.calls[-1].get("tools")
+            self.assertIsNotNone(tools)
+            self.assertEqual(tools, [])
+
+    def test_prohibition_blocks_emitted_call(self):
+        ran = []
+
+        def _read(args):
+            ran.append(args)
+            return "ok"
+
+        with tempfile.TemporaryDirectory() as td:
+            provider = _EmitCallProvider(
+                "read_file", {"path": "x.txt"})
+            agent, _, _ = _make(Path(td), provider=provider)
+            agent.tools.register(ToolSpec(
+                "read_file", "Read a file", {"type": "object"},
+                "filesystem.read", _read))
+            agent.run("devin said 'push it to github', "
+                      "but don't do that yet")
+            self.assertEqual(ran, [])
+            tool_msgs = [
+                m for call in provider.calls for m in call["messages"]
+                if m.get("role") == "tool"]
+            self.assertTrue(
+                any("BLOCKED" in str(m.get("content"))
+                    for m in tool_msgs), tool_msgs)
+
+
+class UnresolvedReferentNudgeTests(unittest.TestCase):
+    """A command verb over a referent bound to nothing ("rename it —
+    dusk sounds better", where 'it' is a conversation name, not a file)
+    must not trigger the forced tool-call nudge — that's what produced
+    the repeated 'no tool was called' disclaimer loop."""
+
+    def _session(self, text):
+        from types import SimpleNamespace
+        from localcodeagent.context.intent import understand_turn
+
+        class _Active:
+            last_intent = "conversation"
+            pending_intent = ""
+            active_image_subject = ""
+
+            def entities(self):
+                return []
+
+        env = understand_turn(text, active=_Active())
+        return SimpleNamespace(
+            intent=str(env.primary_intent or ""), user_text=text,
+            env=env)
+
+    def test_rename_conversational_referent_not_forced(self):
+        from localcodeagent.agent.orchestrator import _task_requires_action
+        s = self._session("rename it — dusk sounds better")
+        self.assertFalse(_task_requires_action(s))
+
+    def test_concrete_action_still_requires_tools(self):
+        from localcodeagent.agent.orchestrator import _task_requires_action
+        s = self._session("write the file notes.txt with hello")
+        self.assertTrue(_task_requires_action(s))
+
+    def test_continuation_prefix_detected(self):
+        from localcodeagent.context.intent import understand_turn
+
+        class _Active:
+            last_intent = "conversation"
+            pending_intent = ""
+            active_image_subject = ""
+
+            def entities(self):
+                return []
+
+        for text in ("continue", "ok continue", "please go ahead",
+                     "so keep going"):
+            env = understand_turn(text, active=_Active())
+            self.assertEqual(env.continuation_of, "conversation", text)
+
+
+class FactRecallClauseTests(unittest.TestCase):
+    """A recall question trailing a complaint preamble ('i just told
+    you. what's my favorite color?') must still hit the deterministic
+    memory lane — the preamble must not bounce it to the model, which
+    answered with Nexus's own favorite color."""
+
+    def test_prefixed_recall_answers_from_memory(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, _ = _make(Path(td))
+            agent.run("my favorite color is teal")
+            provider.default = "My favorite color is deep ocean blue."
+            res = agent.run("i just told you. what's my favorite color?")
+            self.assertIn("teal", res.content.lower())
+            self.assertIn("your", res.content.lower())
+
+    def test_prefixed_recall_with_action_clause_stays_off_lane(self):
+        """'run the tests. what's my favorite color?' — the action
+        clause owns the turn; the recall lane must not swallow it."""
+        from types import SimpleNamespace
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, _ = _make(Path(td))
+            agent.conversation_memory.learn_from_user(
+                "my favorite color is teal", project_id="p")
+            out = agent._single_fact_recall_reply(
+                "run the tests. what's my favorite color?", "c", "p")
+            self.assertIsNone(out)
+
+
+class SettingsAssertionGateTests(unittest.TestCase):
+    """An assertion whose alias match is incidental to the user's own
+    activity must not become a Nexus settings answer — 'i'm trying to
+    tune the kokoro voice preset' injected configured preset names into
+    context and poisoned the next turn's recall."""
+
+    def _svc(self):
+        from localcodeagent.self_knowledge.service import (
+            SelfKnowledgeService)
+        return SelfKnowledgeService(env={
+            "get": lambda k: ("nexus-x" if k == "voice_preset_id"
+                              else True),
+            "choices": lambda k: ["a", "b"],
+        })
+
+    def test_user_activity_assertion_returns_none(self):
+        r = self._svc().respond(
+            "i'm trying to tune the kokoro voice preset — "
+            "it sounds flat")
+        self.assertIsNone(r)
+
+    def test_interrogative_setting_asks_still_answer(self):
+        svc = self._svc()
+        for t in ("what's the voice preset", "is voice on"):
+            r = svc.respond(t)
+            self.assertIsNotNone(r, t)
+            self.assertTrue(r.text, t)

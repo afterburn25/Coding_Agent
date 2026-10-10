@@ -34,16 +34,56 @@ _CONTEXT_DEPENDENT_RE = re.compile(
     r"wtf|wth|huh|lol|lmao|rofl|haha+|omg|ugh|wow|damn+|shit|crap|"
     r"fuck(?:\s+(?:you|this|that|off|it|me|sake))?|"
     r"what\s+the\s+\w+|the\s+hell"
-    r")(?:[\s,]+(?:yes|yeah|please|ok(?:ay)?|sure|do it|go ahead|that|them))*"
+    r")(?:[\s,]+(?:yes|yeah|please|ok(?:ay)?|sure|do it|go ahead|that|"
+    r"them|continue|carry on|keep going|resume|go on|then|now))*"
     r"[\s.!?,]*$",
     re.I,
 )
 
 
+# Discourse references — the ask's referent is the live conversation
+# itself ("what were we talking about", "summarize our chat", "back to
+# the voice", "did we settle on a port"). No stored Q/A pair can answer
+# these: the correct content lives in the current history and injected
+# memory, and replaying an earlier exchange injects a stale answer from
+# an unrelated topic (the observed "As before — Voice: TTS…" reply to a
+# summarize-the-chat ask).
+_DISCOURSE_REF_RE = re.compile(
+    r"\bwhat\b[^.?!]{0,40}\bwe\b|"
+    r"\bwhere (?:were|did) we\b|"
+    r"\bwe (?:were|was) (?:just )?(?:talking|discussing|saying|working)\b|"
+    r"\b(?:summari[sz]e|recap|repeat|go back over|go over)\b[^.?!]{0,40}"
+    r"\b(?:chat|conversation|discuss\w*|talking|said|covered|went over|"
+    r"we were|we just|last thing|earlier|before)\b|"
+    r"\bdid we (?:ever )?(?:settle|decide|agree|pick|choose|land|"
+    r"end up|figure)\b|"
+    r"\b(?:the|that) (?:thing|stuff|issue|topic|one|part|option|file|"
+    r"version|preset|name)\s+(?:from |we |that )?(?:earlier|before|"
+    r"last time|just now)\b|"
+    r"\bback to (?:the|our|what)\b|"
+    r"\bdid\s+i\s+(?:just\s+)?(?:say|mention|tell|ask|name|call)\b|"
+    r"\b(?:what|which)\b[^.?!]{0,30}\b(?:again|earlier|before|"
+    r"just now)\b|"
+    r"\bthe (?:first|second|other|last) (?:thing|one|part|option)\b",
+    re.I)
+
+
 def is_context_dependent(text: str) -> bool:
     """True when the message only resolves against live conversation
-    context — affirmatives, deictic picks, bare continue/cancel."""
-    return bool(_CONTEXT_DEPENDENT_RE.match(str(text or "")))
+    context — affirmatives, deictic picks, bare continue/cancel, and
+    discourse references to the conversation itself."""
+    t = str(text or "")
+    return bool(_CONTEXT_DEPENDENT_RE.match(t)
+                or _DISCOURSE_REF_RE.search(t))
+
+
+def references_conversation(text: str) -> bool:
+    """True when the turn's referent is the conversation itself —
+    summary/recall/discourse asks whose answer lives in live history
+    ("summarize what we were talking about", "did we settle on a port").
+    Deterministic lanes (settings, status, Answer Memory) can never
+    carry that referent."""
+    return bool(_DISCOURSE_REF_RE.search(str(text or "")))
 
 # Secret / credential indicators — suppress persistent learning entirely.
 _SECRET_PATTERNS = [

@@ -715,3 +715,73 @@ def test_followup_proposed_without_action_key(svc):
     the next affirmative follow-up."""
     svc._context["proposed"] = {"route": "settings"}
     assert svc.respond("do it") is None or True  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Fragment vs proposition — the "image of my dog" defect
+# ---------------------------------------------------------------------------
+
+def test_visual_proposition_is_not_an_image_request():
+    """THE observed hijack: a declarative clause containing image
+    vocabulary describes the world — it is not an artifact request.
+    A finite-verb predicate makes the whole utterance a proposition,
+    so the image lane stays vetoed and no executing intent survives."""
+    env = _env("the image of my dog on the wall needs a frame")
+    f = env.semantic
+    assert f.speech_act == "assertion"
+    assert not f.fragment
+    assert not f.allows("image_action")
+    assert env.primary_intent not in _EXECUTING_INTENTS
+
+
+def test_bare_visual_phrases_are_requests():
+    """A bare visual noun phrase in chat IS the ask — 'a picture of a
+    dragon' means 'make me one'. Fragments claim image_action even
+    though the act classifier labels them assertion."""
+    for text in ("a picture of a dragon",
+                 "a photo of the sunset",
+                 "the picture on the wall"):
+        f = _env(text).semantic
+        assert f.fragment, (text, f.speech_act)
+        assert f.allows("image_action"), text
+
+
+def test_relative_clause_inside_phrase_stays_fragment():
+    """'a picture of a dog that needs a frame' — the finite verb opens
+    a relative clause modifying 'dog'; the utterance is still one
+    noun phrase and remains request-shaped."""
+    f = _env("a picture of a dog that needs a frame").semantic
+    assert f.fragment
+    assert f.allows("image_action")
+
+
+def test_declarative_mentions_cannot_claim_executing_intents():
+    """Statements ABOUT the world must not keep a lexical action label
+    — the semantic veto strips lane-vetoed intents regardless of the
+    keyword that nominated them."""
+    for text in ("the image of my dog on the wall needs a frame",
+                 "my dog needs a frame",
+                 "the github repo broke last night",
+                 "the installer crashed yesterday",
+                 "the file on my desktop is corrupted",
+                 "the dog that barked needs food"):
+        env = _env(text)
+        assert env.primary_intent not in _EXECUTING_INTENTS, (
+            text, env.primary_intent)
+
+
+def test_action_commands_still_claim_executing_intents():
+    """Real imperatives keep their lanes — the veto only fires when
+    the semantic frame disagrees."""
+    env = _env("draw a dragon")
+    assert env.primary_intent in _EXECUTING_INTENTS | {"image_generation"}
+    env = _env("delete the temp file")
+    assert env.primary_intent in _EXECUTING_INTENTS
+
+
+def test_quoted_and_negated_actions_do_not_execute():
+    """Discussed or forbidden actions are not requests."""
+    env = _env('the error says "delete the folder" what does that mean')
+    assert env.primary_intent not in _EXECUTING_INTENTS
+    f = _env("do not delete that file").semantic
+    assert not f.allows("local_action")

@@ -187,6 +187,41 @@ _QUESTION_LEAD_RE = re.compile(
     r"^\s*(how|what|why|when|where|which|who|whom|whose|is|are|was|were|"
     r"does|do|did|should|would you explain|explain|describe|tell me)\b",
     re.IGNORECASE)
+# Permissions safe to exercise on a purely declarative turn —
+# observation only. Writes, deletes, shell commands, git/branch ops,
+# image jobs, app/browser/desktop control, installs, uploads and
+# queueing all stay out: a statement is not a work order.
+_CONVERSATION_TOOL_PERMS = frozenset({
+    "filesystem.read", "network.read", "github.read", "image.read",
+    "clipboard.read", "desktop.view", "screen.capture",
+})
+
+
+def _declarative_turn(env: Any, user_text: str) -> bool:
+    """True when the adjudicated turn is a plain declarative statement —
+    the user described the world rather than asking for work.
+
+    Gated on the semantic speech act, not keywords: "the image on the
+    wall needs a frame" (assertion) gets a conversational reply, while
+    "make a frame for the picture" (command) keeps full tools. The
+    imperative-verb backstop mirrors _task_requires_action, the
+    action-intent check preserves fragment requests ("a picture of a
+    dragon"), and the interrogative check shields questions whose
+    punctuation the act classifier missed ("whats my ip") — a
+    misclassified act must never silently strip tools.
+    """
+    frame = getattr(env, "semantic", None)
+    if frame is None or frame.speech_act != "assertion":
+        return False
+    if getattr(env, "primary_intent", "") in _ACTION_INTENTS:
+        return False
+    text = user_text or ""
+    if _ACTION_REQUEST_RE.search(text):
+        return False
+    if re.search(r"\?|\b(?:whats?|what|who|whom|whose|how|when|where|"
+                 r"why|which|hows)\b", text, re.IGNORECASE):
+        return False
+    return True
 
 
 def _session_schemas(registry: ToolRegistry, session: "_AgentSession") -> list[dict[str, Any]]:
@@ -198,7 +233,25 @@ def _session_schemas(registry: ToolRegistry, session: "_AgentSession") -> list[d
     too large for this profile's window, fall back to the minimal
     create/read/edit/run set — anything else is still reachable via
     find_tools."""
+    # A prohibition ("don't do that yet") is stronger than read_only —
+    # the user explicitly said not to act, so even observation tools
+    # stay out of the schema.
+    _frame = getattr(getattr(session, "env", None), "semantic", None)
+    if _frame is not None and getattr(_frame, "prohibition", False):
+        session.tool_schema_chars = 0
+        return []
     schemas = registry.schemas(session.tool_categories)
+    if getattr(session, "read_only", False):
+        # Declarative turn — don't even offer mutation tools. Discovery
+        # stays (find_tools); execution is hard-gated in
+        # _process_pending_calls in case the model finds one anyway.
+        schemas = [
+            s for s in schemas
+            if s["function"]["name"] == "find_tools"
+            or str(registry.permission_for(
+                s["function"]["name"])[0] or "")
+            in _CONVERSATION_TOOL_PERMS
+        ]
     window = int(getattr(session.profile, "context_window", 0) or 0) or 8192
     output_reserve = int(getattr(session.profile, "max_output_tokens", 0) or 0) or 2048
     prompt_tokens = max(2048, window - output_reserve)
@@ -220,6 +273,20 @@ def _session_schemas(registry: ToolRegistry, session: "_AgentSession") -> list[d
 
 def _task_requires_action(session: "_AgentSession") -> bool:
     """True when the request clearly asks for executed work, not words."""
+    env = getattr(session, "env", None)
+    ambiguity = [str(a) for a in (getattr(env, "ambiguity", None) or [])]
+    if (session.intent in _ACTION_INTENTS
+            or _ACTION_REQUEST_RE.search(session.user_text or "")):
+        # "rename it — dusk sounds better" — a command verb over an
+        # object that resolved to nothing concrete (no file, no path,
+        # no bound referent). Forcing a tool call makes the model guess
+        # at a target that isn't there — the observed loop where a
+        # conversational rename produced dozens of "no tool was called"
+        # disclaimers. With no actionable referent the right move is a
+        # prose reply (or one clarifying question), not execution.
+        if any("unresolved referent" in a for a in ambiguity) \
+                and not getattr(env, "target_files", None):
+            return False
     if session.intent in _ACTION_INTENTS:
         return True
     text = session.user_text or ""
@@ -311,6 +378,9 @@ class _AgentSession:
     # None = advertise every callable schema; a set prunes the advertised
     # categories (execution stays name-based — find_tools is the escape).
     tool_categories: frozenset[str] | None = None
+    # Declarative-turn lockdown: the user made a statement, not a work
+    # order — mutation tools are neither advertised nor executable.
+    read_only: bool = False
     # Serialized size of the schemas currently advertised — _trim_context
     # subtracts this from the char budget so schemas + messages jointly
     # fit the model window.
@@ -1575,6 +1645,23 @@ class AgentOrchestrator:
                 return None
             prop = re.sub(r"\s+", " ",
                           (frame.proposition or "").strip(" ,."))[:90]
+            if prop and re.search(
+                    r"\b(?:should|shall|can|could|would|do|does|did|"
+                    r"is|are|was|were|will|may|might|must)\b",
+                    prop, re.IGNORECASE) and not re.search(
+                    r"[^\W_]+", re.sub(
+                        r"\b(?:should|shall|can|could|would|do|does|"
+                        r"did|is|are|was|were|will|may|might|must|what|"
+                        r"how|why|when|where|which|who|i|you|we|they|"
+                        r"it|me|us|them|that|this)\b", "", prop,
+                        flags=re.IGNORECASE)):
+                # The "proposition" is only interrogative scaffolding
+                # ("should i") — the offered thing lived in quoted or
+                # background text the frame didn't bind. No preference
+                # answer can name it; the model lane gives real advice.
+                # Bare demonstratives ("that", "it") still reach the
+                # generic branch below.
+                return None
             head = prop.split(" ", 1)[0].lower() if prop else ""
             demonstrative = prop.lower() in (
                 "that", "this", "it", "those", "these", "one",
@@ -2401,9 +2488,27 @@ class AgentOrchestrator:
                       if frame is not None and frame.masked_case
                       else text)
         if (self.conversation_memory is None
-                or not self._FACT_RECALL_RE.match(match_text)
                 or self._FACT_RECALL_SKIP_RE.search(match_text)):
             return None
+        if not self._FACT_RECALL_RE.match(match_text):
+            # Multi-sentence turns carry the actual ask in a later clause
+            # — "i just told you. what's my favorite color?" is a recall
+            # question with a complaint preamble; the preamble must not
+            # bounce the turn off the memory lane into the model. Only
+            # the recall-shaped clause itself may claim the lane (an
+            # earlier action clause keeps the turn on its own path).
+            clause_match = None
+            for clause in re.split(r"[.!?\n]+", match_text):
+                clause = clause.strip()
+                if not clause:
+                    continue
+                if self._FACT_RECALL_RE.match(clause):
+                    clause_match = clause
+                elif _ACTION_REQUEST_RE.search(clause):
+                    return None
+            if clause_match is None:
+                return None
+            match_text = clause_match
         rows = self.conversation_memory.recall_facts(
             match_text, project_id=project_id,
             conversation_id=conversation_id)
@@ -2495,6 +2600,8 @@ class AgentOrchestrator:
         r"\b(?:what|which|who)\b.{0,50}\b(?:decid\w+|settl\w+|"
         r"cho?se|chosen|pick(?:ed)?|agree[ds]?|go(?:ing)?\s+with|"
         r"end\s+up\s+(?:using|with)|final\s+(?:call|answer|choice))\b|"
+        r"\bdid\s+we\b.{0,40}\b(?:settle|decide|pick|choose|agree|"
+        r"land|end\s+up|go\s+with)\b|"
         r"\bremind\s+me\b.{0,40}\b(?:decid|settl|decision|choice)\b",
         re.IGNORECASE)
     _STATE_LOOP_Q_RE = re.compile(
@@ -4425,11 +4532,19 @@ class AgentOrchestrator:
         project_memory = self.memory.context()
         index_summary = self.repository_index.ensure()
         recovered_self_hosting = self._self_hosting_context()
+        try:
+            from ..answer_memory.validation import (
+                references_conversation as _refs_conv)
+        except Exception:
+            _refs_conv = lambda _t: False
         recovered_timing_context = (
             self.conversation_manager.timing_context()
             if (
                 self.conversation_manager is not None
-                and self._TIMING_QUESTION_RE.search(task.prompt or "")
+                and (
+                    self._TIMING_QUESTION_RE.search(task.prompt or "")
+                    or _refs_conv(task.prompt or "")
+                )
             )
             else ""
         )
@@ -6026,6 +6141,36 @@ class AgentOrchestrator:
                 self._append_tool_result(session, call, name, args, brain_block)
                 session.pending_call_index += 1
                 continue
+            _frame = getattr(getattr(session, "env", None), "semantic",
+                             None)
+            if _frame is not None and getattr(_frame, "prohibition",
+                                              False):
+                # The user forbade action this turn — no tool runs at
+                # all, even read-only ones advertised before the frame
+                # was known.
+                self._append_tool_result(
+                    session, call, name, args,
+                    f"BLOCKED: '{name}' was not run — the user "
+                    "explicitly said not to act on this turn. "
+                    "Acknowledge and answer in prose instead.")
+                session.pending_call_index += 1
+                continue
+            if session.read_only:
+                perm = str(self.tools.permission_for(name)[0] or "")
+                if perm and perm not in _CONVERSATION_TOOL_PERMS:
+                    # Declarative turn — no work was requested. The
+                    # result teaches the model to answer in prose (or
+                    # ask one confirming question) rather than count
+                    # the refusal as a tool failure.
+                    self._append_tool_result(
+                        session, call, name, args,
+                        f"BLOCKED: '{name}' changes state, but the user's "
+                        "message was a statement, not a work request — "
+                        "answer in prose. If you believe they want "
+                        "something done, ask one short confirming "
+                        "question instead of doing it.")
+                    session.pending_call_index += 1
+                    continue
             if self._call_signature(name, args) in session.failed_signatures:
                 # Identical retry of a call that already failed — running it
                 # would burn an approval round-trip and a step on the same
@@ -6131,11 +6276,15 @@ class AgentOrchestrator:
             session.verification_done = True
             return None
         if not session.verification_commands:
-            if session.mode == "work_order":
+            if session.mode == "work_order" \
+                    or not _task_requires_action(session):
                 # Per-lane checks must be scoped — the repo-wide selftest
                 # (second instance + full suite) cannot fit inside a lane's
                 # step/wall budget; whole-repo verification is the mission
-                # verify node's job.
+                # verify node's job. The same bound applies when a chat
+                # turn produced files WITHOUT an action request — a
+                # declarative statement must not wedge the user behind a
+                # repo-wide selftest for work nobody asked for.
                 session.verification_commands = \
                     self._work_order_verification(task)
             if not session.verification_commands:
@@ -8724,6 +8873,19 @@ class AgentOrchestrator:
             advisories.append(
                 "Compound request — it contains multiple clauses; "
                 "address each part explicitly.")
+        if env.continuation_of == "conversation":
+            cont_topic = ""
+            if state_ctx is not None:
+                cont_topic = getattr(state_ctx, "active_topic", "") or (
+                    (state_ctx.topic_stack or [{}])[-1].get("label", "")
+                    if getattr(state_ctx, "topic_stack", None) else "")
+            advisories.append(
+                "Continuation — the user said to go on; resume "
+                + (f"the '{cont_topic}' discussion"
+                   if cont_topic else
+                   "the most recent topic of this conversation from "
+                   "history")
+                + " rather than answering in isolation.")
         if env.topic_shift and env.followup_of == "topic_return":
             advisories.append(
                 f"Topic return — the user is circling back to "
@@ -8788,11 +8950,21 @@ class AgentOrchestrator:
         # a small model answers the last *quoted* question instead of the
         # real one. Inject it only when the turn actually asks about
         # timing or recalls a previous exchange.
+        try:
+            from ..answer_memory.validation import (
+                references_conversation as _refs_conv)
+        except Exception:
+            _refs_conv = lambda _t: False
         timing_context = (
             self.conversation_manager.timing_context()
             if (
                 self.conversation_manager is not None
-                and self._TIMING_QUESTION_RE.search(user_text or "")
+                and (
+                    self._TIMING_QUESTION_RE.search(user_text or "")
+                    or _refs_conv(user_text or "")
+                    or getattr(env, "continuation_of", "")
+                    == "conversation"
+                )
             )
             else ""
         )
@@ -9160,6 +9332,8 @@ class AgentOrchestrator:
             event_callback=event_callback,
             tool_categories=_session_tool_categories(
                 env.primary_intent, user_text),
+            read_only=(mode == "auto"
+                       and _declarative_turn(env, user_text)),
             intent=str(env.primary_intent or ""),
             env=env,
             scope=turn_scope,

@@ -274,6 +274,47 @@ class DecisionTests(unittest.TestCase):
              if d["status"] == "active" and d["subject"] == "port"]
         self.assertEqual(d[0]["value"], "9000")
 
+    def test_make_that_reassertion_supersedes(self):
+        """'make that port 9600 instead' corrects the active port
+        decision — the reassertion claims the 'port' slot, not a
+        free-floating 'general' entry."""
+        ctx = ActiveContext()
+        drive(ctx, "let's use port 9500 for the dev server")
+        drive(ctx, "actually, make that port 9600 instead")
+        act = [d for d in ctx.decisions if d["status"] == "active"]
+        self.assertEqual(len(act), 1)
+        self.assertEqual(act[0]["subject"], "port")
+        self.assertEqual(act[0]["value"], "9600")
+        sup = [d for d in ctx.decisions if d["status"] == "superseded"]
+        self.assertEqual(sup[0]["value"], "9500")
+        self.assertEqual(sup[0]["superseded_by"], "9600")
+
+    def test_named_slot_abandonment_supersedes(self):
+        """'forget the port idea, we'll use whatever's free' — the new
+        value claims the slot the turn names, so the stale port value
+        does not stay active beside a floating 'general' decision."""
+        ctx = ActiveContext()
+        drive(ctx, "let's use port 9500 for the dev server")
+        drive(ctx, "actually, make that port 9600 instead")
+        drive(ctx, "never mind — forget the port idea entirely, "
+                   "we'll use whatever's free")
+        act = [d for d in ctx.decisions if d["status"] == "active"]
+        self.assertEqual(len(act), 1)
+        self.assertEqual(act[0]["subject"], "port")
+        self.assertIn("free", act[0]["value"])
+
+    def test_superseded_by_records_immediate_successor(self):
+        """An already-superseded decision keeps the value that actually
+        displaced it — the audit trail is not rewritten by later ones."""
+        ctx = ActiveContext()
+        drive(ctx, "use port 9500")
+        drive(ctx, "make that port 9600 instead")
+        drive(ctx, "use port 9700")
+        d9500 = [d for d in ctx.decisions if d["value"] == "9500"][0]
+        d9600 = [d for d in ctx.decisions if d["value"] == "9600"][0]
+        self.assertEqual(d9500["superseded_by"], "9600")
+        self.assertEqual(d9600["superseded_by"], "9700")
+
 
 # ---------------------------------------------------------------------------
 # Open loops

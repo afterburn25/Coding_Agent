@@ -139,6 +139,13 @@ class _LazyActivity:
         return store.open(*a, **kw)
 
 
+# Foreground tasks are never preempted for chat — except a provably
+# wedged verify/review tail: run_shell caps any single command at 600s,
+# so a bookkeeping phase with no ledger update past this bound is
+# stalled, not busy, and interactive chat outranks it.
+_FOREGROUND_STALL_SECONDS = 660.0
+
+
 class AppState:
     def __init__(self, config: AgentConfig, workspace: Path, runtime_root: Path, config_path: Path | None = None, boot: Callable[[float, str, str], None] | None = None) -> None:
         self.config = config
@@ -3979,19 +3986,34 @@ class AppState:
             for row in candidates.values():
                 mission = str(row.get("mission_id") or "")
                 mode = str(row.get("mode") or "")
-                if not (mission or mode in {"autonomy", "self_repair"}):
-                    continue
+                if mission or mode in {"autonomy", "self_repair"}:
+                    reason = "Preempted by an interactive chat request."
+                else:
+                    # Foreground work is never preempted — except a
+                    # provably wedged bookkeeping tail: a task sitting in
+                    # verifying/reviewing longer than one maximum-length
+                    # command (run_shell caps at 600s) can no longer be
+                    # making progress and must not starve interactive
+                    # chat behind a phantom step.
+                    status = str(row.get("status") or "")
+                    stale = time.time() - float(
+                        row.get("updated_at") or 0)
+                    if not (status in {"verifying", "reviewing"}
+                            and stale > _FOREGROUND_STALL_SECONDS):
+                        continue
+                    reason = (
+                        "Preempted — task stalled in "
+                        f"{status} for {int(stale)}s.")
                 task_id = str(row.get("id") or "")
                 agent = getattr(self, "agent", None)
                 try:
                     if agent is not None and hasattr(agent, "request_cancel"):
                         agent.request_cancel(
-                            task_id,
-                            reason="Preempted by an interactive chat request.")
+                            task_id, reason=reason)
                     else:
                         self.tasks.update(
                             task_id, status="cancelled", phase="done",
-                            summary="Preempted by an interactive chat request.",
+                            summary=reason,
                             pending_approval=None)
                 except Exception:
                     continue

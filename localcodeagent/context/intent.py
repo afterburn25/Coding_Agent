@@ -817,7 +817,11 @@ _SEMANTIC_INTENT_LANES = {
     IMAGE_FOLLOWUP: "image_action",
     TOOL_ACTION: "local_action",
     FILE_EDIT: "local_action",
-    GIT_ACTION: "git_action",
+    # git_state, not git_action: the lexical regex nominates both
+    # commands ("push it") and state questions ("what branch am i on")
+    # — the read-group lane admits both while still vetoing bare
+    # assertions like "the github repo broke last night".
+    GIT_ACTION: "git_state",
     RESEARCH: "local_action",   # a web-research pass is still an action
     # Content lanes — vetoed under offers/prohibitions/hypotheticals
     # ("i'm not asking you to fix the code"), kept under real questions
@@ -849,16 +853,20 @@ def _semantic_gate(env: IntentEnvelope, text: str) -> None:
     env.requested_slot = frame.requested_slot
     env.semantic_intent = frame.semantic_intent
     lane = _SEMANTIC_INTENT_LANES.get(env.primary_intent)
-    # Veto only when the speech act REPUDIATES the action — a
-    # prohibition, offer, hypothetical, comparison, greeting — or an
-    # embedded negation anywhere in the turn. A bare assertion or
-    # context-derived label ("no, red hair" against an active image)
-    # keeps its intent: the claim lanes still self-gate on the frame.
-    repudiates = frame.vetoes_canned() or frame.prohibition
-    if lane and repudiates and not frame.allows(lane):
+    # The whole-utterance frame decides whether the lexical nomination
+    # may claim its lane. It vetoes outright for repudiating acts
+    # (offers, prohibitions, hypotheticals, comparisons, greetings) —
+    # and equally for any act that simply does not CLAIM the lane: a
+    # declarative sentence that mentions an image, file, repo or tool
+    # is conversation ABOUT the thing, not an order to act on it.
+    # IMAGE_FOLLOWUP is exempt — it is context-derived ("no, red hair"
+    # against the active image), never a lexical nomination, and the
+    # follow-up lane re-resolves the referent itself.
+    if (lane and env.primary_intent != IMAGE_FOLLOWUP
+            and frame.lane_vetoed(lane)):
         env.evidence.append(
             f"{env.primary_intent} vetoed by whole-utterance frame "
-            f"({frame.speech_act}"
+            f"({frame.speech_act} does not claim {lane}"
             + (f"/{frame.requested_slot}" if frame.requested_slot else "")
             + ")")
         env.primary_intent = CONVERSATION
@@ -1216,19 +1224,28 @@ def _classify_turn(text: str, *, active: Any = None,
         env.evidence.append("repository/GitHub inspection language")
         return env
 
-    # --- 5.6 Generic continuation — "do it", "try again", "keep going"
-    # against an active task. Without one, the words carry nothing.
+    # --- 5.6 Generic continuation — "do it", "try again", "keep going",
+    # "ok continue" against an active task or topic. A leading discourse
+    # marker ("ok", "so", "please") is filler, not a new subject.
+    # Without any context the words carry nothing.
     if re.match(
-        r"^(?:do\s+(?:it|that)|go\s+ahead|try\s+again|retry|"
-        r"keep\s+going|continue|proceed|run\s+it|yes\s+do\s+it)\s*[.!]?$",
+        r"^(?:(?:ok(?:ay)?|so|well|alright|please|yeah|yes|sure|"
+        r"anyway|now)\b[\s,]*)?"
+        r"(?:do\s+(?:it|that)|go\s+ahead|try\s+again|retry|"
+        r"keep\s+going|carry\s+on|continue|proceed|run\s+it|"
+        r"yes\s+do\s+it)\s*[.!]?$",
             t) and active is not None:
         prior = getattr(active, "last_intent", "") or CONVERSATION
         env.primary_intent = prior if prior != CONVERSATION else CONVERSATION
         env.continuation_of = prior
         env.confidence = 0.75 if prior != CONVERSATION else 0.5
         env.evidence.append("bare continuation phrase + active context")
-        if prior == CONVERSATION:
-            env.ambiguity.append("continuation phrase with no clear task")
+        if prior in (CONVERSATION, "question"):
+            # Not ambiguity — the referent is the live conversation
+            # topic; a question aside ('what time is it') isn't a
+            # resumable work item either. The continuation advisory in
+            # the prompt names the parked topic from the state graph.
+            env.continuation_of = "conversation"
         if image_ctx:
             env.primary_intent = IMAGE_FOLLOWUP
             env.requested_action = "modify"
