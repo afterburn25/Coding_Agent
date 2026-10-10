@@ -201,6 +201,21 @@ class TestNormalizeUserText(unittest.TestCase):
         ):
             self.assertEqual(self.norm(sent), sent, sent)
 
+    def test_skeleton_mismatch_never_a_silent_fix(self):
+        """'boson' -> 'boston' and 'fermion' -> 'version' corrupted
+        names live — a candidate that doesn't share the token's
+        phonetic skeleton is a different word, not the same word
+        mistyped. Only context or a long shared prefix legitimizes it
+        ('fettucini' -> 'fettuccine' keeps 'fettu')."""
+        for sent in (
+            "my headphones are named boson",
+            "actually the headphones are fermion",
+            "the particle is a boson",
+            "the fermion condensate",
+        ):
+            self.assertEqual(self.norm(sent), sent, sent)
+        self.assertIn("fettuccine", self.norm("how do I make fettucini"))
+
     def test_dictionary_words_never_mangled(self):
         """The protective dictionary (SCOWL-60 + proper names) shields
         real words the curated vocab never listed — 'threw', 'spilled',

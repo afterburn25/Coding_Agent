@@ -423,6 +423,22 @@ def _candidates(token: str, ctx_words: set[str], *,
             sim = max(sim, 1.9 - 0.15 * max(0, dl - 3))
         if sim < 0:
             continue
+        # A candidate that doesn't share the token's phonetic skeleton
+        # is a different word, not the same word mistyped — 'boson'->
+        # 'boston', 'fermion'->'version' rode plain edit distance into
+        # common-word magnets. Two signals can still legitimate it:
+        # message context (the fix already present in surrounding
+        # words) or a long shared prefix — 'fettucini'->'fettuccine'
+        # keeps 'fettu' and is the same word missing a letter, while
+        # 'fermion'->'version' rewrites the word from position 0.
+        if not sk_eq and word not in ctx_words:
+            pref = 0
+            for a, b in zip(token, word):
+                if a != b:
+                    break
+                pref += 1
+            if pref < 4:
+                continue
         score = sim + _freq_bonus(word)
         if word in ctx_words:
             score += 2.5
