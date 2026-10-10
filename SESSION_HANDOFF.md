@@ -5101,3 +5101,23 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   `make/move X <literal>` had no lane. All retarget the entity slot.
 - Commits `73e3c94b`. Live: `the standup moved to 10:30` superseded the
   9am fact; compound deadline+standup banked as two facts.
+
+### BUG-049..064 round (conversation memory convergence)
+- **BUG-049** negation banking + `did I tell you` recall (commit `befcd95d`-era).
+- **BUG-050** forgotten facts invalidate banked AM answers (`67d1ed44` chain).
+- **BUG-051** empty `my`-scoped probes answer honestly instead of 503.
+- **BUG-052** `what time is the X` wh-slot probes recall (`53307938`).
+- **BUG-053** `remind me` + `i changed my mind` corrections (`bd1454fb`).
+- **BUG-054/055** cadence statements are facts not goals; passive moves strip aux (`183f6f48`).
+- **BUG-056/057** negated-prep retractions + `i no longer use X` disuse lane (`dd1c490c`).
+- **BUG-058/059/060** spell-corrector name-mangling, AM lane-reply contamination, dotfile space collapse.
+- **BUG-061** `used to be A but now it's B` temporal supersession (`6af34111`).
+- **BUG-062** `my X changed to Y` mints `is`; spell short-token rule (letters must survive, anagrams = adjacent swap only — `priya`/`kanye` safe, `teh`/`chek`/`desrt` still fix); invokeai test de-flaked (`d0d6ea98`).
+- **BUG-063** `when do/does` recall lead + marker-led decl legitimize+retarget (`311566cb`).
+- **BUG-064** P0: acked-but-unbanked fact (`code freeze lifts`) — added `lifts/holds/begins/resumes` predicates; **split-brain store**: `reload_model_configuration` built a second ConversationMemory while `agent.brain.hippocampus` kept the stale instance → stale snapshot saves clobbered fresh rows. Reload now reuses the live store and re-points hippocampus handles. Generic `when do X run` status regex narrowed to generic subjects; precision gate is plural-tolerant with trailing-verb retry (`7c6cc9ee` + `6d88bdce`).
+- Canonical suite: **3764 passed, 4 skipped, 530 subtests** (mid-session run). All probes live-verified on latest.
+
+### Ops notes
+- Kill backend by LISTENING PORT only — a filter containing 'localcodeagent' self-kills the powershell; `Start-Process` detaches fine.
+- Live dogfood store: `.dogfood/.dogfood/runtime/data/conversation_memory.json` (nested — workspace `.dogfood` + config-relative path).
+- Answer Memory: `.dogfood/data/nexus_brain/answer_memory.db` (SQLite, `answers` table).
