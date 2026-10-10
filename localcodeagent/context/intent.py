@@ -577,6 +577,14 @@ def detect_image_intent(text: str) -> tuple[bool, float, list[str]]:
                 t) and not _IMAGE_OP_RE.search(t):
         return False, 0.0, []
 
+    # Memory/meta imperatives govern the speech act — "forget render
+    # box", "remember the wallpaper rule" operate on memory, they never
+    # request an artifact. The subordinate NP can't rescope the turn.
+    if re.match(
+            r"^(?:forget|remember|note|recall|never\s*mind|nm\b|"
+            r"stop\s+remembering|delete\s+(?:the\s+)?facts?|undo)\b", t):
+        return False, 0.0, []
+
     # Hypothetical "imagine" frames request thought, not an artifact —
     # "imagine you were an AI", "imagine if it rained", "imagine what
     # she'd say". "Imagine a dragon" (direct object) still generates.
@@ -615,8 +623,20 @@ def detect_image_intent(text: str) -> tuple[bool, float, list[str]]:
         evidence.append("explicit image operation")
         return True, 0.9, evidence
 
-    show = bool(_SHOW_VERB_RE.search(t))
-    gen = bool(_GENERATE_VERB_RE.search(t))
+    show_m = _SHOW_VERB_RE.search(t)
+    gen_m = _GENERATE_VERB_RE.search(t)
+    show = bool(show_m)
+    gen = bool(gen_m)
+
+    # One token can't be both the verb and its object — "forget render
+    # box" reads 'render' as the generation verb AND the visual noun,
+    # faking "verb + noun" agreement. Visual evidence must come from a
+    # different token than the request verb.
+    verb_spans = [m.span() for m in (show_m, gen_m) if m]
+    if verb_spans:
+        visual_noun = any(
+            all(m.start() >= e or m.end() <= s for s, e in verb_spans)
+            for m in _VISUAL_NOUN_RE.finditer(t))
 
     # Veto: a non-visual requested output object kills image intent even
     # beside a visual verb — "make a picture" vs "generate a report".
