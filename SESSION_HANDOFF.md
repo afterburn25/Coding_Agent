@@ -4885,3 +4885,42 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
 - Still open: UI click-dogfood (needs interactive browser), installer
   cycle, external llama:8391 intermittent disconnects (environment
   fragility — managed reaper covers managed runtimes only).
+
+### Round 11 — Surface audit closeout: POST fuzz + truth-gate recall + UI dead feature (HEAD 992a3cfa)
+
+- **BUG-021** (`69545986`): live POST-fuzz of all 134 literal routes
+  with empty bodies found 6 handlers leaking service-layer exceptions
+  as raw 500s (`conversations/feedback`, `image/backend/start`,
+  `model-growth/job`, `nexus-brain/initialize|unlock`, `policy/mode`).
+  All now map ValueError→400 / not-initialized→409 / missing-dep→503;
+  regression test covers all six plus a valid-path sanity.
+  Side-discovery: fuzz hit `/api/shutdown` — that's a legitimate
+  kill-switch, not a crash.
+- **BUG-022** (`4c3e01f3`, P0 false-success): Part-28 truth-gate audit —
+  `_EXECUTED_CLAIM_RE` had a recall hole: 18/20 adversarial probes
+  escaped. Every simple-past claim ("I ran the tests", "I updated the
+  file") slipped through, plus the everyday work verbs (created/wrote/
+  deleted/modified/edited/saved/made). Extended the same pattern class
+  with phrasal-verb guards ("ran into"/"checked out" excluded),
+  object-required guards for ambiguous verbs, `I've been X-ing`, and a
+  habitual/historical lookahead on passive claims. 24/24 recall, 0/13
+  false positives.
+- **BUG-023 → resolved as design**: `#nexusPresence` absence is
+  intentional — `test_topbar_has_no_duplicate_brand_or_presence`
+  documents the portrait was removed (duplicated brand lockup, broke
+  the topbar grid). avatar.js/CSS/`/api/nexus/avatar` remain as
+  documented foundation; the `if (!el) return` dormant load is
+  harmless. Initial re-add reverted.
+- **UI↔API consistency sweep**: all 317 fetch/api call sites resolve to
+  real routes (0 missing); all inline handlers defined; all 595 DOM ids
+  referenced exist (1 dead feature found → BUG-023); SSE subscriptions
+  all wired to real emitters.
+- Suite: canonical rerun **3709 passed, 4 skipped, 530 subtests**;
+  3 failures all dispositioned as environmental (isolated-instance
+  smoke `rag_api` timeout under suite load — passes in isolation;
+  `screen_hash_stable` — live screen content changes between captures;
+  Chatterbox worker 180s model-load timeout under load). One real
+  conflict: BUG-023's element re-add violated the intentional-removal
+  test → reverted.
+- Still open: UI click-dogfood (needs interactive browser), installer
+  cycle execution, external llama:8391 intermittent disconnects.
