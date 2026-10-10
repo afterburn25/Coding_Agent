@@ -62,6 +62,17 @@ _DISCOURSE_REF_RE = re.compile(
     r"last time|just now)\b|"
     r"\bback to (?:the|our|what)\b|"
     r"\bdid\s+i\s+(?:just\s+)?(?:say|mention|tell|ask|name|call)\b|"
+    # Second-person utterance recall — the referent is something the
+    # assistant said in THIS conversation: "what did you just say",
+    # "you said a port earlier", "your last suggestion". No stored
+    # answer can resolve a reference into live history.
+    r"\b(?:did|do|would|could)\s+you\s+(?:just\s+)?(?:say|mean|tell|"
+    r"mention|show|explain|claim|promise|suggest|recommend)\b|"
+    r"\byou\s+(?:just\s+)?(?:said|mentioned|told|meant|suggested)\b|"
+    r"\bwhat\s+you\s+(?:just\s+)?(?:said|meant|told|promised|"
+    r"suggested)\b|"
+    r"\b(?:your|the)\s+(?:last|previous|earlier)\s+(?:answer|reply|"
+    r"response|message|point|suggestion|recommendation|idea)\b|"
     r"\b(?:what|which)\b[^.?!]{0,30}\b(?:again|earlier|before|"
     r"just now)\b|"
     r"\bthe (?:first|second|other|last) (?:thing|one|part|option)\b",
@@ -126,6 +137,44 @@ def is_error_answer(text: str) -> bool:
     must never be learned or replayed: the failure is transient, and a
     cached error parrots forever."""
     return bool(_ANSWER_FAILURE_RE.search(str(text or "")))
+
+
+# Answers that cannot stand alone — continuation fragments produced
+# mid-thread while resolving a parked clarification ("— no auto",
+# "… the second option"). As a canonical Q/A they are meaningless, and
+# injected as hints they read as non-sequiturs on unrelated questions.
+_FRAGMENT_ANSWER_RE = re.compile(r"^\s*(?:—|–|\.\.\.|…|;|-{2,})")
+
+
+def is_fragment_answer(text: str) -> bool:
+    """True when the reply is a mid-thread fragment, not a standalone
+    answer — a leading continuation marker ("— no auto", "… the second
+    one") literally cannot begin a standalone reply. Bare short answers
+    ("42", "yes", "harmless") stay learnable — they can be canonical."""
+    t = str(text or "").strip()
+    if not t:
+        return True
+    return bool(_FRAGMENT_ANSWER_RE.match(t))
+
+
+# Machine-authored work-order scaffolds — mission/autonomy lanes issue
+# fixed template prompts ("Work the scoped lane of this mission…",
+# "A mission task failed. Diagnose the concrete cause…",
+# "Apply the diagnosis to make progress on the mission objective…").
+# A response to a template is mission evidence, not a user question;
+# replaying it as a learned answer injects mission state into chats.
+_MACHINE_QUESTION_RE = re.compile(
+    r"^\s*(?:work the scoped lane of (?:this|the) mission\b|"
+    r"a mission task failed\b[.\s]*diagnose\b|"
+    r"apply the diagnosis to make progress on the mission\b)",
+    re.I | re.S)
+
+
+def is_machine_authored_question(text: str) -> bool:
+    """True when the stored 'question' is a machine-authored work-order
+    scaffold rather than something a user asked — mission traffic must
+    never be replayed as user-facing memory (BUG-011/016 lineage)."""
+    return bool(_MACHINE_QUESTION_RE.match(str(text or "")))
 
 
 # Capability probes — "can you see my screen", "can you browse websites",

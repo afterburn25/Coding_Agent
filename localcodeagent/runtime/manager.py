@@ -1104,6 +1104,43 @@ class RuntimeManager:
                     stopped.append(model_id)
         return stopped
 
+    def reap_zombie_listeners(self) -> list[str]:
+        """Stop managed runtimes whose process is alive but whose listen
+        socket is gone — the llama-server zombie state observed in soak
+        (process running, no listener, every request stalls until the
+        next ensure_ready cold-start). Reaped proactively so the next
+        user request doesn't eat the stall+restart.
+
+        Only the missing *socket* counts: a busy model that answers a
+        health probe slowly still owns its listener and is never
+        touched, and a model still inside its startup grace is left
+        alone (llama binds the socket only after weights load)."""
+        stopped: list[str] = []
+        now = time.time()
+        with self._lock:
+            for model_id, item in list(self._managed.items()):
+                if item.process.poll() is not None:
+                    continue
+                status = self._status.get(model_id)
+                started = float(
+                    getattr(status, "started_at", None) or now)
+                grace = max(60.0, float(
+                    getattr(item.profile, "startup_timeout", 60) or 60))
+                if now - started < grace:
+                    continue
+                port = self._port_from_endpoint(item.endpoint)
+                if not port or self._listening_pids(port):
+                    continue
+                status = status or item.status
+                status.state = "error"
+                status.healthy = False
+                status.error = (
+                    "llama-server is alive but no longer listening on "
+                    f"{item.endpoint} — reaped zombie process")
+                self._stop_managed(model_id)
+                stopped.append(model_id)
+        return stopped
+
     def resident_model_ids(self) -> list[str]:
         with self._lock:
             return [mid for mid, item in self._managed.items() if item.process.poll() is None]

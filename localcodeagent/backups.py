@@ -124,21 +124,77 @@ class BackupService:
                 return False, meta
         return True, meta
 
-    def restore(self, backup_name: str, *, dry_run: bool = False) -> dict:
-        """Restore a backup after verifying every file's manifest hash.
-        Current live files are stashed under data/backups/pre-restore-<ts>
-        first so a bad restore never destroys working state."""
+    @staticmethod
+    def _select_rows(manifest: list[dict],
+                     paths: list[str] | None) -> list[dict]:
+        """Filter manifest rows to the requested paths. An entry matches
+        by exact path or as a directory prefix ("data/autonomy" selects
+        everything under it). Empty/None selects the whole manifest."""
+        wanted = [str(p).replace("\\", "/").strip("/") for p in (paths or [])
+                  if str(p).strip()]
+        if not wanted:
+            return list(manifest)
+        out = []
+        for row in manifest:
+            rel = str(row.get("path") or "")
+            if any(rel == w or rel.startswith(w + "/") for w in wanted):
+                out.append(row)
+        return out
+
+    def restore_test(self, backup_name: str) -> dict:
+        """Restore-test: copy every manifest file into a scratch dir and
+        re-hash the COPIES — proves a restore can actually write and the
+        bytes survive, not just that the source hashes are intact."""
+        import tempfile
         d = (self.backup_root / backup_name).resolve()
         if not d.is_dir() or d.parent != self.backup_root.resolve():
             return {"ok": False, "error": "unknown backup"}
         ok, meta = self._verify_dir(d)
         if not ok or meta is None:
             return {"ok": False, "error": "backup failed hash verification"}
+        rows = meta.get("manifest", [])
+        checked = 0
+        failures: list[str] = []
+        with tempfile.TemporaryDirectory(prefix="nexus-restore-test-") as td:
+            scratch = Path(td)
+            for row in rows:
+                src = d / "files" / row["path"]
+                tgt = scratch / row["path"]
+                try:
+                    tgt.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, tgt)
+                    if self._sha(tgt) != row["sha256"]:
+                        failures.append(row["path"])
+                    else:
+                        checked += 1
+                except OSError as exc:
+                    failures.append(f"{row['path']}: {exc}")
+        return {"ok": not failures, "checked": checked,
+                "total": len(rows), "failures": failures[:20]}
+
+    def restore(self, backup_name: str, *, dry_run: bool = False,
+                paths: list[str] | None = None) -> dict:
+        """Restore a backup after verifying every file's manifest hash.
+        Current live files are stashed under data/backups/pre-restore-<ts>
+        first so a bad restore never destroys working state. `paths`
+        selects a subset (exact path or directory prefix) for selective
+        restore; None restores the whole backup."""
+        d = (self.backup_root / backup_name).resolve()
+        if not d.is_dir() or d.parent != self.backup_root.resolve():
+            return {"ok": False, "error": "unknown backup"}
+        ok, meta = self._verify_dir(d)
+        if not ok or meta is None:
+            return {"ok": False, "error": "backup failed hash verification"}
+        rows = self._select_rows(meta["manifest"], paths)
+        if paths and not rows:
+            return {"ok": False,
+                    "error": "no backup entries match the requested paths"}
         if dry_run:
-            return {"ok": True, "would_restore": len(meta["manifest"])}
+            return {"ok": True, "would_restore": len(rows),
+                    "paths": [r["path"] for r in rows[:50]]}
         stash = self.backup_root / f"pre-restore-{time.strftime('%Y%m%d-%H%M%S')}"
         restored = 0
-        for row in meta["manifest"]:
+        for row in rows:
             src = d / "files" / row["path"]
             tgt = (self.workspace / row["path"]).resolve()
             try:

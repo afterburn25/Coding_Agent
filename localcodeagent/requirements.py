@@ -16,7 +16,6 @@ user asked for this".
 """
 from __future__ import annotations
 
-import json
 import re
 import threading
 import time
@@ -24,7 +23,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .fsutil import atomic_write_text
 
 MAX_REQUIREMENTS = 2000
 MAX_EVIDENCE = 30
@@ -85,27 +83,27 @@ def new_requirement(description: str, *, source: str = "user",
 class RequirementStore:
     """Bounded JSON store at <runtime>/data/requirements.json."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, db: Any = None) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        from .state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="requirements")
         self._rows: list[dict[str, Any]] = self._load()
 
     # -- persistence --------------------------------------------------
 
     def _load(self) -> list[dict]:
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            rows = raw.get("requirements", [])
-            return [r for r in rows if isinstance(r, dict)
-                    and r.get("id")][-MAX_REQUIREMENTS:]
-        except (OSError, ValueError):
+        raw = self._doc.load_json(None)
+        if not isinstance(raw, dict):
             return []
+        rows = raw.get("requirements", [])
+        return [r for r in rows if isinstance(r, dict)
+                and r.get("id")][-MAX_REQUIREMENTS:]
 
     def _save(self) -> None:
-        atomic_write_text(self.path, json.dumps(
-            {"version": 1, "requirements": self._rows[-MAX_REQUIREMENTS:]},
-            indent=2, ensure_ascii=False))
+        self._doc.save_json(
+            {"version": 1, "requirements": self._rows[-MAX_REQUIREMENTS:]})
 
     # -- CRUD -----------------------------------------------------------
 
@@ -408,3 +406,148 @@ def derive_requirement_specs(objective: str) -> list[dict[str, Any]]:
         add("No regressions: existing checks still pass",
             verification={"kind": "verify_passed"})
     return specs
+
+
+# ---------------------------------------------------------------------
+# Requirements Compiler — user language → structured requirement
+# categories. Deterministic sentence classification only; every claim
+# keeps the user's own phrasing so provenance stays obvious.
+#
+# Categories follow the spec contract: MUST / SHOULD / MAY / MUST_NOT /
+# ASSUMPTION / QUESTION / ACCEPTANCE_CRITERION. Modal verbs and
+# prohibitions drive the bucket; imperatives with no modal default to
+# MUST only when the clause is clearly an instruction.
+
+_MUST_RE = re.compile(
+    r"\b(?:must|need(?:s|ed)? to|has to|have to|required|ensure|"
+    r"shall|is required)\b", re.I)
+_SHOULD_RE = re.compile(
+    r"\b(?:should|prefer(?:s|red|ably)?|ideally|recommended|"
+    r"supposed to|ought to|want(?:s|ed)? (?:it|this|the|to))\b", re.I)
+_MAY_RE = re.compile(
+    r"\b(?:may|might|optionally|nice to have|if possible|"
+    r"when convenient|could also|bonus)\b", re.I)
+_MUST_NOT_RE = re.compile(
+    r"\b(?:must not|mustn'?t|do not|don'?t|never|cannot|can'?t|"
+    r"no longer|without (?:changing|affecting|breaking|deleting|"
+    r"losing)|not allowed|forbidden|avoid)\b", re.I)
+_ASSUME_RE = re.compile(
+    r"\b(?:assuming|assume(?:s|d)?|presum\w+|given that|"
+    r"provided that|as long as|if .{1,60} (?:is|are|has|supports?))\b",
+    re.I)
+_ACCEPT_RE = re.compile(
+    r"\b(?:acceptance|verify that|verified by|should result in|"
+    r"success looks like|done when|passes when|check that|"
+    r"expect(?:ing)? (?:that|to see))\b", re.I)
+
+REQUIREMENT_CATEGORIES = (
+    "MUST", "SHOULD", "MAY", "MUST_NOT",
+    "ASSUMPTION", "QUESTION", "ACCEPTANCE_CRITERION",
+)
+
+_CLAUSE_RE = re.compile(r"(?<=[.;!?\n])\s+|\s+(?:but|and then|also)\s+", re.I)
+
+
+def _clauses(text: str) -> list[str]:
+    out = []
+    for raw in _CLAUSE_RE.split(str(text or "")):
+        c = raw.strip().strip(".,;:!?")
+        if len(c) >= 4:
+            out.append(c)
+    return out[:30]
+
+
+def classify_clause(clause: str) -> str:
+    """Map one clause to a requirement category. MUST_NOT wins over
+    MUST ('don't change X' contains 'change X' but is a prohibition)."""
+    c = str(clause or "")
+    low = c.lower()
+    if _MUST_NOT_RE.search(low) or re.match(r"^(?:don'?t|do not|never|no )\b", low):
+        return "MUST_NOT"
+    if _ACCEPT_RE.search(low):
+        return "ACCEPTANCE_CRITERION"
+    if c.rstrip().endswith("?") or low.startswith(
+            ("what ", "which ", "how ", "when ", "where ", "why ", "is ",
+             "are ", "can ", "does ", "do ", "will ")):
+        return "QUESTION"
+    if _ASSUME_RE.search(low):
+        return "ASSUMPTION"
+    if _MUST_RE.search(low):
+        return "MUST"
+    if _SHOULD_RE.search(low):
+        return "SHOULD"
+    if _MAY_RE.search(low):
+        return "MAY"
+    # Bare imperative — "make X the default", "keep Y as-is".
+    if re.match(r"^(?:make|keep|add|use|set|switch|create|build|write|"
+                r"remove|delete|rename|move|enable|disable|install|"
+                r"update|upgrade|change|fix|implement|support)\b", low):
+        return "MUST"
+    return "MUST"
+
+
+def compile_requirement_spec(text: str) -> dict[str, Any]:
+    """Compile user language into categorized requirement clauses.
+
+    Returns ``{category: [clause, ...]}`` plus a flat ``items`` list of
+    ``{text, category}`` in original order. Deterministic — identical
+    input compiles identically, and the user's phrasing is preserved so
+    a compiled requirement never silently rewords intent.
+    """
+    items: list[dict[str, str]] = []
+    out: dict[str, Any] = {c: [] for c in REQUIREMENT_CATEGORIES}
+    out["items"] = items
+    for clause in _clauses(text):
+        cat = classify_clause(clause)
+        row = {"text": clause, "category": cat}
+        items.append(row)
+        out[cat].append(clause)
+    return out
+
+
+# The RequirementStore.compile method lives on the class above; this
+# free function is the scope-agnostic entry point.
+def compile_to_store(store: RequirementStore, text: str, *,
+                     scope_type: str = "global",
+                     scope_id: str = "",
+                     assumptions=None) -> dict[str, Any]:
+    """Compile + persist MUST/MUST_NOT/SHOULD/MAY/ACCEPTANCE rows scoped
+    to the caller. Returns the stored rows plus the unresolved buckets
+    (QUESTION → clarify, ASSUMPTION → assumption ledger). When an
+    ``AssumptionLedger`` is passed, unresolved assumptions are recorded
+    there with the created requirement ids as dependents."""
+    compiled = compile_requirement_spec(text)
+    created: list[dict] = []
+    cat_priority = {"MUST": "high", "MUST_NOT": "high",
+                    "SHOULD": "normal", "MAY": "low",
+                    "ACCEPTANCE_CRITERION": "normal"}
+    cat_ver = {"MUST_NOT": {"kind": "custom", "check": "invariant_held"}}
+    for cat in ("MUST", "MUST_NOT", "SHOULD", "MAY",
+                "ACCEPTANCE_CRITERION"):
+        for clause in compiled[cat]:
+            desc = clause if cat in ("MUST", "SHOULD", "MAY") \
+                else f"[{cat}] {clause}"
+            row = store.create(
+                desc, source="user",
+                priority=cat_priority[cat],
+                scope_type=scope_type, scope_id=scope_id,
+                verification=dict(cat_ver.get(cat, {"kind": "custom"})),
+                acceptance_criteria=[clause])
+            row["category"] = cat
+            created.append(row)
+    assumption_rows: list[dict] = []
+    if assumptions is not None:
+        dep_ids = [r["id"] for r in created]
+        for clause in compiled["ASSUMPTION"]:
+            assumption_rows.append(assumptions.add(
+                clause, scope_type=scope_type, scope_id=scope_id,
+                dependents={"requirements": dep_ids}))
+    return {
+        "requirements": created,
+        "unresolved": {
+            "questions": compiled["QUESTION"],
+            "assumptions": compiled["ASSUMPTION"],
+        },
+        "assumption_rows": assumption_rows,
+        "compiled": {c: compiled[c] for c in REQUIREMENT_CATEGORIES},
+    }

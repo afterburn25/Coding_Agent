@@ -11,6 +11,23 @@ import urllib.request
 from pathlib import Path
 
 
+class _RetriedTemporaryDirectory(tempfile.TemporaryDirectory):
+    """Windows-safe variant for these tests: per-call sqlite connections
+    (answer_memory `-wal`) can still be mid-flush on a queue worker thread
+    when the with-block exits, and deleting an open file is a hard
+    PermissionError there (ignore_cleanup_errors does not cover the
+    _resetperms chmod path). The handle closes within milliseconds, so a
+    short retry makes teardown deterministic."""
+
+    def cleanup(self) -> None:
+        for _ in range(40):
+            try:
+                return super().cleanup()
+            except PermissionError:
+                time.sleep(0.05)
+        return super().cleanup()
+
+
 class _FakeModelServer:
     """Minimal OpenAI-compatible endpoint scripting a two-turn tool loop.
 
@@ -164,7 +181,7 @@ class EndToEndAgentTests(unittest.TestCase):
         # transmit tool schemas.
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             state.agent.profile_context = (
                 lambda *a, **k: "You are Isabella. Address the user as Father.")
@@ -197,7 +214,7 @@ class EndToEndAgentTests(unittest.TestCase):
         import sys
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             root = Path(td)
             runtime_root = root / ".runtime"
             # Stale on-disk manifest: detect.files requires BOTH paths.
@@ -239,7 +256,7 @@ class EndToEndAgentTests(unittest.TestCase):
         # A mission-attributed waiting_approval row is mission work — its own
         # approval flow resumes it — and must never freeze the agent lane
         # (an abandoned mission park used to block every future mission).
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, "http://127.0.0.1:9")
             mission_task = state.tasks.create("mission node work", "auto")
             state.tasks.update(
@@ -265,7 +282,7 @@ class EndToEndAgentTests(unittest.TestCase):
         # handle them. Chat-level auto-resume/error retry must not re-drive
         # them: the recorded node result is final, and re-driving an orphan
         # of a terminal mission just clogs the agent lane.
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, "http://127.0.0.1:9")
 
             class _Missions:
@@ -289,7 +306,7 @@ class EndToEndAgentTests(unittest.TestCase):
     def test_task_runs_real_tool_call_and_persists_transcript(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             events: list[dict] = []
             result = state.agent.run("check system resources", event_callback=events.append)
@@ -318,7 +335,7 @@ class EndToEndAgentTests(unittest.TestCase):
     def test_queued_tasks_drain_through_real_pipeline(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             state.queue.enqueue("first queued task")
             state.queue.enqueue("second queued task")
@@ -360,7 +377,7 @@ class EndToEndAgentTests(unittest.TestCase):
         # user happened to resolve it).
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             parked = state.tasks.create(
                 prompt="parked approval from an earlier session",
@@ -388,7 +405,7 @@ class EndToEndAgentTests(unittest.TestCase):
         # A user prompt waiting in the queue must register as interactive
         # lane demand — otherwise mission nodes keep dispatching while the
         # user's request sits starved behind background work.
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, "http://127.0.0.1:9")
             self.assertFalse(state._agent_lane_active())
             state.queue.enqueue("user question while missions run")
@@ -406,7 +423,7 @@ class EndToEndAgentTests(unittest.TestCase):
     def test_preempt_for_chat_cancels_mission_task_only(self):
         # Interactive chat preempts mission work holding the lane — but must
         # never cancel a foreground (non-mission) task.
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, "http://127.0.0.1:9")
             mission_task = state.tasks.create("mission node work", "auto")
             state.tasks.update(mission_task.id, mission_id="m-abc")
@@ -421,7 +438,7 @@ class EndToEndAgentTests(unittest.TestCase):
     def test_preempt_for_chat_finds_mission_beyond_current_row(self):
         # current() returns the newest row regardless of status — a newer
         # terminal row must not shield a mission task still holding the lane.
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, "http://127.0.0.1:9")
             mission_task = state.tasks.create("mission node work", "auto")
             state.tasks.update(mission_task.id, mission_id="m-abc")
@@ -437,7 +454,7 @@ class EndToEndAgentTests(unittest.TestCase):
         # the drive silently runs to step_limit (observed live: the
         # preempted mission task ended 'step_limit', never 'cancelled').
         from types import SimpleNamespace
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, "http://127.0.0.1:9")
             mission_task = state.tasks.create("mission node work", "auto")
             state.tasks.update(mission_task.id, mission_id="m-abc")
@@ -451,7 +468,7 @@ class EndToEndAgentTests(unittest.TestCase):
         # The per-command kill flag must be SET (not popped) so a running
         # subprocess aborts instead of running to completion.
         from types import SimpleNamespace
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, "http://127.0.0.1:9")
             task = state.tasks.create("long command", "auto")
             flag = threading.Event()
@@ -469,7 +486,7 @@ class EndToEndAgentTests(unittest.TestCase):
         # the queue item and the response content.
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             bus = state.events.subscribe(replay=0)
             item = state.queue.enqueue("queued user question")
@@ -505,7 +522,7 @@ class EndToEndAgentTests(unittest.TestCase):
         # the user prompt runs first even though it was enqueued later.
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             state.autonomy._lane.mission_id = "m-test"
             try:
@@ -546,7 +563,7 @@ class EndToEndAgentTests(unittest.TestCase):
         # node dispatched. Background work must not touch the voice lane.
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             executor = getattr(getattr(state, "autonomy", None), "_executor", None)
             if executor is None:
@@ -583,7 +600,7 @@ class EndToEndAgentTests(unittest.TestCase):
         self.addCleanup(fake.close)
         fake.static_reply = (
             "I've completed the work and generated the file for you.")
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             executor = getattr(
                 getattr(state, "autonomy", None), "_executor", None)
@@ -602,7 +619,7 @@ class EndToEndAgentTests(unittest.TestCase):
         # reach the model so it can correct instead of repeating the lie.
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             executor = getattr(
                 getattr(state, "autonomy", None), "_executor", None)
@@ -627,7 +644,7 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertTrue(out.get("ok"), out)
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             state.config.runtime_recovery_attempts = 2
             state.agent.config.runtime_recovery_attempts = 2
@@ -645,7 +662,7 @@ class EndToEndAgentTests(unittest.TestCase):
     def test_persistent_model_failure_fails_task(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             state.config.runtime_recovery_attempts = 1
             state.agent.config.runtime_recovery_attempts = 1
@@ -664,7 +681,7 @@ class EndToEndAgentTests(unittest.TestCase):
     def test_task_cancelled_mid_run(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             fake.delay = 0.6  # slow first response -> cancel window
             outcome: list = []
@@ -697,7 +714,7 @@ class EndToEndAgentTests(unittest.TestCase):
     def test_approval_pause_and_resume_end_to_end(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             # filesystem.write defaults to "ask" — the run pauses for approval.
             fake.tool_name = "write_file"
@@ -724,7 +741,7 @@ class EndToEndAgentTests(unittest.TestCase):
     def test_approval_denial_reaches_model_end_to_end(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             fake.tool_name = "write_file"
             fake.tool_args = json.dumps({"path": "note.txt", "content": "hello nexus"})
@@ -740,7 +757,7 @@ class EndToEndAgentTests(unittest.TestCase):
     def test_batched_tool_calls_execute_sequentially(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             fake.tool_calls = [
                 ("system_resources", "{}"),
@@ -760,7 +777,7 @@ class EndToEndAgentTests(unittest.TestCase):
     def test_pending_approval_survives_restart(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             fake.tool_name = "write_file"
             fake.tool_args = json.dumps({"path": "note.txt", "content": "survived restart"})
@@ -789,7 +806,7 @@ class EndToEndAgentTests(unittest.TestCase):
         drain, which is the 'run all night' invariant."""
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             state.config.runtime_recovery_attempts = 1
             state.agent.config.runtime_recovery_attempts = 1
@@ -821,7 +838,7 @@ class EndToEndAgentTests(unittest.TestCase):
         queued item can start."""
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             stranded = state.tasks.create("ghost task", "auto")
             state.tasks.update(
@@ -855,7 +872,7 @@ class EndToEndAgentTests(unittest.TestCase):
         """A running task with a live registered driver is never reaped."""
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             task = state.tasks.create("still driving", "auto")
             state.tasks.update(task.id, status="running", phase="working")
@@ -880,7 +897,7 @@ class EndToEndAgentTests(unittest.TestCase):
         position, is the authoritative liveness check."""
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             deep = state.tasks.create("deep running task", "auto")
             state.tasks.update(deep.id, status="running", phase="working")
@@ -898,7 +915,7 @@ class EndToEndAgentTests(unittest.TestCase):
         kill the in-flight request."""
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             deep = state.tasks.create("deep running task", "auto")
             state.tasks.update(
@@ -923,7 +940,7 @@ class EndToEndAgentTests(unittest.TestCase):
         than kill an in-flight request."""
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             task = state.tasks.create("unattributed drive", "auto")
             state.tasks.update(task.id, status="running")  # model_id stays ""
@@ -948,7 +965,7 @@ class EndToEndAgentTests(unittest.TestCase):
         self.addCleanup(fake.close)
         # Daemon threads may still be flushing state during teardown;
         # Windows holds directory locks briefly.
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import create_server, stop_state
             ws = Path(td)
@@ -1025,7 +1042,7 @@ class EndToEndAgentTests(unittest.TestCase):
         self.addCleanup(fake.close)
         # Daemon threads may still be flushing state during teardown;
         # Windows holds directory locks briefly.
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import create_server, stop_state
             ws = Path(td)
@@ -1094,7 +1111,7 @@ class EndToEndAgentTests(unittest.TestCase):
 
 
     def test_mcp_servers_register_as_processes(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import AppState
             cfg = AgentConfig(profiles_onboarding_gate=False, 
@@ -1133,7 +1150,7 @@ class AutonomyApiTests(unittest.TestCase):
     the UI form, and enable/disable/delete actually mutate the store."""
 
     def test_trigger_crud_and_signals(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import create_server, stop_state
             ws = Path(td)
@@ -1192,7 +1209,7 @@ class AutonomyApiTests(unittest.TestCase):
             self.assertFalse(any(t["id"] == tid for t in remaining))
 
     def test_schedule_create_validates_kind(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import create_server, stop_state
             ws = Path(td)
@@ -1232,7 +1249,7 @@ class AutonomyApiTests(unittest.TestCase):
         session in _sessions (leaked memory + resumable stale state) and
         kept pending_approval in the ledger row. A parked task has no live
         drive to notice the cancel, so the endpoint must clean up itself."""
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             from localcodeagent.config import AgentConfig, ModelProfile
             from localcodeagent.server import create_server, stop_state
             ws = Path(td)
@@ -1298,7 +1315,7 @@ class ChatAttachmentTests(unittest.TestCase):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
         fake.tool_calls = []  # answer directly, no tool calls
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             result = state.agent.run(
                 "summarize this file",
@@ -1318,7 +1335,7 @@ class ChatAttachmentTests(unittest.TestCase):
         self.addCleanup(fake.close)
         png = ("data:image/png;base64," + __import__("base64").b64encode(
             b"\x89PNG\r\n\x1a\nfakeimagebytes").decode())
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             # Stub the actual generation; we only verify the source path
             # reaches the image tool arguments.
@@ -1348,7 +1365,7 @@ class ChatAttachmentTests(unittest.TestCase):
     def test_oversized_and_binary_attachments_bounded(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
             state = self._state(td, fake.endpoint)
             out = state.agent._prepare_attachments([
                 {"name": "big.txt", "kind": "file",

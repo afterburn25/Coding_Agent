@@ -25,9 +25,13 @@ class JsonStore:
     """One bounded JSON document with atomic writes + corrupt quarantine."""
 
     def __init__(self, path: Path, *, default: Any, limit: int | None = None,
-                 key: str | None = None, preserve=None) -> None:
+                 key: str | None = None, preserve=None, doc=None) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # `doc` is a state_db.DocStore: when a StateDB backs it the
+        # payload lives in a WAL-committed kv row (with a live file
+        # shadow); without a db it is the same atomic file as before.
+        self._doc = doc
         self._default = default
         self._limit = limit          # max rows kept for list payloads
         self._key = key              # payload key wrapping the list
@@ -36,6 +40,8 @@ class JsonStore:
         self.data = self._load()
 
     def _load(self) -> Any:
+        if self._doc is not None:
+            return self._doc.load_json(self._fresh(), self._migrate)
         if not self.path.is_file():
             return self._fresh()
         try:
@@ -68,9 +74,13 @@ class JsonStore:
                     self.data[self._key] = [
                         row for row in rows
                         if id(row) in tail_ids or self._kept(row)]
-            atomic_write_text(
-                self.path,
-                json.dumps(self.data, indent=2, ensure_ascii=False, default=str))
+            if self._doc is not None:
+                self._doc.save_json(self.data)
+            else:
+                atomic_write_text(
+                    self.path,
+                    json.dumps(self.data, indent=2, ensure_ascii=False,
+                               default=str))
 
     def _kept(self, row: dict) -> bool:
         if self._preserve is None:
@@ -134,57 +144,71 @@ class AutonomyStore:
         "grants", "notifications", "approvals", "repairs", "findings",
     )
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, db: Any = None) -> None:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+        self.db = db  # state_db.StateDB — critical rows live in WAL-committed kv
+        from ..state_db import DocStore
+        _doc = (lambda name: DocStore(db, self.root / name,
+                                      domain="autonomy")) if db else (
+                                          lambda name: None)
         # Completed history is bounded, but any user-actionable or live row
         # survives retention — losing one would leave durable work unowned.
         self.missions = JsonStore(
             self.root / "missions.json", default=None, key="missions",
-            limit=200,
+            limit=200, doc=_doc("missions.json"),
             preserve=lambda row: str(row.get("status")) not in
             {"completed", "completed_with_warnings", "failed",
              "cancelled", "archived"})
         self.standing_goals = JsonStore(self.root / "standing_goals.json",
-                                        default=None, key="goals", limit=100)
+                                        default=None, key="goals", limit=100,
+                                        doc=_doc("standing_goals.json"))
         # Durable evaluated goals (GoalManager) — distinct from
         # standing_goals, which are schedule/trigger-bound recurring runs.
         self.goals = JsonStore(self.root / "goals.json",
-                               default=None, key="goals", limit=100)
+                               default=None, key="goals", limit=100,
+                               doc=_doc("goals.json"))
         self.triggers = JsonStore(self.root / "triggers.json",
-                                  default=None, key="triggers", limit=200)
+                                  default=None, key="triggers", limit=200,
+                                  doc=_doc("triggers.json"))
         self.schedules = JsonStore(self.root / "schedules.json",
-                                   default=None, key="schedules", limit=200)
+                                   default=None, key="schedules", limit=200,
+                                   doc=_doc("schedules.json"))
         self.grants = JsonStore(self.root / "grants.json",
-                                default=None, key="grants", limit=200)
+                                default=None, key="grants", limit=200,
+                                doc=_doc("grants.json"))
         self.notifications = JsonStore(self.root / "notifications.json",
-                                       default=None, key="notifications", limit=300)
+                                       default=None, key="notifications",
+                                       limit=300,
+                                       doc=_doc("notifications.json"))
         self.approvals = JsonStore(
             self.root / "approvals.json", default=None, key="approvals",
-            limit=300,
+            limit=300, doc=_doc("approvals.json"),
             preserve=lambda row: str(row.get("state")) == "pending")
         # Durable self-repair incidents (SelfRepairCoordinator) —
         # persisted so a crash mid-repair resumes instead of repeating.
         self.repairs = JsonStore(
             self.root / "repairs.json", default=None, key="repairs",
-            limit=200,
+            limit=200, doc=_doc("repairs.json"),
             preserve=lambda row: str(row.get("state")) not in
             {"resolved", "rolled_back", "needs_human", "abandoned"})
         # Detector findings — evidence-based problems/opportunities the
         # SignalScanner emits (deduped by signature, cooldown-bounded).
         self.findings = JsonStore(self.root / "findings.json",
-                                  default=None, key="findings", limit=200)
+                                  default=None, key="findings", limit=200,
+                                  doc=_doc("findings.json"))
         # Procedure memory — terminal outcomes of source-keyed missions
         # (detector investigations, goal repairs, schedules) so recurring
         # signatures recall what worked and stop looping on what didn't.
         self.procedures = JsonStore(self.root / "procedures.json",
                                     default=None, key="procedures",
-                                    limit=300)
+                                    limit=300, doc=_doc("procedures.json"))
         self.control = JsonStore(self.root / "control.json",
                                  default={"version": SCHEMA_VERSION,
                                           "paused": False,
                                           "stop": False,
-                                          "resource_mode": "balanced"})
+                                          "resource_mode": "balanced"},
+                                 doc=_doc("control.json"))
         self.receipts = JsonlLog(self.root / "receipts.jsonl")
         self.audit = JsonlLog(self.root / "audit.jsonl")
         self.lessons = JsonlLog(self.root / "lessons.jsonl")

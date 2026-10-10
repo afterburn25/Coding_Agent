@@ -8,13 +8,11 @@ counts persist; retention decays and refresh is scheduled.
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 import uuid
 from pathlib import Path
 
-from ..fsutil import atomic_write_text
 
 STAGES = ("closed_book", "practical", "adversarial", "verified")
 PASS_SCORE = 0.7
@@ -24,30 +22,27 @@ RETENTION_INTERVALS = (86400, 7 * 86400, 30 * 86400)
 
 
 class MasteryEvaluator:
-    def __init__(self, path: Path, *, competency_map=None) -> None:
+    def __init__(self, path: Path, *, competency_map=None,
+                 db: Any = None) -> None:
         self.path = Path(path).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.competency_map = competency_map
         self._lock = threading.RLock()
+        from ..state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="learning")
         self._data: dict = {"version": 1, "evaluations": [], "retention": {}}
         self._load()
 
     def _load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                if isinstance(raw.get("evaluations"), list):
-                    self._data["evaluations"] = raw["evaluations"]
-                if isinstance(raw.get("retention"), dict):
-                    self._data["retention"] = raw["retention"]
-        except (OSError, ValueError, TypeError):
-            pass
+        raw = self._doc.load_json(None)
+        if isinstance(raw, dict):
+            if isinstance(raw.get("evaluations"), list):
+                self._data["evaluations"] = raw["evaluations"]
+            if isinstance(raw.get("retention"), dict):
+                self._data["retention"] = raw["retention"]
 
     def _save(self) -> None:
-        atomic_write_text(self.path, json.dumps(
-            self._data, indent=2, ensure_ascii=False))
+        self._doc.save_json(self._data)
 
     # -- evaluations ---------------------------------------------------------
 

@@ -238,6 +238,46 @@ class SelfUpdateTests(unittest.TestCase):
             # Nothing staged or flagged.
             self.assertIsNone(lkg.consume_update())
 
+    def test_apply_runs_data_backup_stage(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = _app(Path(td))
+            src = self._repo(td)
+            lkg = LkgStore(app, Path(td) / "lkg")
+            calls = []
+
+            def fake_backup(*, label=""):
+                calls.append(label)
+                return {"ok": True, "backup": "backup-x"}
+
+            upd = SelfUpdate(app, src, lkg, data_backup=fake_backup)
+
+            def fake_git(self_, *a, **k):
+                cp = subprocess.CompletedProcess(a, 0, stdout="abc123\n",
+                                                 stderr="")
+                if a[:1] == ("rev-list",):
+                    cp.stdout = "0\n"
+                elif a[:1] == ("status",):
+                    cp.stdout = ""
+                return cp
+
+            fake_build = src / "build" / "selfupdate-dist" \
+                / "ChatNexus.Backend" / "ChatNexus.Backend.exe"
+            fake_build.parent.mkdir(parents=True)
+            fake_build.write_bytes(b"new-exe")
+            (fake_build.parent / "_internal").mkdir()
+
+            with patch("localcodeagent.selfupdate._git", fake_git):
+                out = upd.apply(run_tests=False, build=False)
+            self.assertTrue(out["ok"], out)
+            # The data snapshot fires after the LKG snapshot, before staging.
+            names = [s["name"] for s in out["stages"]]
+            self.assertIn("data_snapshot", names)
+            self.assertLess(names.index("lkg_snapshot"),
+                            names.index("data_snapshot"))
+            self.assertLess(names.index("data_snapshot"),
+                            names.index("stage"))
+            self.assertTrue(calls and calls[0].startswith("pre-update"))
+
 
 class PendingSwapTests(unittest.TestCase):
     """Generalized deferred replacement — stage now, host swaps at boot."""

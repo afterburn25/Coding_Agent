@@ -38,6 +38,7 @@ class TaskRecord:
     recovery_count: int = 0
     response_source: str = ""
     mission_id: str = ""
+    conversation_id: str = ""
     memory: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
@@ -275,6 +276,18 @@ class TaskStore:
     def recent(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
             return [self._tasks[i].as_dict() for i in self._order[-max(1, limit):]][::-1]
+
+    def mission_ids(self) -> set[str]:
+        """Ids of tasks owned by a mission/autonomy lane — machine work
+        orders, never user utterances. Used to exclude their memory
+        records from conversational recall (incl. rows recorded before
+        the lane flag existed)."""
+        with self._lock:
+            return {
+                t.id for t in self._tasks.values()
+                if t.mission_id
+                or str(t.mode) in {"work_order", "autonomy", "self_repair"}
+            }
 
     def by_status(self, *statuses: str) -> list[dict[str, Any]]:
         """All tasks with any of ``statuses``, newest first — the full-ledger

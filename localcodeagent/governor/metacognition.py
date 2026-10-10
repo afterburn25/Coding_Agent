@@ -30,6 +30,159 @@ _STAKES_RE = re.compile(
 )
 
 
+# Reasoning strategies — the problem-class a turn wants, chosen before
+# the op ladder is built. Deterministic classification only: the router
+# reads the whole utterance (question shape, modal verbs, policy flags)
+# and emits a primary strategy plus composable secondaries — complex
+# problems legitimately need more than one (diagnose → causal →
+# experiment), so this is never forced into a single label.
+STRATEGY_DIRECT = "direct_retrieval"
+STRATEGIES = (
+    STRATEGY_DIRECT, "deductive", "inductive", "causal", "debugging",
+    "diagnostic", "counterfactual", "optimization", "constraint_solving",
+    "analogy", "experimental", "comparative", "planning", "research",
+    "simulation", "decision_analysis", "multi_agent_review",
+    "formal_math",
+)
+
+# Strategy → extra cognitive ops the ladder should include. These are
+# *additions* to the knowledge-state ladder, not replacements — a
+# diagnostic turn still gets retrieve_memory and an answer path.
+STRATEGY_OPS: dict[str, list[str]] = {
+    "diagnostic": ["generate_hypotheses", "test_hypothesis"],
+    "debugging": ["generate_hypotheses", "test_hypothesis"],
+    "causal": ["generate_hypotheses", "test_hypothesis"],
+    "counterfactual": ["simulate_plan"],
+    "optimization": ["run_formal_solver"],
+    "constraint_solving": ["run_formal_solver"],
+    "formal_math": ["run_formal_solver"],
+    "experimental": ["generate_hypotheses", "run_experiment"],
+    "comparative": ["run_verifier"],
+    "decision_analysis": ["run_verifier", "ask_critic"],
+    "multi_agent_review": ["ask_critic", "spawn_specialist"],
+    "simulation": ["simulate_plan"],
+    "analogy": ["retrieve_memory"],
+    "planning": ["inspect_repository"],
+    "research": ["search_web"],
+}
+
+_MATH_RE = re.compile(
+    r"(?:\b\d+(?:\.\d+)?\s*[×x*/+\-^]\s*\d+(?:\.\d+)?\b|"
+    r"\b(?:calculate|compute|solve|simplify|factor|integral|derivative)\b|"
+    r"\bsqrt\b|\b(?:square root|modulo|percent of)\b)", re.I)
+_COUNTERFACT_RE = re.compile(
+    r"\b(?:what (?:would|will|happens?|might|could) happen|what if|"
+    r"happens if|difference if|trade.?off|instead of)\b", re.I)
+_OPT_RE = re.compile(
+    r"\b(?:optimi[sz]e|allocat\w+|schedul\w+|maximi[sz]e|minimi[sz]e|"
+    r"fit (?:all|both|these|\w+ models?)|pack|budget of|within \d+|"
+    r"\bhow (?:can|should) we (?:fit|pack|schedule|allocate))\b", re.I)
+_COMPARE_RE = re.compile(
+    r"\b(?:should (?:i|we|it)\b.{0,60}\bor\b|versus| vs\.? |"
+    r"which (?:is |would be |option )?(?:better|best|right)|"
+    r"keep \w+ or (?:switch|move)|pros and cons|trade.?offs? between|"
+    r"worth (?:it|switching|upgrading))\b", re.I)
+_DECISION_RE = re.compile(
+    r"\b(?:should (?:i|we)\b|decide|decision|adopt|migrate to|"
+    r"move (?:this|the|\w+) (?:to|onto)|choose (?:between|whether))\b",
+    re.I)
+_EXPERIMENT_RE = re.compile(
+    r"\b(?:experiment|a/?b test|benchmark (?:it|this|whether)|"
+    r"test whether|measure (?:the|if|whether)|controlled test)\b", re.I)
+_SIM_RE = re.compile(r"\b(?:simulat\w+|dry.?run|rehearse|model the)\b",
+                   re.I)
+_ANALOGY_RE = re.compile(
+    r"\b(?:similar to (?:the|that|when)|like (?:the|that) (?:bug|issue|"
+    r"problem|time)|same (?:pattern|structure|shape) as|reminds? us)\b",
+    re.I)
+_PLAN_RE = re.compile(
+    r"\b(?:plan (?:for|to|out)|roadmap|step.?by.?step (?:plan|approach)|"
+    r"how (?:should|do|can) (?:we|i) (?:approach|build|implement|do)|"
+    r"break (?:this|it) (?:down|into)|strategy for)\b", re.I)
+_RESEARCH_RE = re.compile(
+    r"\b(?:research|look (?:it|this|that)? ?up|search (?:for|the web)|"
+    r"find out|what'?s the latest|current (?:best|recommended|version)|"
+    r"latest (?:version|release|news))\b", re.I)
+_REVIEW_RE = re.compile(
+    r"\b(?:review (?:this|my|the)|second opinion|sanity.?check|"
+    r"get (?:a|another) (?:review|opinion)|cross.?check)\b", re.I)
+_QUESTIONISH_RE = re.compile(
+    r"^(?:what|who|where|when|which|how (?:much|many|old|long))\b"
+    r".{0,60}\??\s*$", re.I)
+
+
+def classify_strategy(text: str, *, is_error: bool = False,
+                      is_current: bool = False,
+                      is_coding: bool = False
+                      ) -> tuple[str, list[str], float, str]:
+    """Reasoning Strategy Router — which method fits this problem.
+
+    Returns (primary, secondaries, confidence, reason). Order matters:
+    more specific problem shapes win over generic ones; a single short
+    factual question stays ``direct_retrieval`` so simple asks never pay
+    planning overhead.
+    """
+    t = str(text or "")
+    low = t.lower()
+    picks: list[tuple[str, float, str]] = []
+
+    if _MATH_RE.search(t) and not is_error:
+        picks.append(("formal_math", 0.9, "exact math — compute, don't guess"))
+    if is_error or re.search(
+            r"\b(?:crash|error|fail\w*|bug|broken|traceback|exception|"
+            r"why does|why (?:is|isn't|won't)|keeps? (?:crash|fail|"
+            r"freez|dying)|not working|doesn'?t work|regression)\b",
+            low):
+        picks.append(("diagnostic", 0.8 if is_error else 0.65,
+                      "failure/why-shaped problem"))
+        picks.append(("causal", 0.6, "needs mechanism, not just symptom"))
+    if _EXPERIMENT_RE.search(low):
+        picks.append(("experimental", 0.7, "explicit test/measure ask"))
+    if _COUNTERFACT_RE.search(low):
+        picks.append(("counterfactual", 0.7,
+                      "what-if phrasing — predict before measuring"))
+    if _OPT_RE.search(low):
+        picks.append(("optimization", 0.7, "resource/limit language"))
+        if re.search(r"\b\d+\s*(?:gb|mb|vram|ram|deadline|limit)\b", low):
+            picks.append(("constraint_solving", 0.65,
+                          "explicit numeric constraints"))
+    if _SIM_RE.search(low):
+        picks.append(("simulation", 0.65, "explicit simulation ask"))
+    if _ANALOGY_RE.search(low):
+        picks.append(("analogy", 0.6, "references a similar prior problem"))
+    if _COMPARE_RE.search(low):
+        picks.append(("comparative", 0.7, "either/or comparison"))
+    if _DECISION_RE.search(low):
+        picks.append(("decision_analysis", 0.65, "a choice is being made"))
+    if _PLAN_RE.search(low) or (is_coding and re.search(
+            r"\b(?:implement|build|add|refactor|migrate|create)\b", low)):
+        picks.append(("planning", 0.6, "structured multi-step work"))
+    if _REVIEW_RE.search(low):
+        picks.append(("multi_agent_review", 0.6, "explicit review ask"))
+    if is_current or _RESEARCH_RE.search(low):
+        picks.append(("research", 0.7, "fresh/external information needed"))
+    if re.search(r"\b(?:explain|why is|how does|what causes)\b", low) \
+            and not any(p[0] == "diagnostic" for p in picks):
+        picks.append(("inductive", 0.5, "explanation from observations"))
+
+    if not picks:
+        # A short single-clause factual/question ask: direct retrieval —
+        # simple questions must not pay planning overhead.
+        return STRATEGY_DIRECT, [], 0.8, "simple direct ask"
+
+    # Primary = highest-scoring; secondaries = the rest, deduped and
+    # ordered — composable reasoning, never a forced single label.
+    seen: set[str] = set()
+    ordered: list[tuple[str, float, str]] = []
+    for p in sorted(picks, key=lambda x: -x[1]):
+        if p[0] not in seen:
+            seen.add(p[0])
+            ordered.append(p)
+    primary, conf, reason = ordered[0]
+    secondaries = [p[0] for p in ordered[1:]]
+    return primary, secondaries, conf, reason
+
+
 @dataclass
 class MetaAssessment:
     knowledge_state: str = UNKNOWN
@@ -40,6 +193,11 @@ class MetaAssessment:
     recommended_ops: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     think_mode: str = "auto"
+    # Reasoning Strategy Router output — the problem class this turn
+    # wants solved (primary) plus composable secondary strategies.
+    strategy: str = STRATEGY_DIRECT
+    strategies: list[str] = field(default_factory=list)
+    strategy_confidence: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -51,6 +209,9 @@ class MetaAssessment:
             "recommended_ops": self.recommended_ops,
             "reasons": self.reasons,
             "think_mode": self.think_mode,
+            "strategy": self.strategy,
+            "strategies": self.strategies,
+            "strategy_confidence": round(self.strategy_confidence, 3),
         }
 
 
@@ -117,6 +278,18 @@ def assess(
         m.uncertainty_sources.append("high-stakes domain")
         m.confidence = min(m.confidence, 0.4)
 
+    # -- reasoning strategy router ---------------------------------------
+    # Classify the problem class before building the op ladder — the
+    # strategy decides *how* to reason, the ops are its instruments.
+    primary, secondaries, sconf, sreason = classify_strategy(
+        text or "", is_error=is_error, is_current=is_current,
+        is_coding=is_coding)
+    m.strategy = primary
+    m.strategies = secondaries
+    m.strategy_confidence = sconf
+    if primary != STRATEGY_DIRECT:
+        m.reasons.append(f"strategy: {primary} ({sreason})")
+
     # -- novelty --------------------------------------------------------
     # Cheap signature: coding/error/volatile topics without local memory
     # are the least charted territory for a small-model chat lane.
@@ -135,6 +308,12 @@ def assess(
     ops.append("ask_fast_model")
     if is_error:
         ops.append("generate_hypotheses")
+    # Strategy-implied ops — the router's instruments ride the same
+    # ladder, deduped and kept ahead of the model-answer fallbacks.
+    for strat in [primary] + secondaries:
+        for sop in STRATEGY_OPS.get(strat, ()):
+            if sop not in ops:
+                ops.append(sop)
     if m.stakes == "high" or m.knowledge_state == CONFLICTED:
         ops.append("run_verifier")
         ops.append("ask_critic")

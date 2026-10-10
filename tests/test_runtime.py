@@ -77,6 +77,78 @@ class HardwareTests(unittest.TestCase):
         self.assertTrue(0.0 <= snap.ram_used_percent <= 100.0)
 
 
+class ZombieListenerReaperTests(unittest.TestCase):
+    """reap_zombie_listeners: the soak-observed llama-server failure —
+    process alive, listen socket dead. Only a missing socket kills the
+    item; a busy-but-listening model and a still-loading model are
+    never touched."""
+
+    def _profile(self, **overrides):
+        values = dict(
+            id="coder", endpoint="http://127.0.0.1:8391/v1",
+            model="coder", roles=["primary_coder"],
+            runtime="llama_cpp", model_path="models/coder.gguf")
+        values.update(overrides)
+        return ModelProfile(**values)
+
+    def _manager(self, profile):
+        from localcodeagent.runtime.manager import RuntimeStatus
+        config = AgentConfig(models=[profile], permissions={})
+        mgr = RuntimeManager.__new__(RuntimeManager)
+        mgr._lock = threading.RLock()
+        mgr._managed = {}
+        mgr._status = {profile.id: RuntimeStatus(
+            model_id=profile.id, state="stopped",
+            endpoint=profile.endpoint, managed=True)}
+        mgr._last_used = {}
+        mgr.config = config
+        return mgr
+
+    def _attach(self, mgr, profile, endpoint="http://127.0.0.1:8391/v1"):
+        proc = _FakeProcess()
+        status = mgr._status[profile.id]
+        status.managed = True
+        status.state = "running"
+        status.healthy = True
+        mgr._managed[profile.id] = _ManagedProcess(
+            profile, proc, endpoint, io.StringIO(), status)
+        return proc
+
+    def test_zombie_process_reaped(self):
+        mgr = self._manager(self._profile())
+        profile = self._profile()
+        proc = self._attach(mgr, profile)
+        mgr._status[profile.id].started_at = time.time() - 500
+        with patch.object(mgr, "_listening_pids", return_value=set()):
+            stopped = mgr.reap_zombie_listeners()
+        self.assertEqual(stopped, [profile.id])
+        self.assertTrue(proc.terminated)
+        self.assertNotIn(profile.id, mgr._managed)
+
+    def test_loading_model_never_touched(self):
+        mgr = self._manager(self._profile())
+        profile = self._profile()
+        proc = self._attach(mgr, profile)
+        mgr._status[profile.id].started_at = time.time()  # just launched
+        with patch.object(mgr, "_listening_pids", return_value=set()):
+            stopped = mgr.reap_zombie_listeners()
+        self.assertEqual(stopped, [])
+        self.assertFalse(proc.terminated)
+        self.assertIn(profile.id, mgr._managed)
+
+    def test_busy_listener_survives(self):
+        mgr = self._manager(self._profile())
+        profile = self._profile()
+        proc = self._attach(mgr, profile)
+        mgr._status[profile.id].started_at = time.time() - 500
+        # Something still listens on the port — a slow health probe is
+        # load, not death; the model must never be reaped for it.
+        with patch.object(mgr, "_listening_pids", return_value={4242}):
+            stopped = mgr.reap_zombie_listeners()
+        self.assertEqual(stopped, [])
+        self.assertFalse(proc.terminated)
+
+
 class RuntimeManagerTests(unittest.TestCase):
     def _profile(self, **overrides):
         values = dict(

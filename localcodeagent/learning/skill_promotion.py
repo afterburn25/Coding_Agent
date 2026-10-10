@@ -15,7 +15,6 @@ import time
 import uuid
 from pathlib import Path
 
-from ..fsutil import atomic_write_text
 from .procedures import STATUS_VERIFIED
 
 # Procedure must be verified AND succeed this often across episodes.
@@ -30,28 +29,25 @@ def _skill_name(text: str) -> str:
 
 
 class SkillPromotionEngine:
-    def __init__(self, path: Path, *, procedures, registry=None) -> None:
+    def __init__(self, path: Path, *, procedures, registry=None,
+                 db: Any = None) -> None:
         self.path = Path(path).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.procedures = procedures
         self.registry = registry   # SkillRegistry — set post-construction
         self._lock = threading.RLock()
+        from ..state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="learning")
         self._data: dict = {"version": 1, "proposals": []}
         self._load()
 
     def _load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict) and isinstance(raw.get("proposals"), list):
-                self._data["proposals"] = raw["proposals"]
-        except (OSError, ValueError, TypeError):
-            pass
+        raw = self._doc.load_json(None)
+        if isinstance(raw, dict) and isinstance(raw.get("proposals"), list):
+            self._data["proposals"] = raw["proposals"]
 
     def _save(self) -> None:
-        atomic_write_text(self.path, json.dumps(
-            self._data, indent=2, ensure_ascii=False))
+        self._doc.save_json(self._data)
 
     def eligible(self) -> list[dict]:
         """Verified procedures with enough success to propose as skills."""

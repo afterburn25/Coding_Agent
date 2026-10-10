@@ -8,35 +8,29 @@ memory is as important as success memory.
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from pathlib import Path
 
-from ..fsutil import atomic_write_text
 
 
 class StrategyEvaluator:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, db: Any = None) -> None:
         self.path = Path(path).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        from ..state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="learning")
         self._data: dict = {"version": 1, "strategies": {}}
         self._load()
 
     def _load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict) and isinstance(raw.get("strategies"), dict):
-                self._data["strategies"] = raw["strategies"]
-        except (OSError, ValueError, TypeError):
-            pass
+        raw = self._doc.load_json(None)
+        if isinstance(raw, dict) and isinstance(raw.get("strategies"), dict):
+            self._data["strategies"] = raw["strategies"]
 
     def _save(self) -> None:
-        atomic_write_text(self.path, json.dumps(
-            self._data, indent=2, ensure_ascii=False))
+        self._doc.save_json(self._data)
 
     def _key(self, problem_class: str, strategy: str) -> str:
         return f"{problem_class}|{strategy}"

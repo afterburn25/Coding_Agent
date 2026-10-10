@@ -110,12 +110,17 @@ class ConsultEngine:
 
     def __init__(self, store: SocialStore, *,
                  consults_path: Path | None = None,
-                 event_sink: Callable[[str, dict], None] | None = None
+                 event_sink: Callable[[str, dict], None] | None = None,
+                 db: Any = None,
                  ) -> None:
         self.store = store
+        from ..state_db import DocStore
         self.consults = JsonStore(
             consults_path or Path("data/social/consults.json"),
             default=None, limit=200, key="consults",
+            doc=DocStore(db, consults_path
+                         or Path("data/social/consults.json"),
+                         domain="social") if db else None,
             preserve=lambda c: c.get("status") in
             ("pending_send", "awaiting_response"))
         self._event = event_sink or (lambda _e, _p: None)

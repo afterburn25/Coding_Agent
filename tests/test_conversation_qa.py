@@ -718,6 +718,115 @@ class ProhibitionSessionTests(unittest.TestCase):
                     for m in tool_msgs), tool_msgs)
 
 
+class GitHubCapabilityTruthTests(unittest.TestCase):
+    """With github_enabled off the tools are never registered — the
+    github-read lane must answer capability truth ("isn't connected"),
+    never the raw 'unknown tool' string."""
+
+    def test_disabled_github_answers_capability_truth(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, _ = _make(Path(td))
+            agent.config.github_enabled = False
+            executed = []
+            orig = agent.tools.execute
+            agent.tools.execute = lambda *a, **k: (
+                executed.append(a) or orig(*a, **k))
+            reply = agent._github_activity_reply(
+                "check the latest work on acme/widgets", "acme/widgets",
+                issues=False, intent="github_read")
+            self.assertIsNotNone(reply)
+            self.assertIn("isn't connected", reply.text)
+            self.assertEqual(executed, [], "no tool may run unregistered")
+
+
+class MissionConversationIsolationTests(unittest.TestCase):
+    """Delegated work orders are not user utterances — their prompts and
+    outputs must never enter conversation history (the live dogfood
+    defect: mission work orders appeared as user turns and the model
+    echoed mission-failure text into unrelated questions)."""
+
+    def test_work_order_run_leaves_no_conversation_trace(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, convos = _make(Path(td))
+            agent.run_work_order(
+                "Work the scoped lane of this mission — fix the file")
+            hist = convos.history(limit=20)
+            self.assertFalse(
+                any("scoped lane" in str(m.get("content"))
+                    for m in hist), hist)
+
+    def test_user_turn_still_records(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, convos = _make(Path(td))
+            agent.run("hello there")
+            self.assertTrue(convos.history(limit=5))
+
+    def test_mission_attributed_run_isolated(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, convos = _make(Path(td))
+            agent.run("fix the tests", mission_id="mission-1")
+            hist = convos.history(limit=20)
+            self.assertFalse(
+                any("fix the tests" in str(m.get("content"))
+                    for m in hist), hist)
+
+    def test_pure_chat_reply_not_project_work(self):
+        # BUG-012: a conversational answer (no tools, no files) is not
+        # "recent project work" — recording it lets a wrong answer
+        # echo back into later prompts via token overlap.
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, _ = _make(Path(td))
+            agent.run("hello there")
+            self.assertEqual(
+                agent.memory._data.get("task_history"), [])
+
+    def test_work_order_memory_marked_and_excluded(self):
+        # Mission work still reaches project memory (its own lane reads
+        # it), but tagged so chat recall can never surface it — even for
+        # topically overlapping queries.
+        with tempfile.TemporaryDirectory() as td:
+            agent, _, _ = _make(Path(td))
+            agent.run_work_order(
+                "Work the scoped lane of this mission — fix the file")
+            hist = agent.memory._data.get("task_history", [])
+            self.assertTrue(hist)
+            self.assertTrue(all(r.get("mission") for r in hist))
+            ctx = agent.memory.context_for(
+                "the scoped lane work",
+                exclude_task_ids=agent.tasks.mission_ids())
+            self.assertNotIn("scoped lane", ctx)
+
+    def test_failed_task_error_binding_is_conversation_scoped(self):
+        # A failure in conversation A must never become conversation
+        # B's "the error" referent — the global-ledger fallback binds
+        # only same-conversation tagged tasks.
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, convos = _make(Path(td))
+            conv_a = convos.active().get("id")
+            agent.run("do some work")
+            a_task = agent.tasks.recent(1)[0]
+            self.assertEqual(str(a_task.get("conversation_id") or ""),
+                             str(conv_a))
+            agent.tasks.update(a_task["id"], status="failed",
+                               error="exploded badly")
+            # Conversation B: A's failure must NOT resolve "that error"
+            # — the model is asked to clarify (anaphoric advisory) and
+            # never sees A's error text.
+            convos.create()
+            conv_b = convos.active().get("id")
+            self.assertNotEqual(str(conv_a), str(conv_b))
+            agent.run("fix that error")
+            self.assertNotIn("exploded badly", provider.last_all_content)
+            self.assertIn("anaphoric", provider.last_all_content)
+            # B's OWN failed task DOES bind — the referent resolves and
+            # no ambiguity advisory is needed.
+            b_task = agent.tasks.recent(1)[0]
+            agent.tasks.update(b_task["id"], status="failed",
+                               error="b-side failure")
+            agent.run("fix that error")
+            self.assertNotIn("anaphoric", provider.last_all_content)
+
+
 class UnresolvedReferentNudgeTests(unittest.TestCase):
     """A command verb over a referent bound to nothing ("rename it —
     dusk sounds better", where 'it' is a conversation name, not a file)

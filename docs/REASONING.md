@@ -74,3 +74,79 @@ with the alternatives that were on the table) on every incident.
 | `GET /api/decisions` | list + summary |
 | `POST /api/decisions` | journal entry |
 | `POST /api/decisions/outcome` | close with actual/reviewer/lessons |
+
+---
+
+# Cognitive Phase 1 — Strategy Router, Requirements Compiler, Assumption Ledger
+
+## Reasoning Strategy Router (`localcodeagent/governor/metacognition.py`)
+
+Before the op ladder is built, `classify_strategy()` reads the whole
+utterance — question shape, modal verbs, policy flags — and emits a
+primary reasoning strategy plus composable secondaries onto
+`MetaAssessment.strategy` / `.strategies`. Deterministic; never a model
+call. A short single-clause factual ask stays `direct_retrieval` so
+simple questions pay no planning overhead.
+
+| Shape | Strategy | Extra ops added |
+|---|---|---|
+| `14 × 37`, `calculate …` | `formal_math` | `run_formal_solver` |
+| crash/error/"why does X fail" | `diagnostic` (+`causal`) | `generate_hypotheses`, `test_hypothesis` |
+| "what happens if…" | `counterfactual` | `simulate_plan` |
+| "schedule N models within 12 GB" | `optimization`/`constraint_solving` | `run_formal_solver` |
+| "should we X or Y" | `comparative`/`decision_analysis` | `run_verifier`, `ask_critic` |
+| "test whether"/"benchmark" | `experimental` | `run_experiment` |
+| "like that bug before" | `analogy` | memory weighting |
+| review/cross-check asks | `multi_agent_review` | `ask_critic`, `spawn_specialist` |
+
+The strategy rides the same `IntelPlan` (`assessment.as_dict()`), flows
+through `task.intel` and the `intel` SSE event — visible in the
+Intelligence Inspector, never hidden reasoning.
+
+## Formal solvers
+
+`formal_math` maps to `run_formal_solver`. The install's existing
+instrument is the thalamus math fast path (`brain/thalamus.py` —
+whitelist-AST evaluation, exponent/finite guards, honest
+division-by-zero), which already answers pure arithmetic asks
+deterministically before any model lane. `run_formal_solver` stays
+declared in the op catalog for heavier formal tooling (Z3/OR-Tools/
+SymPy) and schedules once an execution lane declares the `solvers`
+capability — it degrades cleanly until then.
+
+## Requirements Compiler (`localcodeagent/requirements.py`)
+
+`compile_requirement_spec(text)` splits user language into clauses and
+classifies each: `MUST` / `SHOULD` / `MAY` / `MUST_NOT` / `ASSUMPTION`
+/ `QUESTION` / `ACCEPTANCE_CRITERION` — prohibitions win over
+imperatives ("don't change X" is `MUST_NOT`, not `MUST`). The user's
+own phrasing is preserved; a compiled row never rewords intent.
+
+`compile_to_store(store, text, scope_*, assumptions=)` persists the
+actionable categories as `RequirementStore` rows (`MUST`/`MUST_NOT` at
+high priority, `MUST_NOT` tagged with an `invariant_held` check) and
+returns `unresolved.questions` for clarification plus `assumption_rows`
+when an `AssumptionLedger` is wired — each assumption links back to the
+created requirement ids as dependents.
+
+## Assumption Ledger (`localcodeagent/assumptions.py`)
+
+Durable `data/assumptions.json` (DocStore → `state.db`,
+`domain="assumptions"`). Every meaningful plan assumption is a row:
+text, scope, `dependents{decisions,requirements,missions,tasks,
+procedures}`, `test`, evidence trail, and state
+`untested → supported → verified | invalidated | superseded`.
+
+- `invalidate(id)` → marks the row and returns the dependent ids — the
+  targeted re-evaluation list, not a blind rebuild.
+- `supersede(id, text)` → links old → new; both stay inspectable.
+- `weakest(scope)` → the unknown-unknown probe: live assumptions ranked
+  by least evidence, the investigation list before a decision.
+
+## API
+
+| Route | Purpose |
+|---|---|
+| `GET /api/assumptions` | list + summary + `weakest` probe |
+| `POST /api/assumptions` | record `{text, scope_*, dependents, confidence, test}` |
+| `POST /api/assumptions/state` | `{id, state\|action: invalidate\|supersede, evidence}` |

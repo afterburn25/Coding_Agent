@@ -46,7 +46,8 @@ def audit_storage(root: Path, *, max_files: int = _MAX_SCAN_FILES) -> dict:
     root = Path(root).resolve()
     rows: list[dict] = []
     scanned = 0
-    skipped_dirs = {".git", "node_modules", "__pycache__", ".venv"}
+    skipped_dirs = {".git", "node_modules", "__pycache__", ".venv",
+                    ".repair-worktrees", ".nexus", ".agent"}
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in skipped_dirs]
         for name in filenames:

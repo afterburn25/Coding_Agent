@@ -13,14 +13,12 @@ audit trail, not a scratch note.
 """
 from __future__ import annotations
 
-import json
 import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
-from .fsutil import atomic_write_text
 
 HYP_STATUSES = {"proposed", "testing", "supported", "weakened",
                 "confirmed", "rejected"}
@@ -33,22 +31,19 @@ _HISTORY_BOUND = 400
 class HypothesisStore:
     """Durable hypothesis rows keyed by incident/mission scope."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, db: Any = None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        try:
-            self.data = json.loads(
-                self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        from .state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="hypotheses")
+        self.data = self._doc.load_json({"version": 1, "hypotheses": []})
+        if not isinstance(self.data, dict):
             self.data = {"version": 1, "hypotheses": []}
         self.data.setdefault("hypotheses", [])
 
     def _save(self) -> None:
-        atomic_write_text(
-            self.path,
-            json.dumps(self.data, indent=2, ensure_ascii=False,
-                       default=str))
+        self._doc.save_json(self.data)
 
     # -- reads --------------------------------------------------------
     def get(self, hid: str) -> dict | None:

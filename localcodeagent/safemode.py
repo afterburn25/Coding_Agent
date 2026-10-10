@@ -47,20 +47,25 @@ GOLDEN_PATHS = [
 
 
 class SafeModeStore:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, db: Any = None) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        try:
-            self.data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        from .state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="safemode")
+        # Corrupt/missing sources must NOT silently reset the
+        # consecutive-failure counter — that would mask a crash loop.
+        self.data = self._doc.load_json(
+            {"version": 1, "active": False, "reason": "",
+             "since": 0.0, "consecutive_failures": 0,
+             "history": []})
+        if not isinstance(self.data, dict):
             self.data = {"version": 1, "active": False, "reason": "",
                          "since": 0.0, "consecutive_failures": 0,
                          "history": []}
 
     def _save(self) -> None:
-        atomic_write_text(self.path, json.dumps(
-            self.data, indent=2, ensure_ascii=False, default=str))
+        self._doc.save_json(self.data)
 
     def record_boot(self, *, previous_clean: bool) -> None:
         """Called at startup after reading the prior session marker."""

@@ -9,14 +9,12 @@ source records for provenance.
 
 from __future__ import annotations
 
-import json
 import re
 import threading
 import time
 import uuid
 from pathlib import Path
 
-from ..fsutil import atomic_write_text
 from . import taxonomy as t
 
 # problem_class detection — coarse buckets, same spirit as the governor's
@@ -56,27 +54,24 @@ def signature_for(text: str, problem_class: str) -> str:
 class LessonStore:
     """Append-mostly JSON store; records are never rewritten wholesale."""
 
-    def __init__(self, path: Path, *, max_records: int = 2000) -> None:
+    def __init__(self, path: Path, *, max_records: int = 2000,
+                 db: Any = None) -> None:
         self.path = Path(path).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.max_records = int(max_records)
         self._lock = threading.RLock()
+        from ..state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="learning")
         self._data: dict = {"version": 1, "records": []}
         self._load()
 
     def _load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict) and isinstance(raw.get("records"), list):
-                self._data.update(raw)
-        except (OSError, ValueError, TypeError):
-            pass
+        raw = self._doc.load_json(None)
+        if isinstance(raw, dict) and isinstance(raw.get("records"), list):
+            self._data.update(raw)
 
     def _save(self) -> None:
-        atomic_write_text(self.path, json.dumps(
-            self._data, indent=2, ensure_ascii=False))
+        self._doc.save_json(self._data)
 
     def add(self, record: dict) -> dict:
         with self._lock:

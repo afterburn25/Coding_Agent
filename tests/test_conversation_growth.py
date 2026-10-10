@@ -340,6 +340,29 @@ class ScopedConversationMemoryTests(unittest.TestCase):
             self.assertIn("redo it",
                           reloaded.resolve_option_selection("option 1"))
 
+    def test_option_selection_is_conversation_scoped(self):
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.record_exchange(
+                "which approach",
+                "Option 1: retry\nOption 2: rebuild",
+                conversation_id="chat-a")
+            # A bare selection in another conversation must not resolve
+            # against chat-a's proposal.
+            self.assertIsNone(memory.resolve_option_selection(
+                "option 1", conversation_id="chat-b"))
+            self.assertIsNone(memory.resolve_option_selection(
+                "option 1", conversation_id=None))
+            # The originating conversation still resolves.
+            self.assertIn("rebuild", memory.resolve_option_selection(
+                "option 2", conversation_id="chat-a"))
+            # Untagged legacy options (no recorded conversation) stay
+            # resolvable — backward compatible.
+            memory.record_exchange(
+                "again", "Option 1: one\nOption 2: two")
+            self.assertIn("two", memory.resolve_option_selection(
+                "option 2", conversation_id="chat-c"))
+
     def test_conversation_manager_intent_classification(self):
         self.assertEqual(ConversationManager.classify_intent("write an email to the team"), "writing")
         self.assertEqual(ConversationManager.classify_intent("teach me how recursion works"), "tutoring")

@@ -151,6 +151,46 @@ class BackupTests(unittest.TestCase):
             self.assertLessEqual(len(remaining), 2)
             self.assertIn(names[-1], remaining)
 
+    def test_selective_restore(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = self._ws(td)
+            svc = BackupService(ws)
+            out = svc.create()
+            (ws / "config.json").write_text('{"mode": "broken"}')
+            (ws / "data" / "nexus_brain.json").write_text('{"facts": 0}')
+            # Restore only config.json — the other live file keeps its
+            # (damaged) content.
+            res = svc.restore(out["backup"], paths=["config.json"])
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["restored"], 1)
+            self.assertEqual(json.loads((ws / "config.json").read_text())
+                             ["mode"], "auto")
+            self.assertEqual(json.loads(
+                (ws / "data" / "nexus_brain.json").read_text())["facts"], 0)
+            # A non-matching selection is an error, not a silent no-op.
+            self.assertFalse(svc.restore(out["backup"],
+                                         paths=["data/nonexistent"])["ok"])
+            # Directory prefix selects everything under it.
+            res = svc.restore(out["backup"], paths=["data"],
+                              dry_run=True)
+            self.assertTrue(res["ok"])
+            self.assertGreaterEqual(res["would_restore"], 1)
+
+    def test_restore_test_verifies_copies(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = self._ws(td)
+            svc = BackupService(ws)
+            out = svc.create()
+            res = svc.restore_test(out["backup"])
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["checked"], res["total"])
+            self.assertGreater(res["checked"], 0)
+            # Unknown backup and corrupt backup both refuse.
+            self.assertFalse(svc.restore_test("backup-nosuch")["ok"])
+            target = next((Path(out["path"]) / "files").rglob("*.json"))
+            target.write_text("tampered")
+            self.assertFalse(svc.restore_test(out["backup"])["ok"])
+
 
 class VaultTests(unittest.TestCase):
     def test_dpapi_key_protection_windows(self):

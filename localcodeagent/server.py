@@ -153,6 +153,12 @@ class AppState:
         self.config_path = (config_path or (runtime_root / "config.json")).expanduser().resolve()
         self.runtime_root = runtime_root
         self._boot: Callable[[float, str, str], None] = boot or (lambda *a: None)
+        # Transactional state layer — WAL-mode SQLite backing the
+        # highest-risk document stores (autonomy, ledger, identity,
+        # safemode, decisions, requirements). Each save is a crash-safe
+        # commit; corrupt sources quarantine instead of resetting.
+        from .state_db import StateDB
+        self.state_db = StateDB(runtime_root / "data" / "state.db")
         self._boot(4, "INITIALIZING · NEXUS CORE", "Preparing local application environment")
         self._boot(12, "CALIBRATING · MODEL RUNTIME", "Detecting models, hardware and available resources")
         self.runtime = RuntimeManager(config, base_dir=runtime_root)
@@ -206,13 +212,20 @@ class AppState:
         from .projects import ProjectStore
         self.projects = ProjectStore(runtime_root / "data")
         from .requirements import RequirementStore
-        self.requirements = RequirementStore(runtime_root / "data" / "requirements.json")
+        self.requirements = RequirementStore(runtime_root / "data" / "requirements.json",
+                                             db=self.state_db)
         from .hypotheses import HypothesisStore
         from .causal import CausalMemory
         from .decisions import DecisionJournal
-        self.hypotheses = HypothesisStore(runtime_root / "data" / "hypotheses.json")
-        self.causal = CausalMemory(runtime_root / "data" / "causal_memory.json")
-        self.decisions = DecisionJournal(runtime_root / "data" / "decisions.json")
+        self.hypotheses = HypothesisStore(runtime_root / "data" / "hypotheses.json",
+                                          db=self.state_db)
+        self.causal = CausalMemory(runtime_root / "data" / "causal_memory.json",
+                                   db=self.state_db)
+        self.decisions = DecisionJournal(runtime_root / "data" / "decisions.json",
+                                         db=self.state_db)
+        from .assumptions import AssumptionLedger
+        self.assumptions = AssumptionLedger(
+            runtime_root / "data" / "assumptions.json", db=self.state_db)
         from .promotion import PromotionPipeline
         self.promotions = PromotionPipeline(runtime_root / "data" / "promotions.json")
         from .evidence import EvidenceBoard
@@ -289,7 +302,8 @@ class AppState:
             decisions=self.decisions,
             regressions=self.regressions,
             benchmarks=getattr(self, "benchmarks", None),
-            model_growth=self.model_growth)
+            model_growth=self.model_growth,
+            state_db=self.state_db)
         # Every terminal task transition feeds the learning loop — lesson
         # extraction, competency updates, strategy stats — regardless of
         # which lane (chat, queue, mission, worker) produced it.
@@ -613,7 +627,8 @@ class AppState:
         # consecutive-failure counter; repeated failures surface a
         # Safe Mode offer (never automatic data loss).
         from .safemode import GoldenConfigStore, SafeModeStore
-        self.safemode = SafeModeStore(runtime_root / "data" / "safe_mode.json")
+        self.safemode = SafeModeStore(runtime_root / "data" / "safe_mode.json",
+                                      db=self.state_db)
         self.safemode.record_boot(
             previous_clean=not bool(self.prior_session_abnormal))
         self.golden = GoldenConfigStore(
@@ -674,7 +689,8 @@ class AppState:
             config=config, vault=self.secrets,
             permission_check=lambda p: self.permission_manager.effective(p),
             store_root=runtime_root / "data" / "social",
-            event_sink=lambda e, p: self.events.publish(e, p))
+            event_sink=lambda e, p: self.events.publish(e, p),
+            state_db=self.state_db)
         try:
             self._moltbook_connector = MoltbookConnector(
                 base_url=str(getattr(config, "moltbook_api_url",
@@ -710,7 +726,8 @@ class AppState:
             connectors=self.connectors,
             github_account=self.github_account,
             permission_check=lambda p: self.permission_manager.effective(p),
-            emit=lambda e, d: self.events.publish(e, d))
+            emit=lambda e, d: self.events.publish(e, d),
+            state_db=self.state_db)
         self._knowledge_path = runtime_root / "data" / "knowledge_graph.db"
         self.skills = SkillRegistry(runtime_root)
         # L13: learned procedures promote to real skills only through
@@ -1017,7 +1034,7 @@ class AppState:
         # success language is only allowed on a 'verified' entry.
         from .action_ledger import ActionLedger
         self.action_ledger = ActionLedger(
-            runtime_root / "data" / "action_ledger.json")
+            runtime_root / "data" / "action_ledger.json", db=self.state_db)
         # Entries still 'recorded' across a restart were interrupted —
         # close them as unverified so open-looking rows never masquerade
         # as pending work.
@@ -1070,6 +1087,7 @@ class AppState:
             action_ledger=self.action_ledger,
             artifacts=self.artifacts,
             social=lambda: self.social,
+            state_db=self.state_db,
         )
         # The /shutdown /exit /restart commands run the same graceful
         # close as the /api/shutdown endpoint — wired here because the
@@ -1089,6 +1107,28 @@ class AppState:
         self.autonomy = self._build_autonomy(config, runtime_root)
         self._sweep_worktree_orphans()
         self._report_prior_crash()
+        # Startup integrity — bounded check of the transactional state
+        # layer: SQLite quick_check plus a JSON parse probe of every
+        # migrated document row. Degraded stores still boot (each fell
+        # back to a quarantined/default state with the original
+        # preserved), but the condition is surfaced, never silent.
+        try:
+            self.state_integrity = self.state_db.integrity()
+            if not self.state_integrity.get("ok"):
+                self.events.publish("state_health", {
+                    "ok": False,
+                    "bad_rows": self.state_integrity.get("bad_rows", []),
+                    "degraded": self.state_integrity.get("degraded", [])})
+        except Exception:
+            self.state_integrity = {"ok": False,
+                                    "quick_check": "check failed"}
+        # Operations claimed by a prior run that never completed —
+        # mark them 'interrupted' so exactly-once callers see honest
+        # uncertainty instead of a forever-in-flight claim.
+        try:
+            self.state_db.op_reap_interrupted()
+        except Exception:
+            pass
         self.queue.enrich = self._queue_enrich_mission
         # Requirement-change propagation — a superseded conversation fact
         # flags in-flight mission nodes that still reference the stale
@@ -1848,8 +1888,9 @@ class AppState:
                     break
         if src is None:
             src = Path(self.workspace)
+        data_backup = getattr(getattr(self, "backups", None), "create", None)
         return SelfUpdate(Path(self.config_path).parent.resolve(),
-                          src, self.lkg)
+                          src, self.lkg, data_backup=data_backup)
 
     def _build_capability_registry(self, config) -> "CapabilityRegistry":
         """First-class Capability Registry — probed real states for what
@@ -3317,6 +3358,7 @@ class AppState:
                 self.config, "autonomous_approval_timeout_seconds", 0.0) or 0.0)
             if getattr(self.config, "autonomous_mode", False) else 0.0,
             task_resolver=self._task_row,
+            state_db=self.state_db,
         )
         self._register_goal_metrics(registry, sup, runtime_root)
         # Evidence for non-executor node kinds (verify/internal/job) —
@@ -5531,6 +5573,10 @@ class AppState:
         return False
 
     def _watchdog_maintenance(self) -> None:
+        try:
+            self.runtime.reap_zombie_listeners()
+        except Exception:
+            pass
         self._evict_idle_models()
         self._expire_stale_approvals()
         self._reap_stalled_tasks()
@@ -6456,6 +6502,20 @@ class AppState:
             missions=getattr(sup, "missions", None) if sup else None,
             resources=res, last_interaction_at=self._last_interaction_at,
             profile=prof)
+
+    def state_health(self) -> dict:
+        """Transactional state layer health: the boot-time integrity
+        report re-checked live, plus per-domain row inventory. Degraded
+        stores are listed with their quarantine issue — a damaged store
+        boots degraded and recoverable, never silently empty."""
+        report = self.state_db.integrity()
+        boot = getattr(self, "state_integrity", None) or {}
+        report["boot_ok"] = bool(boot.get("ok", True))
+        report["stores"] = {
+            d: self.state_db.kv_keys(d)
+            for d in ("autonomy", "ledger", "identity", "safemode",
+                      "decisions", "requirements", "hypotheses", "causal")}
+        return report
 
     def situation(self) -> dict:
         """The Situation Model — one coherent, live view of everything
@@ -7676,6 +7736,10 @@ def _queueable_message(message: str, attachments: list[dict]) -> str:
     return message + "\n\nAttached context:\n" + "\n\n".join(blocks)
 
 
+class _ApiBodyError(ValueError):
+    """Valid JSON but not an object — a client 400, never a 500."""
+
+
 def _queued_notice(current, position: int) -> str:
     """Describe what owns the lane so a queued user isn't left guessing —
     self-repair/background work is named as such, user tasks by prompt."""
@@ -7683,10 +7747,18 @@ def _queued_notice(current, position: int) -> str:
     if phase == "interrupted":
         phase = "resuming"
     doing = phase if phase not in {"running", ""} else "working"
-    prompt = " ".join(str(getattr(current, "prompt", "") or "").split())[:90]
+    prompt = " ".join(str(getattr(current, "prompt", "") or "").split())
+    if len(prompt) > 90:
+        # Cut on a word boundary — a mid-word slice ("VERSION,.") reads
+        # like a broken render, not a status line.
+        prompt = prompt[:90].rsplit(" ", 1)[0] + "…"
     mission = getattr(current, "mission_id", "")
     if mission or str(getattr(current, "mode", "")) in {"autonomy", "self_repair"}:
         label = f"Nexus is {doing} on an autonomous mission"
+        # Mission prompts are machine-authored work orders ("Work the
+        # scoped lane…") — meaningless as a status detail, unlike a
+        # user's own prompt which they recognize.
+        prompt = ""
     else:
         label = f"Nexus is {doing}"
     detail = f": {prompt}" if prompt else ""
@@ -7708,7 +7780,88 @@ class Handler(BaseHTTPRequestHandler):
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
-        return json.loads(self.rfile.read(length) or b"{}")
+        data = json.loads(self.rfile.read(length) or b"{}")
+        # Every route uses body.get(...) — a non-object JSON body would
+        # AttributeError into a 500. It's a client error: 400.
+        if not isinstance(data, dict):
+            raise _ApiBodyError("body must be a JSON object")
+        return data
+
+    @staticmethod
+    def _qint(q: dict, key: str, default: int, *,
+              lo: int | None = None, hi: int | None = None) -> int:
+        """Bounded integer query param — garbage input gets the
+        default, never a ValueError 500."""
+        raw = (q.get(key) or [""])[0]
+        try:
+            value = int(raw) if str(raw).strip() else default
+        except (TypeError, ValueError):
+            value = default
+        if lo is not None:
+            value = max(lo, value)
+        if hi is not None:
+            value = min(hi, value)
+        return value
+
+    @staticmethod
+    def _bnum(body: dict, key: str, default: float, *,
+              lo: float | None = None, hi: float | None = None) -> float:
+        """Bounded numeric body field — garbage input gets the default,
+        never a ValueError 500."""
+        raw = body.get(key)
+        try:
+            value = float(raw) if raw not in (None, "") else default
+        except (TypeError, ValueError):
+            value = default
+        if lo is not None:
+            value = max(lo, value)
+        if hi is not None:
+            value = min(hi, value)
+        return value
+
+    def _api_error(self, exc: Exception) -> None:
+        """Shared top-level API exception mapping for do_GET/do_POST/
+        do_PATCH. Malformed client input maps to a real 4xx — 500 is
+        reserved for genuine server faults, and the raw traceback goes
+        to stderr (backend-host.log), never the client."""
+        import traceback
+        if isinstance(exc, (json.JSONDecodeError, _ApiBodyError)):
+            self._json({"error": "invalid JSON body"}, 400)
+            return
+        if isinstance(exc, KeyError):
+            # An escaping KeyError is a latent bug — print the traceback
+            # so post-mortem logs can identify it.
+            traceback.print_exc()
+            self._json({"error": f"Not found: {exc}"}, 404)
+            return
+        if isinstance(exc, PermissionError):
+            # Creator-session gates raise PermissionError — 403, not an
+            # opaque 500.
+            self._json({"error": str(exc) or "permission denied"}, 403)
+            return
+        # Dependency-down is not a server fault: a dead llama-server /
+        # backend endpoint is a 503 with the friendly message + diagnostic
+        # the transport layer already classified.
+        try:
+            from .netdiag import BackendConnectionError
+        except Exception:
+            BackendConnectionError = ()  # type: ignore[assignment]
+        if isinstance(exc, BackendConnectionError):
+            payload = {"error": exc.friendly,
+                       "technical": f"{type(exc).__name__}: {exc}",
+                       "diagnostic": exc.diagnostic()}
+            self._json(payload, 503)
+            return
+        traceback.print_exc()
+        diag_fn = getattr(exc, "diagnostic", None)
+        friendly = getattr(exc, "friendly", "")
+        payload: dict[str, Any] = {
+            "error": friendly or f"{type(exc).__name__}: {exc}"
+        }
+        if callable(diag_fn):
+            payload["technical"] = f"{type(exc).__name__}: {exc}"
+            payload["diagnostic"] = diag_fn()
+        self._json(payload, 500)
 
     def _sse_begin(self) -> None:
         self.send_response(200)
@@ -7740,6 +7893,7 @@ class Handler(BaseHTTPRequestHandler):
     _PLATFORM_PREFIXES = ("/api/health", "/api/twin", "/api/artifacts",
                           "/api/skills", "/api/connectors", "/api/knowledge",
                           "/api/social", "/api/identity", "/api/situation",
+                          "/api/state",
                           "/api/rag", "/api/eval", "/api/experiments",
                           "/api/lsp", "/api/backups", "/api/simulate",
                           "/api/lineage", "/api/safemode", "/api/golden",
@@ -7781,6 +7935,11 @@ class Handler(BaseHTTPRequestHandler):
             # consults, failures. Feeds the Intelligence Center and the
             # "what's going on?" lane.
             self._json(self.state.situation())
+            return True
+        if path == "/api/state/health":
+            # Transactional state layer integrity — quick_check + row
+            # parse probe + degraded/migration report.
+            self._json(self.state.state_health())
             return True
         if path == "/api/identity":
             # Identity Manager — persistent account/identity registry.
@@ -7938,7 +8097,7 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if path == "/api/changes":
             journal = getattr(self.state, "changes", None)
-            limit = int((q.get("limit") or ["40"])[0] or 40)
+            limit = self._qint(q, "limit", 40)
             self._json({"changes": journal.recent(limit)
                         if journal is not None else []})
             return True
@@ -7952,7 +8111,7 @@ class Handler(BaseHTTPRequestHandler):
                 gs = self.state._global_search = GlobalSearch(self.state)
             self._json(gs.query(
                 (q.get("q") or [""])[0],
-                limit=min(int((q.get("limit") or ["40"])[0] or 40), 100)))
+                limit=self._qint(q, "limit", 40, hi=100)))
             return True
         if path == "/api/update/status":
             # Status is a fast read — no network fetch; apply() plans fresh.
@@ -7964,7 +8123,7 @@ class Handler(BaseHTTPRequestHandler):
             from .search import GlobalSearch
             self._json(GlobalSearch(self.state).query(
                 (q.get("q") or [""])[0],
-                limit=min(int((q.get("limit") or ["40"])[0] or 40), 100)))
+                limit=self._qint(q, "limit", 40, hi=100)))
             return True
         if path.startswith("/api/lkg/verify/"):
             name = unquote(path[len("/api/lkg/verify/"):]).strip("/")
@@ -8276,7 +8435,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(social.consult(
                 question=str(body.get("question") or ""),
                 domain=str(body.get("domain") or ""),
-                importance=float(body.get("importance") or 0.6)))
+                importance=self._bnum(body, "importance", 0.6)))
             return True
         if path == "/api/social/consult/dispatch":
             social = getattr(self.state, "social", None)
@@ -8350,9 +8509,16 @@ class Handler(BaseHTTPRequestHandler):
                 label=str(body.get("label", ""))))
             return True
         if path == "/api/backups/restore":
+            sel = body.get("paths")
             out = self.state.backups.restore(
                 str(body.get("backup", "")),
-                dry_run=bool(body.get("dry_run", False)))
+                dry_run=bool(body.get("dry_run", False)),
+                paths=[str(p) for p in sel] if isinstance(sel, list) else None)
+            self._json(out, 400 if not out.get("ok") else 200)
+            return True
+        if path == "/api/backups/restore_test":
+            out = self.state.backups.restore_test(
+                str(body.get("backup", "")))
             self._json(out, 400 if not out.get("ok") else 200)
             return True
         if path == "/api/changes/undo":
@@ -8417,7 +8583,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/trends/record":
             self.state.trends.record(
                 str(body.get("metric") or ""),
-                float(body.get("value") or 0))
+                self._bnum(body, "value", 0))
             self._json({"ok": True})
             return True
         if path == "/api/cleanup/run":
@@ -8427,10 +8593,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/benchmarks/record":
             row = self.state.benchmarks.record_result(
                 str(body.get("name") or ""),
-                latency_ms=float(body.get("latency_ms") or 0),
-                throughput=float(body.get("throughput") or 0),
-                memory_mb=float(body.get("memory_mb") or 0),
-                vram_mb=float(body.get("vram_mb") or 0),
+                latency_ms=self._bnum(body, "latency_ms", 0),
+                throughput=self._bnum(body, "throughput", 0),
+                memory_mb=self._bnum(body, "memory_mb", 0),
+                vram_mb=self._bnum(body, "vram_mb", 0),
                 success=bool(body.get("success", True)),
                 quality=body.get("quality"),
                 detail=str(body.get("detail") or ""))
@@ -8985,7 +9151,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/policies/override":
             row = self.state.policies.add_override(
                 str(body.get("key") or ""), body.get("value"),
-                ttl_seconds=float(body.get("ttl_seconds") or 0),
+                ttl_seconds=self._bnum(body, "ttl_seconds", 0),
                 source="api",
                 description=str(body.get("description") or ""))
             self._json({"ok": True, "override": row})
@@ -9012,7 +9178,7 @@ class Handler(BaseHTTPRequestHandler):
             row = sup.policy.grant(
                 str(body.get("action") or ""),
                 scope=str(body.get("scope") or ""),
-                expires_in_s=float(body.get("expires_in_s") or 0),
+                expires_in_s=self._bnum(body, "expires_in_s", 0),
                 note=str(body.get("note") or ""))
             self._json({"ok": True, "grant": row})
             return True
@@ -9161,7 +9327,7 @@ class Handler(BaseHTTPRequestHandler):
                         if isinstance(body.get("conditions"), dict) else None,
                     action=body.get("action")
                         if isinstance(body.get("action"), dict) else None,
-                    debounce_s=float(body.get("debounce_s") or 60.0),
+                    debounce_s=self._bnum(body, "debounce_s", 60.0),
                     watch=str(body.get("watch") or ""),
                     enabled=bool(body.get("enabled", True)))
             except ValueError as exc:
@@ -9189,9 +9355,9 @@ class Handler(BaseHTTPRequestHandler):
                     str(body.get("name") or "schedule"),
                     str(body.get("kind") or "once"),
                     at=body.get("at"),
-                    interval_s=float(body.get("interval_s") or 0),
-                    hour=int(body.get("hour") or 3),
-                    minute=int(body.get("minute") or 0),
+                    interval_s=self._bnum(body, "interval_s", 0),
+                    hour=int(self._bnum(body, "hour", 3)),
+                    minute=int(self._bnum(body, "minute", 0)),
                     weekday=body.get("weekday"),
                     action=body.get("action")
                         if isinstance(body.get("action"), dict) else None,
@@ -9403,7 +9569,7 @@ class Handler(BaseHTTPRequestHandler):
                     out = voice.speak_text(
                         text[:20000],
                         preset_id=body.get("preset_id") or None,
-                        speed=max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                        speed=self._bnum(body, "speed", 1.0, lo=0.5, hi=2.0),
                         auto_filter=bool(body.get("auto_filter", True)),
                     )
                 except Exception as exc:
@@ -9444,7 +9610,7 @@ class Handler(BaseHTTPRequestHandler):
                     voice._sync_adapter(preset.engine)
                     pcm, sr, seg = voice._synthesize(
                         voice.resolve_speech(text, task_id="preview"), preset,
-                        max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                        self._bnum(body, "speed", 1.0, lo=0.5, hi=2.0),
                         apply_personality=False,
                         delivery=body.get("delivery"))
                     seg_id = voice._register_segment(seg, "preview")
@@ -9486,7 +9652,7 @@ class Handler(BaseHTTPRequestHandler):
                     voice._sync_adapter(preset.engine)
                     pcm, sr, seg = voice._synthesize(
                         voice.resolve_speech(text, task_id="preview"), preset,
-                        max(0.5, min(2.0, float(body.get("speed") or 1.0))),
+                        self._bnum(body, "speed", 1.0, lo=0.5, hi=2.0),
                         apply_personality=False,
                         delivery=body.get("delivery"))
                     seg_id = voice._register_segment(seg, "preview")
@@ -9831,6 +9997,12 @@ class Handler(BaseHTTPRequestHandler):
         return out[:12]
 
     def do_GET(self) -> None:
+        try:
+            self._do_GET()
+        except Exception as exc:
+            self._api_error(exc)
+
+    def _do_GET(self) -> None:
         path = urlparse(self.path).path
         # Onboarding lock: until a profile exists, only onboarding-safe
         # APIs + static assets pass — everything else is gated
@@ -9859,7 +10031,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/github/repos":
             q = parse_qs(urlparse(self.path).query)
             self._json(self.state.github_account.list_repos(
-                limit=int((q.get("limit") or ["20"])[0] or 20),
+                limit=self._qint(q, "limit", 20),
                 visibility=str((q.get("visibility") or ["all"])[0])))
             return
         if path == "/api/conversation-memory":
@@ -9901,6 +10073,17 @@ class Handler(BaseHTTPRequestHandler):
                 status=str((q.get("status") or [""])[0]),
                 actor=str((q.get("actor") or [""])[0])),
                 "summary": self.state.decisions.summary()})
+            return
+        if path == "/api/assumptions":
+            q = parse_qs(urlparse(self.path).query)
+            self._json({"assumptions": self.state.assumptions.list(
+                scope_type=str((q.get("scope_type") or [""])[0]),
+                scope_id=str((q.get("scope_id") or [""])[0]),
+                state=str((q.get("state") or [""])[0])),
+                "summary": self.state.assumptions.summary(),
+                "weakest": self.state.assumptions.weakest(
+                    scope_type=str((q.get("scope_type") or [""])[0]),
+                    scope_id=str((q.get("scope_id") or [""])[0]))})
             return
         if path == "/api/promotions":
             q = parse_qs(urlparse(self.path).query)
@@ -10388,7 +10571,7 @@ class Handler(BaseHTTPRequestHandler):
             brain = getattr(self.state, "brain", None)
             q = parse_qs(urlparse(self.path).query)
             corr = str(q.get("correlation_id", [""])[0])
-            limit = int(q.get("limit", ["100"])[0])
+            limit = self._qint(q, "limit", 100)
             if brain is None:
                 self._json({"events": []})
                 return
@@ -10498,7 +10681,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/devservers/logs":
             q = parse_qs(urlparse(self.path).query)
             sid = str((q.get("id") or [""])[0])
-            limit = int((q.get("limit") or ["80"])[0])
+            limit = self._qint(q, "limit", 80)
             if not sid:
                 self._json({"error": "id is required"}, 400)
                 return
@@ -10536,7 +10719,7 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/fs/tree":
                 raw = q.get("path", [""])[0]
-                depth = max(1, min(int(q.get("depth", ["2"])[0] or 2), 8))
+                depth = self._qint(q, "depth", 2, lo=1, hi=8)
                 try:
                     root = _wb_root(raw or str(self.state.workspace))
                 except ValueError as exc:
@@ -10829,7 +11012,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/nexus/avatar"):
             q = parse_qs(urlparse(self.path).query)
-            size = int(q.get("size", ["128"])[0] or 128)
+            size = self._qint(q, "size", 128)
             got = self.state.nexus_avatar.avatar(size)
             if got is None:
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -11089,7 +11272,11 @@ class Handler(BaseHTTPRequestHandler):
         # PATCH /api/profiles/<id> → field patch; suffix routes
         # (e.g. /personality) dispatch to the same action handler.
         route = path if path.count("/") > 3 else f"{path}/patch"
-        if self.state.profile_api.handle_post(self, route, body):
+        try:
+            if self.state.profile_api.handle_post(self, route, body):
+                return
+        except Exception as exc:
+            self._api_error(exc)
             return
         self._json({"error": "unknown profile route"}, 404)
 
@@ -11311,7 +11498,7 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/nexus-brain/rollback":
                 self.state.require_brain_creator_session(str(body.get("creator_token", "")))
-                restored = self.state.nexus_brain.rollback_settings(float(body.get("updated_at") or 0))
+                restored = self.state.nexus_brain.rollback_settings(self._bnum(body, "updated_at", 0))
                 self._json({"ok": True, "brain": restored})
                 return
 
@@ -11350,7 +11537,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/policy/temperature":
                 saved = self.state.set_conversation_policy_mode(
                     self.state.config.conversation_policy_mode,
-                    ethical_temperature=float(body.get("ethical_temperature", 1.0)),
+                    ethical_temperature=self._bnum(body, "ethical_temperature", 1.0),
                 )
                 self._json({"ok": True, **saved})
                 return
@@ -11844,7 +12031,7 @@ class Handler(BaseHTTPRequestHandler):
                 row = self.state.hypotheses.propose(
                     stmt,
                     kind=str(body.get("kind") or ""),
-                    confidence=float(body.get("confidence") or 0.3),
+                    confidence=self._bnum(body, "confidence", 0.3),
                     source=str(body.get("source") or "manual"),
                     incident_id=str(body.get("incident_id") or ""),
                     mission_id=str(body.get("mission_id") or ""),
@@ -11929,6 +12116,52 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "decision": row})
                 return
 
+            if path == "/api/assumptions":
+                text = str(body.get("text") or body.get("assumption") or "")
+                if not text.strip():
+                    self._json({"error": "text is required"}, 400)
+                    return
+                row = self.state.assumptions.add(
+                    text,
+                    scope_type=str(body.get("scope_type") or "global"),
+                    scope_id=str(body.get("scope_id") or ""),
+                    dependents=body.get("dependents")
+                    if isinstance(body.get("dependents"), dict) else None,
+                    confidence=self._bnum(body, "confidence", 0.5),
+                    test=str(body.get("test") or ""))
+                self._json({"ok": True, "assumption": row})
+                return
+
+            if path == "/api/assumptions/state":
+                aid = str(body.get("id") or "")
+                action = str(body.get("action") or "")
+                if action == "invalidate":
+                    out = self.state.assumptions.invalidate(
+                        aid, evidence=str(body.get("evidence") or ""))
+                    if out is None:
+                        self._json({"error": "unknown assumption"}, 404)
+                        return
+                    self._json({"ok": True, **out})
+                    return
+                if action == "supersede":
+                    out = self.state.assumptions.supersede(
+                        aid, str(body.get("text") or ""))
+                    if out is None:
+                        self._json({"error": "unknown assumption"}, 404)
+                        return
+                    self._json({"ok": True, "assumption": out})
+                    return
+                row = self.state.assumptions.set_state(
+                    aid, str(body.get("state") or action or ""),
+                    evidence=str(body.get("evidence") or ""),
+                    ref=str(body.get("ref") or ""))
+                if row is None:
+                    self._json({"error": "unknown assumption or state"},
+                               404)
+                    return
+                self._json({"ok": True, "assumption": row})
+                return
+
             if path == "/api/promotions":
                 desc = str(body.get("description") or "").strip()
                 if not desc:
@@ -11993,7 +12226,7 @@ class Handler(BaseHTTPRequestHandler):
                     claim,
                     kind=str(body.get("kind") or "note"),
                     source=str(body.get("source") or "manual"),
-                    confidence=float(body.get("confidence") or 0.5),
+                    confidence=self._bnum(body, "confidence", 0.5),
                     refs=body.get("refs")
                     if isinstance(body.get("refs"), list) else None,
                     mission_id=str(body.get("mission_id") or ""),
@@ -12033,9 +12266,9 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 row = self.state.reliability.record(
                     subject, ok=bool(body.get("ok")),
-                    latency_s=float(body.get("latency_s") or 0.0),
+                    latency_s=self._bnum(body, "latency_s", 0.0),
                     error_class=str(body.get("error_class") or ""),
-                    retries=int(body.get("retries") or 0))
+                    retries=int(self._bnum(body, "retries", 0)))
                 self._json({"ok": True, "subject": row,
                             "status": self.state.reliability.status(
                                 subject)})
@@ -12069,7 +12302,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "metric is required"}, 400)
                     return
                 row = self.state.baselines.record(
-                    metric, float(body.get("value") or 0.0),
+                    metric, self._bnum(body, "value", 0.0),
                     context=body.get("context")
                     if isinstance(body.get("context"), dict) else None)
                 self._json({"ok": True, "metric": row})
@@ -12078,7 +12311,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/baselines/check":
                 self._json(self.state.baselines.check(
                     str(body.get("metric") or ""),
-                    float(body.get("value") or 0.0)))
+                    self._bnum(body, "value", 0.0)))
                 return
 
             if path == "/api/bisect":
@@ -12095,7 +12328,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     res = GitBisector(self.state.workspace).run(
                         good=good, bad=bad, test_command=test_cmd,
-                        timeout_s=float(body.get("timeout_s") or 600.0),
+                        timeout_s=self._bnum(body, "timeout_s", 600.0),
                         step_timeout_s=float(
                             body.get("step_timeout_s") or 120.0))
                 except Exception as exc:
@@ -12117,7 +12350,11 @@ class Handler(BaseHTTPRequestHandler):
                         project_id=str(self.state.workspace),
                         conversation_id=str(self.state.conversation_manager.active().get("id") or ""),
                     )
-                    self.state.conversation_memory.record_exchange(user_text, assistant_text)
+                    self.state.conversation_memory.record_exchange(
+                        user_text, assistant_text,
+                        conversation_id=str(
+                            self.state.conversation_manager.active().get("id") or "")
+                        or None)
                 self.state.conversation_manager.record_exchange(
                     user_text,
                     assistant_text,
@@ -12779,7 +13016,7 @@ class Handler(BaseHTTPRequestHandler):
                     res["wait"] = self.state.devservers.wait_for_url(
                         res["server"]["id"],
                         timeout=max(1.0, min(
-                            float(body.get("timeout", 45)), 180)))
+                            self._bnum(body, "timeout", 45), 180)))
                 self._json(res)
                 return
             if path == "/api/devservers/stop":
@@ -12951,7 +13188,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not cwd.is_dir():
                         self._json({"error": "cwd is not a directory"}, 400)
                         return
-                    timeout = max(1, min(int(body.get("timeout", 120)), 600))
+                    timeout = max(1, min(int(self._bnum(body, "timeout", 120)), 600))
                     import time as _t
                     started = _t.time()
                     flags = _sp.CREATE_NO_WINDOW if sys.platform.startswith(
@@ -13687,31 +13924,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             self.send_error(HTTPStatus.NOT_FOUND)
-        except KeyError as exc:
-            # Legit not-found KeyErrors are handled by inner routes; an
-            # escape reaching here is a latent bug — print the traceback
-            # to stderr (host captures it into backend-host.log) so the
-            # intermittent 'id' failures can be identified post-mortem.
-            import traceback
-            traceback.print_exc()
-            self._json({"error": f"Not found: {exc}"}, 404)
-        except PermissionError as exc:
-            # Creator-session gates (e.g. Nexus Brain sync/lock) raise
-            # PermissionError — report 403, not an opaque 500.
-            self._json({"error": str(exc) or "permission denied"}, 403)
         except Exception as exc:
-            # Transport-classified failures carry a friendly message and a
-            # structured diagnostic — keep the raw exception off the chat
-            # surface while preserving it for diagnostics.
-            diag_fn = getattr(exc, "diagnostic", None)
-            friendly = getattr(exc, "friendly", "")
-            payload: dict[str, Any] = {
-                "error": friendly or f"{type(exc).__name__}: {exc}"
-            }
-            if callable(diag_fn):
-                payload["technical"] = f"{type(exc).__name__}: {exc}"
-                payload["diagnostic"] = diag_fn()
-            self._json(payload, 500)
+            # Shared top-level mapping: malformed body → 400, escaping
+            # KeyError → 404, PermissionError → 403, else a diagnostic
+            # 500 with the traceback on stderr, never the client.
+            self._api_error(exc)
 
     def log_message(self, format: str, *args) -> None:
         pass
@@ -13825,6 +14042,13 @@ def stop_state(state: AppState) -> None:
     try:
         if getattr(state, "brain", None) is not None:
             state.brain.close()
+    except Exception:
+        pass
+    # State layer last — every migrated store writes through it, so it
+    # closes only after all writers are stopped.
+    try:
+        if getattr(state, "state_db", None) is not None:
+            state.state_db.close()
     except Exception:
         pass
     # Join tracked daemon threads so nothing writes after the workspace

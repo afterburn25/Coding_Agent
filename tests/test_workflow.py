@@ -1748,5 +1748,106 @@ class ActionNudgeTests(unittest.TestCase):
             self.assertIn("find_tools", advertised)
 
 
+class ProjectMemoryRelevanceTests(unittest.TestCase):
+    """context_for gates chat-lane recall on topical overlap — an
+    unrelated question must not get verbatim mission summaries injected
+    (the model echoes whatever memory block it sees)."""
+
+    def _mem(self, root):
+        mem = ProjectMemory(root)
+        mem.remember_task(
+            task_id="t1",
+            prompt="Self-repair incident — fix voice test",
+            summary="Patched test_capacity_restored_speaks in test_voice_polish.py",
+            files_changed=["tests/test_voice_polish.py"])
+        mem.remember_task(
+            task_id="t2",
+            prompt="Add caching layer to the API",
+            summary="Implemented an in-memory cache for /api/status responses",
+            files_changed=["localcodeagent/server.py"])
+        return mem
+
+    def test_unrelated_query_gets_no_memory_dump(self):
+        with tempfile.TemporaryDirectory() as td:
+            mem = self._mem(Path(td))
+            for q in ("what is 14 times 37 plus gravity?",
+                      "tell me a joke about penguins",
+                      "how do I center a div horizontally?"):
+                self.assertEqual(
+                    mem.context_for(q), "", f"unrelated turn leaked memory: {q!r}")
+            # A topically-overlapping token DOES recall — token-level
+            # precision is the accepted contract, unrelated dumps are not.
+            self.assertIn("in-memory cache",
+                          mem.context_for("the status endpoint cache"))
+
+    def test_related_query_recalls_only_matching_items(self):
+        with tempfile.TemporaryDirectory() as td:
+            mem = self._mem(Path(td))
+            out = mem.context_for("tell me about the status cache work")
+            self.assertIn("in-memory cache", out)
+            self.assertNotIn("voice_polish", out)
+
+    def test_recency_window_and_cap(self):
+        with tempfile.TemporaryDirectory() as td:
+            mem = self._mem(Path(td))
+            for i in range(10):
+                mem.remember_task(
+                    task_id=f"x{i}", prompt=f"database migration {i}",
+                    summary=f"ran postgres migration step {i}",
+                    files_changed=[])
+            out = mem.context_for("postgres migration work", limit=6, max_items=3)
+            self.assertEqual(out.count("migration step"), 3)
+            # newest matching records win
+            self.assertIn("step 9", out)
+            self.assertNotIn("step 4", out)
+
+    def test_generic_tokens_alone_do_not_match(self):
+        with tempfile.TemporaryDirectory() as td:
+            mem = self._mem(Path(td))
+            # 'work'/'task'/'fix' are in the generic stop set — a question
+            # phrased only in generic words must not recall anything.
+            self.assertEqual(
+                mem.context_for("what did you work on?"), "")
+
+    def test_mission_records_never_reach_chat_recall(self):
+        # BUG-012: a mission work order shares topical tokens with casual
+        # questions ("fix", "test", "worktree") — token overlap alone
+        # can't keep machine-authored work prose out of chat context.
+        # Mission-tagged rows are excluded regardless of overlap.
+        with tempfile.TemporaryDirectory() as td:
+            mem = self._mem(Path(td))
+            mem.remember_task(
+                task_id="m1",
+                prompt="Apply the diagnosis — Self-repair incident "
+                       "ri-98c0c16b2b in the repair worktree",
+                summary="The test file tests/test_voice_polish.py is "
+                        "missing from repair worktree ri-98c0c16b2b",
+                files_changed=["tests/test_voice_polish.py"],
+                mission=True)
+            out = mem.context_for("what's inside that worktree?")
+            self.assertEqual(out, "")
+            self.assertNotIn("98c0c16b2b", out)
+
+    def test_legacy_mission_rows_excluded_by_task_id(self):
+        # Rows recorded before the mission flag existed carry no flag —
+        # the live ledger's mission task-id set still excludes them.
+        with tempfile.TemporaryDirectory() as td:
+            mem = self._mem(Path(td))
+            mem.remember_task(
+                task_id="legacy-mission",
+                prompt="Work the scoped lane for the repair worktree",
+                summary="repair worktree ri-98c0c16b2b is missing "
+                        "tests/test_voice_polish.py",
+                files_changed=["tests/test_voice_polish.py"])
+            out = mem.context_for(
+                "what's inside that worktree?",
+                exclude_task_ids={"legacy-mission"})
+            self.assertEqual(out, "")
+            # Without the exclusion set the legacy row still matches —
+            # proving the guard, not the token gate, did the work.
+            self.assertIn("98c0c16b2b",
+                          mem.context_for("what's inside that worktree?"))
+
+
 if __name__ == "__main__":
     unittest.main()

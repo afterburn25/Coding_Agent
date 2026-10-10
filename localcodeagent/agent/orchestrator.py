@@ -3,7 +3,9 @@ from __future__ import annotations
 import base64
 import http.client
 import inspect
+import hashlib
 import json
+import os
 import re
 import secrets
 import threading
@@ -194,6 +196,14 @@ _QUESTION_LEAD_RE = re.compile(
 _CONVERSATION_TOOL_PERMS = frozenset({
     "filesystem.read", "network.read", "github.read", "image.read",
     "clipboard.read", "desktop.view", "screen.capture",
+})
+
+# Connector capabilities with external side effects — these claim an
+# exactly-once operation row before executing (F4). Reads (feed,
+# notifications, search, me, comments-listing) never need the guard.
+_SOCIAL_MUTATING_CAPS = frozenset({
+    "post", "comment", "reply", "message", "send", "upvote", "downvote",
+    "vote", "follow", "unfollow", "subscribe", "unsubscribe", "join",
 })
 
 
@@ -461,12 +471,17 @@ class AgentOrchestrator:
         action_ledger=None,
         artifacts=None,
         social=None,
+        state_db=None,
     ) -> None:
         self.config = config
         self.router = router
         self.tools = tools
         self.runtime = runtime
         self.tasks = tasks
+        # thread-ident → task id: lets the run() wrapper mark the right
+        # ledger row failed when a run raises, even with a mission and an
+        # interactive run in flight at once.
+        self._run_task_ids: dict[int, str] = {}
         self.checkpoints = checkpoints
         self.memory = memory
         self.repository_index = repository_index
@@ -542,6 +557,9 @@ class AgentOrchestrator:
         # Callable returning the SocialService — lazy because AppState
         # builds the orchestrator during its own construction.
         self._social = social
+        # Transactional state layer — durable exactly-once operation
+        # claims for external side effects (social sends, …).
+        self.state_db = state_db
         # Requirement-change propagation — AppState wires this to the
         # mission store so a superseded conversation fact flags
         # in-flight mission nodes referencing the stale value.
@@ -803,8 +821,7 @@ class AgentOrchestrator:
         memory_event = {"type": "answer_memory", **memory_meta}
         self._safe_emit(event_callback, {"type": "model", "event": memory_event})
         self._safe_emit(event_callback, {"type": "task", "task": completed_task.as_dict()})
-        if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(user_text, answer_text)
+        self._record_conversation_exchange(user_text, answer_text)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(
                 user_text,
@@ -931,7 +948,7 @@ class AgentOrchestrator:
         self._safe_emit(event_callback, {"type": "model", "event": evt})
         self._safe_emit(event_callback, {"type": "task", "task": completed_task.as_dict()})
         if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(user_text, text)
+            self._record_conversation_exchange(user_text, text)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(
                 user_text, text, intent="conversation", model_id="builtin-local")
@@ -1221,7 +1238,7 @@ class AgentOrchestrator:
                         "data": result.data}})
         self._safe_emit(event_callback, {"type": "task", "task": completed_task.as_dict()})
         if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(user_text, text)
+            self._record_conversation_exchange(user_text, text)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(
                 user_text, text, intent="conversation", model_id="builtin-local")
@@ -2076,6 +2093,10 @@ class AgentOrchestrator:
         elif head.startswith("CREATOR_"):
             canonical = ("GitHub read needs an unlocked creator "
                          "session in this profile.")
+        elif head.startswith("TOOL_"):
+            detail = head.split(":", 1)[1].strip() if ":" in head else ""
+            canonical = ("GitHub isn't connected in this setup"
+                         + (f" — {detail}." if detail else "."))
         else:
             detail = head[6:].strip() if head.startswith("ERROR:") \
                 else head
@@ -2099,6 +2120,15 @@ class AgentOrchestrator:
         list. Untrusted remote content is quoted data, never
         instructions. → RenderedReply | None."""
         from ..context.realize import RenderedReply, SemanticResponse
+        # Capability truth first: with GitHub disabled the tools are never
+        # registered — executing would surface the raw "unknown tool"
+        # string instead of the honest "not connected" answer.
+        if not getattr(getattr(self, "config", None),
+                       "github_enabled", True):
+            return self._github_blocked_reply(
+                user_text,
+                "TOOL_NOT_INSTALLED: github tools are disabled in this setup",
+                intent=intent)
         args = {"limit": 8}
         if repo:
             args["repo"] = repo
@@ -2894,7 +2924,7 @@ class AgentOrchestrator:
         self._safe_emit(
             event_callback, {"type": "task", "task": done.as_dict()})
         if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(user_text, text)
+            self._record_conversation_exchange(user_text, text)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(
                 user_text, text,
@@ -3044,7 +3074,7 @@ class AgentOrchestrator:
         self._safe_emit(
             event_callback, {"type": "task", "task": done.as_dict()})
         if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(
+            self._record_conversation_exchange(
                 " | ".join(p.action_text for p in plans), text)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(
@@ -4385,6 +4415,29 @@ class AgentOrchestrator:
             return False
         return None
 
+    def _record_conversation_exchange(
+        self, user_text: str, assistant_text: str
+    ) -> None:
+        """Record a user-facing exchange into rolling conversation memory.
+
+        Always tags the exchange with the active conversation id so
+        conversation-scoped artifacts (pending numbered options) can
+        never resolve across conversations.
+        """
+        if self.conversation_memory is None:
+            return
+        conversation_id = None
+        try:
+            if self.conversation_manager is not None:
+                conversation_id = (
+                    str(self.conversation_manager.active().get("id") or "")
+                    or None
+                )
+        except Exception:
+            conversation_id = None
+        self.conversation_memory.record_exchange(
+            user_text, assistant_text, conversation_id=conversation_id)
+
     def _record_outcome(
         self,
         session: _AgentSession,
@@ -4584,7 +4637,10 @@ class AgentOrchestrator:
 
         profile = self.router.get_profile(decision.model_id)
         provider = self._provider_for(profile)
-        project_memory = self.memory.context()
+        project_memory = self.memory.context_for(
+            task.prompt or "",
+            exclude_task_ids=self.tasks.mission_ids()) \
+            or self.memory.context()
         index_summary = self.repository_index.ensure()
         recovered_self_hosting = self._self_hosting_context()
         try:
@@ -4777,6 +4833,7 @@ class AgentOrchestrator:
                 "arguments": args,
                 "result": result,
                 "phase": "recovered_approval",
+                "permission": permission,
             })
             redactor = self.tools.context.get("redactor")
             shown = redactor(result) if redactor else result
@@ -5592,10 +5649,16 @@ class AgentOrchestrator:
                     params={"consult": consult_id}, task_id=task_id)
             except Exception:
                 ledger_entry = None
-        try:
-            out = svc.dispatch_consult(consult_id, approved=True)
-        except Exception as exc:
-            out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        op_id = f"social:moltbook:consult:{task_id}"
+        out, op_claimed = self._social_op_claim(
+            op_id, "moltbook.consult", {"consult": consult_id})
+        if out is None:
+            try:
+                out = svc.dispatch_consult(consult_id, approved=True)
+            except Exception as exc:
+                out = {"ok": False,
+                       "error": f"{type(exc).__name__}: {exc}"}
+        self._social_op_settle(op_id, op_claimed, out)
         ok = bool(out.get("ok"))
         if self.action_ledger is not None and ledger_entry is not None:
             try:
@@ -5637,10 +5700,15 @@ class AgentOrchestrator:
                     params={"service": service}, task_id=task_id)
             except Exception:
                 ledger_entry = None
-        try:
-            out = svc.join(service, approved=approved)
-        except Exception as exc:
-            out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        op_id = f"social:{service}:onboard:{task_id}"
+        out, op_claimed = self._social_op_claim(
+            op_id, f"{service}.onboard", {"service": service})
+        if out is None:
+            try:
+                out = svc.join(service, approved=approved)
+            except Exception as exc:
+                out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        self._social_op_settle(op_id, op_claimed, out)
         ok = bool(out.get("ok"))
         state = str(out.get("state") or "")
         claim_url = str(out.get("claim_url") or "")
@@ -5758,6 +5826,59 @@ class AgentOrchestrator:
              "role": "utility", "reason": "social action lane"},
             event_callback, approved=True)
 
+    def _social_op_claim(
+        self, op_id: str, target: str, params: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """Exactly-once claim for a social side effect (F4).
+
+        Returns (out, claimed): a non-None `out` is the terminal
+        result to use WITHOUT executing (replay of a 'done' claim, or
+        a refusal for 'interrupted'/'in_flight' — the action may have
+        already taken effect). `claimed=True` means we hold the claim
+        and must record complete/fail after the call."""
+        if self.state_db is None or not op_id:
+            return None, False
+        try:
+            claim = self.state_db.op_begin(
+                op_id,
+                intent_hash=hashlib.sha256(
+                    json.dumps(params, sort_keys=True, default=str)
+                    .encode()).hexdigest()[:32],
+                target=target)
+            state = str(claim.get("state") or "")
+            if state == "done":
+                try:
+                    out = (json.loads(claim["result"])
+                           if claim.get("result") else {"ok": True})
+                except (TypeError, ValueError):
+                    out = {"ok": True}
+                return out, False
+            if state != "started":
+                svc_name, cap_name = target.split(".", 1)
+                return {"ok": False, "error": (
+                    f"cannot safely retry — a prior {cap_name} attempt "
+                    f"on {svc_name} was {state} and may already have "
+                    "taken effect")}, False
+            return None, True
+        except Exception:
+            # State layer down → unguarded call; the action ledger still
+            # records the attempt.
+            return None, False
+
+    def _social_op_settle(
+        self, op_id: str, claimed: bool, out: dict[str, Any]
+    ) -> None:
+        if claimed and self.state_db is not None:
+            try:
+                if bool(out.get("ok")):
+                    self.state_db.op_complete(
+                        op_id, result=json.dumps(out, default=str)[:8000])
+                else:
+                    self.state_db.op_fail(
+                        op_id, result=str(out.get("error") or "failed")[:500])
+            except Exception:
+                pass  # operation bookkeeping must never break the call
+
     def _run_social_call(self, svc, service: str, task_id: str,
                          cap: str, args: dict, event_callback=None):
         """Resume of an approved connector capability (feed/post/…) —
@@ -5782,11 +5903,25 @@ class AgentOrchestrator:
                     params=dict(params), task_id=task_id)
             except Exception:
                 ledger_entry = None
-        try:
-            out = svc.call_capability(service, cap, approved=True,
-                                      **params)
-        except Exception as exc:
-            out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        # Exactly-once for side-effecting calls: a crash after the
+        # connector call but before the ledger finish would otherwise let
+        # a retry double-post. 'done' replays the stored result;
+        # 'interrupted'/'in_flight' refuses to re-run — the action may
+        # already have taken effect, and silently re-sending is worse
+        # than surfacing the uncertainty.
+        op_id = (
+            f"social:{service}:{cap}:{task_id}"
+            if cap in _SOCIAL_MUTATING_CAPS else ""
+        )
+        out, op_claimed = self._social_op_claim(
+            op_id, f"{service}.{cap}", params)
+        if out is None:
+            try:
+                out = svc.call_capability(service, cap, approved=True,
+                                          **params)
+            except Exception as exc:
+                out = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        self._social_op_settle(op_id, op_claimed, out)
         ok = bool(out.get("ok"))
         if self.action_ledger is not None and ledger_entry is not None:
             try:
@@ -6022,19 +6157,19 @@ class AgentOrchestrator:
             return f"{name}:{args!r}"
 
     def _append_tool_result(self, session: _AgentSession, call: dict[str, Any], name: str, args: dict[str, Any], result: str) -> None:
+        try:
+            perm = str(self.tools.permission_for(name)[0] or "")
+        except Exception:
+            perm = ""
         if result.startswith(("ERROR", "PERMISSION_DENIED")):
             session.failures += 1
             session.failed_signatures.add(self._call_signature(name, args))
-        else:
+        elif perm and perm not in self._READ_ONLY_TOOL_PERMS:
             # A successful mutating call changes the workspace — a previously
             # failed call may now legitimately succeed, so unblock retries.
-            try:
-                perm = str(self.tools.permission_for(name)[0] or "")
-                if perm and perm not in self._READ_ONLY_TOOL_PERMS:
-                    session.failed_signatures.clear()
-            except Exception:
-                pass
-        event = {"name": name, "arguments": args, "result": result}
+            session.failed_signatures.clear()
+        event = {"name": name, "arguments": args, "result": result,
+                 "permission": perm}
         session.tool_events.append(event)
         redactor = self.tools.context.get("redactor")
         shown = redactor(result) if redactor else result
@@ -6618,13 +6753,21 @@ class AgentOrchestrator:
         self._act_update(session.task_id, act, state="completed", callback=session.event_callback)
         if self.activities is not None:
             self.activities.close_open(session.task_id, "completed")
-        self.memory.remember_task(
-            task_id=task.id,
-            prompt=task.prompt,
-            summary=task.summary,
-            files_changed=task.files_changed,
-            review=task.review,
-        )
+        mission_attributed = self._mission_attributed(session.task_id)
+        # Project memory is WORK memory — a pure conversational reply
+        # (no files changed, no tools ran) is not "recent project work".
+        # Recording it both pollutes recall with chat prose and lets a
+        # wrong answer echo back into later prompts (BUG-012: a stale
+        # repair verdict re-injected itself via "cache" overlap).
+        if task.files_changed or session.tool_events or mission_attributed:
+            self.memory.remember_task(
+                task_id=task.id,
+                prompt=task.prompt,
+                summary=task.summary,
+                files_changed=task.files_changed,
+                review=task.review,
+                mission=mission_attributed,
+            )
         if task.files_changed:
             try:
                 self.repository_index.build()
@@ -6635,9 +6778,9 @@ class AgentOrchestrator:
             status,
             verification_passed=(None if not current_round else not verification_failed),
         )
-        if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(session.user_text, session.main_content)
-        if self.conversation_manager is not None:
+        if self.conversation_memory is not None and not mission_attributed:
+            self._record_conversation_exchange(session.user_text, session.main_content)
+        if self.conversation_manager is not None and not mission_attributed:
             self.conversation_manager.record_exchange(
                 session.user_text,
                 session.main_content,
@@ -6647,7 +6790,8 @@ class AgentOrchestrator:
                 artifact_ids=self._artifact_ids_from_events(session.tool_events),
                 attachments=session.attachments_meta,
             )
-        if self.answer_memory is not None and not session.unverified_claims:
+        if (self.answer_memory is not None and not session.unverified_claims
+                and not mission_attributed):
             try:
                 tool_names = [
                     str(e.get("name") or "")
@@ -7461,9 +7605,10 @@ class AgentOrchestrator:
             steps=session.steps,
         )
         self._record_outcome(session, "step_limit")
-        if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(session.user_text, session.main_content)
-        if self.conversation_manager is not None:
+        mission_attributed = self._mission_attributed(session.task_id)
+        if self.conversation_memory is not None and not mission_attributed:
+            self._record_conversation_exchange(session.user_text, session.main_content)
+        if self.conversation_manager is not None and not mission_attributed:
             self.conversation_manager.record_exchange(
                 session.user_text,
                 session.main_content,
@@ -7710,7 +7855,7 @@ class AgentOrchestrator:
         )
         self._safe_emit(event_callback, {"type": "task", "task": completed.as_dict()})
         if self.conversation_memory is not None:
-            self.conversation_memory.record_exchange(user_text, content)
+            self._record_conversation_exchange(user_text, content)
         if self.conversation_manager is not None:
             self.conversation_manager.record_exchange(
                 user_text,
@@ -7856,18 +8001,101 @@ class AgentOrchestrator:
         mission_id: str | None = None,
         model_role: str | None = None,
     ) -> AgentResult:
+        """Fault boundary for _run_impl: an unexpected exception closes the
+        ledger row ("error", phase done) BEFORE propagating, so a crash can
+        never leave a phantom 'running/planning' task wedging the queue or
+        stranded past restart. Status "error" (not "failed") keeps the row
+        inside the bounded watchdog retry lane, matching every other
+        execution-failure site. The raise is preserved — every caller's
+        except-path already handles it."""
+        try:
+            return self._run_impl(
+                user_text,
+                history=history, mode=mode, event_callback=event_callback,
+                attachments=attachments, mission_id=mission_id,
+                model_role=model_role)
+        finally:
+            self._close_run_task()
+            self._run_task_ids.pop(threading.get_ident(), None)
+
+    # Statuses that mean "a driver should still be working on this". A
+    # returned-but-parked task (waiting_approval) is NOT here — it must
+    # survive the boundary intact.
+    _ACTIVE_TASK_STATUSES = frozenset(
+        {"queued", "running", "planning", "working", "verifying", "reviewing"})
+
+    def _close_run_task(self) -> None:
+        """Mark the thread's tracked task "error" iff it is still in an
+        active status when run() exits — a no-op on success (terminal rows
+        and approval parks untouched), the phantom-killer on a raise path.
+        Never swallows: a ledger failure here must not mask the original
+        exception."""
+        tid = self._run_task_ids.get(threading.get_ident())
+        if not tid:
+            return
+        try:
+            row = self.tasks.get(tid)
+            if row is not None and str(getattr(row, "status", "")) in self._ACTIVE_TASK_STATUSES:
+                self.tasks.update(
+                    tid, status="error", phase="done",
+                    error="run aborted before a terminal state")
+        except Exception:
+            pass
+
+    def _register_run_task(self, task_id: str) -> None:
+        self._run_task_ids[threading.get_ident()] = task_id
+
+    def _mission_attributed(self, task_id: str) -> bool:
+        """True when the task is delegated mission/autonomy work rather
+        than a user utterance — its prompt is a machine work order and
+        must never enter user-facing conversation history."""
+        if self._mission_by_task.get(task_id):
+            return True
+        try:
+            row = self.tasks.get(task_id)
+        except Exception:
+            return False
+        if row is None:
+            return False
+        return bool(
+            getattr(row, "mission_id", "")
+            or str(getattr(row, "mode", ""))
+            in {"work_order", "autonomy", "self_repair"})
+
+    def _run_impl(
+        self,
+        user_text: str,
+        *,
+        history: list[dict[str, Any]] | None = None,
+        mode: str = "auto",
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
+        mission_id: str | None = None,
+        model_role: str | None = None,
+    ) -> AgentResult:
         # Resolve "option 1" / "the first option" style replies against the
         # assistant's most recent numbered proposal before anything else
         # sees the fragment — otherwise the model can't tell which option.
+        # Options are bound to the conversation that produced them.
+        active_conv_id = None
+        if self.conversation_manager is not None:
+            try:
+                active_conv_id = (
+                    str(self.conversation_manager.active().get("id") or "")
+                    or None
+                )
+            except Exception:
+                active_conv_id = None
         if self.conversation_memory is not None:
             try:
                 resolved = self.conversation_memory.resolve_option_selection(
-                    user_text)
+                    user_text, conversation_id=active_conv_id)
                 if resolved:
                     user_text = resolved
             except Exception:
                 pass
         task = self.tasks.create(user_text, mode)
+        self._register_run_task(task.id)
         if mission_id:
             self._mission_by_task[task.id] = mission_id
             # Persist attribution on the ledger row too — the in-memory map
@@ -7875,6 +8103,11 @@ class AgentOrchestrator:
             # able to tell mission parks from interactive parks after a
             # restart (mission parks are mission work, never foreground).
             self.tasks.update(task.id, mission_id=mission_id)
+        if active_conv_id:
+            # Conversation provenance — error-referent binding ("fix that
+            # error") must never cross conversations.
+            self.tasks.update(
+                task.id, conversation_id=str(active_conv_id))
         event_callback = self._logging_callback(task.id, event_callback)
         self._last_callback = event_callback
         self._task_context(task.id)
@@ -7970,12 +8203,29 @@ class AgentOrchestrator:
                 pass
         # Bind the latest real failure to active context — "fix that
         # error" resolves against the task ledger, not a guess.
+        # Interactive failures only: mission/work-order failures belong
+        # to their own lane's repair surface — a self-repair worktree
+        # crash must never become the referent of an unrelated chat.
         if active_ctx is not None and not getattr(
                 active_ctx, "active_error", ""):
             try:
+                active_cid = (
+                    str(self.conversation_manager.active().get("id") or "")
+                    if self.conversation_manager is not None else "")
                 for _t in self.tasks.recent(limit=5):
+                    # Same conversation only — a task tagged to another
+                    # chat (or untagged legacy mission traffic) must never
+                    # become this conversation's error referent.
+                    _t_cid = str(_t.get("conversation_id") or "")
+                    if _t_cid and active_cid and _t_cid != active_cid:
+                        continue
+                    if not _t_cid:
+                        continue  # untagged — provenance unknown, skip
                     if (str(_t.get("status")) == "failed"
-                            and _t.get("error")):
+                            and _t.get("error")
+                            and not _t.get("mission_id")
+                            and str(_t.get("mode") or "")
+                            not in {"work_order", "autonomy", "self_repair"}):
                         active_ctx.note_error(str(_t["error"]))
                         break
             except Exception:
@@ -8103,7 +8353,7 @@ class AgentOrchestrator:
                         "correlation_id": brain_envelope.get("correlation_id"),
                         "latency_ms": brain_envelope.get("latency_ms")}})
                 if self.conversation_memory is not None:
-                    self.conversation_memory.record_exchange(
+                    self._record_conversation_exchange(
                         user_text, str(brain_envelope["answer"]))
                 if self.conversation_manager is not None:
                     self.conversation_manager.record_exchange(
@@ -8303,7 +8553,7 @@ class AgentOrchestrator:
                 user_text, task.id, event_callback, env=env)
             if social_reply is not None:
                 if self.conversation_memory is not None:
-                    self.conversation_memory.record_exchange(
+                    self._record_conversation_exchange(
                         user_text, social_reply.content or "")
                 if self.conversation_manager is not None:
                     self.conversation_manager.record_exchange(
@@ -8458,7 +8708,7 @@ class AgentOrchestrator:
             self._safe_emit(event_callback, {"type": "model", "event": builtin_event})
             self._safe_emit(event_callback, {"type": "task", "task": completed_task.as_dict()})
             if self.conversation_memory is not None:
-                self.conversation_memory.record_exchange(user_text, local_response)
+                self._record_conversation_exchange(user_text, local_response)
             if self.conversation_manager is not None:
                 self.conversation_manager.record_exchange(
                     user_text,
@@ -9255,7 +9505,12 @@ class AgentOrchestrator:
             messages.append({"role": "user", "content": self._vision_user_content(
                 user_content, vision_image_paths, profile)})
         else:
-            project_memory = self.memory.context()
+            # Conversation lane recall is relevance-gated: unrelated
+            # queries get no task-history dump at all (the model reliably
+            # echoes whatever memory block it is shown). Work lanes keep
+            # the full recency window — recency IS their context.
+            project_memory = self.memory.context_for(
+                user_text, exclude_task_ids=self.tasks.mission_ids())
             index_act = self._act(
                 task.id, "investigating", "Investigating",
                 "Scanning repository index and project context",
@@ -9300,11 +9555,16 @@ class AgentOrchestrator:
                     )
             elif research_context:
                 self.tasks.update(task.id, research=research_context)
+            _ws_parts = []
+            if project_memory:
+                _ws_parts.append(f"Workspace memory:\n{project_memory}")
+            _ws_parts.append(
+                f"Repository index: {index_summary.get('file_count', 0)} indexed files.")
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
                     "role": "system",
-                    "content": f"Workspace memory:\n{project_memory}\n\nRepository index: {index_summary.get('file_count', 0)} indexed files.",
+                    "content": "\n\n".join(_ws_parts),
                 },
             ]
             _cap_msg = self._capability_prompt_message()
@@ -9375,6 +9635,16 @@ class AgentOrchestrator:
                 messages.extend(reversed(kept))
             messages.append({"role": "user", "content": self._vision_user_content(
                 user_content, vision_image_paths, profile)})
+        # Debug hook — NEXUS_DEBUG_PROMPT_DUMP=<path> writes the exact
+        # model-facing message list for QA/contamination tracing.
+        _dump = os.environ.get("NEXUS_DEBUG_PROMPT_DUMP")
+        if _dump:
+            try:
+                Path(_dump).write_text(
+                    json.dumps(messages, ensure_ascii=False, indent=1),
+                    encoding="utf-8")
+            except Exception:
+                pass
         session = _AgentSession(
             task_id=task.id,
             user_text=user_text,
@@ -9433,10 +9703,30 @@ class AgentOrchestrator:
         interactive path uses. The instruction is executed, not
         interpreted.
         """
+        try:
+            return self._run_work_order_impl(
+                instruction, task_title=task_title, mission_id=mission_id,
+                model_role=model_role, system_blocks=system_blocks,
+                event_callback=event_callback)
+        finally:
+            self._close_run_task()
+            self._run_task_ids.pop(threading.get_ident(), None)
+
+    def _run_work_order_impl(
+        self,
+        instruction: str,
+        *,
+        task_title: str = "",
+        mission_id: str | None = None,
+        model_role: str | None = None,
+        system_blocks: list[str] | None = None,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentResult:
         instruction = str(instruction or "").strip()
         task = self.tasks.create(
             instruction or task_title or "mission work order",
             "work_order")
+        self._register_run_task(task.id)
         if mission_id:
             self._mission_by_task[task.id] = mission_id
             self.tasks.update(task.id, mission_id=mission_id)

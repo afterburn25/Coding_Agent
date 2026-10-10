@@ -108,16 +108,22 @@ def _env_sig(env: dict) -> str:
 class SocialStore:
     """Root handle for all persisted social/epistemic state."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, db: Any = None) -> None:
         root = Path(root)
+        from ..state_db import DocStore
+        _doc = (lambda name: DocStore(db, root / name,
+                                      domain="social")) if db else (
+                                          lambda name: None)
         self.peers = JsonStore(
-            root / "peers.json", default=None, limit=400, key="peers")
+            root / "peers.json", default=None, limit=400, key="peers",
+            doc=_doc("peers.json"))
         self.claims = JsonStore(
             root / "claims.json", default=None, limit=500, key="claims",
+            doc=_doc("claims.json"),
             preserve=lambda c: c.get("ladder") in PROMOTABLE)
         self.backlog = JsonStore(
             root / "learning_backlog.json", default=None, limit=300,
-            key="items",
+            key="items", doc=_doc("learning_backlog.json"),
             preserve=lambda i: i.get("status") in BACKLOG_OPEN)
         self.drive = JsonStore(
             root / "drive.json",
@@ -148,17 +154,17 @@ class SocialStore:
                                "helpful_marks": 0},
                 "last_heartbeat": 0.0,
                 "posts_24h": [],
-            })
+            }, doc=_doc("drive.json"))
         self.debates = JsonStore(
             root / "debates.json", default=None, limit=120,
-            key="debates",
+            key="debates", doc=_doc("debates.json"),
             preserve=lambda d: d.get("status") in ("open", "active"))
         self.journal = JsonStore(
             root / "journal.json", default=None, limit=400,
-            key="entries")
+            key="entries", doc=_doc("journal.json"))
         self.experiments = JsonStore(
             root / "experiments.json", default=None, limit=300,
-            key="experiments",
+            key="experiments", doc=_doc("experiments.json"),
             preserve=lambda e: e.get("status") == "running")
 
     # -- peers ---------------------------------------------------------------

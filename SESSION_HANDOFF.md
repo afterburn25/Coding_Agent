@@ -2,6 +2,123 @@
 
 > **Devin takeover:** read `DEVIN_START_HERE.md` before this chronological handoff. It contains the current exact source/CI/artifact state and a do-not-regress checklist.
 
+## Product-wide polish/QA pass (in flight)
+
+Bugs found + fixed so far — full ledger in `docs/BUG_LEDGER.md`, surface
+map in `docs/SURFACE_INVENTORY.md`:
+
+- **BUG-001..004 (P1, API)** — `do_GET`/`do_PATCH` had no handler-level
+  catch (connection died, no JSON); malformed/non-object JSON bodies →
+  500 not 400; ~35 bare `int()`/`float()` casts on client input → 500 on
+  garbage. Now: shared `_api_error` mapper, `_qint`/`_bnum` coercion.
+- **BUG-005 (P1, orchestrator)** — exception inside `run()` /
+  `run_work_order()` left the ledger row `running/planning` forever →
+  phantom "current" task wedged the whole chat queue (seen live). New
+  thread→task-id fault boundary marks active rows `error` before the
+  raise; `waiting_approval` parks/terminal rows never clobbered; raise
+  contract preserved.
+- **BUG-006 (P2)** — duplicate arithmetic lane (`_math_reply` +
+  `solvers.py`) deleted; brain thalamus owns exact math
+  (`brain_fast_path`, live-verified `14*37=518`).
+- **BUG-007 (P1, tests)** — Windows `answer_memory.db-wal` teardown race
+  → `_RetriedTemporaryDirectory` in `test_end_to_end.py`.
+- **BUG-008 (P2)** — `BackendConnectionError` (dead model backend) →
+  503 friendly+diagnostic, not 500.
+- **BUG-009 (P1, conversation)** — `ProjectMemory.context()` injected
+  the last 6 task summaries verbatim into every chat turn → casual
+  questions echoed mission-failure text. New `context_for()` token-overlap
+  gate; chat lane skips the block on no match; work lanes keep recency.
+- **BUG-010 (P1, GitHub lane)** — `github_enabled=false` envs executed
+  unregistered `github_*` tools → raw `unknown tool` prose. Lane now
+  gates on `config.github_enabled` → honest "isn't connected".
+- **BUG-011 (P1, conversation isolation)** — mission/autonomy work
+  orders were recorded into conversation history as user/assistant
+  turns (live-verified: model echoed mission failures into unrelated
+  questions). `_mission_attributed()` now gates `record_exchange` on
+  conversation_memory, conversation_manager AND answer_memory at both
+  completion paths. NOTE: pre-fix contaminated exchanges persist in
+  existing conversations.json — new traffic is isolated.
+- **Queued-notice polish** — no more machine-authored mission work
+  orders pasted as status detail; user prompts cut on word boundaries.
+- **BUG-012 (P1, project memory)** — fresh chats still got stale repair
+  context after BUG-011: `remember_task` recorded every completed task
+  unconditionally (mission work orders + pure conversational replies —
+  wrong answers self-reinforced). Now only real work (files/tools/
+  mission lane) is remembered; `context_for` skips mission rows incl.
+  legacy via `TaskStore.mission_ids()`; restart-recovery recall gated;
+  12 poisoned rows scrubbed from the live store; env-gated
+  `NEXUS_DEBUG_PROMPT_DUMP` added for prompt forensics.
+- **BUG-013 (P2)** — `active_error` bound ANY failed task from the
+  global ledger (incl. self-repair crashes) into unrelated chats; now
+  lane-scoped.
+- **BUG-014 (P2)** — `.repair-worktrees` (587 scratch paths) were
+  indexed as project files; added to ignore sets.
+- **BUG-015 (P1, runtime)** — llama zombie-listener (process alive,
+  socket dead) is now proactively reaped by the watchdog via
+  `reap_zombie_listeners()` — busy/loading listeners untouched.
+- **BUG-016 (P1, answer memory)** — fragmentary/context-bound replies
+  (`— no auto`) were learned as canonical answers and echoed into
+  unrelated fresh chats; `is_context_dependent` covers "did you just
+  say"/"last suggestion" forms and `is_fragment_answer` filters
+  continuation fragments at learn AND lookup time.
+- **BUG-017 (P2)** — `pending_options` bound globally: a bare
+  "option 2" in a fresh conversation resolved against a different
+  conversation's numbered proposal. Options now tagged with the
+  producing conversation id; all 11 orchestrator write sites converged
+  on `_record_conversation_exchange()`. Live-verified: fresh chat
+  "option 2" asks for clarification instead of inheriting another
+  conversation's proposal.
+- **F2 Recovery Center closed** — selective restore (`paths=` exact or
+  directory-prefix selection on `/api/backups/restore`), `restore_test`
+  (`/api/backups/restore_test` copies manifest files to scratch +
+  re-hashes the copies), `data_snapshot` stage wired into self-update
+  after `lkg_snapshot`; System page has Restore-test + Selective
+  restore buttons. F3 (A/B update + LKG rollback) was already landed:
+  `selfupdate.py` staged-apply + `lkg.py` snapshot/flags/auto-rollback.
+- **F4 exactly-once landed** — `StateDB` operations API
+  (`op_begin`/`op_complete`/`op_fail`/`op_get`/`op_reap_interrupted`);
+  mutating social-connector calls claim `social:{svc}:{cap}:{task_id}`
+  — `done` replays stored result, `interrupted`/`in_flight` refuses
+  auto-retry ("may already have taken effect"), so a crash can never
+  double-post. Boot reaps stale running claims. Remaining consumer
+  candidates: mission tool stages, approval-resume replays.
+
+Live dogfood verified this pass: fast_path math ~280ms, `and of Japan?`
+ellipsis → Tokyo, `don't open Chrome` preempted a mission drive
+(cooperative cancel, supervisor retries — by design), model-down →
+honest `error`/`done` + friendly message, malformed input → 400,
+malformed query int → 200 fallback. Suite: **3685 passed, 4 skipped,
+530 subtests**.
+
+Still open: UI click-dogfood, voice/image/browser live workflows, soak,
+dead-code sweep, remaining audit parts (see BUG_LEDGER discovery queue).
+
+## Resilience Foundation 1 → Cognitive Phase 1 (in flight)
+
+- **F1 landed** (`4eb73559`): `state_db.py` WAL SQLite + DocStore; all
+  Tier-1 stores migrated; `/api/state/health`; silent-corruption-reset
+  eliminated. Next foundations per the resilience milestone:
+  F2 Recovery Center/verified backups → F3 A/B self-update →
+  F4 exactly-once ops (`operations` table groundwork in place).
+- **Cognitive Phase 1** (this branch): Strategy Router inside the
+  existing IntelligenceGovernor (`metacognition.classify_strategy` →
+  `MetaAssessment.strategy/strategies` + strategy→op injection),
+  `formal_math`→`run_formal_solver` (thalamus math fast path already
+  computes exactly — no duplicate lane),
+  `requirements.compile_requirement_spec`/`compile_to_store`
+  (MUST/SHOULD/MAY/MUST_NOT/ASSUMPTION/QUESTION/ACCEPTANCE), and
+  `assumptions.py` AssumptionLedger with invalidation→dependents +
+  `weakest()` probe. `/api/assumptions*` live. Docs: `docs/REASONING.md`.
+  Reuse map for later phases: EvalLab (`eval/`), HypothesisStore,
+  CausalMemory, DecisionJournal, RequirementStore, LearningGovernor,
+  multiagent/swarm, ExperimentStore — do not duplicate.
+- **Open fragility**: external llama-server dies during dogfood —
+  root-caused: process stays ALIVE but its listen socket disappears
+  (zombie; curl refused while PID resident). Externally-managed in the
+  scratch env — the backend's degradation path (503 + task `error`,
+  no phantom) is verified correct. Distinguish runtime availability
+  from product defects.
+
 ## 0.42.0 — Adaptive Intelligence Phase A
 
 Umbrella milestone "Adaptive Intelligence + Persistent Nexus Identity",
@@ -4686,3 +4803,82 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
 - Verification: all 23 packs green live (81 turns, 0 failures);
   full suite 3620+1 passed (one voice test flaked under dogfood
   CPU load, passes isolated); long-300 rerun in flight.
+
+### Round 9 — Resilience Foundation 1: transactional critical state
+
+- New `localcodeagent/state_db.py`: `StateDB` — WAL-mode SQLite at
+  `data/state.db` (foreign_keys, busy_timeout, schema_migrations,
+  `txn()` atomic multi-write, `integrity()` boot probe) — and
+  `DocStore`, a drop-in persistence adapter: DB-backed kv row when
+  wired, legacy atomic file otherwise. Valid legacy files import
+  once + freeze as `<file>.migrated`; a live shadow file is still
+  written every save (downgrade + file-tooling safe). Corrupt
+  sources quarantine (quarantine table + .corrupt-* copy) and flag
+  the store degraded — never silently reset.
+- P0 defect fixed everywhere at once: ActionLedger, IdentityManager,
+  SafeModeStore, DecisionJournal, RequirementStore, HypothesisStore,
+  CausalMemory + all 7 learning stores silently reset to empty on
+  ANY load error (no quarantine — a truncated file wiped the store).
+- Tier-1 migrated: all 12 autonomy JsonStores (missions, approvals,
+  schedules, grants, goals, triggers, notifications, repairs,
+  findings, procedures, control, standing_goals), action_ledger,
+  identity, safe_mode, decisions, requirements, hypotheses, causal,
+  learning×7, social×8 (peers/claims/backlog/drive/debates/journal/
+  experiments/consults) — all through `db=`/`state_db=` params,
+  defaulting to prior file behavior.
+- Server: `self.state_db` first in AppState; boot integrity report
+  publishes `state_health` events when degraded; `/api/state/health`
+  endpoint; `stop_state` closes the DB last (after all writers).
+- Groundwork tables for later foundations: `operations`
+  (exactly-once) and `events` (audit replay).
+- docs/STATE_AUDIT.md — every persistent store classified
+  (transactional/atomic-file/append-only/recoverable/non-critical/
+  legacy) with Tier-2/Tier-3 migration notes.
+- Tests: tests/test_state_db.py — 21 tests: WAL/pragmas, idempotent
+  schema version, txn all-or-nothing, uncommitted-write invisibility,
+  integrity bad-row probe, migration verify+.migrated, DB-wins-over-
+  stale-file, corrupt quarantine (file+DB row), .migrated recovery,
+  reopen persistence for autonomy/ledger/identity/safemode/learning,
+  cross-store atomic commit.
+
+### Round 10 — Foundations F2–F4 + V4 conversation-binding fixes (HEAD 39db96d8)
+
+- Foundations all landed: F1 StateDB (`4eb73559`), F2 Recovery Center —
+  selective restore + restore-test + pre-update data snapshot
+  (`c1d5001d`), F3 A/B self-update pre-existing, F4 exactly-once ops via
+  `StateDB.op_*` claiming mutating social calls (`c1d5001d`).
+- Contamination closeout BUG-012→019 (commits `bf0a223e`→`b14c3a27`):
+  mission traffic isolated from history/project memory; only real work
+  remembered; fragmentary/context-bound answers rejected at learn +
+  recall; legacy mission-authored answers invalidated; pending_options
+  and active_error bindings conversation-scoped (TaskRecord gained
+  `conversation_id`).
+- BUG-020 (`9f4c3a6e`): spelled-out arithmetic now hits the thalamus
+  math fast path via `_spelled_math` — bounded whole-candidate
+  translator; live-verified (`brain_fast_path`, model down → still
+  answers).
+- QA language (`39db96d8`): tool events carry `permission`; live expect
+  `no_mutating_tools` distinguishes read-only grounding from actions.
+  Soak's quoted-command search_text residual dispositioned as correct
+  behavior, not a defect.
+- Environment note: 21/25 soak failures were the external llama:8391
+  dying (socket dead, process alive). Managed-reaper can't see external
+  runtimes; `qwen3-4b-all` IS managed and self-heals on next request.
+- Round-10 verification (final): canonical suite **3710 passed,
+  4 skipped, 530 subtests**; clean 81-turn soak on latest code →
+  **1 failure only**, an environmental llama mid-response disconnect —
+  every scenario semantically green incl. quoted-negated under the new
+  `no_mutating_tools` assertion.
+- Live GET sweep: all 104 literal routes probed, zero 500s; 8 primary
+  UI pages serve. `/api/storage/audit` scratch-dir skips added.
+- Test-infra flake fixed: leaked `warmup-*` daemon ping consumed a
+  scripted urlopen inside another test's patch window; counting fakes
+  now gated by `_completions_only(fn, 9999, 1)`.
+- Tool fuzz: 15 fs/search tools × 9 type-confused arg shapes — zero
+  crashes, all return error strings. Permission matrix: NEVER_AUTO
+  keys ⊆ PERMISSION_INFO, all builtin tool permissions resolve;
+  `audio.*` synthesizes correctly via `_PREFIX_CATEGORY`.
+- Still open: UI click-dogfood (needs interactive browser), installer
+  cycle, dead-code deep sweep, external llama:8391 intermittent
+  disconnects (environment fragility — managed reaper covers managed
+  runtimes only).

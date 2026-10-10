@@ -912,3 +912,26 @@ class TestContextDependentUtterances(unittest.TestCase):
                      "what are your capabilities", "whats my ip",
                      "who is your father"):
             self.assertFalse(validation.is_context_dependent(text), text)
+
+    def test_machine_authored_questions_never_learned_or_replayed(self):
+        """Mission work-order scaffolds are machine prompts, not user
+        questions — a stored response is mission evidence and must never
+        replay into chat (nor be learned in the first place)."""
+        from localcodeagent.answer_memory import AnswerMemory, validation
+        for q in ("Work the scoped lane of this mission. Stay inside your scope",
+                  "A mission task failed. Diagnose the concrete cause",
+                  "Apply the diagnosis to make progress on the mission objective"):
+            self.assertTrue(validation.is_machine_authored_question(q), q)
+        for q in ("what did the mission do?", "tell me about the mission",
+                  "my editor is neovim"):
+            self.assertFalse(validation.is_machine_authored_question(q), q)
+        with tempfile.TemporaryDirectory() as tmp:
+            am = AnswerMemory(str(Path(tmp) / "am.db"))
+            try:
+                out = am.record_exchange(
+                    "Work the scoped lane of this mission. Stay inside your scope",
+                    "Applied the repair to tests/test_voice_polish.py.")
+                self.assertIsNone(out["answer_id"])
+                self.assertEqual(am.store.query("SELECT * FROM answers"), [])
+            finally:
+                am.close()

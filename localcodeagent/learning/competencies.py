@@ -12,12 +12,10 @@ children on read.
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from pathlib import Path
 
-from ..fsutil import atomic_write_text
 
 STATUS_MASTERED = "mastered"
 STATUS_STRONG = "strong"
@@ -84,27 +82,24 @@ def _trend(row: dict) -> str:
 
 
 class CompetencyMap:
-    def __init__(self, path: Path, *, history_keep: int = 60) -> None:
+    def __init__(self, path: Path, *, history_keep: int = 60,
+                 db: Any = None) -> None:
         self.path = Path(path).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.history_keep = int(history_keep)
         self._lock = threading.RLock()
+        from ..state_db import DocStore
+        self._doc = DocStore(db, self.path, domain="learning")
         self._data: dict = {"version": 1, "competencies": {}}
         self._load()
 
     def _load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict) and isinstance(raw.get("competencies"), dict):
-                self._data.update(raw)
-        except (OSError, ValueError, TypeError):
-            pass
+        raw = self._doc.load_json(None)
+        if isinstance(raw, dict) and isinstance(raw.get("competencies"), dict):
+            self._data.update(raw)
 
     def _save(self) -> None:
-        atomic_write_text(self.path, json.dumps(
-            self._data, indent=2, ensure_ascii=False))
+        self._doc.save_json(self._data)
 
     def _row(self, cid: str) -> dict:
         comps = self._data["competencies"]
