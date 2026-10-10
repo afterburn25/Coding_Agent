@@ -1306,6 +1306,7 @@ class ConversationMemory:
                             r"lives? (?:at|in|on)|reports? to|"
                             r"works? (?:on|at|for)|belongs? to|comes? from|"
                             r"scheduled for|due (?:on|by|in)|"
+                            r"expires?|ends?|starts?|runs?|"
                             r"hosted (?:at|on)|serves?|costs?|lasts?|"
                             r"is|are)\s+(.+)$",
                             body, flags=re.IGNORECASE,

@@ -2528,7 +2528,9 @@ class AgentOrchestrator:
         return t
 
     _FACT_RECALL_RE = re.compile(
-        r"^\s*(?:remind me\s+(?:of|about)\s+|what(?:'s|\s+s)?\s+|"
+        r"^\s*(?:remind me\s+(?:(?:of|about)\s+|"
+        r"(?:what|when|where|which|who|whose|how)\s+)?|"
+        r"what(?:'s|\s+s)?\s+|"
         r"whats\s+|which\s+|whichever\s+|who'?s?\s+|whos\s+|whose\s+|"
         r"who\s+(?:is|are|was|were)\s+|when\s+(?:is|are|was|were)\s+|"
         r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
@@ -6951,7 +6953,14 @@ class AgentOrchestrator:
                 attachments=session.attachments_meta,
             )
         if (self.answer_memory is not None and not session.unverified_claims
-                and not mission_attributed):
+                and not mission_attributed
+                # Deterministic lane replies — recall acks, honest-empty
+                # memory probes, clock/status answers, training acks —
+                # encode session state, not reusable knowledge. Banking
+                # them as answers let "do i use slack" replay "you
+                # haven't told me about your standup".
+                and str(getattr(session.decision, "model_id", ""))
+                != "builtin-local"):
             try:
                 tool_names = [
                     str(e.get("name") or "")

@@ -157,6 +157,19 @@ class TestNormalizeUserText(unittest.TestCase):
             self.norm("actually the deadlien was friday not monday"),
             "actually the deadline was friday not monday")
 
+    def test_leading_deletion_never_a_fix(self):
+        """'jira' -> 'ira' corrupted a tool name live. A candidate that
+        is the token minus its first or last char assumes a stray
+        letter — proper nouns and brands die to it."""
+        for sent in (
+            "i stopped using jira",
+            "i use jira for work",
+            "the kanye album",
+            "we deploy on kubernetes",   # 'kubernetes' minus 's' ->
+                                        # 'kubernete' must not win
+        ):
+            self.assertEqual(self.norm(sent), sent, sent)
+
     def test_dictionary_words_never_mangled(self):
         """The protective dictionary (SCOWL-60 + proper names) shields
         real words the curated vocab never listed — 'threw', 'spilled',

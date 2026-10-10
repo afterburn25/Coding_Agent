@@ -371,6 +371,12 @@ def _candidates(token: str, ctx_words: set[str], *,
     for word, wsk in word_sk.items():
         if word == token or len(word) < 3:
             continue
+        # A candidate that is the token minus its first or last
+        # character is not a typo fix — it's an assumption that the
+        # user typed a stray letter. Proper nouns and names die here:
+        # 'jira'->'ira', 'kanye'->'kane', 'slack'->'lack'.
+        if word == token[1:] or word == token[:-1]:
+            continue
         sk_eq = sk == wsk
         if not sk_eq and len(word) - len(token) > 4:
             continue  # far too long to be this typo
