@@ -5096,3 +5096,8 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   cobalt row while `cache db` was newer). `and`-joined declaratives
   split when every part is a complete statement.
 - Commit `7b2cb052` + `5214726a`. Live matrix all persistent.
+- **BUG-048** (P1 memory): `X moved to Y` minted parallel `uses` slots;
+  `, and <marker>` compounds banked verbatim; connector-less
+  `make/move X <literal>` had no lane. All retarget the entity slot.
+- Commits `73e3c94b`. Live: `the standup moved to 10:30` superseded the
+  9am fact; compound deadline+standup banked as two facts.
