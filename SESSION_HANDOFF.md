@@ -4953,6 +4953,20 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   pids still alive + running the recorded port/model are touched;
   PID-reuse/foreign/stale records drop untouched. Live-verified:
   booted with deployed's :8080/:8084 servers running — zero kills.
+- **BUG-029** (`88f6b67c`/`f907862d`, P1 truth gate): the
+  `⚠ Unverified action claims` notice lives verbatim in stored
+  assistant history → small models parroted it as their own sign-off,
+  and the echoed marker rode `main_content` into the transcript AND
+  Answer Memory (echo isn't a real claim → `unverified_claims` stayed
+  False → banked as trusted, live row `e88dc3cc086248f0`).
+  `_strip_unverified_notice` now removes the marker wherever content
+  becomes model-facing (both history-injection lanes) or gets persisted
+  (pre-scan on fresh model output). Detector tail: intransitive
+  progressive self-state ("I'm already running", "I'm working on it")
+  no longer badges — object-required lookahead. Live-verified clean.
+  NB: the 8391 "vanished server" mystery is resolved as our own
+  `release_managed_models_for_vram` balanced-policy eviction under
+  shared-GPU pressure — not a foreign kill.
 - Still open: UI click-dogfood (needs interactive browser), installer
-  cycle execution, external llama:8391 intermittent disconnects
-  (environmental — deployed instance's own evictions).
+  cycle execution, model-lane churn under shared-GPU contention
+  (environmental — balanced-policy eviction + deployed instance).
