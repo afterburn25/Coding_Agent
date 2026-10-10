@@ -200,6 +200,15 @@ class SelfKnowledgeService:
                 r"(?:change|edit|update|rename|move|switch|fix|"
                 r"modification)\b", t)
             ref_text = referent.group(1).strip() if referent else ""
+            if ref_text and not any(
+                    w not in {"the", "that", "last", "recent", "change",
+                              "edit", "update", "rename", "move",
+                              "switch", "fix", "modification",
+                              "correction", "adjustment", "tweak"}
+                    for w in re.findall(r"[a-z0-9]{3,}", ref_text)):
+                # "undo the last change" — the captured referent is all
+                # stopwords, so there's no scope at all; keep it generic.
+                ref_text = ""
             if not ref_text:
                 # Looser referential forms — "undo the correction to
                 # the editor" names a target without the `X change`
