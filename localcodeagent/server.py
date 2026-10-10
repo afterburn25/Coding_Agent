@@ -3336,6 +3336,9 @@ class AppState:
         # Peer-intelligence hook — stuck missions may open peer
         # consults; external_wait nodes poll consult state through it.
         sup.social = self.social
+        # Learning governor — internal:learning_consolidate missions run
+        # the experience→procedure→skill-promotion compaction cycle.
+        sup.learning = self.learning
         try:
             if not any(s.get("name") == "social-heartbeat"
                        for s in sup.scheduler.list()):
@@ -3368,6 +3371,28 @@ class AppState:
                         "kind": "mission",
                         "objective": "internal:epistemic_step",
                         "title": "Epistemic learning step",
+                        "priority": "low",
+                        "scope": "one_shot",
+                        "autonomy_profile": "local_autonomous",
+                    },
+                    created_by="system")
+        except Exception:
+            pass
+        # Learning consolidation — lessons cluster into procedure
+        # candidates and eligible ones stage as skill proposals on a
+        # fixed cadence so the loop runs even when nobody calls
+        # /consolidate manually. Low priority: chat always wins.
+        try:
+            if not any(s.get("name") == "learning-consolidate"
+                       for s in sup.scheduler.list()):
+                sup.scheduler.add(
+                    "learning-consolidate", "interval",
+                    interval_s=max(600.0, float(getattr(
+                        config, "learning_consolidate_minutes", 30)) * 60.0),
+                    action={
+                        "kind": "mission",
+                        "objective": "internal:learning_consolidate",
+                        "title": "Learning consolidation",
                         "priority": "low",
                         "scope": "one_shot",
                         "autonomy_profile": "local_autonomous",
@@ -3862,6 +3887,7 @@ class AppState:
             conversation_memory=self.conversation_memory,
             locked_vault=self.nexus_brain,
             activity_source=lambda n: self.tasks.recent(n),
+            procedures=self.learning.procedures,
             mission_planner=self.autonomy.planner,
             mission_store=self.autonomy.missions,
             tool_router=self.tool_router,
@@ -8667,6 +8693,33 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 ok = self.state.skills.remove(name)
                 self._json({"ok": ok}, 404 if not ok else 200)
+            return True
+        if path in ("/api/skills/proposals/approve",
+                    "/api/skills/proposals/reject"):
+            # Learned-skill lifecycle — promotion engine stages proposals;
+            # these endpoints are the explicit user decision point.
+            cid = str(body.get("id") or "")
+            action = "approve" if path.endswith("/approve") else "reject"
+            promo = getattr(self.learning, "skill_promotion", None)
+            if promo is None:
+                self._json({"ok": False, "error": "no promotion engine"}, 404)
+                return True
+            gate = self.state._permission_gate(
+                "skills.manage", bool(body.get("approve", False)),
+                f"skill proposal {action}:{cid}")
+            if gate is not None:
+                gate["action"] = action
+                gate["proposal"] = cid
+                self._json(gate)
+                return True
+            if action == "approve":
+                staging = self.state.skills.user_dir / "_generated"
+                out = promo.approve(cid, staging)
+            else:
+                out = promo.reject(cid)
+                if out is None:
+                    out = {"ok": False, "error": "no such proposal"}
+            self._json(out, 400 if not out.get("ok") else 200)
             return True
         if path == "/api/knowledge/entity" and self.state.knowledge:
             self._json(self.state.knowledge.add_entity(

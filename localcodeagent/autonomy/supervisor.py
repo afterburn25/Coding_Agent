@@ -2935,6 +2935,16 @@ class AutonomousSupervisor:
                 return run_light_maintenance(self.workspace, self.store)
             except Exception as exc:
                 return {"ok": False, "output": f"maintenance: {exc}"}
+        if instr.startswith("internal:learning_consolidate"):
+            gov = getattr(self, "learning", None)
+            if gov is None or not callable(getattr(gov, "consolidate", None)):
+                return {"ok": True,
+                        "output": "learning consolidate: no governor wired"}
+            try:
+                out = gov.consolidate() or {}
+                return {"ok": True, "output": json.dumps(out)[:800]}
+            except Exception as exc:
+                return {"ok": False, "output": f"learning consolidate: {exc}"}
         if instr.startswith("internal:social_heartbeat"):
             hb = getattr(self, "social_heartbeat", None)
             if not callable(hb):

@@ -159,7 +159,21 @@ class LearningGovernor:
 
     def consolidate(self, budget: ConsolidationBudget | None = None) -> dict:
         report = self.consolidator.run(budget)
-        return report.as_dict()
+        out = report.as_dict()
+        # Auto-stage skill proposals for verified, repeatedly-successful
+        # procedures. propose() is idempotent per pending procedure and
+        # promotion still requires explicit user approval — staging just
+        # keeps the /api/learning pending list current.
+        staged = 0
+        try:
+            for p in self.skill_promotion.eligible():
+                if self.skill_promotion.propose(str(p.get("id") or "")):
+                    staged += 1
+        except Exception:
+            pass
+        out["skill_proposals_staged"] = staged
+        out["skill_proposals_pending"] = len(self.skill_promotion.pending())
+        return out
 
     # -- competency / planning -------------------------------------------------
 

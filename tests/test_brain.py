@@ -238,6 +238,27 @@ class HippocampusTests(unittest.TestCase):
         self.assertGreater(res.entries[0].confidence, 0.6)
 
 
+    def test_governor_procedures_surface_in_recall(self):
+        # The learning governor's ProceduralMemory is the store that
+        # consolidation promotes into — recall must merge its matches so
+        # learned procedures reach task-time routing.
+        from localcodeagent.learning.procedures import ProceduralMemory
+        procs = ProceduralMemory(Path(self.tmp.name) / "procs.json")
+        p = procs.add("rebuild-widget",
+                      problem_signature="rebuild widget pipeline",
+                      steps=["clean", "build"])
+        procs.record_outcome(p["id"], "success")
+        h = self._hipp(procedures=procs)
+        res = h.recall("rebuild widget", kinds={"procedural"},
+                       project_id="p")
+        self.assertTrue(any(e.provenance == "learning_procedures"
+                            for e in res.entries))
+        # No match → governor contributes nothing (doesn't spam recall)
+        res2 = h.recall("unrelated subject", kinds={"procedural"},
+                        project_id="p")
+        self.assertFalse(any(e.provenance == "learning_procedures"
+                             for e in res2.entries))
+
     def test_project_facts_namespaced(self):
         h = self._hipp()
         h.learn_project_fact("proj-a", "build_cmd", "build.py",

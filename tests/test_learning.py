@@ -550,6 +550,31 @@ class GovernorTests(unittest.TestCase):
                     "competencies", "study", "mastery", "priorities"):
             self.assertIn(key, s)
 
+    def test_consolidate_stages_pending_skill_proposals(self):
+        # A verified procedure with enough successes becomes eligible —
+        # consolidate auto-stages the proposal so /api/learning surfaces
+        # it for explicit approval.
+        p = self.gov.procedures.add(
+            "repair-widget", problem_signature="widgets:repair widget",
+            steps=["inspect", "repair", "verify"])
+        for _ in range(5):
+            self.gov.procedures.record_outcome(p["id"], "success")
+        self.assertEqual(self.gov.procedures.get(p["id"])["status"],
+                         "verified")
+        out = self.gov.consolidate()
+        self.assertGreaterEqual(out["skill_proposals_staged"], 1)
+        self.assertGreaterEqual(out["skill_proposals_pending"], 1)
+        pending = self.gov.skill_promotion.pending()
+        self.assertEqual(pending[0]["procedure_id"], p["id"])
+        # Idempotent — a second consolidate reuses the pending row.
+        out2 = self.gov.consolidate()
+        self.assertEqual(len(self.gov.skill_promotion.pending()), 1)
+
+    def test_consolidate_no_eligible_stages_nothing(self):
+        out = self.gov.consolidate()
+        self.assertEqual(out["skill_proposals_staged"], 0)
+        self.assertEqual(out["skill_proposals_pending"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
