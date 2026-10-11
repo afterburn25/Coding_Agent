@@ -3733,9 +3733,10 @@ class AgentOrchestrator:
     # are set for 4' over zero rows.
     _REMINDER_NOUNADJ_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:daily|weekly|monthly|nightly|hourly|weekdays?|"
+        r"(?P<adj>daily|weekly|monthly|nightly|hourly|weekdays?|"
         r"weekends?|workdays?|morning|afternoon|evening|night|"
-        r"tomorrow|tonight)\s+"
+        r"tomorrow|tonight|biweekly|bimonthly|fortnightly|"
+        r"semi-?weekly|semi-?monthly)\s+"
         r"(?P<noun>reminders?|alarms?|timers?)\b"
         r"(?:\s+(?P<tail>.+?))?" + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -3834,7 +3835,8 @@ class AgentOrchestrator:
         r"\d|morning|afternoon|evening|night|noon|midnight|tomorrow|"
         r"tonight|today|next|mon|tue|wed|thu|fri|sat|sun|week|minute|"
         r"hour|day|am\b|pm\b|later|soon|eventually|sometime|in\s+a\s+"
-        r"(?:bit|while|moment|sec)", re.IGNORECASE)
+        r"(?:bit|while|moment|sec)|in\s+advance|ahead\s+of\s+time|"
+        r"beforehand", re.IGNORECASE)
     _REMINDER_EVENTISH_RE = re.compile(
         r"\b(?:when|once|if|as\s+soon\s+as|after|before|until|"
         r"whenever|every\s+time)\b", re.IGNORECASE)
@@ -4838,6 +4840,20 @@ class AgentOrchestrator:
                     when_d = task_d
                 task_d = ""
             cand = dur or when_d
+            adj = str(md.groupdict().get("adj") or "").lower().strip()
+            if not cand and adj:
+                # 'weekday reminders' / 'biweekly reminder' — the
+                # leading adjective is the cadence, not decoration.
+                for adj_cand in (adj, "every " + adj.rstrip("s"),
+                                 {"biweekly": "every other week",
+                                  "semiweekly": "every other week",
+                                  "semimonthly": "fortnightly",
+                                  "bimonthly": "every 2 months"}.get(
+                                      adj.replace("-", ""), "")):
+                    if (adj_cand and self._reminder_spec(
+                            adj_cand, time.time()) is not None):
+                        cand = adj_cand
+                        break
             spec = (self._reminder_spec(cand, time.time())
                     if cand else None)
             if spec is None and dur:
@@ -5099,6 +5115,16 @@ class AgentOrchestrator:
                             and self._REMINDER_TIMEISH_RE.search(wtxt)):
                         return self._reminder_finish(
                             f"Sure — remind you to do what {wtxt}?",
+                            user_text, task_id, event_callback)
+                    if self._REMINDER_EVENTISH_RE.search(wtxt):
+                        # 'remind me before the meeting' — an event
+                        # trigger, not a clock; say so rather than
+                        # letting recall answer with trivia.
+                        return self._reminder_finish(
+                            f"I can't watch for a trigger like "
+                            f"“{wtxt}” — reminders need a clock time "
+                            "(“in 30 minutes”, “at 3pm”, "
+                            "“tomorrow at 9”).",
                             user_text, task_id, event_callback)
                     if self._REMINDER_TIMEISH_RE.search(wtxt):
                         # 'wake me up early tomorrow' — timeish but

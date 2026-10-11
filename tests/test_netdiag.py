@@ -2377,7 +2377,8 @@ class TruthGateTests(RecoveryLoopTests):
             # got a model 'set for 4' claim over zero rows.
             n0 = len(sup.scheduler.rows)
             result = agent.run("weekday reminders", mode="auto")
-            self.assertIn("When should", result.content)
+            self.assertIn("do what", result.content)
+            self.assertIn("weekday", result.content)
             self.assertEqual(len(sup.scheduler.rows), n0)
             n0 = len(sup.scheduler.rows)
             result = agent.run("morning alarm at 7", mode="auto")
@@ -2455,6 +2456,33 @@ class TruthGateTests(RecoveryLoopTests):
                 near["at"], time.time() + 300, delta=30)
             self.assertAlmostEqual(
                 far["at"], time.time() + 85800, delta=30)
+            sup.scheduler.rows.clear()
+
+            # Adjective cadences and event triggers — 'biweekly
+            # reminder to call mom' got a model 'set for 14 days'
+            # over zero rows; the adjective IS the cadence.
+            # 'remind me before the meeting' is a trigger ask, not
+            # a recall topic. 'remind me in advance' is timeish.
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("biweekly reminder to call mom",
+                               mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            self.assertEqual(sup.scheduler.rows[-1]["kind"],
+                             "interval")
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("weekday reminders to stretch",
+                               mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(sup.scheduler.rows[-1]["weekday"],
+                             [0, 1, 2, 3, 4])
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("remind me before the meeting",
+                               mode="auto")
+            self.assertIn("trigger", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0)
+            result = agent.run("remind me in advance", mode="auto")
+            self.assertIn("couldn't pin a time", result.content)
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —
