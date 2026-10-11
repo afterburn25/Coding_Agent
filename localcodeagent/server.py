@@ -1109,6 +1109,7 @@ class AppState:
             artifacts=self.artifacts,
             social=lambda: self.social,
             state_db=self.state_db,
+            autonomy=lambda: self.autonomy,
         )
         # The /shutdown /exit /restart commands run the same graceful
         # close as the /api/shutdown endpoint — wired here because the

@@ -1132,6 +1132,55 @@ class TruthGateTests(RecoveryLoopTests):
                 "conv", "proj")
             self.assertIsNone(r)
 
+    def test_reminder_creates_real_schedule(self):
+        # Live: "remind me in 5 minutes to check the build" answered
+        # with stored build facts — no lane owned scheduling asks.
+        # The reminder lane creates a real once-schedule with a notify
+        # action; recall-shaped 'remind me what X' stays with memory.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+
+            def add(self, name, kind, **kw):
+                self.rows.append({"name": name, "kind": kind, **kw})
+                return {"id": "sc-1"}
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            task = agent.tasks.create("x", "auto")
+            r = agent._reminder_reply(
+                "remind me in 5 minutes to check the build",
+                "remind me in 5 minutes to check the build", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("check the build", r.content)
+            self.assertEqual(len(sup.scheduler.rows), 1)
+            row = sup.scheduler.rows[0]
+            self.assertEqual(row["kind"], "once")
+            self.assertEqual(row["action"]["kind"], "notify")
+            self.assertIn("check the build", row["action"]["detail"])
+            self.assertGreater(row["at"], 0)
+            # No-time asks clarify instead of guessing a commitment.
+            r = agent._reminder_reply(
+                "remind me to take out the trash",
+                "remind me to take out the trash", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("when", r.content.lower())
+            # 'remind me what X' is recall, not a schedule.
+            self.assertIsNone(agent._reminder_reply(
+                "remind me what my editor is",
+                "remind me what my editor is", task.id))
+            self.assertEqual(len(sup.scheduler.rows), 1)
+
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of
         # 10 active rules with no indication the set was truncated —

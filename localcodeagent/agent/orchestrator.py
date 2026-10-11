@@ -502,6 +502,7 @@ class AgentOrchestrator:
         artifacts=None,
         social=None,
         state_db=None,
+        autonomy=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -590,6 +591,11 @@ class AgentOrchestrator:
         # Transactional state layer — durable exactly-once operation
         # claims for external side effects (social sends, …).
         self.state_db = state_db
+        # Callable returning the AutonomousSupervisor — lazy because
+        # AppState builds the orchestrator before the supervisor.
+        # Powers the deterministic reminder lane ("remind me in 5
+        # minutes to X" → a real once-schedule with a notify action).
+        self._autonomy = autonomy
         # Requirement-change propagation — AppState wires this to the
         # mission store so a superseded conversation fact flags
         # in-flight mission nodes referencing the stale value.
@@ -3548,6 +3554,123 @@ class AgentOrchestrator:
         low = str(masked_text or "").lower()
         return any(re.search(rf"\b{re.escape(v)}\b", low) for v in verbs)
 
+    _REMINDER_RE = re.compile(
+        r"^\s*(?:please\s+)?remind\s+me\s+"
+        r"(?:(?:in\s+(?P<amt>\d+(?:\.\d+)?)\s*"
+        r"(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?|days?))|"
+        r"(?P<tomorrow>tomorrow(?:\s+(?:morning|afternoon|evening))?)|"
+        r"(?:at\s+(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*"
+        r"(?P<ampm>a\.?\s?m\.?|p\.?\s?m\.?)?))"
+        r"[\s,]*(?:to|about|of|that)\s+(?P<task>.+?)\s*[.!?]?\s*$",
+        re.IGNORECASE)
+    _REMINDER_CLARIFY_RE = re.compile(
+        r"^\s*(?:please\s+)?remind\s+me\s+to\s+(?P<task>.+?)"
+        r"\s*[.!?]?\s*$", re.IGNORECASE)
+
+    def _reminder_at(self, m: re.Match) -> float | None:
+        """Wall-clock timestamp for the matched time phrase."""
+        now = time.time()
+        amt = m.group("amt")
+        if amt:
+            unit = (m.group("unit") or "minutes").lower()
+            secs = (1 if unit.startswith(("sec",)) else
+                    86400 if unit.startswith("day") else
+                    3600 if unit.startswith(("h",)) else 60)
+            return now + float(amt) * secs
+        if m.group("tomorrow"):
+            lt = time.localtime(now + 86400)
+            part = m.group("tomorrow").lower()
+            hour = (9 if "morning" in part else
+                    15 if "afternoon" in part else
+                    19 if "evening" in part else 9)
+            return time.mktime(
+                (lt.tm_year, lt.tm_mon, lt.tm_mday, hour, 0, 0,
+                 -1, -1, -1))
+        hour = int(m.group("hour") or 0)
+        minute = int(m.group("minute") or 0)
+        ampm = re.sub(r"[\s.]", "", (m.group("ampm") or "").lower())
+        if ampm == "pm" and hour < 12:
+            hour += 12
+        elif ampm == "am" and hour == 12:
+            hour = 0
+        lt = time.localtime(now)
+        at = time.mktime(
+            (lt.tm_year, lt.tm_mon, lt.tm_mday, hour, minute, 0,
+             -1, -1, -1))
+        if at <= now:
+            at += 86400
+        return at
+
+    def _reminder_reply(self, user_text: str, plan_text: str,
+                        task_id: str, *, event_callback=None):
+        """'remind me in 5 minutes to X' — a real once-schedule with a
+        notify action through the autonomy scheduler, not a promise.
+        Falls through (None) for 'remind me the tag' recall asks —
+        those belong to memory lanes."""
+        m = self._REMINDER_RE.match(plan_text)
+        clarify = None
+        if m is None:
+            m2 = self._REMINDER_CLARIFY_RE.match(plan_text)
+            if m2 is None:
+                return None
+            # 'remind me to X' with no time — claim and ask rather
+            # than let the model improvise a commitment.
+            clarify = str(m2.group("task") or "").strip()
+        task = (clarify if clarify is not None
+                else str(m.group("task") or "")).strip().rstrip(".")
+        if not task:
+            return None
+        sup = (self._autonomy() if callable(self._autonomy)
+               else self._autonomy)
+        sched = getattr(sup, "scheduler", None)
+        if clarify is not None:
+            text = (f"When should I remind you to {clarify}? — e.g. "
+                    f"“remind me in 10 minutes to {clarify}”.")
+        elif sched is None:
+            text = ("I can't set reminders — the scheduler isn't "
+                    "running in this session.")
+        else:
+            at = self._reminder_at(m)
+            if at is None:
+                return None
+            try:
+                sched.add(
+                    f"reminder: {task[:100]}", "once", at=at,
+                    action={"kind": "notify", "title": "Reminder",
+                            "detail": task},
+                    created_by="user")
+            except Exception as exc:
+                text = f"I couldn't set the reminder ({exc})."
+            else:
+                when = time.strftime("%H:%M", time.localtime(at))
+                if at - time.time() > 20 * 3600:
+                    when = time.strftime(
+                        "%a %H:%M", time.localtime(at))
+                text = (f"Reminder set for {when} — I'll ping you "
+                        f"to {task}.")
+        decision = RoutingDecision(
+            role="utility", model_id="builtin-local",
+            reasons=["reminder lane — no model call"], complexity=0)
+        builtin_event = {
+            "type": "builtin_utility", "model_id": "builtin-local",
+            "role": "utility", "reason": "reminder lane"}
+        self._safe_emit(
+            event_callback, {"type": "model", "event": builtin_event})
+        done = self.tasks.update(
+            task_id, status="completed", phase="done",
+            model_id="builtin-local", model_role="utility",
+            summary=text, final_content=text, steps=0)
+        self._safe_emit(
+            event_callback, {"type": "task", "task": done.as_dict()})
+        if self.conversation_memory is not None:
+            self._record_conversation_exchange(user_text, text)
+        if self.conversation_manager is not None:
+            self.conversation_manager.record_exchange(user_text, text)
+        return AgentResult(
+            content=text, routing=decision,
+            model_events=[builtin_event], steps=0,
+            task=done.as_dict())
+
     def _local_action_reply(self, user_text: str, task_id: str,
                             event_callback=None, env=None):
         """Deterministic computer-task lane — 'create a folder
@@ -3571,6 +3694,16 @@ class AgentOrchestrator:
         plan_text = (frame.masked_case
                      if frame is not None and frame.masked_case
                      else user_text)
+        # Reminders are a bounded local action: 'remind me in 5
+        # minutes to X' → a real once-schedule firing a notification.
+        # Checked before parse_local_action, which has no temporal
+        # grammar — without this the ask fell to the model and it
+        # regurgitated stored facts about the reminder's topic.
+        reminder = self._reminder_reply(
+            user_text, plan_text, task_id,
+            event_callback=event_callback)
+        if reminder is not None:
+            return reminder
         # Compound local actions — "create folder x, then delete y.txt".
         # Every clause must parse: one unparseable clause hands the WHOLE
         # turn to the model lane (never partially executed on a guess).
