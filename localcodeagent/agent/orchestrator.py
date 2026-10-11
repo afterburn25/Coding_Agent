@@ -3981,6 +3981,28 @@ class AgentOrchestrator:
                 text += " noon midday"
             elif clock == (0, 0):
                 text += " midnight"
+        # Date-relative scope — 'any reminders for tomorrow' resolves
+        # rows whose next fire lands on that date; weekday names
+        # follow the fire day too, not just the weekly spec.
+        fire = s.get("next_run") or s.get("at")
+        try:
+            ft = time.localtime(float(fire)) if fire else None
+        except (TypeError, ValueError):
+            ft = None
+        if ft is not None:
+            nowt = time.localtime()
+            day0 = time.mktime(
+                (nowt.tm_year, nowt.tm_mon, nowt.tm_mday,
+                 0, 0, 0, 0, 0, -1))
+            fday0 = time.mktime(
+                (ft.tm_year, ft.tm_mon, ft.tm_mday,
+                 0, 0, 0, 0, 0, -1))
+            delta = int(round((fday0 - day0) / 86400))
+            text += " " + days[ft.tm_wday]
+            if delta == 0:
+                text += " today tonight"
+            elif delta == 1:
+                text += " tomorrow"
         return set(re.findall(r"[a-z0-9']+", text.lower()))
 
     def _reminder_when_text(self, s: dict, now: float) -> str:

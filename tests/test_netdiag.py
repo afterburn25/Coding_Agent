@@ -1872,6 +1872,13 @@ class TruthGateTests(RecoveryLoopTests):
                 at=row_at, action={"kind": "notify",
                                   "detail": "check the oven"})
             oven_row = sup.scheduler.rows[-1]
+            # Date-relative scope — 'any reminders for tomorrow'
+            # resolves rows by next fire date, not literal text.
+            # Live it echoed 'No reminder about "tomorrow"' while a
+            # tomorrow-dated row sat in the pool.
+            result = agent.run("any reminders for tomorrow",
+                               mode="auto")
+            self.assertIn("check the oven", result.content)
             result = agent.run("push the 3pm reminder to 10pm",
                                mode="auto")
             self.assertIn("Snoozed", result.content)
