@@ -745,11 +745,21 @@ class ConversationMemory:
         # Embedded interrogative/relative clauses are commands in
         # disguise — "go back to what we were talking about" parses a
         # 'were' declarative with 'what we' inside the subject.
-        return not re.search(
-            r"\b(?:what|which|who|whom|whose|why|how|when|where)\s+"
-            r"(?:i|we|you|they|he|she|it)\b"
-            r"|\bthat\s+(?:i|we|you|they|he|she|it)\b",
-            subj, flags=re.IGNORECASE)
+        if re.search(
+                r"\b(?:what|which|who|whom|whose|why|how|when|where)\s+"
+                r"(?:i|we|you|they|he|she|it)\b"
+                r"|\bthat\s+(?:i|we|you|they|he|she|it)\b",
+                subj, flags=re.IGNORECASE):
+            return False
+        # A wh-word as the subject's LAST token is the same inversion
+        # one token earlier — "hmm what was my editor" parses subj
+        # 'hmm what' + 'was' and would bank the question verbatim.
+        # Mid-subject names ('the who concert') stay legal.
+        last = subj.strip().split()[-1].casefold()
+        if last in {"what", "which", "who", "whom", "whose", "why",
+                    "when", "where", "how"}:
+            return False
+        return True
 
     @staticmethod
     def _fact_slot(text: str) -> str:
@@ -1218,7 +1228,8 @@ class ConversationMemory:
             r"note\s+(?:that|this)|note|quick\s+note|"
             r"for\s+the\s+record|just\s+so\s+you\s+know|"
             r"no|wait|sorry|nm|never\s*mind|scratch\s+that|"
-            r"on\s+second\s+thought|i\s+mean(?:t)?)[,:\s]+)+",
+            r"on\s+second\s+thought|i\s+mean(?:t)?|"
+            r"hmm+|hm+|um+|uh+|er+|erm+|ah+|oh)[,:\s]+)+",
             "", raw, flags=re.IGNORECASE)
         # Confirmation tags — "the api keys rotate monthly, right?" —
         # ask for agreement; they aren't part of the stated value.

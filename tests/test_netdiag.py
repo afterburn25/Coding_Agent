@@ -752,6 +752,24 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNone(agent._single_fact_recall_reply(
                 "i forgot the deadline", "conv", "proj"))
 
+    def test_filler_sounds_never_pollute_banked_facts(self):
+        # "hmm the port is 8080" used to bank 'hmm the port is 8080'
+        # verbatim — filler syllables leaked into stored text. And
+        # "hmm what was my editor" banked the QUESTION as a fact
+        # ('hmm what' parsed as the subject of 'was').
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            r = cm.learn_from_user("hmm the port is 8080")
+            self.assertEqual(r["facts"], ["port is 8080"])
+            r = cm.learn_from_user("uh my editor is vim")
+            self.assertEqual(r["facts"], ["my editor is vim"])
+            for q in ("hmm what was my editor",
+                      "um what is the port",
+                      "hmm what was my editor again"):
+                self.assertEqual(cm.learn_from_user(q)["facts"], [], q)
+
     def test_port_probe_is_answer_type_slot(self):
         # "which port is prod on" — 'port' names the answer's type, not
         # the entity; the stored fact is 'prod api is on 443' and never

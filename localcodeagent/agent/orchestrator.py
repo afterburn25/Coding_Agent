@@ -2598,6 +2598,17 @@ class AgentOrchestrator:
         match_text = (frame.masked_case
                       if frame is not None and frame.masked_case
                       else text)
+        # Leading discourse particles ("hey what's the queue depth")
+        # aren't part of the ask — the frame layer already strips them
+        # for act detection; the recall regex is anchored, so strip the
+        # same shared vocabulary here before matching.
+        try:
+            from ..context.semantics import _strip_discourse_prefix
+            stripped = _strip_discourse_prefix(match_text)
+            if stripped:
+                match_text = stripped
+        except Exception:
+            pass
         if (self.conversation_memory is None
                 or self._FACT_RECALL_SKIP_RE.search(match_text)):
             return None
