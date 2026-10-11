@@ -392,6 +392,7 @@ _ACTION_LEAD_RE = re.compile(
     r"(?:hey|ok|okay|yo|hi|hello)\s+\w+[,!]?\s+)*(?:"
     r"create|make|write|edit|fix|delete|remove|add|build|rebuild|run|"
     r"execute|update|upgrade|install|uninstall|download|upload|open|"
+    r"mkdir|rmdir|rm|touch|"
     r"close|move|copy|rename|push|pull|commit|deploy|save|start|stop|"
     r"restart|kill|set|turn|mute|unmute|pause|resume|enable|disable|"
     r"connect|disconnect|check|show|list|give|put|get|fetch|grab|"
@@ -489,6 +490,7 @@ _EMBEDDED_PROHIBITION_RE = re.compile(
 _EXEC_TOPIC_RE = (
     r"\b(?:create|make|write|edit|fix|delete|remove|add|build|rebuild|"
     r"run|execute|update|upgrade|install|uninstall|download|upload|"
+    r"mkdir|rmdir|rm|touch|"
     r"open|close|move|copy|rename|push|pull|commit|deploy|save|start|"
     r"stop|restart|kill|set|turn|mute|unmute|pause|resume|enable|"
     r"disable|connect|disconnect|generate|draw|paint|render|search|"

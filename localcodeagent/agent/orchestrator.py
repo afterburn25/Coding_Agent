@@ -3121,6 +3121,31 @@ class AgentOrchestrator:
             sem, genome, ctx, intent="state_recall",
             canonical=canonical)
 
+    # Plan-kind → the imperative aliases that could have produced it.
+    # A re-parse on unmasked text is accepted only when one of these
+    # verbs survives outside the quoted spans — proving the command
+    # itself wasn't the quoted/discussed text.
+    _PLAN_KIND_VERBS = {
+        "mkdir": {"create", "make", "new", "mkdir"},
+        "write": {"write", "save", "create", "make", "touch"},
+        "delete": {"delete", "remove", "erase", "rm", "rmdir"},
+        "move": {"move"},
+        "rename": {"rename"},
+        "copy": {"copy", "duplicate"},
+        "archive": {"archive", "zip", "compress"},
+        "extract": {"extract", "unzip", "unarchive"},
+    }
+
+    @staticmethod
+    def _plan_verb_visible(plan, masked_text: str) -> bool:
+        verbs = AgentOrchestrator._PLAN_KIND_VERBS.get(
+            getattr(plan, "kind", ""))
+        if not verbs:
+            head = str(getattr(plan, "action_text", "")).split()[:1]
+            verbs = {head[0].lower()} if head else set()
+        low = str(masked_text or "").lower()
+        return any(re.search(rf"\b{re.escape(v)}\b", low) for v in verbs)
+
     def _local_action_reply(self, user_text: str, task_id: str,
                             event_callback=None, env=None):
         """Deterministic computer-task lane — 'create a folder
@@ -3174,6 +3199,26 @@ class AgentOrchestrator:
                 extra_roots=self.tools.context.get("extra_roots"))
         except Exception:
             return None
+        if (plan is None or getattr(plan, "clarify", None)) \
+                and frame is not None and frame.quoted_spans \
+                and plan_text != user_text:
+            # A masked quoted span may have been the action's payload or
+            # target — 'write "hello" to note.txt', "delete 'junk.txt'"
+            # — not discussed text. Re-parse the unmasked utterance and
+            # accept the plan only when its action verb survives outside
+            # the quotes: 'the note says "delete x"' keeps 'delete'
+            # inside the quote, so the masked text holds no delete verb.
+            try:
+                raw_plan = parse_local_action(
+                    user_text,
+                    workspace=self.checkpoints.workspace,
+                    extra_roots=self.tools.context.get("extra_roots"))
+            except Exception:
+                raw_plan = None
+            if raw_plan is not None and not getattr(
+                    raw_plan, "clarify", None) and self._plan_verb_visible(
+                        raw_plan, plan_text):
+                plan = raw_plan
         if plan is None:
             return None
         outcome = execute_plan(
