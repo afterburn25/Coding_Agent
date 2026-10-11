@@ -7,17 +7,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
-    # Identify the root cause
-    root_cause = None
-    
-    # Analyze the error lines for the root cause
-    for li in error_lines:
-        if "capacity restoration" in li:
-            root_cause = li
-            break
-    
-    # Return the diagnosis
-    return {
         "root_cause": root_cause,
         "suggestion": "Fix the capacity restoration logic in the code to ensure it properly handles capacity changes and allows the system to speak when needed."}
