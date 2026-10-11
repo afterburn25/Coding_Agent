@@ -155,6 +155,10 @@ def register_document_tools(registry: ToolRegistry, workspace: Path, *, jobs=Non
             return "ERROR: input must exist inside the workspace"
         if dst is None:
             return "ERROR: output must stay inside the workspace"
+        from . import gitguard
+        block = gitguard.mission_fs_write_block(registry, dst)
+        if block:
+            return f"ERROR: {block}"
         pargs: list[str] = []
         if args.get("from"):
             pargs += ["-f", str(args["from"])]

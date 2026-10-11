@@ -174,7 +174,8 @@ class UserDownloadManager:
     def start(self, url: str, dest: str = "", *,
               sha256: str = "", expected_size: int = 0,
               headers: dict | None = None,
-              artifact: dict | None = None) -> dict[str, Any]:
+              artifact: dict | None = None,
+              write_guard=None) -> dict[str, Any]:
         try:
             url = _safe_url(url)
         except ValueError as exc:
@@ -183,6 +184,15 @@ class UserDownloadManager:
             target = self._resolve_dest(str(dest or ""), url)
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
+        if callable(write_guard):
+            # Mission boundary — downloads may only land inside the
+            # mission's own workspace.
+            try:
+                blocked = write_guard(target)
+            except Exception:
+                blocked = None
+            if blocked:
+                return {"ok": False, "error": str(blocked)}
 
         # Dedupe: a verified matching artifact is the download already done.
         if target.is_file():
@@ -952,6 +962,7 @@ def register_download_tools(registry, downloads: "UserDownloadManager") -> None:
     resume, hash verification, and cancel. All HTTP(S)-only."""
     import json as _json
     from .base import ToolSpec
+    from .gitguard import mission_fs_write_block
 
     def _cap(fn):
         def inner(args):
@@ -972,7 +983,8 @@ def register_download_tools(registry, downloads: "UserDownloadManager") -> None:
         _cap(lambda a: downloads.start(
             str(a.get("url") or ""), str(a.get("dest") or ""),
             sha256=str(a.get("sha256") or ""),
-            expected_size=int(a.get("expected_size") or 0))),
+            expected_size=int(a.get("expected_size") or 0),
+            write_guard=lambda p: mission_fs_write_block(registry, p))),
         category="utilities", capabilities=["download", "network"]))
 
     registry.register(ToolSpec(
