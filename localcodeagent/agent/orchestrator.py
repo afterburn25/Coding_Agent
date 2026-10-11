@@ -4194,7 +4194,8 @@ class AgentOrchestrator:
                     re.sub(r"\b(?:what|which|when|does|do|is|are|have|"
                            r"has|any|go|goes|going|off|fire|fires|"
                            r"firing|set|the|a|an|my|that|next|time|"
-                           r"day|date|hour)\b", " ",
+                           r"day|date|hour|i|me|we|you|your|got|"
+                           r"still|really|actually)\b", " ",
                            tm.group(1), flags=re.IGNORECASE).lower()))
         when_ask = bool(re.match(
             r"\s*(?:when|what\s+time)\b", plan_text, re.IGNORECASE))
