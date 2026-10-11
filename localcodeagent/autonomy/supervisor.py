@@ -3018,6 +3018,7 @@ class AutonomousSupervisor:
                 return {"ok": True,
                         "output": "epistemic step: no social service"}
             try:
+                mission_id = str(mission.get("id") or "")
                 meta = node.get("metadata") or {}
                 granted = meta.get("approval_granted") or {}
                 parked_cid = str(meta.get("parked_consult") or "")

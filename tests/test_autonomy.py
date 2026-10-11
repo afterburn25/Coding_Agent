@@ -3250,5 +3250,31 @@ class LearningConsolidateInternalTests(unittest.TestCase):
             sup.stop()
 
 
+class EpistemicStepInternalTests(unittest.TestCase):
+    def test_epistemic_step_reaches_social_service(self):
+        # Live: the epistemic branch referenced an undefined
+        # 'mission_id' — every node failed with NameError and retried
+        # for ~24h before a diagnose-failure node surfaced it. A
+        # working social service must actually be invoked.
+        class _Social:
+            def __init__(self):
+                self.calls = []
+
+            def epistemic_step(self, **kw):
+                self.calls.append(kw)
+                return {"ok": True, "unit": "journal"}
+
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            sup.social = _Social()
+            res = sup._default_internal(
+                {"id": "m-test"},
+                {"instruction": "internal:epistemic_step"})
+            self.assertTrue(res["ok"], res)
+            self.assertTrue(sup.social.calls)
+            self.assertNotIn("mission_id", res.get("output") or "")
+            sup.stop()
+
+
 if __name__ == "__main__":
     unittest.main()
