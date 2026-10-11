@@ -294,3 +294,38 @@ def last_experience(store, conversation_id: str) -> dict[str, Any] | None:
         " ORDER BY ts DESC LIMIT 1",
         (conversation_id,),
     )
+
+
+def matching_experience(store, conversation_id: str,
+                        correction_text: str) -> dict[str, Any] | None:
+    """The experience a correction actually refers to. A bare "that's
+    wrong" resolves to the last exchange; a correction carrying its own
+    topic ("actually my editor is neovim") must bind to the experience
+    that shares its terms — never the most recent unrelated question
+    (a 'my editor is X' correction banked under 'what have you seen
+    lately' poisons that question forever)."""
+    last = last_experience(store, conversation_id)
+    try:
+        from ..workflow.conversation_memory import ConversationMemory
+        terms = ConversationMemory._content_terms(correction_text)
+    except Exception:
+        terms = set()
+    if not terms:
+        return last
+    rows = store.query(
+        "SELECT * FROM experiences WHERE conversation_id=? AND "
+        "suppressed=0 ORDER BY ts DESC LIMIT 12",
+        (conversation_id,),
+    ) or []
+    try:
+        from ..workflow.conversation_memory import ConversationMemory
+        for row in rows:
+            q_terms = ConversationMemory._content_terms(
+                str(row.get("raw_question") or ""))
+            if terms & q_terms:
+                return row
+    except Exception:
+        pass
+    # No topical antecedent — the correction names its own subject, so
+    # bank it self-keyed rather than under an unrelated question.
+    return None

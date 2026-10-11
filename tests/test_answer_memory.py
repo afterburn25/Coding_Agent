@@ -250,6 +250,40 @@ class LearningAndCorrectionTests(unittest.TestCase):
             self.assertIn("Juggernaut", row["answer_text"])
             am.store.close()
 
+    def test_correction_binds_to_topical_experience_not_latest(self):
+        # Live: "actually my editor is neovim not vscode" banked the
+        # correction under the LAST asked question ("what have you seen
+        # happening"), so that question started replaying "my editor is
+        # neovim". A topic-bearing correction must bind to the
+        # experience sharing its terms — and a correction with no
+        # topical antecedent must not poison an unrelated question.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            am.record_exchange("what is my editor",
+                               "your editor is vscode",
+                               conversation_id="c1")
+            am.record_exchange("what have you seen happening",
+                               "nothing unusual",
+                               conversation_id="c1")
+            am.mark_incorrect(
+                correction="actually my editor is neovim not vscode",
+                conversation_id="c1")
+            # The topical binding corrected the editor answer…
+            row = am.store.query_one(
+                "SELECT * FROM answers WHERE invalidated=0 AND "
+                "canonical_question LIKE '%editor%'")
+            self.assertIsNotNone(row)
+            self.assertIn("neovim", row["answer_text"])
+            # …and the unrelated question keeps its own answer — the
+            # correction never landed under its key.
+            row = am.store.query_one(
+                "SELECT * FROM answers WHERE invalidated=0 AND "
+                "canonical_question LIKE '%seen happening%'")
+            self.assertIsNotNone(row)
+            self.assertNotIn("neovim", row["answer_text"])
+            self.assertNotIn("editor", row["answer_text"])
+            am.store.close()
+
     def test_mark_incorrect_then_relearn(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             am = _mem(td)
