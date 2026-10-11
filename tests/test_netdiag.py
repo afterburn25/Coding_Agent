@@ -2410,6 +2410,25 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertFalse(sup.scheduler.rows)
             sup.scheduler.rows.clear()
 
+            # Pool-scoped reschedule — 'reschedule everything to
+            # tomorrow' got a model 'no access to your calendar'
+            # refusal; single-row binds, multi-row asks which.
+            sup.scheduler.add(
+                "reminder: pool1", "once",
+                at=time.time() + 3600,
+                action={"kind": "notify", "detail": "pool1"})
+            result = agent.run("reschedule everything to tomorrow",
+                               mode="auto")
+            self.assertIn("Rescheduled", result.content)
+            sup.scheduler.add(
+                "reminder: pool2", "once",
+                at=time.time() + 7200,
+                action={"kind": "notify", "detail": "pool2"})
+            result = agent.run("reschedule everything to 9am",
+                               mode="auto")
+            self.assertIn("matches 2", result.content)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

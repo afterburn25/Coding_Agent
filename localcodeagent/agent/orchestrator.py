@@ -3806,7 +3806,7 @@ class AgentOrchestrator:
         r"(?:reschedule|move|change)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?|schedules?|"
-        r"it|that|this|them)\b"
+        r"it|that|this|them|everything|all)\b"
         + _REMINDER_ECHO +
         r"\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?)"
         + _REMINDER_TRAIL,
