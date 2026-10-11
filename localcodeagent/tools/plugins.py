@@ -388,7 +388,8 @@ def _substitute(template: list[str], arguments: dict[str, Any]) -> list[str]:
 
 
 def _make_invoker(manifest: PluginManifest, *, workspace: Path | None,
-                  default_timeout: int, install_root: Path | None = None):
+                  default_timeout: int, install_root: Path | None = None,
+                  registry=None):
     invoke = manifest.invoke or {}
     template = [str(x) for x in invoke.get("command") or []]
     if not template:
@@ -401,6 +402,16 @@ def _make_invoker(manifest: PluginManifest, *, workspace: Path | None,
         if cmd:
             cmd[0] = resolve_executable(cmd[0], install_root, manifest.id,
                                         extra_dirs=manifest.extra_executable_dirs(install_root))
+        if cmd and registry is not None:
+            # Manifest argv can place agent args anywhere ("git {op}",
+            # "sh -c {cmd}") — scan the joined command for git/gh
+            # mutations like every other spawn lane.
+            from .gitguard import autonomous_git_block
+            cwd = Path(workspace) if workspace else Path.cwd()
+            block = autonomous_git_block(
+                registry, " ".join(cmd), cwd, cwd)
+            if block:
+                return block
         stdin_data = str(arguments.get(stdin_key, "")) if stdin_key else None
         started = time.time()
         try:
@@ -485,7 +496,8 @@ def load_plugin_manifests(
 
         invoker = _make_invoker(manifest, workspace=workspace,
                                 default_timeout=default_timeout,
-                                install_root=install_root)
+                                install_root=install_root,
+                                registry=registry)
         install_status = "installed" if manifest.is_installed(install_root) else "missing"
         # Invokers spawn a subprocess — the effective gate must reflect that.
         # Manifests may declare a stricter dedicated key (e.g. docker.access);
