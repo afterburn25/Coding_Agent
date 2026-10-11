@@ -809,6 +809,38 @@ class AbandonTests(unittest.TestCase):
             coord.tick()
             self.assertEqual(coord.get(inc["id"])["state"], "abandoned")
 
+    def test_sweep_retires_stale_and_orphan_worktrees(self):
+        # A needs_human candidate keeps its worktree for the inspection
+        # window, then the sweep retires it; orphan dirs with no
+        # incident row are always swept. Live incidents are untouched.
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo, patch_generator=good_generator,
+                               auto_promote=False)
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            inc2 = coord.get(inc["id"])
+            self.assertEqual(inc2["state"], "needs_human")
+            wt = Path(inc2["worktree"])
+            self.assertTrue(wt.is_dir())
+
+            orphan = repo / ".repair-worktrees" / "ri-orphaned00"
+            orphan.mkdir(parents=True)
+            # First sweep: the orphan goes immediately (no incident
+            # row), the needs_human candidate keeps its window.
+            coord.tick()
+            self.assertTrue(wt.is_dir())
+            self.assertFalse(orphan.exists())
+
+            # Age the incident past the stale bound and re-tick.
+            inc2["updated_at"] = 0.0
+            coord._last_wt_sweep = 0.0
+            coord.tick()
+            self.assertFalse(wt.exists())
+            # The record survives — the sandbox, not the evidence.
+            self.assertEqual(coord.get(inc["id"])["state"], "needs_human")
+            self.assertFalse(coord.get(inc["id"]).get("worktree"))
+
 
 class WorktreeLossTests(unittest.TestCase):
     """A persisted incident can outlive its scratch worktree (restart,

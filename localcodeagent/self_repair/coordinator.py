@@ -764,8 +764,7 @@ class SelfRepairCoordinator:
             f"Self-repair resolved: {inc['error_class']}",
             f"{inc['subsystem']} · {inc['repair_kind']} · "
             f"confidence {inc['confidence']:.0%}")
-        if inc.get("worktree"):
-            self.patcher.cleanup(Path(inc["worktree"]), inc["id"])
+        self._cleanup_worktree(inc)
         self._save()
         return ""
 
@@ -818,10 +817,73 @@ class SelfRepairCoordinator:
     # and its repair mission retires via the supervisor check.
     STALE_INCIDENT_S = 3 * 86400.0
 
+    # Worktree hygiene runs at most once an hour — cleanup shells out
+    # to git, and tick() is frequent.
+    _WT_SWEEP_S = 3600.0
+
+    def _cleanup_worktree(self, inc: dict) -> None:
+        """Free the incident's candidate worktree + repair branch.
+        Idempotent; never blocks a state transition on a cleanup
+        failure."""
+        wt = inc.get("worktree")
+        if not wt:
+            return
+        try:
+            self.patcher.cleanup(Path(wt), inc["id"])
+        except Exception:
+            pass
+        inc["worktree"] = ""
+
+    def _sweep_worktrees(self, now: float) -> None:
+        """Retire worktrees that outlived their incident.
+
+        A live incident keeps its sandbox; a terminal one (resolved,
+        abandoned, rolled_back) should already have released it —
+        belt-and-suspenders here. A needs_human incident keeps the
+        candidate for the inspection window (STALE_INCIDENT_S), then
+        the worktree retires while the record stays. Directories with
+        no incident row at all (mission cancelled across restarts,
+        pruned history) are always orphans.
+        """
+        if now - getattr(self, "_last_wt_sweep", 0.0) < self._WT_SWEEP_S:
+            return
+        self._last_wt_sweep = now
+        base = self.repo_root / ".repair-worktrees"
+        try:
+            dirs = ([d for d in base.iterdir() if d.is_dir()]
+                    if base.is_dir() else [])
+        except OSError:
+            return
+        if not dirs:
+            return
+        by_id = {str(r.get("id")): r for r in self._rows()}
+        dirty = False
+        for d in dirs:
+            inc = by_id.get(d.name)
+            if inc is not None:
+                state = str(inc.get("state"))
+                if state in OPEN_REPAIR_STATES \
+                        and state != "needs_human":
+                    continue
+                if state == "needs_human" and (
+                        now - float(inc.get("updated_at") or 0.0)
+                        < self.STALE_INCIDENT_S):
+                    continue
+            try:
+                self.patcher.cleanup(d, d.name)
+            except Exception:
+                continue
+            if inc is not None and inc.get("worktree"):
+                inc["worktree"] = ""
+                dirty = True
+        if dirty:
+            self._save()
+
     def tick(self, now: float | None = None) -> None:
         """Bounded supervisor-tick step: each open incident advances at
         most one stage so a heavy repair cannot stall the supervisor."""
         now = time.time() if now is None else now
+        self._sweep_worktrees(now)
         with self._lock:
             due = [dict(r) for r in self._rows()
                    if r.get("state") in OPEN_REPAIR_STATES
@@ -832,6 +894,7 @@ class SelfRepairCoordinator:
                 continue
             if (now - float(inc.get("updated_at") or 0.0)
                     > self.STALE_INCIDENT_S):
+                self._cleanup_worktree(inc)
                 self._set(inc, "abandoned",
                           "stale — no progress in "
                           f"{int(self.STALE_INCIDENT_S // 86400)}d")
@@ -876,13 +939,7 @@ class SelfRepairCoordinator:
         result = self.rollback.restore(incident_id)
         if result.get("ok"):
             # The candidate is dead — its worktree/branch must not linger.
-            wt = inc.get("worktree")
-            if wt:
-                try:
-                    self.patcher.cleanup(Path(wt), inc["id"])
-                except Exception:
-                    pass
-                inc["worktree"] = ""
+            self._cleanup_worktree(inc)
             self._set(inc, "rolled_back", "manual rollback")
         return result
 
@@ -895,12 +952,6 @@ class SelfRepairCoordinator:
         state = str(inc.get("state"))
         if state in {"resolved", "rolled_back", "abandoned"}:
             return {"ok": False, "error": f"incident already {state}"}
-        wt = inc.get("worktree")
-        if wt:
-            try:
-                self.patcher.cleanup(Path(wt), inc["id"])
-            except Exception:
-                pass
-            inc["worktree"] = ""
+        self._cleanup_worktree(inc)
         self._set(inc, "abandoned", "closed by user — no repair applied")
         return {"ok": True}
