@@ -4804,7 +4804,8 @@ class AppState:
                        r"timers?)\b", low)
                 and re.search(
                     r"\b(?:what|which|list|show|any|are\s+there|"
-                    r"do\s+you\s+have|how\s+many|running|active)\b", low)
+                    r"do\s+you\s+have|do\s+i\s+have|have\s+i\s+got|"
+                    r"how\s+many|running|active)\b", low)
                 and not re.search(
                     r"\b(?:stop|cancel|pause|resume|create|make|start|"
                     r"run|every|each|daily|weekly|hourly)\b", low))

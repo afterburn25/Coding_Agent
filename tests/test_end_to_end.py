@@ -1435,7 +1435,10 @@ class AutonomyApiTests(unittest.TestCase):
                 # goals do i have' skipped the lead (it required the
                 # 'standing' prefix) and fell to fact recall.
                 sup.add_standing_goal("run the smoke tests")
-                for q in ("what goals do i have", "list my goals"):
+                for q in ("what goals do i have", "list my goals",
+                          # 'do i have' interrogative — live it fell
+                          # to fact recall while rows existed.
+                          "do i have anything scheduled"):
                     out = state._mission_command(q)
                     self.assertIsNotNone(out, q)
                     self.assertIn("smoke tests", out["content"], q)
