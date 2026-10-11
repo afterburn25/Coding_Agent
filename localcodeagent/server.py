@@ -5213,6 +5213,25 @@ class AppState:
         label = (noun.capitalize() if desc == noun
                  else f"{noun.capitalize()}: {desc[:80]}"
                  if noun != "reminder" else f"Reminder: {desc[:80]}")
+        # Re-setting the same reminder moves it — identical rows
+        # make 'say which' ambiguity lists useless. Matches the
+        # orchestrator lane's same-task dedupe.
+        dupes = [s for s in (sup.scheduler.list() or [])
+                 if s.get("enabled", True)
+                 and isinstance(s.get("action"), dict)
+                 and s["action"].get("kind") == "notify"
+                 and str(s["action"].get("detail", ""))
+                        .strip().lower() == desc.strip().lower()]
+        if dupes and noun == "reminder":
+            sup.scheduler.update(str(dupes[0]["id"]), kind=kind,
+                                 **fields)
+            for extra in dupes[1:]:
+                sup.scheduler.remove(str(extra["id"]))
+            return {"content": (
+                f"Moved the reminder "
+                f"{self._reminder_spec_text(spec)} — {desc}. "
+                "It'll surface as a notification; cancel it from "
+                "the Missions page if plans change.")}
         sup.scheduler.add(
             label, kind,
             action={"kind": "notify", "title": noun.capitalize(),

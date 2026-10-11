@@ -3718,11 +3718,8 @@ class AgentOrchestrator:
                     user_text, task_id, event_callback)
         else:
             when = now + 600  # bare 'snooze' — a default ten minutes.
-        hits = [s for s in rows if not topic_terms or topic_terms <= set(
-            re.findall(
-                r"[a-z0-9']+",
-                (f"{s.get('name', '')} "
-                 f"{(s.get('action') or {}).get('detail', '')}").lower()))]
+        hits = [s for s in rows if not topic_terms
+                or topic_terms <= self._reminder_hay(s)]
         if not rows:
             text = "You don't have any reminders set."
         elif not hits:
@@ -3781,11 +3778,8 @@ class AgentOrchestrator:
             r"[a-z0-9']+",
             re.sub(r"\b(?:the|my|that|all|every|each|any|of|to|for|"
                    r"about)\b", " ", body, flags=re.IGNORECASE).lower()))
-        hits = [s for s in rows if not topic_terms or topic_terms <= set(
-            re.findall(
-                r"[a-z0-9']+",
-                (f"{s.get('name', '')} "
-                 f"{(s.get('action') or {}).get('detail', '')}").lower()))]
+        hits = [s for s in rows if not topic_terms
+                or topic_terms <= self._reminder_hay(s)]
         if not rows:
             text = "You don't have any reminders set."
         elif not hits:
@@ -3831,15 +3825,47 @@ class AgentOrchestrator:
                 if (include_disabled or s.get("enabled", True))
                 and (str(s.get("name") or "").lower()
                      .startswith("reminder")
-                     or (s.get("action") or {}).get("kind") == "notify")]
+                     or (isinstance(s.get("action"), dict)
+                         and s["action"].get("kind") == "notify"))]
         return sched, rows
 
     def _reminder_label(self, s: dict) -> str:
         name = re.sub(r"^reminder\s*:\s*", "",
                       str(s.get("name") or "").strip(),
                       flags=re.IGNORECASE)
-        return name or str((s.get("action") or {}).get("detail")
-                           or s.get("id") or "")
+        act = s.get("action")
+        return name or str(
+            (act.get("detail") if isinstance(act, dict) else None)
+            or s.get("id") or "")
+
+    def _reminder_hay(self, s: dict) -> set:
+        """Searchable terms for topic matching — the label plus the
+        schedule's own day/cadence words, so 'the friday reminder'
+        resolves a weekly-Friday row and 'the daily reminder' a
+        daily one."""
+        act = s.get("action")
+        text = (f"{s.get('name', '')} "
+                f"{act.get('detail', '') if isinstance(act, dict)
+                   else act or ''}")
+        days = ["monday", "tuesday", "wednesday", "thursday",
+                "friday", "saturday", "sunday"]
+        wd = s.get("weekday")
+        if isinstance(wd, list):
+            text += " " + " ".join(days[d] for d in wd)
+            if wd == [0, 1, 2, 3, 4]:
+                text += " weekday weekdays"
+            if wd == [5, 6]:
+                text += " weekend weekends"
+        elif wd is not None:
+            text += " " + days[int(wd)]
+        kind = s.get("kind")
+        if kind == "daily":
+            text += " daily everyday"
+        elif kind == "weekly":
+            text += " weekly"
+        elif kind == "interval":
+            text += " hourly" if s.get("interval_s") == 3600 else ""
+        return set(re.findall(r"[a-z0-9']+", text.lower()))
 
     def _reminder_when_text(self, s: dict, now: float) -> str:
         kind = s.get("kind")
@@ -3884,8 +3910,8 @@ class AgentOrchestrator:
         if len(hits) < 2:
             return False
         key = lambda s: (
-            str((s.get("action") or {}).get("detail", ""))
-            .strip().lower(),
+            str((s["action"] if isinstance(s.get("action"), dict)
+                 else {}).get("detail", "")).strip().lower(),
             s.get("kind"), s.get("at"), s.get("interval_s"),
             s.get("hour"), s.get("minute"), s.get("weekday"))
         return len({key(s) for s in hits}) == 1
@@ -3925,10 +3951,7 @@ class AgentOrchestrator:
             r"[a-z0-9']+",
             re.sub(r"\b(?:the|my|that|all|every|each|any|of|to|for|"
                    r"about)\b", " ", body, flags=re.IGNORECASE).lower()))
-        _hay = lambda s: set(re.findall(
-            r"[a-z0-9']+",
-            (f"{s.get('name', '')} "
-             f"{(s.get('action') or {}).get('detail', '')}").lower()))
+        _hay = self._reminder_hay
         hits = [s for s in pool
                 if not topic_terms or topic_terms <= _hay(s)]
         state = "on" if want_on else "off"
@@ -3998,11 +4021,7 @@ class AgentOrchestrator:
         def _matches(s: dict) -> bool:
             if not topic_terms:
                 return True
-            hay = set(re.findall(
-                r"[a-z0-9']+",
-                (f"{s.get('name', '')} "
-                 f"{(s.get('action') or {}).get('detail', '')}").lower()))
-            return topic_terms <= hay
+            return topic_terms <= self._reminder_hay(s)
 
         hits = [s for s in rows if _matches(s)]
         if not rows:
@@ -4064,16 +4083,14 @@ class AgentOrchestrator:
                     r"[a-z0-9']+",
                     re.sub(r"\b(?:what|which|when|does|do|is|are|have|"
                            r"has|any|go|goes|going|off|fire|fires|"
-                           r"firing|set|the|a|an|my|that|next)\b", " ",
+                           r"firing|set|the|a|an|my|that|next|time|"
+                           r"day|date|hour)\b", " ",
                            tm.group(1), flags=re.IGNORECASE).lower()))
         when_ask = bool(re.match(
-            r"\s*when\b", plan_text, re.IGNORECASE))
+            r"\s*(?:when|what\s+time)\b", plan_text, re.IGNORECASE))
         if scope_terms:
-            hits = [s for s in rows if scope_terms <= set(re.findall(
-                r"[a-z0-9']+",
-                (f"{s.get('name', '')} "
-                 f"{(s.get('action') or {}).get('detail', '')}")
-                .lower()))]
+            hits = [s for s in rows
+                    if scope_terms <= self._reminder_hay(s)]
             if not hits:
                 names = "; ".join(
                     f"“{self._reminder_label(s)}”" for s in rows[:3])
@@ -4200,7 +4217,8 @@ class AgentOrchestrator:
                          if s.get("enabled", True)
                          and str(s.get("name") or "").lower()
                             .startswith("reminder:")
-                         and str((s.get("action") or {})
+                         and str((s["action"] if isinstance(
+                             s.get("action"), dict) else {})
                                  .get("detail", "")).strip().lower()
                             == task.lower()]
                 if srows:
