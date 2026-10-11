@@ -4081,7 +4081,9 @@ class AgentOrchestrator:
             str((s["action"] if isinstance(s.get("action"), dict)
                  else {}).get("detail", "")).strip().lower(),
             s.get("kind"), s.get("at"), s.get("interval_s"),
-            s.get("hour"), s.get("minute"), s.get("weekday"))
+            s.get("hour"), s.get("minute"),
+            tuple(s["weekday"]) if isinstance(
+                s.get("weekday"), list) else s.get("weekday"))
         return len({key(s) for s in hits}) == 1
 
     def _reminder_toggle_reply(self, user_text: str, mt: re.Match,
