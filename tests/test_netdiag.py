@@ -1715,6 +1715,111 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Snoozed", r.content)
             self.assertAlmostEqual(once_row["at"], at_2pm + 1800, 0)
 
+    def test_unpause_survives_spelling_normalization(self):
+        # Live: 'unpause my reminders'/'unpause the reminders' fell to
+        # the model, which riffed on 'unpassed' — run() feeds
+        # user_text through spelling normalization BEFORE intent, and
+        # 'unpause' was absent from the lexicon so the corrector
+        # rewrote it to 'unpassed'. The reminder lane never saw the
+        # verb. The fix is a productive-prefix morph shield
+        # (un-/re-/dis-/mis-/non-/pre-/de- + known stem = real word),
+        # so the whole class survives — this test drives the PUBLIC
+        # run() path, the only layer where the bug lived.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+                self._n = 0
+
+            def add(self, name, kind, **kw):
+                self._n += 1
+                row = {"id": f"sc-{self._n}", "name": name,
+                       "kind": kind, "enabled": True, **kw}
+                self.rows.append(row)
+                return row
+
+            def list(self):
+                return list(self.rows)
+
+            def remove(self, sid):
+                n = len(self.rows)
+                self.rows = [r for r in self.rows if r["id"] != sid]
+                return len(self.rows) < n
+
+            def update(self, sid, **fields):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r.update(fields)
+                        return dict(r)
+                return None
+
+            def set_enabled(self, sid, enabled):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r["enabled"] = bool(enabled)
+                        return True
+                return False
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            sup.scheduler.add("reminder: check email", "once",
+                              at=time.time() + 3600,
+                              action={"kind": "notify",
+                                      "detail": "check email"})
+            row = sup.scheduler.rows[0]
+
+            # Any provider build means the model was asked — the lane
+            # must claim every one of these turns without it.
+            def _no_provider(*_a, **_kw):
+                raise AssertionError("model invoked on a reminder "
+                                     "control turn")
+            agent._provider_for = _no_provider
+
+            for text, want_on in (
+                    ("unpause my reminders", True),
+                    ("unpause the reminders please", True),
+                    ("pause my reminders", False),
+                    ("unpause my reminders", True),
+                    ("disable my reminders", False),
+                    ("enable my reminders", True),
+                    ("pause my reminders", False),
+                    ("resume my reminders", True)):
+                row["enabled"] = not want_on
+                result = agent.run(text, mode="auto")
+                self.assertEqual(row["enabled"], want_on, text)
+                self.assertIn("Turned " + ("on" if want_on else "off"),
+                              result.content)
+                # The deterministic lane reports a builtin utility
+                # identity — never a model role.
+                self.assertEqual(result.task["model_id"],
+                                 "builtin-local")
+                self.assertEqual(result.task["model_role"], "utility")
+
+            # The mangled-text probe the model actually saw live —
+            # it must now stay 'unpause' end to end.
+            from localcodeagent.context.spelling import (
+                normalize_user_text)
+            normalized, fixes = normalize_user_text(
+                "unpause my reminders")
+            self.assertEqual(normalized, "unpause my reminders")
+            self.assertFalse(fixes)
+
+            # No ephemeral control turn banks a durable rule.
+            self.assertFalse(
+                agent.conversation_memory.recall_facts("unpause"))
+            learned = agent.conversation_memory.learn_from_user(
+                "unpause my reminders", project_id="x")
+            self.assertFalse(learned.get("behavior_rules"))
+
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of
         # 10 active rules with no indication the set was truncated —

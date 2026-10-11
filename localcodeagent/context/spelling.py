@@ -313,6 +313,11 @@ _SUFFIXES = (
     "es", "s", "y",
 )
 
+# Productive derivational prefixes — longest first so 'dis' doesn't
+# clip 'disa'-forms before 'dis'. A prefix + a real stem is a word
+# ('unmute', 'refactor', 'desaturate') even when unlisted.
+_PREFIXES = ("dis", "mis", "non", "pre", "un", "re", "de")
+
 
 def _morph_shield(low: str) -> str | None:
     """Suffix whose stem is a real word — the token *could* be a valid
@@ -331,6 +336,14 @@ def _morph_shield(low: str) -> str | None:
             stems.add(stem[:-1])
         if any(s in _vocab() for s in stems):
             return suf
+    # Productive prefixes — the mirror of the suffix shield. English
+    # derives freely ('unpause', 'resync', 'unpin'); the lexicon lists
+    # the stem but can't enumerate every derivation, so prefix+known
+    # word is a real word, not a typo magnet ('unpause'->'unpassed').
+    for pre in _PREFIXES:
+        if low.startswith(pre) and len(low) - len(pre) >= 3:
+            if low[len(pre):] in _vocab():
+                return pre
     return None
 
 
