@@ -157,8 +157,9 @@ def parse_reminder_when(when: str, now: float) -> float | None:
               "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
     m = re.fullmatch(
         r"in\s+(?:about\s+|around\s+|roughly\s+)?"
-        r"(\d+(?:\.\d+)?|an?\s+couple\s+of|an?|one|two|three|four|"
-        r"five|six|seven|eight|nine|ten|eleven|twelve|half\s+an?)\s*"
+        r"(\d+(?:\.\d+)?|an?\s+couple\s+(?:of\s+)?|an?|one|two|"
+        r"three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+        r"half\s+an?)\s*"
         r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
         r"days?|d|weeks?|w|months?)", t)
     if m:
@@ -379,9 +380,9 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         return {"kind": "interval",
                 "interval_s": 1800.0 if m.group(1) == "hour"
                 else 43200.0}
-    # 'every couple of hours' — informal two-unit span.
+    # 'every couple (of) hours' — informal two-unit span.
     m = re.fullmatch(
-        r"every\s+(?:a\s+)?couple\s+of\s+"
+        r"every\s+(?:a\s+)?couple\s+(?:of\s+)?"
         r"(minutes?|mins?|hours?|hrs?|days?)", t)
     if m:
         unit = m.group(1)

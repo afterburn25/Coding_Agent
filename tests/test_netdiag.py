@@ -2517,6 +2517,23 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertFalse(sup.scheduler.rows[-1]["enabled"])
             sup.scheduler.rows.clear()
 
+            # 'every couple hours' parses; 'urgent/important' are
+            # adjective leads, not fake-set material; 'anything at
+            # 6' is a scoped inventory ask.
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("urgent reminder for tomorrow",
+                               mode="auto")
+            self.assertIn("do what tomorrow", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0)
+            result = agent.run("important reminder to call mom",
+                               mode="auto")
+            self.assertIn("call mom", result.content)
+            result = agent.run("anything at 6", mode="auto")
+            self.assertIn("No reminder", result.content)
+            result = agent.run("what's at 3", mode="auto")
+            self.assertIn("No reminder", result.content)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

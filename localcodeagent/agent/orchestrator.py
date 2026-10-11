@@ -3751,7 +3751,8 @@ class AgentOrchestrator:
         r"(?P<adj>daily|weekly|monthly|nightly|hourly|weekdays?|"
         r"weekends?|workdays?|morning|afternoon|evening|night|"
         r"tomorrow|tonight|biweekly|bimonthly|fortnightly|"
-        r"semi-?weekly|semi-?monthly)\s+"
+        r"semi-?weekly|semi-?monthly|urgent|important|critical|"
+        r"quick|fast)\s+"
         r"(?P<noun>reminders?|alarms?|timers?)\b"
         r"(?:\s+(?P<tail>.+?))?" + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -3844,7 +3845,9 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(
         r"\breminders?\b|\balarms?\b|\btimers?\b|\bschedules?\b|"
-        r"\bscheduled\b|\b(?:comes?|coming)\s+up\b", re.IGNORECASE)
+        r"\bscheduled\b|\b(?:comes?|coming)\s+up\b|"
+        r"\b(?:anything|something)\s+(?:at|for|on|around)\s+\d|"
+        r"\bwhat'?s\s+(?:at|for|on|around)\s+\d", re.IGNORECASE)
     # Temporal tokens in a failed when-clause → ask when, don't claim.
     _REMINDER_TIMEISH_RE = re.compile(
         r"\d|morning|afternoon|evening|night|noon|midnight|tomorrow|"
