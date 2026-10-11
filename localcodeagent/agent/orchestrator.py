@@ -4554,7 +4554,9 @@ class AgentOrchestrator:
         return bool(
             self._SCHEDULE_INVENTORY_RE.search(text)
             and re.search(
-                r"\b(?:what|which|any|anything|how\s+many|list|"
+                r"\b(?:what|which|any|anything|how\s+many|"
+                r"how\s+long|how\s+soon|time\s+(?:left|until|"
+                r"till)|list|"
                 r"show|do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
                 r"are\s+there|got|active|pending|upcoming|when|"
                 r"tell\s+me|run\s+through|go\s+through|"
@@ -4567,6 +4569,23 @@ class AgentOrchestrator:
             and not re.search(
                 r"\babout\b.{0,40}\breminders?\b|\btold\b",
                 text, re.IGNORECASE))
+
+    @staticmethod
+    def _duration_text(delta: float) -> str:
+        """'in 4 days 15 hours' / 'in 3 hours 20 minutes' — a
+        human countdown for 'how long until' asks."""
+        secs = max(0, int(delta))
+        days, rem = divmod(secs, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes = rem // 60
+        parts = ([f"{days} day{'s' if days != 1 else ''}"]
+                 if days else [])
+        if hours:
+            parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+        if minutes or not parts:
+            parts.append(
+                f"{minutes} minute{'s' if minutes != 1 else ''}")
+        return "in " + " ".join(parts[:2])
 
     def _reminder_inventory_reply(self, user_text: str,
                                   plan_text: str):
@@ -4626,9 +4645,22 @@ class AgentOrchestrator:
             # cancel lane does. ('next week' stays a time scope.)
             soonest = min(rows, key=lambda s: float(
                 s.get("next_run") or s.get("at") or 1e18))
-            text = (f"Your next reminder is "
-                    f"“{self._reminder_label(soonest)}” "
-                    f"({self._reminder_when_text(soonest, now)}).")
+            fire = float(soonest.get("next_run")
+                         or soonest.get("at") or 0)
+            if re.search(
+                    r"\bhow\s+(?:long|soon)\b|time\s+(?:left|"
+                    r"until|till)\b", plan_text, re.IGNORECASE):
+                # 'how long until my next reminder' — answer the
+                # duration; the model guessed 'in 4 hours' when the
+                # row was 4 days out.
+                text = (f"Your next reminder is "
+                        f"“{self._reminder_label(soonest)}” — "
+                        f"{self._duration_text(fire - now)} "
+                        f"({self._reminder_when_text(soonest, now)}).")
+            else:
+                text = (f"Your next reminder is "
+                        f"“{self._reminder_label(soonest)}” "
+                        f"({self._reminder_when_text(soonest, now)}).")
         elif not rows and nm is not None:
             # 'any alarms' when only reminders exist — 'No reminders
             # set' would be a false claim about the store.

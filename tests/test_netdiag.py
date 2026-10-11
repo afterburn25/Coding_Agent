@@ -2624,6 +2624,15 @@ class TruthGateTests(RecoveryLoopTests):
             delta = row["at"] - time.time()
             self.assertGreater(delta, 80 * 60)
             self.assertLess(delta, 100 * 60)
+            # 'how long until my next reminder' — a countdown ask;
+            # the model guessed 'in 4 hours' over a 4-day row.
+            result = agent.run("how long until my next reminder",
+                               mode="auto")
+            self.assertIn("in ", result.content)
+            self.assertIn("stretch", result.content)
+            result = agent.run("time until my next reminder",
+                               mode="auto")
+            self.assertIn("in ", result.content)
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —
