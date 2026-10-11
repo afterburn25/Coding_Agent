@@ -756,6 +756,36 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertNotIn("metrics api uses on 9100", active)
         self.assertNotIn("metrics api uses port 9090", active)
 
+    def test_social_acks_never_hit_the_model(self):
+        # 'thanks'/'got it'/'you already told me that' carry nothing
+        # learnable — they 503'd live when the model lane was down.
+        # A deterministic ack answers; nothing banks.
+        cm = self._mem()
+        for utterance in ("thanks", "got it", "you already told me that",
+                          "i know", "correct", "sounds good"):
+            learned = cm.learn_from_user(utterance)
+            self.assertFalse(learned["facts"], utterance)
+            self.assertEqual(learned.get("ack"), ["social"], utterance)
+        # But 'i know <claim>' is a statement, not a close-out.
+        self.assertFalse(cm.learn_from_user(
+            "i know the answer is 42").get("ack"))
+
+    def test_cadence_facts_share_a_supersession_slot(self):
+        # 'api keys rotate monthly' then 'api keys rotate weekly' —
+        # the cadence is one attribute; a restated frequency retires
+        # the old one instead of answering "how often" with both
+        # (live-observed contradiction).
+        cm = self._mem()
+        cm.learn_from_user("the api keys rotate monthly")
+        cm.learn_from_user("the api keys rotate weekly")
+        active = self._active(cm)
+        self.assertIn("api keys rotate weekly", active)
+        self.assertNotIn("api keys rotate monthly", active)
+        # Different subjects keep their own cadences.
+        cm.learn_from_user("db backups run nightly")
+        self.assertIn("db backups run nightly", self._active(cm))
+        self.assertIn("api keys rotate weekly", self._active(cm))
+
     def test_ambiguous_bare_correction_asks_never_guesses(self):
         # Two digit-shaped facts and no conversational focus — "no
         # it's 8443" could mean either; guessing once rewrote

@@ -4141,10 +4141,13 @@ class AgentOrchestrator:
         elif clarify:
             parts.append(str(clarify[0]))
         elif ack:
-            # A pure acknowledgement ('no problem', 'no worries') —
-            # the honest reply is an ack, not a model riff that might
-            # fabricate a correction that never ran.
-            parts.append("Got it — nothing to change.")
+            # A pure acknowledgement — 'no problem'/'no worries' close
+            # a correction thread ('nothing to change'); 'thanks'/'got
+            # it'/'you already told me' are plain social close-outs.
+            if "social" in ack:
+                parts.append("Anytime.")
+            else:
+                parts.append("Got it — nothing to change.")
         elif not parts and not miss:
             parts.append("Got it.")
         if rules:

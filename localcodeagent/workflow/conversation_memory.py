@@ -1492,6 +1492,23 @@ class ConversationMemory:
                         r"no[,]?\s", raw, flags=re.IGNORECASE)):
                 result.setdefault("ack", []).append("no-idiom")
                 return result
+            # Pure social acknowledgements — 'thanks', 'got it',
+            # 'you already told me that' — carry no learnable content
+            # and nothing to correct; a deterministic ack beats a
+            # model round-trip (which 503'd live on 'thanks').
+            if re.match(
+                    r"^(?:thanks|thank\s+you|got\s+it|ok(?:ay)?|cool|"
+                    r"nice|right|exactly|correct|sounds\s+good|"
+                    r"fair\s+enough|understood|noted|makes\s+sense|"
+                    r"i\s+see|i\s+know|copy\s+(?:that|it)|roger|"
+                    r"sure\s+thing|appreciated|cheers|great|"
+                    r"perfect|nice\s+one|"
+                    r"you\s+(?:already\s+)?told\s+me(?:\s+that)?|"
+                    r"i\s+just\s+(?:told|said)\s+(?:you|that)|"
+                    r"you\s+said\s+(?:that|so))[\s.!?]*$",
+                    body, flags=re.IGNORECASE):
+                result.setdefault("ack", []).append("social")
+                return result
             for pattern in (
                 r"^remember\s+that\s+(.+)$",
                 r"^remember\s*:\s*(.+)$",
