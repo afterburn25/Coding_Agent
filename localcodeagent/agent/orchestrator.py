@@ -3630,6 +3630,16 @@ class AgentOrchestrator:
         r"(?P<noun>reminders?|alarms?|timers?)\b"
         r"(?:\s+(?P<tail>.+?))?" + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # Noun-first fragments — 'reminder for my dentist appointment
+    # tomorrow' carries no verb lead; the model narrated a fake
+    # 'reminder set for 15:00'. Requires a tail so a bare 'reminders!'
+    # still falls through, and interrogatives ('any reminders…')
+    # claim the inventory lane earlier.
+    _REMINDER_NOUNFIRST_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?P<noun>reminders?|alarms?|timers?)\s+"
+        r"(?P<tail>.+?)" + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:remind|alert|notify|ping|wake)\s+"
@@ -4316,7 +4326,8 @@ class AgentOrchestrator:
             plan_text, re.IGNORECASE)
         if sm is not None:
             scope_terms = self._reminder_terms(re.sub(
-                r"\b(?:reminders?|alarms?|timers?|the|a|an|my|that)\b",
+                r"\b(?:reminders?|alarms?|timers?|the|a|an|my|that|"
+                r"me|us)\b",
                 " ", sm.group(1), flags=re.IGNORECASE))
         if not scope_terms:
             tm = re.search(
@@ -4442,14 +4453,15 @@ class AgentOrchestrator:
                         "Say “turn reminders back on” to resume them.")
             return self._reminder_finish(
                 text, user_text, task_id, event_callback)
-        md = self._REMINDER_DECL_RE.match(plan_text)
+        md = (self._REMINDER_DECL_RE.match(plan_text)
+              or self._REMINDER_NOUNFIRST_RE.match(plan_text))
         if md is not None:
             # 'i want a reminder for 5pm' / 'give me a 10 minute
             # timer' — the time carries the whole ask; alarm/timer
             # nouns are their own task, a bare 'reminder' asks what.
             sched, _rows = self._reminder_rows(noun=md.group("noun"))
             noun = str(md.group("noun") or "").lower().rstrip("s")
-            dur = str(md.group("dur") or "").strip(" ,;—-")
+            dur = str(md.groupdict().get("dur") or "").strip(" ,;—-")
             # Resolve the free tail — 'to X'/'about X'/'of X' is the
             # task, 'at X'/'in X'/'on X' the time; 'for X' and bare
             # tails split by whichever side parses as a schedule.
@@ -4461,6 +4473,15 @@ class AgentOrchestrator:
             if cm:
                 conn = cm.group(1).lower()
                 rest = cm.group(2).strip(" ,;—-")
+            if conn == "for" and re.fullmatch(
+                    r"me|us", rest, re.IGNORECASE):
+                # 'reminders for me' — a scoped inventory ask with
+                # no interrogative, not a create with a 'me' task.
+                inv = self._reminder_inventory_reply(
+                    user_text, plan_text)
+                if inv is not None:
+                    return self._reminder_finish(
+                        inv.text, user_text, task_id, event_callback)
             when_d, task_d = "", ""
             if conn in ("to", "about", "of"):
                 task_d = rest
@@ -4489,6 +4510,13 @@ class AgentOrchestrator:
                         task_d = rest
                     else:
                         when_d = rest
+            if task_d and re.fullmatch(
+                    r"me|you|it|that|this|them|us|something|anything",
+                    task_d, re.IGNORECASE):
+                # 'reminders for me' — a pronoun isn't a task; let
+                # the when-side ask fail honestly instead.
+                when_d = task_d
+                task_d = ""
             cand = dur or when_d
             spec = (self._reminder_spec(cand, time.time())
                     if cand else None)
@@ -4764,7 +4792,9 @@ class AgentOrchestrator:
                          or self._REMINDER_NOTASK_RE.match(plan_text)
                          or self._REMINDER_LEAD_CADENCE_RE.match(
                              plan_text)
-                         or self._REMINDER_DECL_RE.match(plan_text))):
+                         or self._REMINDER_DECL_RE.match(plan_text)
+                         or self._REMINDER_NOUNFIRST_RE.match(
+                             plan_text))):
             return None
         # Checked before parse_local_action, which has no temporal
         # grammar — without this the ask fell to the model and it

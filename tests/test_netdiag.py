@@ -2125,6 +2125,19 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("remind me at 5 to take 6 pills",
                                mode="auto")
             self.assertIn("take 6 pills", result.content)
+            # Noun-first fragments — 'reminder for my dentist
+            # appointment tomorrow' got a model 'reminder set for
+            # 15:00' over zero rows; 'reminders for me' is a scoped
+            # inventory ask, not a create with a 'me' task.
+            n0 = len(sup.scheduler.rows)
+            result = agent.run(
+                "reminder for my dentist appointment tomorrow",
+                mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            result = agent.run("reminders for me", mode="auto")
+            self.assertIn("reminder", result.content.lower())
+            self.assertNotIn("do what", result.content)
             sup.scheduler.rows.clear()
 
             # Possessive scopes — 'cancel tomorrow's reminder' left
