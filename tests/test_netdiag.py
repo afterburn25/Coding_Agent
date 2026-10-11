@@ -2384,6 +2384,32 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Alarm set", result.content)
             self.assertEqual(len(sup.scheduler.rows), n0 + 1)
 
+            # Bare possessive inventory — 'my reminders' got a
+            # model 'I'll set a reminder for you in 5 minutes'
+            # fake-set; it's an inventory ask.
+            sup.scheduler.rows.clear()
+            sup.scheduler.add(
+                "reminder: gym", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "gym"})
+            result = agent.run("my reminders", mode="auto")
+            self.assertIn("gym", result.content)
+            result = agent.run("my schedule", mode="auto")
+            self.assertIn("gym", result.content)
+            # 'another reminder for 4' — 'for' leads a bare clock,
+            # not a task named '4'.
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("another reminder for 4", mode="auto")
+            self.assertIn("do what at 4", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0)
+            # 'clear my schedule' — 'schedule' is a pool-wide noun;
+            # the model refused with 'no access to your calendar'
+            # while real rows sat in the scheduler.
+            result = agent.run("clear my schedule", mode="auto")
+            self.assertIn("Cancelled", result.content)
+            self.assertFalse(sup.scheduler.rows)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

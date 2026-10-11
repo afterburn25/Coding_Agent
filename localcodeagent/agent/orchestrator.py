@@ -3643,9 +3643,9 @@ class AgentOrchestrator:
     # lane answers the reference from real rows instead.
     _REMINDER_REFER_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:that|the|this|my)\s+"
-        r"(?:reminders?|alarms?|timers?)\s+"
-        r"(?:at|for|on|about)\s+.+?" + _REMINDER_TRAIL,
+        r"(?:that|the|this|my|your)\s+"
+        r"(?:reminders?|alarms?|timers?|schedules?)"
+        r"(?:\s+(?:at|for|on|about)\s+.+?)?" + _REMINDER_TRAIL,
         re.IGNORECASE)
     # Imperative inventory leads — 'tell me about my reminders',
     # 'run through my reminders', 'list my reminders'. Command
@@ -3753,7 +3753,7 @@ class AgentOrchestrator:
         r"|(?:i\s+)?(?:don'?t|do\s+not|dont)\s+"
         r"(?:need|want|use|like))\s+"
         r"(?:(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
-        r"it|that|this|them)\b"
+        r"schedules?|it|that|this|them)\b"
         + _REMINDER_ECHO +
         r"(?:\s*(?:for|about|on|of|to|at)\s+(?P<tail>.+?))?"
         # Bare clock target — 'cancel my 9pm' is a scoped cancel; the
@@ -3767,7 +3767,7 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:snooze|postpone|delay|push\s+back|push|bump|shift)"
         r"(?:\s+(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
-        r"it|that|this|them|everything|all)\b"
+        r"schedules?|it|that|this|them|everything|all)\b"
         + _REMINDER_ECHO + r")?"
         r"(?:\s+(?:(?P<way>for|until|till|to|by|back|up|forward|"
         r"later|earlier|sooner)\s+"
@@ -3779,13 +3779,14 @@ class AgentOrchestrator:
         r"(?P<verb>turn|switch|disable|enable|re-?enable|pause|"
         r"resume|unpause|unmute|unsilence|stop|mute|silence|"
         r"hold|freeze|suspend|quiet|block)\s+(?P<body>.+?)?"
-        r"\b(?P<noun>reminders?|alarms?|timers?|it|that|this|them)\b"
+        r"\b(?P<noun>reminders?|alarms?|timers?|schedules?|"
+        r"it|that|this|them)\b"
         + _REMINDER_ECHO +
         r"\s*(?P<dir>back\s+on|off|on)?"
         r"(?:\s+(?:until|till|for)\s+(?P<til>.+?))?"
         + _REMINDER_TRAIL +
         r"|" + _REMINDER_POLITE +
-        r"(?P<noun2>reminders?|alarms?|timers?)\s+"
+        r"(?P<noun2>reminders?|alarms?|timers?|schedules?)\s+"
         r"(?P<dir2>back\s+on|off|on)" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_STOP_RE = re.compile(
@@ -3804,7 +3805,8 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:reschedule|move|change)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?"
-        r"\b(?P<noun>reminders?|alarms?|timers?|it|that|this|them)\b"
+        r"\b(?P<noun>reminders?|alarms?|timers?|schedules?|"
+        r"it|that|this|them)\b"
         + _REMINDER_ECHO +
         r"\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?)"
         + _REMINDER_TRAIL,
@@ -4098,7 +4100,7 @@ class AgentOrchestrator:
                          and s["action"].get("kind") == "notify"))]
         if noun and noun not in ("reminder", "reminders", "it",
                                  "that", "this", "them", "everything",
-                                 "all"):
+                                 "all", "schedule", "schedules"):
             stem = noun.rstrip("s").lower()
             rows = [s for s in rows
                     if str(s.get("name") or "").lower()
@@ -4733,6 +4735,16 @@ class AgentOrchestrator:
                     # 'a timer for 5 minutes' — 'for' leads a
                     # duration, not a task.
                     when_d = "in " + rest
+                elif self._reminder_spec("at " + rest,
+                                         now_d) is not None:
+                    # 'another reminder for 4' — 'for' leads a bare
+                    # clock, not a task named '4'.
+                    when_d = rest
+                elif self._reminder_spec("at " + rest,
+                                         now_d) is not None:
+                    # 'another reminder for 4' — 'for' leads a
+                    # clock, not the '4' task the model invented.
+                    when_d = rest
                 else:
                     # 'reminder me at 3' — a verb-typo 'me' artifact
                     # leads the tail; strip it before resolving.
