@@ -3623,7 +3623,8 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:snooze|postpone|delay|push\s+back)\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
-        r"(?:\s+(?:for|until|till|to|by)\s+(?P<dur>.+?))?"
+        r"(?:\s+(?:(?:for|until|till|to|by)\s+"
+        r"|(?=\d|a\s|an\s|one\s))(?P<dur>.+?))?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_TOGGLE_RE = re.compile(
@@ -3650,7 +3651,7 @@ class AgentOrchestrator:
         r"(?:reschedule|move|change)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?)\b"
-        r"\s+(?:to|until|till|for)\s+(?P<when>.+?)"
+        r"\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?)"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(

@@ -1703,6 +1703,18 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("don't see", r.content)
             self.assertTrue(once_row["enabled"])
 
+            # Connector-less durations are still snooze ops —
+            # 'snooze the X reminder 30 minutes' fell to the model
+            # live, which composed a plausible miss naming real rows
+            # while skipping the row that actually matched.
+            r = agent._reminder_reply(
+                "snooze the morning pages reminder 30 minutes",
+                "snooze the morning pages reminder 30 minutes",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Snoozed", r.content)
+            self.assertAlmostEqual(once_row["at"], at_2pm + 1800, 0)
+
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of
         # 10 active rules with no indication the set was truncated —
