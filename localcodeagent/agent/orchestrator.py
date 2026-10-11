@@ -4424,7 +4424,39 @@ class AgentOrchestrator:
                     " ", tm.group(1), flags=re.IGNORECASE))
         when_ask = bool(re.match(
             r"\s*(?:when|what\s+time)\b", plan_text, re.IGNORECASE))
-        if scope_terms:
+        if (re.search(
+                r"\bnext\b(?!\s+(?:week|weeks|month|months|year|"
+                r"years|day|days|hour|hours|minute|minutes|monday|"
+                r"tuesday|wednesday|thursday|friday|saturday|sunday|"
+                r"few|couple|one|time))",
+                plan_text, re.IGNORECASE) and rows):
+            # 'when does my next reminder fire' — ordinal, not a
+            # scope term; pick the soonest-firing row like the
+            # cancel lane does. ('next week' stays a time scope.)
+            soonest = min(rows, key=lambda s: float(
+                s.get("next_run") or s.get("at") or 1e18))
+            text = (f"Your next reminder is "
+                    f"“{self._reminder_label(soonest)}” "
+                    f"({self._reminder_when_text(soonest, now)}).")
+        elif not rows and nm is not None:
+            # 'any alarms' when only reminders exist — 'No reminders
+            # set' would be a false claim about the store.
+            _s, others = self._reminder_rows()
+            noun_pl = nm.group(1).lower()
+            if not noun_pl.endswith("s"):
+                noun_pl += "s"
+            if others:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in others[:3])
+                text = (f"No {noun_pl} set — you've got "
+                        f"{len(others)} reminder"
+                        f"{'s' if len(others) != 1 else ''}: "
+                        f"{names}.")
+            else:
+                text = (f"No {noun_pl} set — say “remind me in 10 "
+                        "minutes to …” and I'll schedule it.")
+        elif scope_terms:
             hits = [s for s in rows
                     if scope_terms <= self._reminder_hay(s)]
             if not hits:

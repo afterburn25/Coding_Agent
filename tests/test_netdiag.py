@@ -2241,6 +2241,27 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("poss2", result.content)
             sup.scheduler.remove(str(sup.scheduler.rows[-1]["id"]))
 
+            # 'next' is ordinal in inventory too — 'when does my
+            # next reminder fire' listed every row; and a noun-scoped
+            # miss must name the noun — 'any alarms' answered 'No
+            # reminders set' while reminder rows existed.
+            sup.scheduler.add(
+                "reminder: soonest", "once",
+                at=time.time() + 600,
+                action={"kind": "notify", "detail": "soonest"})
+            sup.scheduler.add(
+                "reminder: later", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "later"})
+            result = agent.run("when does my next reminder fire",
+                               mode="auto")
+            self.assertIn("soonest", result.content)
+            self.assertNotIn("later", result.content)
+            result = agent.run("any alarms", mode="auto")
+            self.assertIn("No alarms", result.content)
+            self.assertIn("soonest", result.content)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
