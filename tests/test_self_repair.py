@@ -449,6 +449,66 @@ class ScenarioA_CodeRepairPromoted(unittest.TestCase):
                           git("status", "--porcelain", cwd=repo).stdout)
 
 
+class DestructivePatchReviewTests(unittest.TestCase):
+    """A generated patch that guts a file — a stub replacing thousands
+    of lines — still imports cleanly, so tests alone can't catch it.
+    Review must reject destructive diffs before they ever promote."""
+
+    def _big_module(self, repo: Path) -> None:
+        (repo / "mod" / "big.py").write_text(
+            "\n".join(f"VALUE_{i} = {i}" for i in range(60)) + "\n",
+            encoding="utf-8")
+        git("add", "-A", cwd=repo)
+        git("-c", "user.email=t@t", "-c", "user.name=t",
+            "commit", "-m", "big module", cwd=repo)
+
+    def test_gutting_patch_never_promotes(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            self._big_module(repo)
+            baseline = (repo / "mod" / "big.py").read_text()
+
+            def gutting_generator(incident, wt: Path):
+                (wt / "mod" / "calc.py").write_text(
+                    GOOD_PATCH, encoding="utf-8")
+                # the deployed-instance failure: a scaffold stub written
+                # over a large tracked module
+                (wt / "mod" / "big.py").write_text(textwrap.dedent("""\
+                    import sys
+
+                    def main():
+                        print("diagnosis applied")
+
+                    if __name__ == "__main__":
+                        main()
+                    """), encoding="utf-8")
+                # and a scratch helper minted at repo root
+                (wt / "diagnosis_notes.py").write_text(
+                    "X = 1\n", encoding="utf-8")
+                return {"files": ["mod/calc.py", "mod/big.py",
+                                  "diagnosis_notes.py"],
+                        "test": "tests/test_calc.py"}
+
+            coord = make_coord(td, repo,
+                               patch_generator=gutting_generator,
+                               canary=Canary(lambda i, w, **k:
+                                             {"ok": True, "port": 1}))
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            final = coord.get(inc["id"])
+
+            # never promoted — the incident ends escalated, not resolved
+            self.assertNotEqual(final["state"], "resolved")
+            # stable tree untouched
+            self.assertEqual((repo / "mod" / "big.py").read_text(),
+                             baseline)
+            self.assertFalse((repo / "diagnosis_notes.py").exists())
+            # review recorded the destructive-diff and scratch-file notes
+            notes = " ".join(final.get("review", {}).get("notes") or [])
+            self.assertIn("guts", notes)
+            self.assertIn("repo-root", notes)
+
+
 class ProductionCanaryTests(unittest.TestCase):
     """The real candidate launcher — boots the repo's Nexus from the
     worktree on a free port with fully isolated state."""
