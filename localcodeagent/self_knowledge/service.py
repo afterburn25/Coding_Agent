@@ -202,6 +202,33 @@ class SelfKnowledgeService:
         # direction explicitly, so the control lane's honest apply
         # beats a revert-to-previous (which could land on 'off').
         named_setting = self.settings.find(t) is not None
+        # A named non-setting object is a domain command, not a
+        # session undo — 'turn reminders back on' re-enables scheduler
+        # rows in the reminder lane. The object must bind to the last
+        # action's subject before the undo may fire; reverting an
+        # unrelated change ('mute voice') lies twice.
+        if m_back and last and not named_setting:
+            bo = re.search(
+                r"\b(?:turn|switch|set|put)\s+(.{0,15}?)\s+back\b", t)
+            obj = ({w for w in re.findall(r"[a-z0-9]{3,}", bo.group(1))
+                    if w not in {"the", "that", "it", "its", "them",
+                                 "all", "this", "those", "everything",
+                                 "something"}}
+                   if bo else set())
+            if obj:
+                undo0 = last.get("undo") or {}
+                parts = [last.get("setting"), last.get("action"),
+                         undo0.get("action")]
+                for src in (last.get("params"), undo0.get("params")):
+                    if isinstance(src, dict):
+                        parts.extend(src.values())
+                    else:
+                        parts.append(src)
+                subj = set(re.findall(
+                    r"[a-z0-9]{3,}",
+                    " ".join(str(x or "") for x in parts).lower()))
+                if not (obj & subj):
+                    return None
         if m_undo or m_putback or (m_back and last and not named_setting):
             # A named referent ("undo that laptop change") scopes the
             # undo — it must bind before the session's last_executed,
@@ -668,6 +695,12 @@ class SelfKnowledgeService:
     def _control(self, t: str) -> Resolution | None:
         """Direct mutation requests — 'turn voice off', 'use Isabella',
         'set workers to four'."""
+        # Scheduler nouns belong to the reminder lane — 'mute my
+        # reminders' disables schedule rows, not voice. No control-
+        # surface setting or action owns reminders/alarms/timers, so
+        # a bare 'mute'/'stop' alias must never claim them.
+        if re.search(r"\b(?:reminders?|alarms?|timers?)\b", t):
+            return None
         # Whole-utterance gate: a mute/setting keyword inside a
         # prohibition ('don't mute yourself'), question about how a
         # setting works, quote, or hypothetical must never mutate.

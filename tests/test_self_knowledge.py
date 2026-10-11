@@ -417,6 +417,27 @@ class TestServiceControl(unittest.TestCase):
         self.assertEqual(res.kind, "execute")
         self.assertTrue(store["voice_muted"])
 
+    def test_scheduler_nouns_never_claim_control(self):
+        # Live: 'mute my reminders' matched the bare 'mute' alias and
+        # muted VOICE; the follow-up 'turn reminders back on' then
+        # un-muted it through the session-undo lane. Scheduler nouns
+        # belong to the reminder lane — the control surface defers,
+        # and a named non-setting object never binds a session undo.
+        svc, store, _ = make_service()
+        for q in ("mute my reminders", "silence the reminders",
+                  "turn off my alarms", "stop the timer"):
+            self.assertIsNone(svc.respond(q), q)
+        self.assertFalse(store["voice_muted"])
+        # Pronoun undo still binds; a named object that isn't the
+        # last action's subject declines to the scheduler lane.
+        svc.respond("mute yourself")
+        self.assertTrue(store["voice_muted"])
+        self.assertIsNone(svc.respond("turn reminders back on"))
+        self.assertTrue(store["voice_muted"])
+        res = svc.respond("turn it back on")
+        self.assertIsNotNone(res)
+        self.assertFalse(store["voice_muted"])
+
     def test_numeric_worker_command(self):
         svc, store, _ = make_service()
         svc.respond("use four workers")
