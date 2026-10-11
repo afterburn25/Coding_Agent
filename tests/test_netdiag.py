@@ -2182,6 +2182,38 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("an alarm at 7", mode="auto")
             self.assertIn("Alarm set", result.content)
             self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            # Leading-time creates — 'in 20 minutes remind me to
+            # stretch' and 'at 6am wake me up' got model fake-sets
+            # over zero rows; 'every 30 minutes ping me' got a fake
+            # "That's set" with no task at all.
+            sup.scheduler.rows.clear()
+            n0 = len(sup.scheduler.rows)
+            result = agent.run(
+                "in 20 minutes remind me to stretch", mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            self.assertEqual(sup.scheduler.rows[-1]
+                             ["action"]["detail"], "stretch")
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("at 6am wake me up", mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            self.assertEqual(sup.scheduler.rows[-1]
+                             ["action"]["detail"], "wake you")
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("every 30 minutes ping me", mode="auto")
+            self.assertIn("do what", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0)
+            # Verb-led declaratives — 'set a reminder to call mom'
+            # and 'can i get a reminder' got model riffs.
+            result = agent.run("set a reminder to call mom",
+                               mode="auto")
+            self.assertIn("call mom", result.content)
+            result = agent.run("can i get a reminder", mode="auto")
+            self.assertIn("fire", result.content)
+            result = agent.run("i'll need a reminder for tomorrow",
+                               mode="auto")
+            self.assertIn("do what", result.content)
             # Terse forms — 'reminders off' got a model 'all inactive'
             # over untouched rows; 'snooze everything' got a false
             # capability refusal. Both are real pool mutations now.

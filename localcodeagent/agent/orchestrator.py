@@ -2997,7 +2997,8 @@ class AgentOrchestrator:
                 or self._REMINDER_SNOOZE_RE.match(match_text)
                 or self._REMINDER_TOGGLE_RE.match(match_text)
                 or self._REMINDER_STOP_RE.match(match_text)
-                or self._REMINDER_RESCHEDULE_RE.match(match_text)):
+                or self._REMINDER_RESCHEDULE_RE.match(match_text)
+                or self._REMINDER_LEAD_WHEN_RE.match(match_text)):
             return None
         # Reminder inventory — "what reminders do i have" asks the
         # scheduler, not conversational facts; a memory recall can only
@@ -3612,7 +3613,9 @@ class AgentOrchestrator:
     _REMINDER_DECL_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:i\s+(?:want|need|wanna|'?d\s+like|would\s+like|could\s+use)"
-        r"|(?:give|get|make|set\s+up)\s+me|gimme)\s+"
+        r"|i'?ll\s+(?:need|want)|can\s+i\s+(?:get|have)"
+        r"|(?:give|get|make|set\s+up)\s+me|gimme"
+        r"|set|make|create|add|schedule)\s+"
         r"(?:a\s+|an\s+|me\s+a\s+)?"
         r"(?:(?P<dur>\d[\w\s]*?(?:seconds?|secs?|minutes?|mins?|"
         r"hours?|hrs?|days?|weeks?))\s+)?"
@@ -3673,6 +3676,19 @@ class AgentOrchestrator:
         r"remind|alert|notify|ping|wake)\s+me\s+(?:up\s+)?"
         r"(?:(?:to|about|of|that)\s+(?P<task>.+?)"
         r"|(?P<when2>(?:at|in|on)\s+.+?))" + _REMINDER_TRAIL,
+        re.IGNORECASE)
+    # Leading-time creates — 'in 20 minutes remind me to stretch',
+    # 'at 6am wake me up'. The when sits before the verb instead of
+    # inside it; the model narrated fake 'That's set' acks over
+    # zero rows. when2-shaped cadences ('every 30 minutes ping me')
+    # with no task get the honest do-what ask here too.
+    _REMINDER_LEAD_WHEN_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?P<when>.+?)\s+"
+        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak)ing|"
+        r"remind|alert|notify|ping|wake)\s+me\b\s*(?:up\b\s*)?"
+        r"(?:(?:to|about|of|that)\s+(?P<task>.+?))?"
+        + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_NOTASK_RE = re.compile(
         _REMINDER_POLITE +
@@ -4784,6 +4800,67 @@ class AgentOrchestrator:
                         f"“tomorrow at 9”.",
                         user_text, task_id, event_callback)
                 return None
+        if m is None:
+            mlw = self._REMINDER_LEAD_WHEN_RE.match(plan_text)
+            if mlw is not None:
+                wtxt = str(mlw.group("when") or "").strip(" ,;—-")
+                spec_lw = self._reminder_spec(wtxt, time.time())
+                if spec_lw is None and self._reminder_spec(
+                        "in " + wtxt, time.time()) is not None:
+                    wtxt = "in " + wtxt
+                    spec_lw = self._reminder_spec(wtxt, time.time())
+                if spec_lw is None:
+                    if self._REMINDER_TIMEISH_RE.search(wtxt):
+                        return self._reminder_finish(
+                            f"I couldn't pin a time from “{wtxt}” "
+                            "— say “at 6am”, “in 30 minutes”, or "
+                            "“tomorrow at 9”.",
+                            user_text, task_id, event_callback)
+                elif not str(
+                        mlw.groupdict().get("task") or "").strip():
+                    if re.search(r"\bwak(?:e|ing)\s+me\b|\bwake\s+me\b",
+                                 plan_text, re.IGNORECASE):
+                        # 'at 6am wake me up' — waking is the task,
+                        # like the NOTASK wake path.
+                        sup = (self._autonomy() if callable(
+                            self._autonomy) else self._autonomy)
+                        sched = getattr(sup, "scheduler", None)
+                        if sched is None:
+                            return self._reminder_finish(
+                                "I can't set reminders — the "
+                                "scheduler isn't running in this "
+                                "session.",
+                                user_text, task_id, event_callback)
+                        try:
+                            fields = {k: v for k, v in
+                                      spec_lw.items()
+                                      if k != "kind"}
+                            sched.add(
+                                "reminder: wake you",
+                                spec_lw["kind"],
+                                action={"kind": "notify",
+                                        "title": "Reminder",
+                                        "detail": "wake you"},
+                                created_by="user", **fields)
+                        except Exception as exc:
+                            return self._reminder_finish(
+                                f"I couldn't set the reminder "
+                                f"({exc}).",
+                                user_text, task_id, event_callback)
+                        return self._reminder_finish(
+                            "Reminder set "
+                            + self._reminder_spec_text(
+                                spec_lw, "wake you"),
+                            user_text, task_id, event_callback)
+                    # 'every 30 minutes ping me' — a cadence with no
+                    # task; ask honestly, never 'That's set'.
+                    return self._reminder_finish(
+                        f"Sure — remind you to do what {wtxt}?",
+                        user_text, task_id, event_callback)
+                else:
+                    # 'in 20 minutes remind me to stretch' — reuse
+                    # the main create path.
+                    m = mlw
         clarify = None
         if m is None:
             m2 = self._REMINDER_CLARIFY_RE.match(plan_text)
@@ -5017,6 +5094,8 @@ class AgentOrchestrator:
                          or self._REMINDER_RESCHEDULE_RE.match(plan_text)
                          or self._REMINDER_NOTASK_RE.match(plan_text)
                          or self._REMINDER_LEAD_CADENCE_RE.match(
+                             plan_text)
+                         or self._REMINDER_LEAD_WHEN_RE.match(
                              plan_text)
                          or self._REMINDER_DECL_RE.match(plan_text)
                          or self._REMINDER_NOUNFIRST_RE.match(
