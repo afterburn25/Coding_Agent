@@ -1738,6 +1738,11 @@ class ConversationMemory:
                             r"stopped|quit)\s+"
                             r"(?:use|using|run|running|like|liking|"
                             r"want|needing?|work\s+with)\s+"
+                            # "i don't want you to X" is a prohibition
+                            # on Nexus (rule lane), not the user's own
+                            # disuse — the retracted object must not be
+                            # 'you'.
+                            r"(?!you\b)"
                             r"(.+?)\s*(?:anymore|any\s+more)?[.!?]?$",
                             body, flags=re.IGNORECASE)):
                         # "i no longer use slack for comms" retracts
@@ -2599,6 +2604,12 @@ class ConversationMemory:
                 ("never", r"^never\s+(?!mind\b)(.+)$"),
                 ("want_always", r"^i\s+want\s+you\s+to\s+always\s+(.+)$"),
                 ("want", r"^i\s+want\s+you\s+to\s+(.+)$"),
+                # Negated want is a forward prohibition — "i don't
+                # want you to join communities" banks 'Never join
+                # communities', not a retraction of a stored fact.
+                ("dont_want",
+                 r"^i\s+(?:don'?t|do\s+not|dont)\s+want\s+you\s+to\s+"
+                 r"(?:always\s+)?(.+)$"),
                 ("teach", r"^(?:teach|training)\s*:\s*(.+)$"),
                 ("should", r"^you\s+should\s+(.+)$"),
                 ("instead", r"^instead[, ]+\s*(.+)$"),
@@ -2609,7 +2620,7 @@ class ConversationMemory:
                 body = match.group(1).strip()
                 if kind in {"always", "want_always"}:
                     rule = "Always " + body
-                elif kind == "never":
+                elif kind in {"never", "dont_want"}:
                     rule = "Never " + body
                 else:
                     rule = body

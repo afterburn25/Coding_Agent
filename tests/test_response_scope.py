@@ -899,6 +899,23 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertTrue(learned["forgotten_miss"])
         self.assertEqual(len(self._active(cm)), 2)
 
+    def test_dont_want_you_to_banks_rule_not_retraction(self):
+        # "i don't want you to join any communities" is a prohibition on
+        # Nexus, not the user's own disuse — the object is 'you', so the
+        # disuse lane must not build a garbage retraction query; the
+        # rule lane banks the forward prohibition instead.
+        cm = self._mem()
+        learned = cm.learn_from_user(
+            "i don't want you to join any communities")
+        self.assertIn("Never join any communities",
+                      learned["behavior_rules"])
+        self.assertFalse(learned.get("forgotten_miss"))
+        # 'always' inside a negated want collapses — prohibiting
+        # 'always X' is prohibiting X.
+        learned = cm.learn_from_user(
+            "i don't want you to always respond in caps")
+        self.assertIn("Never respond in caps", learned["behavior_rules"])
+
     def test_negated_my_fact_retracts_not_banks(self):
         # "my editor is not emacs" retracts the unique emacs fact — it
         # must never bank the negation verbatim ('your editor is not
