@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS chunks (
     text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_chunk_file ON chunks(file);
+CREATE TABLE IF NOT EXISTS meta (
+    k TEXT PRIMARY KEY,
+    v INTEGER NOT NULL
+);
 """
 
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv",
@@ -74,6 +78,48 @@ class RepoIndex:
         self._ro = sqlite3.connect(str(self.db_path),
                                    check_same_thread=False)
         self._ro.execute("PRAGMA busy_timeout=2000")
+        # stats() serves exact counters from `meta` — counting the multi-MB
+        # chunks table inline made /api/rag take seconds on large indexes
+        # and blew the self-update smoke probe's 2s timeout. Existing DBs
+        # are seeded once in the background; stats() reports {"seeding": true}
+        # until the counters exist.
+        self._seed_thread: threading.Thread | None = None
+        try:
+            seeded = self._db.execute(
+                "SELECT v FROM meta WHERE k='counts_seeded'").fetchone()
+        except sqlite3.Error:
+            seeded = None
+        if not seeded:
+            try:
+                empty = self._db.execute(
+                    "SELECT COUNT(*) FROM files").fetchone()[0] == 0
+            except sqlite3.Error:
+                empty = False
+            if empty:
+                self._seed_counts()  # trivial on an empty index
+            else:
+                self._seed_thread = threading.Thread(
+                    target=self._seed_counts, name="rag-stats-seed",
+                    daemon=True)
+                self._seed_thread.start()
+
+    def _seed_counts(self) -> None:
+        """One-time counter seed under the write lock so update() cannot
+        interleave a commit mid-count."""
+        try:
+            with self._lock:
+                f, s, c = (
+                    self._db.execute(f"SELECT COUNT(*) FROM {t}")
+                    .fetchone()[0]
+                    for t in ("files", "symbols", "chunks"))
+                self._db.execute(
+                    "INSERT OR REPLACE INTO meta(k,v) VALUES"
+                    " ('files',?),('symbols',?),('chunks',?),"
+                    " ('counts_seeded',1)",
+                    (f, s, c))
+                self._db.commit()
+        except sqlite3.Error:
+            pass
 
     def _iter_files(self) -> list[Path]:
         out = []
@@ -100,21 +146,31 @@ class RepoIndex:
         except OSError:
             return ""
 
-    def _index_file(self, path: Path, rel: str) -> None:
+    def _index_file(self, path: Path, rel: str) -> tuple[int, int]:
+        """Reindex one file; returns (symbols_delta, chunks_delta) for the
+        stats counters."""
         from ..tools.codeintel import extract_symbols
         text = ""
         try:
             if path.stat().st_size <= MAX_FILE:
                 text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            return
+            return (0, 0)
+        old_syms = self._db.execute(
+            "SELECT COUNT(*) FROM symbols WHERE file=?", (rel,)
+        ).fetchone()[0]
+        old_chunks = self._db.execute(
+            "SELECT COUNT(*) FROM chunks WHERE file=?", (rel,)
+        ).fetchone()[0]
         self._db.execute("DELETE FROM symbols WHERE file=?", (rel,))
         self._db.execute("DELETE FROM chunks WHERE file=?", (rel,))
+        n_syms = n_chunks = 0
         for sym in extract_symbols(path).get("symbols", []):
             self._db.execute(
                 "INSERT INTO symbols(file,kind,name,line) VALUES(?,?,?,?)",
                 (rel, sym.get("kind", ""), sym.get("name", ""),
                  int(sym.get("line", 0) or 0)))
+            n_syms += 1
         if text:
             lines = text.splitlines()
             for i in range(0, len(lines), CHUNK_LINES):
@@ -122,17 +178,20 @@ class RepoIndex:
                     "INSERT INTO chunks(file,ord,text) VALUES(?,?,?)",
                     (rel, i // CHUNK_LINES,
                      "\n".join(lines[i:i + CHUNK_LINES])[:8000]))
+                n_chunks += 1
         st = path.stat()
         self._db.execute(
             "INSERT OR REPLACE INTO files(path,mtime,size,sha,indexed_at)"
             " VALUES(?,?,?,?,?)",
             (rel, st.st_mtime, st.st_size, self._sha(path), time.time()))
+        return (n_syms - old_syms, n_chunks - old_chunks)
 
     def update(self, *, force: bool = False) -> dict[str, int]:
         """Incremental update: only changed files are re-parsed; deleted
         files are dropped."""
         added = updated = removed = 0
         with self._lock:
+            d_syms = d_chunks = 0
             known = {r[0]: (r[1], r[2], r[3]) for r in self._db.execute(
                 "SELECT path,mtime,size,sha FROM files").fetchall()}
             seen = set()
@@ -150,16 +209,40 @@ class RepoIndex:
                 sha = self._sha(p)
                 if not force and old and old[2] == sha:
                     continue  # mtime moved but content identical
-                self._index_file(p, rel)
+                ds, dc = self._index_file(p, rel)
+                d_syms += ds
+                d_chunks += dc
                 if old:
                     updated += 1
                 else:
                     added += 1
             for rel in set(known) - seen:
+                d_syms -= self._db.execute(
+                    "SELECT COUNT(*) FROM symbols WHERE file=?", (rel,)
+                ).fetchone()[0]
+                d_chunks -= self._db.execute(
+                    "SELECT COUNT(*) FROM chunks WHERE file=?", (rel,)
+                ).fetchone()[0]
                 self._db.execute("DELETE FROM files WHERE path=?", (rel,))
                 self._db.execute("DELETE FROM symbols WHERE file=?", (rel,))
                 self._db.execute("DELETE FROM chunks WHERE file=?", (rel,))
                 removed += 1
+            if self._db.execute(
+                    "SELECT v FROM meta WHERE k='counts_seeded'"
+            ).fetchone():
+                # `files` recount is cheap (narrow table) and immune to
+                # edge cases; the blob tables get exact deltas.
+                self._db.execute(
+                    "UPDATE meta SET v=(SELECT COUNT(*) FROM files)"
+                    " WHERE k='files'")
+                if d_syms:
+                    self._db.execute(
+                        "UPDATE meta SET v=v+? WHERE k='symbols'",
+                        (d_syms,))
+                if d_chunks:
+                    self._db.execute(
+                        "UPDATE meta SET v=v+? WHERE k='chunks'",
+                        (d_chunks,))
             self._db.commit()
         return {"added": added, "updated": updated, "removed": removed}
 
@@ -184,13 +267,39 @@ class RepoIndex:
                                  "ord": r[1], "snippet": r[2][:400]})
         return hits
 
-    def stats(self) -> dict[str, int]:
+    def stats(self) -> dict[str, Any]:
+        with self._ro_lock:
+            meta = {str(k): v for k, v in
+                    self._ro.execute("SELECT k,v FROM meta")}
+        if meta.get("counts_seeded"):
+            return {"files": int(meta.get("files", 0)),
+                    "symbols": int(meta.get("symbols", 0)),
+                    "chunks": int(meta.get("chunks", 0))}
+        if self._seed_thread is not None and self._seed_thread.is_alive():
+            return {"seeding": True}
+        # Seed never ran or failed — count directly (slow on large
+        # indexes, but correct) and persist so later calls are instant.
         with self._ro_lock:
             f = self._ro.execute("SELECT COUNT(*) FROM files").fetchone()[0]
             s = self._ro.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]
             c = self._ro.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+        try:
+            with self._lock:
+                self._db.execute(
+                    "INSERT OR REPLACE INTO meta(k,v) VALUES"
+                    " ('files',?),('symbols',?),('chunks',?),"
+                    " ('counts_seeded',1)",
+                    (f, s, c))
+                self._db.commit()
+        except sqlite3.Error:
+            pass
         return {"files": f, "symbols": s, "chunks": c}
 
     def close(self) -> None:
+        try:
+            if self._seed_thread is not None and self._seed_thread.is_alive():
+                self._seed_thread.join(timeout=2)
+        except Exception:
+            pass
         self._db.close()
         self._ro.close()

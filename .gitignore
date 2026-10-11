@@ -73,6 +73,8 @@ tools_*.png
 .shots/
 .shots-baseline/
 .agent/rag_index.db
+.agent/rag_index.db-shm
+.agent/rag_index.db-wal
 
 # Recovered feature spec (session artifact)
 .spec_full.txt

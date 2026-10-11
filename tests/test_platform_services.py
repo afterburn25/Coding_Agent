@@ -532,7 +532,7 @@ class RagTests(unittest.TestCase):
             def slow_index(path, rel):
                 started.set()
                 release.wait(2)
-                real_index(path, rel)
+                return real_index(path, rel)
 
             idx._index_file = slow_index  # hold the write lock mid-build
             (ws / "src" / "new_file.py").write_text(
@@ -550,6 +550,36 @@ class RagTests(unittest.TestCase):
             self.assertTrue(hits)
             release.set()
             worker.join(5)
+            idx.close()
+
+    def test_stats_counters_track_updates_exactly(self):
+        """stats() serves meta counters (O(1) — /api/rag must answer inside
+        the smoke probe's 2s); they must never drift from real counts."""
+        with tempfile.TemporaryDirectory() as td:
+            ws = self._repo(td)
+            idx = RepoIndex(ws)
+            self.addCleanup(idx.close)
+            idx.update()
+            stats = idx.stats()
+            real = {
+                t: idx._db.execute(f"SELECT COUNT(*) FROM {t}")
+                .fetchone()[0]
+                for t in ("files", "symbols", "chunks")}
+            self.assertEqual(stats, real)
+            # Change + delete, then re-verify counters stayed exact.
+            (ws / "src" / "util.py").write_text(
+                "def helper():\n    pass\n\ndef new_fn():\n    pass\n")
+            import os
+            os.utime(ws / "src" / "util.py",
+                     (time.time() + 2, time.time() + 2))
+            (ws / "README.md").unlink()
+            idx.update()
+            stats = idx.stats()
+            real = {
+                t: idx._db.execute(f"SELECT COUNT(*) FROM {t}")
+                .fetchone()[0]
+                for t in ("files", "symbols", "chunks")}
+            self.assertEqual(stats, real)
             idx.close()
 
 
