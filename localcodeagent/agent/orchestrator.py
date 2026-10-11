@@ -3628,8 +3628,7 @@ class AgentOrchestrator:
         r"(?:(?P<dur>\d[\w\s]*?(?:seconds?|secs?|minutes?|mins?|"
         r"hours?|hrs?|days?|weeks?))\s+)?"
         r"(?P<noun>reminders?|alarms?|timers?)\b"
-        r"(?:\s+(?:for|at|in|on|to)\s+(?P<when>.+?))?"
-        + _REMINDER_TRAIL,
+        r"(?:\s+(?P<tail>.+?))?" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
@@ -4451,7 +4450,45 @@ class AgentOrchestrator:
             sched, _rows = self._reminder_rows(noun=md.group("noun"))
             noun = str(md.group("noun") or "").lower().rstrip("s")
             dur = str(md.group("dur") or "").strip(" ,;—-")
-            when_d = str(md.group("when") or "").strip(" ,;—-")
+            # Resolve the free tail — 'to X'/'about X'/'of X' is the
+            # task, 'at X'/'in X'/'on X' the time; 'for X' and bare
+            # tails split by whichever side parses as a schedule.
+            tail = str(md.group("tail") or "").strip(" ,;—-")
+            conn = ""
+            rest = tail
+            cm = re.match(r"(for|at|in|on|to|about|of)\s+(.+)",
+                          tail, re.IGNORECASE)
+            if cm:
+                conn = cm.group(1).lower()
+                rest = cm.group(2).strip(" ,;—-")
+            when_d, task_d = "", ""
+            if conn in ("to", "about", "of"):
+                task_d = rest
+            elif conn in ("at", "in", "on"):
+                when_d = rest
+            elif rest:
+                now_d = time.time()
+                if self._reminder_spec(rest, now_d) is not None:
+                    when_d = rest
+                elif self._reminder_spec("in " + rest,
+                                         now_d) is not None:
+                    # 'a timer for 5 minutes' — 'for' leads a
+                    # duration, not a task.
+                    when_d = "in " + rest
+                else:
+                    # 'for the dentist at 3' — split task/time at the
+                    # last temporal boundary.
+                    parts = re.split(
+                        r"\s+(?=(?:at|in|on|every|next|tomorrow|"
+                        r"today|tonight|tonite)\b)", rest)
+                    if (len(parts) > 1 and self._reminder_spec(
+                            parts[-1], now_d) is not None):
+                        task_d = " ".join(parts[:-1])
+                        when_d = parts[-1]
+                    elif conn:
+                        task_d = rest
+                    else:
+                        when_d = rest
             cand = dur or when_d
             spec = (self._reminder_spec(cand, time.time())
                     if cand else None)
@@ -4471,6 +4508,12 @@ class AgentOrchestrator:
                     "running in this session.",
                     user_text, task_id, event_callback)
             if spec is None:
+                if task_d:
+                    return self._reminder_finish(
+                        f"When should I remind you to {task_d}? — "
+                        f"e.g. “in 10 minutes”, “at 3pm”, "
+                        "“tomorrow at 9”.",
+                        user_text, task_id, event_callback)
                 if not cand:
                     return self._reminder_finish(
                         f"When should the {noun} fire? — e.g. "
@@ -4483,19 +4526,26 @@ class AgentOrchestrator:
                     f"I couldn't pin a time from “{cand}” — say "
                     "“at 3pm”, “in 30 minutes”, or “tomorrow at 9”.",
                     user_text, task_id, event_callback)
-            task_d = noun if noun in ("alarm", "timer") else ""
-            if task_d:
+            task_f = task_d or (
+                noun if noun in ("alarm", "timer") else "")
+            if task_f:
                 kind = spec["kind"]
                 fields = {k: v for k, v in spec.items()
                           if k != "kind"}
-                sched.add(
-                    f"{noun}: {noun.capitalize()}", kind,
-                    action={"kind": "notify", "title": "Reminder",
-                            "detail": task_d},
-                    created_by="user", **fields)
+                try:
+                    sched.add(
+                        f"{noun}: {task_f[:100]}", kind,
+                        action={"kind": "notify",
+                                "title": noun.capitalize(),
+                                "detail": task_f},
+                        created_by="user", **fields)
+                except Exception as exc:
+                    return self._reminder_finish(
+                        f"I couldn't set the {noun} ({exc}).",
+                        user_text, task_id, event_callback)
                 return self._reminder_finish(
                     f"{noun.capitalize()} set "
-                    + self._reminder_spec_text(spec, task_d),
+                    + self._reminder_spec_text(spec, task_f),
                     user_text, task_id, event_callback)
             lead = ("in " if dur else
                     "at " if re.match(r"\d|noon|midnight", cand,
@@ -4558,10 +4608,17 @@ class AgentOrchestrator:
         else:
             when_raw = str(m.group("when") or "").strip(" ,;—-")
             spec = self._reminder_spec(when_raw, time.time())
-            if spec is None:
-                # The lazy when may have split inside a clock phrase
-                # ('at quarter to 5' → 'at quarter'); retry with the
-                # connector bound to the LAST one.
+            task_lazy = str(m.group("task") or "").strip()
+            if (spec is None or re.match(
+                    r"\d|one\b|two\b|three\b|four\b|five\b|six\b|"
+                    r"seven\b|eight\b|nine\b|ten\b|eleven\b|twelve\b|"
+                    r"quarter\b|half\b", task_lazy, re.IGNORECASE)):
+                # The lazy when may have split inside a clock phrase —
+                # 'at quarter to 5' → 'at quarter' (spec fails), or
+                # 'at 5 to 6 to go' → 'at 5' + task '6 to go' (spec
+                # parses but the task stole clock digits). Retry with
+                # the connector bound to the LAST one; a task that
+                # starts with a clock-ish token is the tell.
                 mg = self._REMINDER_RE_GREEDY.match(plan_text)
                 if mg is not None:
                     gspec = self._reminder_spec(

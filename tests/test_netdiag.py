@@ -1371,6 +1371,23 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(
                 time.localtime(mo["at"]).tm_mon,
                 (time.localtime().tm_mon + 1) % 12 + 1)
+            # 'ten to 6'/'twenty past 4'/'five to midnight' —
+            # worded minutes-to/past clocks returned None so the
+            # greedy-when retry never reached them live.
+            spec = parse_reminder_schedule("at ten to 6", time.time())
+            self.assertEqual(
+                (time.localtime(spec["at"]).tm_hour,
+                 time.localtime(spec["at"]).tm_min), (17, 50))
+            spec = parse_reminder_schedule(
+                "at twenty past 4", time.time())
+            self.assertEqual(
+                (time.localtime(spec["at"]).tm_hour,
+                 time.localtime(spec["at"]).tm_min), (16, 20))
+            spec = parse_reminder_schedule(
+                "at five to midnight", time.time())
+            self.assertEqual(
+                (time.localtime(spec["at"]).tm_hour,
+                 time.localtime(spec["at"]).tm_min), (23, 55))
 
             # Snooze re-anchors 'at' via scheduler.update — a real
             # reschedule, not a narrated postponement.
@@ -2074,8 +2091,41 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("give me a 10 minute timer",
                                mode="auto")
             self.assertIn("Timer set", result.content)
-            sup.scheduler.rows.pop()
-            sup.scheduler.rows.pop()
+            # Free tails — 'tomorrow at 9' has no connector, 'for the
+            # dentist at 3' embeds task+time, 'to stretch' is task-only.
+            result = agent.run("i need a reminder tomorrow at 9",
+                               mode="auto")
+            self.assertIn("do what", result.content)
+            result = agent.run("i need a reminder to stretch",
+                               mode="auto")
+            self.assertIn("When should", result.content)
+            n0 = len(sup.scheduler.rows)
+            result = agent.run(
+                "give me a reminder for the dentist at 3",
+                mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            result = agent.run("gimme a timer for 5 minutes",
+                               mode="auto")
+            self.assertIn("Timer set", result.content)
+            # 'at 5 to 6' — the lazy split's 'at 5' parses on its own
+            # and stole '6 to go' as the task; the digit-led task is
+            # the tell that the when must bind greedily.
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("remind me at 5 to 6 to go",
+                               mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            g_row = sup.scheduler.rows[-1]
+            self.assertEqual(g_row["action"]["detail"], "go")
+            self.assertEqual(
+                (time.localtime(g_row["at"]).tm_hour,
+                 time.localtime(g_row["at"]).tm_min), (17, 55))
+            # Non-clock digits in the task stay tasks.
+            result = agent.run("remind me at 5 to take 6 pills",
+                               mode="auto")
+            self.assertIn("take 6 pills", result.content)
+            sup.scheduler.rows.clear()
 
             # Possessive scopes — 'cancel tomorrow's reminder' left
             # 'tomorrow's' as one token that never matched hay

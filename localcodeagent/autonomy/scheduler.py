@@ -33,6 +33,13 @@ _WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
              "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
              "eleven": 11, "twelve": 12}
 
+# Minute-of-hour words for 'ten to six'/'twenty past four' —
+# numbers above twelve only ever appear on the minute side.
+_MIN_NUM = {**_WORD_NUM, "thirteen": 13, "fourteen": 14,
+            "fifteen": 15, "sixteen": 16, "seventeen": 17,
+            "eighteen": 18, "nineteen": 19, "twenty": 20,
+            "twenty-five": 25, "twenty five": 25, "thirty": 30}
+
 
 def _hour_num(tok: str) -> int | None:
     if tok.isdigit():
@@ -40,9 +47,22 @@ def _hour_num(tok: str) -> int | None:
     return _WORD_NUM.get(tok)
 
 
+def _min_num(tok: str) -> int | None:
+    if tok.isdigit():
+        return int(tok)
+    return _MIN_NUM.get(tok)
+
+
+_MIN_TOK = (r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|"
+            r"ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|"
+            r"seventeen|eighteen|nineteen|twenty|"
+            r"twenty[- ]five|thirty)")
+
+
 def _worded_clock(t: str) -> str:
     """'at half past three' → 'at 3:30', 'at quarter to five' →
-    'at 4:45', 'at quarter past two' → 'at 2:15'."""
+    'at 4:45', 'at ten to 6' → 'at 5:50', 'at twenty past 4' →
+    'at 4:20'."""
     m = re.search(r"\bquarter\s+to\s+(\w+)\b", t)
     if m:
         h = _hour_num(m.group(1))
@@ -54,6 +74,35 @@ def _worded_clock(t: str) -> str:
         if h is not None:
             mins = "30" if m.group(1) == "half" else "15"
             return t[:m.start()] + f"{h}:{mins}" + t[m.end():]
+    m = re.search(r"\b(" + _MIN_TOK + r")\s+to\s+(\w+)\b", t)
+    if m:
+        mn = _min_num(m.group(1))
+        htok = m.group(2).lower()
+        if mn is not None and 1 <= mn <= 59:
+            if htok == "midnight":
+                return (t[:m.start()] + f"11:{60 - mn:02d} pm"
+                        + t[m.end():])
+            if htok == "noon":
+                return (t[:m.start()] + f"11:{60 - mn:02d}"
+                        + t[m.end():])
+            h = _hour_num(m.group(2))
+            if h is not None and 1 <= h <= 12:
+                return (t[:m.start()]
+                        + f"{(h - 1) % 12 or 12}:{60 - mn:02d}"
+                        + t[m.end():])
+    m = re.search(r"\b(" + _MIN_TOK + r")\s+past\s+(\w+)\b", t)
+    if m:
+        mn = _min_num(m.group(1))
+        htok = m.group(2).lower()
+        if mn is not None and 1 <= mn <= 59:
+            if htok == "midnight":
+                return (t[:m.start()] + f"12:{mn:02d} am"
+                        + t[m.end():])
+            if htok == "noon":
+                return t[:m.start()] + f"12:{mn:02d}" + t[m.end():]
+            h = _hour_num(m.group(2))
+            if h is not None and 1 <= h <= 12:
+                return t[:m.start()] + f"{h}:{mn:02d}" + t[m.end():]
     return t
 
 
