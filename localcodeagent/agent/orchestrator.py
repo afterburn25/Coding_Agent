@@ -2998,7 +2998,8 @@ class AgentOrchestrator:
                 or self._REMINDER_TOGGLE_RE.match(match_text)
                 or self._REMINDER_STOP_RE.match(match_text)
                 or self._REMINDER_RESCHEDULE_RE.match(match_text)
-                or self._REMINDER_LEAD_WHEN_RE.match(match_text)):
+                or self._REMINDER_LEAD_WHEN_RE.match(match_text)
+                or self._REMINDER_BARE_RE.match(match_text)):
             return None
         # Reminder inventory — "what reminders do i have" asks the
         # scheduler, not conversational facts; a memory recall can only
@@ -3688,6 +3689,15 @@ class AgentOrchestrator:
         r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak)ing|"
         r"remind|alert|notify|ping|wake)\s+me\b\s*(?:up\b\s*)?"
         r"(?:(?:to|about|of|that)\s+(?P<task>.+?))?"
+        + _REMINDER_TRAIL,
+        re.IGNORECASE)
+    # Bare verb+me — 'wake me', 'ping me', 'remind me'. No when, no
+    # task; the model narrated 'I'll set a reminder to wake you at
+    # 3 AM' over zero rows.
+    _REMINDER_BARE_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?P<verb>(?:keep\s+)?(?:remind|alert|notify|ping|wak)ing|"
+        r"remind|alert|notify|ping|wake)\s+me\b(?:\s+up\b)?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_NOTASK_RE = re.compile(
@@ -4923,6 +4933,23 @@ class AgentOrchestrator:
                             f"“{wtxt}” — say “at 6am”, “in 30 minutes”"
                             f", or “tomorrow at 9”.",
                             user_text, task_id, event_callback)
+                mb = self._REMINDER_BARE_RE.match(plan_text)
+                if mb is not None:
+                    vb = str(mb.group("verb") or "").lower()
+                    if re.search(r"wak(?:e|ing)$", vb):
+                        # 'wake me' — the task is waking; only the
+                        # time is missing.
+                        return self._reminder_finish(
+                            "Wake you when? — e.g. “at 6am”, "
+                            "“in an hour”, “tomorrow at 7”.",
+                            user_text, task_id, event_callback)
+                    # 'remind me'/'ping me' — both slots are empty;
+                    # the model narrated a fake 'I'll set a ping
+                    # reminder for you' over zero rows.
+                    return self._reminder_finish(
+                        "Remind you to do what — and when? e.g. "
+                        "“remind me in 10 minutes to stretch”.",
+                        user_text, task_id, event_callback)
                 return None
             # 'remind me to X' with no time — claim and ask rather
             # than let the model improvise a commitment.
@@ -5097,6 +5124,7 @@ class AgentOrchestrator:
                              plan_text)
                          or self._REMINDER_LEAD_WHEN_RE.match(
                              plan_text)
+                         or self._REMINDER_BARE_RE.match(plan_text)
                          or self._REMINDER_DECL_RE.match(plan_text)
                          or self._REMINDER_NOUNFIRST_RE.match(
                              plan_text)

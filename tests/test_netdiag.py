@@ -2214,6 +2214,13 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("i'll need a reminder for tomorrow",
                                mode="auto")
             self.assertIn("do what", result.content)
+            # Bare verb+me — 'wake me'/'ping me' got model fake-sets
+            # ('I'll set a reminder to wake you at 3 AM') over zero
+            # rows; waking is its own task so the ask is the time.
+            result = agent.run("wake me", mode="auto")
+            self.assertIn("when", result.content.lower())
+            result = agent.run("ping me", mode="auto")
+            self.assertIn("do what", result.content)
             # Terse forms — 'reminders off' got a model 'all inactive'
             # over untouched rows; 'snooze everything' got a false
             # capability refusal. Both are real pool mutations now.
