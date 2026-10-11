@@ -3641,14 +3641,15 @@ class AgentOrchestrator:
         re.IGNORECASE)
     # Noun-first fragments — 'reminder for my dentist appointment
     # tomorrow' carries no verb lead; the model narrated a fake
-    # 'reminder set for 15:00'. Requires a tail so a bare 'reminders!'
-    # still falls through, and interrogatives ('any reminders…')
-    # claim the inventory lane earlier.
+    # 'reminder set for 15:00'. A bare singular ('timer') asks when;
+    # a bare plural ('reminders') routes to inventory — the model
+    # narrated 'Timer set for 30 minutes' and 'No active reminders'
+    # over rows that didn't match either claim.
     _REMINDER_NOUNFIRST_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:(?:a|an|new|another|one)\s+)?"
-        r"(?P<noun>reminders?|alarms?|timers?)\s+"
-        r"(?P<tail>.+?)" + _REMINDER_TRAIL,
+        r"(?P<noun>reminders?|alarms?|timers?)\b"
+        r"(?:\s+(?P<tail>.+?))?" + _REMINDER_TRAIL,
         re.IGNORECASE)
     # Referential scoped asks — 'that reminder at 3', 'my reminder
     # about the dentist'. No verb lead at all; the model narrated a
@@ -3657,6 +3658,7 @@ class AgentOrchestrator:
     _REMINDER_REFER_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:that|the|this|my|your)\s+"
+        r"(?:[\w:'-]+\s+)?"
         r"(?:reminders?|alarms?|timers?|schedules?)"
         r"(?:\s+(?:at|for|on|about)\s+.+?)?" + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -3827,7 +3829,7 @@ class AgentOrchestrator:
         r"(?:\s+at\s+(?P<attime>\d[\w:.\s]*?|noon|midnight))?"
         r"(?:\s+(?:anymore|again|any\s+more|any\s+longer))?"
         + _REMINDER_TRAIL +
-        r"|^\s*(?:no\s+more|enough\s+(?:of|with))\s+"
+        r"|^\s*(?:no\s+(?:more\s+)?|enough\s+(?:of|with)\s+)"
         r"(?:the\s+)?reminders?" + _REMINDER_ECHO + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_RESCHEDULE_RE = re.compile(
@@ -4095,6 +4097,10 @@ class AgentOrchestrator:
             # not a clock.
             spec = self._reminder_spec(
                 "in " + str(mr.group("when") or ""), time.time())
+        if spec is None:
+            # 'change my alarm to 7' — a bare clock target.
+            spec = self._reminder_spec(
+                "at " + str(mr.group("when") or ""), time.time())
         if spec is None:
             return self._reminder_finish(
                 "Reschedule to when? — e.g. “to friday at 3pm” "
@@ -4751,6 +4757,20 @@ class AgentOrchestrator:
         md = (self._REMINDER_DECL_RE.match(plan_text)
               or self._REMINDER_NOUNFIRST_RE.match(plan_text)
               or self._REMINDER_NOUNADJ_RE.match(plan_text))
+        if (md is not None
+                and self._REMINDER_NOUNFIRST_RE.match(plan_text)
+                is not None
+                and self._REMINDER_DECL_RE.match(plan_text) is None
+                and self._REMINDER_NOUNADJ_RE.match(plan_text) is None
+                and not str(md.group("tail") or "").strip()
+                and str(md.group("noun") or "").endswith("s")):
+            # Bare plural — 'reminders'/'alarms?'/'timers' — is an
+            # inventory ask, not a create; the model narrated 'No
+            # active reminders' over a live row.
+            inv = self._reminder_inventory_reply(user_text, plan_text)
+            if inv is not None:
+                return self._reminder_finish(
+                    inv.text, user_text, task_id, event_callback)
         if md is not None:
             # 'i want a reminder for 5pm' / 'give me a 10 minute
             # timer' — the time carries the whole ask; alarm/timer
@@ -5086,6 +5106,22 @@ class AgentOrchestrator:
                 mnt = self._REMINDER_NOTASK_RE.match(plan_text)
                 if mnt is not None:
                     wtxt = str(mnt.group("when") or "")
+                    # 'remind me tomorrow to' / 'wake me at' — a
+                    # dangling connector is not part of the when.
+                    wtxt = re.sub(
+                        r"\s*(?:to|of|about|that|at|in|on|for)\s*$",
+                        "", wtxt).strip(" ,;—-")
+                    if not wtxt:
+                        vb_nt = str(mnt.group("verb") or "").lower()
+                        if re.search(r"wak(?:e|ing)$", vb_nt):
+                            return self._reminder_finish(
+                                "Wake you when? — e.g. “at 6am”, "
+                                "“in an hour”, “tomorrow at 7”.",
+                                user_text, task_id, event_callback)
+                        return self._reminder_finish(
+                            "Remind you to do what — and when? e.g. "
+                            "“remind me in 10 minutes to stretch”.",
+                            user_text, task_id, event_callback)
                     spec_nt = self._reminder_spec(wtxt, time.time())
                     if (spec_nt is not None
                             and re.search(

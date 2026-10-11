@@ -2485,6 +2485,38 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("couldn't pin a time", result.content)
             sup.scheduler.rows.clear()
 
+            # Bare nouns and dangling connectors — 'timer' got a
+            # model 'Timer set for 30 minutes. It'll expire at
+            # 6:51 PM.' over zero rows; 'reminders?' got 'No active
+            # reminders' over a live row; 'wake me at' got a false
+            # 'no alarm setup exists' refusal.
+            sup.scheduler.add(
+                "alarm: wake", "once",
+                at=time.time() + 43200,
+                action={"kind": "notify", "detail": "wake"})
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("timer", mode="auto")
+            self.assertIn("When should", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0)
+            result = agent.run("reminders?", mode="auto")
+            self.assertIn("wake", result.content)
+            result = agent.run("remind me to", mode="auto")
+            self.assertIn("do what", result.content)
+            result = agent.run("remind me tomorrow to", mode="auto")
+            self.assertIn("do what tomorrow", result.content)
+            result = agent.run("wake me at", mode="auto")
+            self.assertIn("when", result.content.lower())
+            # 'change my alarm to 7' — a bare clock reschedule
+            # target got 'Reschedule to when?'.
+            result = agent.run("change my alarm to 7", mode="auto")
+            self.assertIn("Rescheduled", result.content)
+            # 'no reminders' — a pool stop; the model corrected the
+            # spelling instead of disabling anything.
+            result = agent.run("no reminders", mode="auto")
+            self.assertIn("off", result.content.lower())
+            self.assertFalse(sup.scheduler.rows[-1]["enabled"])
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
