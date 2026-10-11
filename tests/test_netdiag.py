@@ -2221,6 +2221,21 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("when", result.content.lower())
             result = agent.run("ping me", mode="auto")
             self.assertIn("do what", result.content)
+            # Help-idiom creates — 'don't let me forget to call mom'
+            # banked 'Never let me forget to call mom' as a rule;
+            # 'make sure i remember the dentist at 3' banked garbled
+            # text. Both are creates; reminder-shaped turns must
+            # never bank.
+            result = agent.run("don't let me forget to call mom",
+                               mode="auto")
+            self.assertIn("call mom", result.content)
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("make sure i remember the dentist "
+                               "at 3", mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            self.assertFalse(
+                agent.conversation_memory.recall_facts("dentist"))
             # Terse forms — 'reminders off' got a model 'all inactive'
             # over untouched rows; 'snooze everything' got a false
             # capability refusal. Both are real pool mutations now.

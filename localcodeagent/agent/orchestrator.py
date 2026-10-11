@@ -2999,7 +2999,8 @@ class AgentOrchestrator:
                 or self._REMINDER_STOP_RE.match(match_text)
                 or self._REMINDER_RESCHEDULE_RE.match(match_text)
                 or self._REMINDER_LEAD_WHEN_RE.match(match_text)
-                or self._REMINDER_BARE_RE.match(match_text)):
+                or self._REMINDER_BARE_RE.match(match_text)
+                or self._REMINDER_HELP_RE.match(match_text)):
             return None
         # Reminder inventory — "what reminders do i have" asks the
         # scheduler, not conversational facts; a memory recall can only
@@ -3690,6 +3691,18 @@ class AgentOrchestrator:
         r"remind|alert|notify|ping|wake)\s+me\b\s*(?:up\b\s*)?"
         r"(?:(?:to|about|of|that)\s+(?P<task>.+?))?"
         + _REMINDER_TRAIL,
+        re.IGNORECASE)
+    # Help-idiom creates — 'don't let me forget to call mom',
+    # 'make sure i remember the dentist at 3'. The learn lane
+    # banked 'Never let me forget to call mom' as a rule and
+    # 'sure is i remember the dentist at 3' as a fact.
+    _REMINDER_HELP_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:(?:don'?t|do\s+not|dont|never)\s+let\s+me\s+forget|"
+        r"make\s+sure\s+i\s+(?:don'?t\s+forget|remember)|"
+        r"help\s+me\s+(?:remember|not\s+forget)|"
+        r"keep\s+me\s+from\s+forgetting)\s+"
+        r"(?:to\s+|about\s+)?(?P<task>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
     # Bare verb+me — 'wake me', 'ping me', 'remind me'. No when, no
     # task; the model narrated 'I'll set a reminder to wake you at
@@ -4411,6 +4424,25 @@ class AgentOrchestrator:
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
+    def _reminder_shaped(self, text: str) -> bool:
+        """Any reminder-lane command — creates, controls, inventory.
+        These are scheduler operations, never durable facts or
+        rules; the learn lane banked 'at 6am wake me up' and
+        'pay is rent reminder to friday at 10am' as facts live."""
+        if any(rx.match(text) for rx in (
+                self._REMINDER_RE, self._REMINDER_RE_GREEDY,
+                self._REMINDER_CLARIFY_RE, self._REMINDER_CANCEL_RE,
+                self._REMINDER_SNOOZE_RE, self._REMINDER_TOGGLE_RE,
+                self._REMINDER_STOP_RE, self._REMINDER_RESCHEDULE_RE,
+                self._REMINDER_NOTASK_RE, self._REMINDER_BARE_RE,
+                self._REMINDER_HELP_RE,
+                self._REMINDER_LEAD_CADENCE_RE,
+                self._REMINDER_LEAD_WHEN_RE, self._REMINDER_DECL_RE,
+                self._REMINDER_NOUNFIRST_RE, self._REMINDER_REFER_RE,
+                self._REMINDER_INV_LEAD_RE)):
+            return True
+        return self._reminder_inventory_shaped(text)
+
     def _reminder_inventory_shaped(self, text: str) -> bool:
         """Inventory-shaped asks — 'what reminders do i have',
         'anything scheduled for tonight'. Shared by the recall gate
@@ -4787,6 +4819,67 @@ class AgentOrchestrator:
             return self._reminder_finish(
                 f"Sure — remind you to do what {lead}{cand}?",
                 user_text, task_id, event_callback)
+        mh = self._REMINDER_HELP_RE.match(plan_text)
+        if mh is not None:
+            # 'don't let me forget to call mom' — a create ask in
+            # idiom clothing; the learn lane banked it as a rule.
+            sched, _rows = self._reminder_rows()
+            task_h = str(mh.group("task") or "").strip(" ,;—-.")
+            when_h, task2 = "", task_h
+            now_h = time.time()
+            parts = re.split(
+                r"\s+(?=(?:at|in|on|every|next|tomorrow|today|"
+                r"tonight|tonite)\b)", task_h)
+            for i in range(1, len(parts)):
+                # 'the meeting tomorrow at 9' — the first boundary
+                # whose tail parses gives the longest when; taking
+                # the last one leaks 'tomorrow' into the task.
+                tail_i = " ".join(parts[i:])
+                if self._reminder_spec(tail_i, now_h) is not None:
+                    task2 = " ".join(parts[:i])
+                    when_h = tail_i
+                    break
+            if not when_h:
+                for mm in reversed(list(re.finditer(
+                        r"\s+to\s+", task_h))):
+                    left = task_h[:mm.start()].strip()
+                    right = re.sub(r"^to\s+", "",
+                                   task_h[mm.start():].strip(),
+                                   flags=re.IGNORECASE)
+                    if (left and right and self._reminder_spec(
+                            left, now_h) is not None):
+                        when_h, task2 = left, right
+                        break
+            spec_h = (self._reminder_spec(when_h, now_h)
+                      if when_h else None)
+            if spec_h is not None and task2 and sched is not None:
+                try:
+                    fields = {k: v for k, v in spec_h.items()
+                              if k != "kind"}
+                    sched.add(
+                        f"reminder: {task2[:100]}",
+                        spec_h["kind"],
+                        action={"kind": "notify",
+                                "title": "Reminder",
+                                "detail": task2},
+                        created_by="user", **fields)
+                except Exception as exc:
+                    return self._reminder_finish(
+                        f"I couldn't set the reminder ({exc}).",
+                        user_text, task_id, event_callback)
+                return self._reminder_finish(
+                    "Reminder set "
+                    + self._reminder_spec_text(spec_h, task2),
+                    user_text, task_id, event_callback)
+            if sched is None:
+                return self._reminder_finish(
+                    "I can't set reminders — the scheduler isn't "
+                    "running in this session.",
+                    user_text, task_id, event_callback)
+            return self._reminder_finish(
+                f"When should I remind you to {task2}? — e.g. "
+                "“in 10 minutes”, “at 3pm”, “tomorrow at 9”.",
+                user_text, task_id, event_callback)
         m = self._REMINDER_RE.match(plan_text)
         if m is None:
             m = self._REMINDER_LEAD_CADENCE_RE.match(plan_text)
@@ -5125,6 +5218,7 @@ class AgentOrchestrator:
                          or self._REMINDER_LEAD_WHEN_RE.match(
                              plan_text)
                          or self._REMINDER_BARE_RE.match(plan_text)
+                         or self._REMINDER_HELP_RE.match(plan_text)
                          or self._REMINDER_DECL_RE.match(plan_text)
                          or self._REMINDER_NOUNFIRST_RE.match(
                              plan_text)
@@ -10933,11 +11027,11 @@ class AgentOrchestrator:
             and self._brain_subroutine_enabled("long_term_memory", True)
             and self._brain_subroutine_enabled("self_learning", True)
             and self._brain_subroutine_enabled("conversation_learning", True)
-            # Inventory asks are questions about the scheduler, not
-            # facts to bank — 'anything scheduled for tonight' stored
-            # as a fact and the restate-ack then outranked the real
-            # schedule answer.
-            and not self._reminder_inventory_shaped(user_text)
+            # Reminder-lane turns are commands against the scheduler,
+            # not facts — 'at 6am wake me up' and 'pay is rent
+            # reminder to friday at 10am' banked as facts live, and
+            # the restate-ack outranked the real schedule answer.
+            and not self._reminder_shaped(user_text)
         ):
             learned = self.conversation_memory.learn_from_user(
                 user_text,
