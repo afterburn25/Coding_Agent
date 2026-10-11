@@ -2674,8 +2674,19 @@ class AgentOrchestrator:
                         r"\s+", " ",
                         str(row.get("content", ""))).strip()
                     if content:
+                        # Keep a trailing truth-gate marker verbatim —
+                        # truncating it off would re-present a flagged
+                        # utterance as if it had been confirmed clean.
+                        marker_at = content.find(UNVERIFIED_CLAIMS_MARKER)
+                        if marker_at > 0:
+                            head_text = content[:marker_at].rstrip(" ⚠")
+                            tail = content[marker_at:].lstrip(" ⚠")
+                            notice = f" ⚠ {tail}"
+                            quoted = head_text[:200] + notice
+                        else:
+                            quoted = content[:200]
                         return (f"Earlier I said: "
-                                f"\"{content[:200]}\"")
+                                f"\"{quoted}\"")
                 return "I don't have an earlier answer on record."
         terms = memory._content_terms(prop)
         if not terms:
