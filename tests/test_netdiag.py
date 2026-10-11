@@ -1362,6 +1362,15 @@ class TruthGateTests(RecoveryLoopTests):
                 parse_reminder_schedule(
                     "every 3 weeks", time.time())["interval_s"],
                 1814400.0)
+            # 'in N weeks/months' — 'remind me in 2 weeks to renew
+            # my passport' got the 'couldn't pin a time' ask live.
+            wk = parse_reminder_schedule("in 2 weeks", time.time())
+            self.assertEqual(
+                round((wk["at"] - time.time()) / 86400), 14)
+            mo = parse_reminder_schedule("in 2 months", time.time())
+            self.assertEqual(
+                time.localtime(mo["at"]).tm_mon,
+                (time.localtime().tm_mon + 1) % 12 + 1)
 
             # Snooze re-anchors 'at' via scheduler.update — a real
             # reschedule, not a narrated postponement.
@@ -1859,7 +1868,12 @@ class TruthGateTests(RecoveryLoopTests):
                           # model claimed 'No vitamins reminder is
                           # active' while the row was live.
                           "i don't need the standup reminder",
-                          "don't want the standup reminder"):
+                          "don't want the standup reminder",
+                          # 'never mind the reminder' ran the
+                          # conversation-memory FORGET lane live —
+                          # 'Got it. Forgot 3 matching item(s).' —
+                          # deleting real facts while the row stayed.
+                          "never mind the standup reminder"):
                 n0 = len(sup.scheduler.rows)
                 sup.scheduler.add(
                     "reminder: standup", "once",

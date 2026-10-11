@@ -103,7 +103,7 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"(\d+(?:\.\d+)?|an?\s+couple\s+of|an?|one|two|three|four|"
         r"five|six|seven|eight|nine|ten|eleven|twelve|half\s+an?)\s*"
         r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
-        r"days?|d)", t)
+        r"days?|d|weeks?|w|months?)", t)
     if m:
         n_raw = m.group(1)
         n = (0.5 if n_raw.startswith("half") else
@@ -111,8 +111,22 @@ def parse_reminder_when(when: str, now: float) -> float | None:
              _WORDS.get(n_raw, None))
         if n is None:
             n = float(n_raw)
-        scale = {"s": 1, "m": 60, "h": 3600, "d": 86400}[
-            m.group(2)[0]]
+        unit = m.group(2).rstrip("s")
+        if unit == "month":
+            # A real calendar advance — a fixed 30d span drifts the
+            # landing date off the user's month boundary.
+            import calendar as _cal
+            lt2 = time.localtime(now)
+            mon0 = lt2.tm_mon - 1 + int(n)
+            yr, mon = lt2.tm_year + mon0 // 12, mon0 % 12 + 1
+            day = min(lt2.tm_mday, _cal.monthrange(yr, mon)[1])
+            return time.mktime(
+                (yr, mon, day, lt2.tm_hour, lt2.tm_min, 0,
+                 -1, -1, -1))
+        scale = {"s": 1, "sec": 1, "second": 1, "m": 60, "min": 60,
+                 "minute": 60, "h": 3600, "hr": 3600, "hour": 3600,
+                 "d": 86400, "day": 86400, "w": 604800,
+                 "week": 604800}[unit]
         return now + n * scale
     # 'in 2 and a half hours' — compound worded fraction.
     m = re.fullmatch(

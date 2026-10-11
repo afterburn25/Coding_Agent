@@ -3635,7 +3635,7 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
-        r"axe?|ditch|forget)"
+        r"axe?|ditch|forget|never\s*mind)"
         r"|(?:i\s+)?(?:don'?t|do\s+not|dont)\s+"
         r"(?:need|want|use|like))\s+"
         r"(?:(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
