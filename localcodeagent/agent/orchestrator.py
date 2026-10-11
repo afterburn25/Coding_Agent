@@ -3606,115 +3606,13 @@ class AgentOrchestrator:
     _REMINDER_EVENTISH_RE = re.compile(
         r"\b(?:when|once|if|as\s+soon\s+as|after|before|until|"
         r"whenever|every\s+time)\b", re.IGNORECASE)
-    _WEEKDAYS = {"mon": 0, "monday": 0, "tue": 1, "tues": 1,
-                 "tuesday": 1, "wed": 2, "wednesday": 2, "thu": 3,
-                 "thur": 3, "thurs": 3, "thursday": 3, "fri": 4,
-                 "friday": 4, "sat": 5, "saturday": 5, "sun": 6,
-                 "sunday": 6}
 
     def _reminder_at_when(self, when: str, now: float) -> float | None:
-        """Parse a reminder when-clause → wall-clock timestamp.
-
-        Covers 'in 5 minutes', 'tomorrow [morning] [at 9am]',
-        'at 14:30 [tomorrow]', 'tonight', 'this morning', 'friday
-        [at 3]', 'noon', 'midnight'. Returns None when nothing
-        parseable is present."""
-        t = " ".join(str(when or "").lower().split())
-        if not t:
-            return None
-        lt = time.localtime(now)
-
-        def _meridian(hour: int, mer: str | None) -> int:
-            mer = re.sub(r"[\s.]", "", mer or "")
-            if mer == "pm" and hour < 12:
-                return hour + 12
-            if mer == "am" and hour == 12:
-                return 0
-            if not mer and hour <= 6:
-                # Bare "at 3" in reminder speech is afternoon, not 3am.
-                return hour + 12
-            return hour
-
-        def _clock(hour: int, minute: int, day_offset: int = 0,
-                   *, roll: bool = True) -> float:
-            cand = time.mktime(
-                (lt.tm_year, lt.tm_mon, lt.tm_mday + day_offset,
-                 hour, minute, 0, -1, -1, -1))
-            if roll and cand <= now:
-                cand += 86400
-            return cand
-
-        clock_tail = (r"(?:\s+at\s+(\d{1,2})(?::(\d{2}))?"
-                      r"\s*(a\.?m\.?|p\.?m\.?|am|pm)?)?")
-
-        m = re.fullmatch(
-            r"in\s+(\d+(?:\.\d+)?)\s*"
-            r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
-            r"days?|d)", t)
-        if m:
-            scale = {"s": 1, "m": 60, "h": 3600, "d": 86400}[
-                m.group(2)[0]]
-            return now + float(m.group(1)) * scale
-        m = re.fullmatch(
-            r"tomorrow(?:\s+(morning|afternoon|evening|night))?"
-            + clock_tail, t)
-        if m:
-            part, hr, mn, mer = m.groups()
-            minute = 0
-            if hr is not None:
-                hour = _meridian(int(hr), mer)
-                minute = int(mn or 0)
-            elif part:
-                hour = {"morning": 9, "afternoon": 15,
-                        "evening": 19, "night": 21}[part]
-            else:
-                hour = 9
-            return _clock(hour, minute, 1, roll=False)
-        if re.fullmatch(r"(?:this\s+night|tonight|this\s+evening)", t):
-            return _clock(21 if "night" in t else 19, 0)
-        m = re.fullmatch(r"this\s+(morning|afternoon|evening)", t)
-        if m:
-            return _clock({"morning": 9, "afternoon": 15,
-                           "evening": 19}[m.group(1)], 0)
-        if t == "noon":
-            return _clock(12, 0)
-        if t == "midnight":
-            return _clock(0, 0)
-        if t == "next week":
-            return _clock(9, 0, 7, roll=False)
-        m = re.fullmatch(
-            r"(?:(on|next)\s+)?(\w+?)" + clock_tail, t)
-        if m:
-            wd = self._WEEKDAYS.get(m.group(2))
-            if wd is not None and m.group(1) == "next":
-                # 'next monday' — the coming week's occurrence, never
-                # today-or-tomorrow.
-                delta = (wd - lt.tm_wday) % 7
-                return _clock(
-                    _meridian(int(m.group(3)), m.group(5))
-                    if m.group(3) else 9,
-                    int(m.group(4) or 0),
-                    delta if delta else 7, roll=False)
-            if wd is not None:
-                hr, mn, mer = m.group(3), m.group(4), m.group(5)
-                hour = _meridian(int(hr), mer) if hr else 9
-                delta = (wd - lt.tm_wday) % 7
-                cand = _clock(hour, int(mn or 0), delta, roll=False)
-                if cand <= now:
-                    cand = _clock(hour, int(mn or 0), delta + 7,
-                                  roll=False)
-                return cand
-        m = re.fullmatch(
-            r"(at\s+)?(\d{1,2})(?::(\d{2}))?\s*"
-            r"(a\.?m\.?|p\.?m\.?|am|pm)?"
-            r"(?:\s+(tomorrow|tonight))?", t)
-        if m and (m.group(1) or m.group(3) or m.group(4)):
-            hour = _meridian(int(m.group(2)), m.group(4))
-            offset = 1 if m.group(5) == "tomorrow" else 0
-            if m.group(5) == "tonight" and hour < 12:
-                hour += 12
-            return _clock(hour, int(m.group(3) or 0), offset)
-        return None
+        """Parse a reminder when-clause → wall-clock timestamp —
+        shared grammar lives in autonomy.scheduler so the server-side
+        reminder lane parses identically."""
+        from ..autonomy.scheduler import parse_reminder_when
+        return parse_reminder_when(when, now)
 
     def _reminder_rows(self):
         """Enabled reminder schedules (chat-set notify rows)."""

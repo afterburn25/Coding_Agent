@@ -1534,12 +1534,27 @@ class AutonomyApiTests(unittest.TestCase):
                 self.assertIsNotNone(out)
                 self.assertIn("Reminder set", out["content"])
                 self.assertEqual(len(_reminders()), 2)
+                # Leading when — "set a reminder for friday at 3pm
+                # to call the vendor" carries the time phrase before
+                # the task; previously the trailing-time-only parser
+                # asked for a time that was already given.
+                out = state._mission_command(
+                    "set a reminder for friday at 3pm "
+                    "to call the vendor")
+                self.assertIsNotNone(out)
+                self.assertIn("Reminder set", out["content"])
+                scheds = _reminders()
+                self.assertEqual(len(scheds), 3)
+                self.assertIn("call the vendor",
+                              scheds[-1]["action"]["detail"])
+                self.assertEqual(
+                    time.localtime(scheds[-1]["at"]).tm_wday, 4)
                 # No parseable time — honest ask, no phantom schedule.
                 out = state._mission_command(
                     "remind me to water the plants")
                 self.assertIsNotNone(out)
                 self.assertIn("can't pin", out["content"])
-                self.assertEqual(len(_reminders()), 2)
+                self.assertEqual(len(_reminders()), 3)
                 # "remember to … weekly" still mints a standing goal.
                 out = state._mission_command(
                     "remember to check the deploys weekly")

@@ -5101,7 +5101,8 @@ class AppState:
         a fallthrough to other lanes.
         """
         import time as _t
-        from .autonomy.scheduler import _next_daily
+        from .autonomy.scheduler import (
+            _next_daily, parse_reminder_when)
 
         def _clock(hour: int, minute: int, mer: str | None,
                    *, days: int = 0) -> float:
@@ -5122,6 +5123,19 @@ class AppState:
                                   lt.tm_mday + days + 1,
                                   hour, minute, 0, 0, 0, -1))
             return cand
+
+        # Leading when — "set a reminder for friday at 3pm to call the
+        # vendor" puts the time phrase BEFORE the task; the trailing
+        # searches below only see the tail. Try each 'to'/'for' split
+        # until the prefix parses as a time.
+        parts = re.split(r"\s+(?:to|for)\s+", body)
+        if len(parts) > 1:
+            for i in range(1, len(parts)):
+                lead_when = parse_reminder_when(
+                    " ".join(parts[:i]), now)
+                if lead_when is not None:
+                    return (lead_when,
+                            " ".join(parts[i:]).strip(" ,;—-"))
 
         m = re.search(
             r"\s+in\s+(\d+)\s+(minutes?|mins?|hours?|hrs?|days?)\s*$",
