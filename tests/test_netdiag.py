@@ -911,6 +911,39 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("deadline is friday", r.text.lower())
 
+    def test_rules_inventory_reports_true_count(self):
+        # Live: "what rules are you following right now" listed 8 of
+        # 10 active rules with no indication the set was truncated —
+        # a self-inspection lane misreporting its own rule book.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            cm = agent.conversation_memory
+            r = agent._facts_recall_reply(
+                "what rules are you following right now",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("no standing rules", r.text.lower())
+            for i in range(3):
+                cm.learn_from_user(f"never run job {i} on friday")
+            r = agent._facts_recall_reply(
+                "what rules are you following right now",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("operating rules", r.text.lower())
+            self.assertNotIn("more.", r.text.lower())
+            for i in range(3, 10):
+                cm.learn_from_user(f"never run job {i} on friday")
+            r = agent._facts_recall_reply(
+                "what rules are you following right now",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("10 operating rules", r.text.lower())
+            self.assertIn("2 more", r.text.lower())
+
     def test_scoped_recall_and_inventory_asks(self):
         # Live: "do you have anything on the backup schedule" dumped
         # the AUTONOMY inventory (standing goals/missions) instead of

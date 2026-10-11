@@ -3002,11 +3002,19 @@ class AgentOrchestrator:
         if rules_q:
             rules = self.conversation_memory.active_rules(
                 project_id=project_id, conversation_id=conversation_id)
-            canonical = (
-                "No standing rules yet — nothing you've told me to "
-                "always or never do."
-                if not rules else
-                "Operating rules: " + "; ".join(f'"{r}"' for r in rules[:8]))
+            if not rules:
+                canonical = ("No standing rules yet — nothing you've "
+                             "told me to always or never do.")
+            elif len(rules) <= 8:
+                canonical = ("Operating rules: "
+                             + "; ".join(f'"{r}"' for r in rules))
+            else:
+                # Past the display cap the total still has to be true —
+                # listing 8 of 11 silently misreports the rule set.
+                canonical = (
+                    f"{len(rules)} operating rules — "
+                    + "; ".join(f'"{r}"' for r in rules[:8])
+                    + f"; and {len(rules) - 8} more.")
             from ..context.realize import RenderedReply, SemanticResponse
             sem = SemanticResponse(
                 facts=[canonical], semantic_id="memory:rules_recall",
