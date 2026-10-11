@@ -2586,6 +2586,17 @@ class AgentOrchestrator:
         r"(?:did|have|had)\s+i\s+(?:ever\s+|already\s+|really\s+)?"
         r"(?:tell|told|mention)\w*\s+you\s+(?:about\s+)?)",
         re.IGNORECASE)
+    # This lane's own recall/attribution outputs — meta-statements about
+    # the record, not content. Anaphoric replay skips them so it quotes
+    # the underlying utterance, not a previous recall reply.
+    _RECALL_REPLY_PREFIXES = (
+        "Earlier I said:",
+        "Yes — that's on record.",
+        "Not exactly — closest thing on record",
+        "I don't have that on record",
+        "I don't have anything on record",
+        "I don't have an earlier answer on record",
+    )
     _FACT_RECALL_SKIP_RE = re.compile(
         r"^\s*what\s+(?:do\s+you(?!\s+(?:have|got|know|remember|"
         r"recall|recollect)\b)|should|would|could|can|"
@@ -2673,6 +2684,11 @@ class AgentOrchestrator:
                     content = re.sub(
                         r"\s+", " ",
                         str(row.get("content", ""))).strip()
+                    # Skip this lane's own recall outputs — replaying a
+                    # replay nests "Earlier I said: Earlier I said:" and
+                    # never reaches the underlying utterance.
+                    if content.startswith(self._RECALL_REPLY_PREFIXES):
+                        continue
                     if content:
                         # Keep a trailing truth-gate marker verbatim —
                         # truncating it off would re-present a flagged
