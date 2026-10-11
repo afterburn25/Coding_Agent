@@ -1,24 +1,60 @@
-"""Durable Scheduler — one-time / interval / daily / weekly schedules.
+"""Durable Scheduler — one-time / interval / daily / weekly / monthly
+schedules.
 
-Schedules persist and survive restart. Daily/weekly use wall-clock local
-time (computed fresh each fire), so DST transitions re-anchor correctly
-instead of drifting by fixed 24h deltas.
+Schedules persist and survive restart. Daily/weekly/monthly use
+wall-clock local time (computed fresh each fire), so DST transitions
+re-anchor correctly instead of drifting by fixed 24h deltas.
 """
 from __future__ import annotations
 
+import calendar
 import re
 import threading
 import time
 import uuid
 from typing import Any, Callable
 
-KINDS = {"once", "interval", "daily", "weekly"}
+KINDS = {"once", "interval", "daily", "weekly", "monthly"}
 
 _WEEKDAY_NAMES = {
     "mon": 0, "monday": 0, "tue": 1, "tues": 1, "tuesday": 1,
     "wed": 2, "wednesday": 2, "thu": 3, "thur": 3, "thurs": 3,
     "thursday": 3, "fri": 4, "friday": 4, "sat": 5, "saturday": 5,
     "sun": 6, "sunday": 6}
+
+_MONTH_NAMES = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3,
+    "march": 3, "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6,
+    "jul": 7, "july": 7, "aug": 8, "august": 8, "sep": 9,
+    "sept": 9, "september": 9, "oct": 10, "october": 10, "nov": 11,
+    "november": 11, "dec": 12, "december": 12}
+
+_WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+             "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+             "eleven": 11, "twelve": 12}
+
+
+def _hour_num(tok: str) -> int | None:
+    if tok.isdigit():
+        return int(tok)
+    return _WORD_NUM.get(tok)
+
+
+def _worded_clock(t: str) -> str:
+    """'at half past three' → 'at 3:30', 'at quarter to five' →
+    'at 4:45', 'at quarter past two' → 'at 2:15'."""
+    m = re.search(r"\bquarter\s+to\s+(\w+)\b", t)
+    if m:
+        h = _hour_num(m.group(1))
+        if h is not None:
+            return t[:m.start()] + f"{(h - 1) % 12 or 12}:45" + t[m.end():]
+    m = re.search(r"\b(half|quarter)\s+past\s+(\w+)\b", t)
+    if m:
+        h = _hour_num(m.group(2))
+        if h is not None:
+            mins = "30" if m.group(1) == "half" else "15"
+            return t[:m.start()] + f"{h}:{mins}" + t[m.end():]
+    return t
 
 
 def parse_reminder_when(when: str, now: float) -> float | None:
@@ -33,6 +69,7 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         return None
     t = re.sub(r"\bat\s+noon\b", "at 12:00 pm", t)
     t = re.sub(r"\bat\s+midnight\b", "at 12:00 am", t)
+    t = _worded_clock(t)
     lt = time.localtime(now)
 
     def _meridian(hour: int, mer: str | None) -> int:
@@ -77,6 +114,57 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         scale = {"s": 1, "m": 60, "h": 3600, "d": 86400}[
             m.group(2)[0]]
         return now + n * scale
+    # 'in 2 and a half hours' — compound worded fraction.
+    m = re.fullmatch(
+        r"in\s+(\d+(?:\.\d+)?)\s+and\s+a\s+half\s+"
+        r"(minutes?|mins?|hours?|hrs?|days?)", t)
+    if m:
+        scale = {"m": 60, "h": 3600, "d": 86400}[m.group(2)[0]]
+        return now + (float(m.group(1)) + 0.5) * scale
+    # 'on the 15th [of march]' / 'on march 3rd' — calendar dates.
+    m = re.fullmatch(
+        r"(?:on\s+)?the\s+(\d{1,2})(?:st|nd|rd|th)?"
+        r"(?:\s+of\s+(\w+))?(?:\s+at\s+(\d{1,2})(?::(\d{2}))?\s*"
+        r"(a\.?m\.?|p\.?m\.?|am|pm)?)?", t)
+    if m:
+        month = (_MONTH_NAMES.get(m.group(2))
+                 if m.group(2) else None)
+        if m.group(2) is None or month is not None:
+            hour = (_meridian(int(m.group(3)), m.group(5))
+                    if m.group(3) else 9)
+            minute = int(m.group(4) or 0)
+            for mo in range(0, 15):
+                year = (lt.tm_year
+                        + (lt.tm_mon - 1 + mo) // 12)
+                mon = (lt.tm_mon - 1 + mo) % 12 + 1
+                if month is not None and mon != month:
+                    continue
+                mday = min(int(m.group(1)),
+                           calendar.monthrange(year, mon)[1])
+                cand = time.mktime(
+                    (year, mon, mday, hour, minute, 0, 0, 0, -1))
+                if cand > now:
+                    return cand
+                if month is not None:
+                    continue
+    m = re.fullmatch(
+        r"(?:on\s+)?(\w+)\s+(\d{1,2})(?:st|nd|rd|th)?"
+        + clock_tail, t)
+    if m:
+        month = _MONTH_NAMES.get(m.group(1))
+        if month is not None:
+            hour = (_meridian(int(m.group(3)), m.group(5))
+                    if m.group(3) else 9)
+            minute = int(m.group(4) or 0)
+            for year in (lt.tm_year, lt.tm_year + 1):
+                mday = min(int(m.group(2)),
+                           calendar.monthrange(year, month)[1])
+                cand = time.mktime(
+                    (year, month, mday, hour, minute, 0,
+                     0, 0, -1))
+                if cand > now:
+                    return cand
+            return None
     m = re.fullmatch(
         r"tomorrow(?:\s+(morning|afternoon|evening|night))?"
         + clock_tail, t)
@@ -109,7 +197,7 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     if t == "next week":
         return _clock(9, 0, 7, roll=False)
     m = re.fullmatch(
-        r"(?:(on|next)\s+)?(\w+?)" + clock_tail, t)
+        r"(?:(on|next|this|coming)\s+)?(\w+?)" + clock_tail, t)
     if m:
         wd = _WEEKDAY_NAMES.get(m.group(2))
         if wd is not None and m.group(1) == "next":
@@ -155,6 +243,7 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         return None
     t = re.sub(r"\bat\s+noon\b", "at 12:00 pm", t)
     t = re.sub(r"\bat\s+midnight\b", "at 12:00 am", t)
+    t = _worded_clock(t)
 
     def _meridian(hour: int, mer: str | None) -> int:
         mer = re.sub(r"[\s.]", "", mer or "")
@@ -168,6 +257,29 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
 
     clock_tail = (r"(?:\s+at\s+(\d{1,2})(?::(\d{2}))?"
                   r"\s*(a\.?m\.?|p\.?m\.?|am|pm)?)?")
+
+    # 'monthly [on the 15th]' / 'every month on the 1st' /
+    # 'on the 15th of every month' — day-of-month cadence.
+    m = re.fullmatch(
+        r"(?:every\s+month|monthly|once\s+a\s+month)"
+        r"(?:\s+on\s+the\s+(\d{1,2})(?:st|nd|rd|th)?)?"
+        + clock_tail, t)
+    if m:
+        hr, mn, mer = m.group(2), m.group(3), m.group(4)
+        lt = time.localtime(now)
+        return {"kind": "monthly",
+                "day": (int(m.group(1)) if m.group(1)
+                        else lt.tm_mday),
+                "hour": _meridian(int(hr), mer) if hr else 9,
+                "minute": int(mn or 0)}
+    m = re.fullmatch(
+        r"on\s+the\s+(\d{1,2})(?:st|nd|rd|th)?\s+"
+        r"(?:day\s+)?of\s+every\s+month" + clock_tail, t)
+    if m:
+        hr, mn, mer = m.group(2), m.group(3), m.group(4)
+        return {"kind": "monthly", "day": int(m.group(1)),
+                "hour": _meridian(int(hr), mer) if hr else 9,
+                "minute": int(mn or 0)}
 
     # 'twice a day' / 'every other day' — fixed-span intervals.
     if re.fullmatch(r"twice\s+a\s+day|two\s+times\s+a\s+day", t):
@@ -243,7 +355,7 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                     "minute": int(mn or 0)}
     # 'every <weekday> [at T]' / 'on fridays [at T]' — weekly cadence.
     m = re.fullmatch(
-        r"(?:every|on)\s+(\w+?)s?" + clock_tail, t)
+        r"(?:every|on|each)\s+(\w+?)s?" + clock_tail, t)
     if m:
         wd = _WEEKDAY_NAMES.get(m.group(1))
         if wd is not None:
@@ -251,15 +363,19 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
             return {"kind": "weekly", "weekday": wd,
                     "hour": _meridian(int(hr), mer) if hr else 9,
                     "minute": int(mn or 0)}
-    # 'every tuesday and thursday [at T]' — explicit two-day cadence.
+    # 'every monday and friday' / 'every mon, wed and fri' —
+    # explicit multi-day list, comma- or 'and'-joined.
     m = re.fullmatch(
-        r"(?:every|on)\s+(\w+?)\s+and\s+(\w+?)" + clock_tail, t)
+        r"(?:every|on|each)\s+(\w+(?:\s*,\s*\w+)*(?:\s*,?\s+and\s+\w+|"
+        r"\s+and\s+\w+)?)" + clock_tail, t)
     if m:
-        days = [_WEEKDAY_NAMES.get(m.group(1)),
-                _WEEKDAY_NAMES.get(m.group(2))]
-        if all(d is not None for d in days):
-            hr, mn, mer = m.group(3), m.group(4), m.group(5)
-            return {"kind": "weekly", "weekday": sorted(days),
+        tokens = [p.rstrip("s") if p not in _WEEKDAY_NAMES else p
+                  for p in re.findall(
+                      r"[a-z]+", re.sub(r"\band\b", ",", m.group(1)))]
+        days = [_WEEKDAY_NAMES.get(p) for p in tokens]
+        if all(d is not None for d in days) and len(days) > 1:
+            hr, mn, mer = m.group(2), m.group(3), m.group(4)
+            return {"kind": "weekly", "weekday": sorted(set(days)),
                     "hour": _meridian(int(hr), mer) if hr else 9,
                     "minute": int(mn or 0)}
     # Clock-before-cadence — 'at 3pm every day', 'at 8am on weekdays'.
@@ -311,6 +427,23 @@ def _next_daily(hour: int, minute: int, *, weekday=None,
     return (after or time.time()) + 86400  # unreachable fallback
 
 
+def _next_monthly(day: int, hour: int, minute: int,
+                  after: float | None = None) -> float:
+    """Next occurrence of day-of-month `day` at hour:minute — clamps
+    to the month end for days 29-31 on short months."""
+    base = time.localtime(after or time.time())
+    for month_offset in range(0, 15):
+        year = base.tm_year + (base.tm_mon - 1 + month_offset) // 12
+        month = (base.tm_mon - 1 + month_offset) % 12 + 1
+        mday = min(int(day),
+                   calendar.monthrange(year, month)[1])
+        cand = time.mktime(
+            (year, month, mday, hour, minute, 0, 0, 0, -1))
+        if cand > (after or time.time()):
+            return cand
+    return (after or time.time()) + 2592000  # unreachable fallback
+
+
 class Scheduler:
     def __init__(self, store, *,
                  on_fire: Callable[[dict], None] | None = None) -> None:
@@ -322,7 +455,8 @@ class Scheduler:
 
     def add(self, name: str, kind: str, *, at: float | None = None,
             interval_s: float = 0, hour: int = 3, minute: int = 0,
-            weekday: int | None = None, action: dict | None = None,
+            weekday: int | None = None, day: int | None = None,
+            action: dict | None = None,
             enabled: bool = True, created_by: str = "user") -> dict:
         if kind not in KINDS:
             raise ValueError(f"unknown schedule kind '{kind}'")
@@ -335,6 +469,8 @@ class Scheduler:
             "hour": max(0, min(23, int(hour))),
             "minute": max(0, min(59, int(minute))),
             "weekday": _norm_weekday(weekday),
+            "day": (max(1, min(31, int(day)))
+                    if day is not None else None),
             "action": dict(action or {}),
             "enabled": bool(enabled),
             "created_by": created_by,
@@ -387,6 +523,9 @@ class Scheduler:
                     elif key in ("hour", "minute"):
                         value = max(0, min(23 if key == "hour" else 59,
                                          int(value)))
+                    elif key == "day":
+                        value = (max(1, min(31, int(value)))
+                                 if value is not None else None)
                     elif key == "action" and isinstance(value, dict):
                         value = dict(value)
                     r[key] = value
@@ -420,6 +559,10 @@ class Scheduler:
             return _next_daily(
                 int(row.get("hour", 3)), int(row.get("minute", 0)),
                 weekday=wd if wd is not None else 6, after=now)
+        if kind == "monthly":
+            return _next_monthly(
+                int(row.get("day") or 1), int(row.get("hour", 3)),
+                int(row.get("minute", 0)), after=now)
         return None
 
     def tick(self) -> list[dict]:

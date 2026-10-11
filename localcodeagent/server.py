@@ -5162,6 +5162,14 @@ class AppState:
                     int(wd or 0)]
             return (f"every {day} at {int(spec.get('hour') or 0):02d}"
                     f":{int(spec.get('minute') or 0):02d}")
+        if kind == "monthly":
+            day = int(spec.get("day") or 1)
+            ordn = ("st" if day in (1, 21, 31) else
+                    "nd" if day in (2, 22) else
+                    "rd" if day in (3, 23) else "th")
+            return (f"monthly on the {day}{ordn} at "
+                    f"{int(spec.get('hour') or 0):02d}"
+                    f":{int(spec.get('minute') or 0):02d}")
         stamp = time.strftime("%a %I:%M %p",
                               time.localtime(spec.get("at") or 0))
         return f"for {stamp}"

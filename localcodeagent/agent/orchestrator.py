@@ -3674,6 +3674,15 @@ class AgentOrchestrator:
             return (f"every {day} at {int(spec['hour']):02d}:"
                     f"{int(spec['minute']):02d} — I'll ping you "
                     f"to {task}.")
+        if kind == "monthly":
+            day = int(spec.get("day") or 1)
+            ordn = ("st" if day in (1, 21, 31) else
+                    "nd" if day in (2, 22) else
+                    "rd" if day in (3, 23) else "th")
+            return (f"monthly on the {day}{ordn} at "
+                    f"{int(spec['hour']):02d}:"
+                    f"{int(spec['minute']):02d} — I'll ping you "
+                    f"to {task}.")
         secs = int(spec.get("interval_s") or 60)
         if secs % 3600 == 0:
             span = f"{secs // 3600} hour" + ("s" if secs > 3600 else "")
@@ -3896,6 +3905,8 @@ class AgentOrchestrator:
             text += " daily everyday"
         elif kind == "weekly":
             text += " weekly"
+        elif kind == "monthly":
+            text += " monthly month"
         elif kind == "interval":
             text += " hourly" if s.get("interval_s") == 3600 else ""
         return set(re.findall(r"[a-z0-9']+", text.lower()))
@@ -3919,6 +3930,13 @@ class AgentOrchestrator:
                 day = ("Mon", "Tue", "Wed", "Thu", "Fri",
                        "Sat", "Sun")[int(wd)]
                 return f"{day} {clock}"
+        if kind == "monthly" and hour is not None:
+            day = int(s.get("day") or 1)
+            ordn = ("st" if day in (1, 21, 31) else
+                    "nd" if day in (2, 22) else
+                    "rd" if day in (3, 23) else "th")
+            return (f"the {day}{ordn} "
+                    f"{int(hour):02d}:{int(minute or 0):02d}")
         if kind == "interval" and s.get("interval_s"):
             secs = int(s["interval_s"])
             if secs % 3600 == 0:

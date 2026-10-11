@@ -1316,6 +1316,36 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(
                 sup.scheduler.rows[-1]["interval_s"], 43200.0)
 
+            # Monthly cadence is a real kind — 'every month on the
+            # 15th' mints a day-of-month schedule, not a decline.
+            r = agent._reminder_reply(
+                "remind me every month on the 15th to pay rent",
+                "remind me every month on the 15th to pay rent",
+                task.id)
+            self.assertIsNotNone(r)
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(row["kind"], "monthly")
+            self.assertEqual(row["day"], 15)
+            # Comma-joined day lists land as a weekday list.
+            r = agent._reminder_reply(
+                "remind me every monday, wednesday and friday "
+                "to take the bins out",
+                "remind me every monday, wednesday and friday "
+                "to take the bins out", task.id)
+            self.assertIsNotNone(r)
+            self.assertEqual(
+                sup.scheduler.rows[-1]["weekday"], [0, 2, 4])
+            # Worded clocks resolve — 'at half past three' is 15:30.
+            from localcodeagent.autonomy.scheduler import (
+                parse_reminder_schedule)
+            spec = parse_reminder_schedule(
+                "at half past three", time.time())
+            self.assertIsNotNone(spec)
+            self.assertEqual(
+                time.localtime(spec["at"]).tm_hour, 15)
+            self.assertEqual(
+                time.localtime(spec["at"]).tm_min, 30)
+
             # Snooze re-anchors 'at' via scheduler.update — a real
             # reschedule, not a narrated postponement.
             build_row = next(
