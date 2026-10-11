@@ -3616,7 +3616,7 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:cancel|delete|remove|drop|clear|kill|dismiss|end)\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
-        r"(?:\s*(?:for|about|on|of|to)\s+(?P<tail>.+?))?"
+        r"(?:\s*(?:for|about|on|of|to|at)\s+(?P<tail>.+?))?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_SNOOZE_RE = re.compile(
@@ -3639,6 +3639,7 @@ class AgentOrchestrator:
         r"(?:remind(?:ing)?|alert(?:ing)?|notify(?:ing)?|"
         r"ping(?:ing)?|wak(?:e|ing))\s+me\b(?:\s+up\b)?"
         r"(?:\s+(?:to|about)\s+(?P<topic>.+?))?"
+        r"(?:\s+at\s+(?P<attime>\d[\w:.\s]*?|noon|midnight))?"
         r"(?:\s+(?:anymore|again|any\s+more|any\s+longer))?"
         + _REMINDER_TRAIL +
         r"|^\s*(?:no\s+more|enough\s+(?:of|with))\s+"
@@ -3938,6 +3939,23 @@ class AgentOrchestrator:
             text += " monthly month"
         elif kind == "interval":
             text += " hourly" if s.get("interval_s") == 3600 else ""
+        # Clock terms — 'the 6am reminder'/'at 6:00' resolve the row
+        # firing at that time, the same way 'friday' resolves weekday.
+        clock = None
+        if s.get("hour") is not None:
+            clock = (int(s["hour"]), int(s.get("minute") or 0))
+        elif s.get("at") or s.get("next_run"):
+            lt = time.localtime(float(s.get("at") or s["next_run"]))
+            clock = (lt.tm_hour, lt.tm_min)
+        if clock is not None:
+            h24, mnt = clock
+            h12, ap = h24 % 12 or 12, ("am" if h24 < 12 else "pm")
+            text += (f" {h24}:{mnt:02d} {h24:02d}:{mnt:02d} "
+                     f"{h12}:{mnt:02d}{ap} {h12}{ap} {h12} {ap}")
+            if clock == (12, 0):
+                text += " noon midday"
+            elif clock == (0, 0):
+                text += " midnight"
         return set(re.findall(r"[a-z0-9']+", text.lower()))
 
     def _reminder_when_text(self, s: dict, now: float) -> str:
@@ -4244,11 +4262,16 @@ class AgentOrchestrator:
                     "running in this session.",
                     user_text, task_id, event_callback)
             topic = str(mstop.group("topic") or "").strip(" ,;—-.")
+            attime = str(mstop.group("attime") or "").strip(" ,;—-.")
+            if attime:
+                # 'stop waking me up at 6am' — the clock scopes the
+                # stop to the rows firing at that time.
+                topic = f"{topic} {attime}".strip()
             if topic:
                 terms = set(re.findall(
                     r"[a-z0-9']+",
                     re.sub(r"\b(?:the|my|that|all|every|each|any|of|"
-                           r"to|for|about)\b", " ", topic,
+                           r"to|for|about|at)\b", " ", topic,
                            flags=re.IGNORECASE).lower()))
                 rows = [s for s in rows
                         if not terms or terms <= self._reminder_hay(s)]

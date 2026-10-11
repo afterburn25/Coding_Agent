@@ -1459,6 +1459,11 @@ class TruthGateTests(RecoveryLoopTests):
             learned = cm.learn_from_user(
                 "stop the stretching reminder", project_id="x")
             self.assertFalse(learned.get("behavior_rules"))
+            # 'waking' is the drop-e gerund — the exemption's
+            # 'wake(?:ing)?' missed it live and banked a rule.
+            learned = cm.learn_from_user(
+                "stop waking me up at 6am", project_id="x")
+            self.assertFalse(learned.get("behavior_rules"))
             # Unscoped stop hits the whole enabled pool; with nothing
             # left on, the reply says so instead of acking a no-op.
             r = agent._reminder_reply(
@@ -1660,6 +1665,26 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("Cancel", r.content)
             self.assertNotIn(cat_row, sup.scheduler.rows)
+
+            # A clock scope targets the row firing at that time —
+            # live, 'stop waking me up at 6am' matched nothing and
+            # banked 'Never waking me up at 6am' as a rule.
+            sup.scheduler.add("reminder: wake up", "daily",
+                              hour=6, minute=0)
+            wake_row = sup.scheduler.rows[-1]
+            agent._reminder_reply(
+                "turn reminders back on",
+                "turn reminders back on", task.id)
+            r = agent._reminder_reply(
+                "stop waking me up at 6am",
+                "stop waking me up at 6am", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("off", r.content)
+            self.assertFalse(wake_row["enabled"])
+            self.assertTrue(row["enabled"])
+            learned = agent.conversation_memory.learn_from_user(
+                "stop waking me up at 6am", project_id="x")
+            self.assertFalse(learned.get("behavior_rules"))
 
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of

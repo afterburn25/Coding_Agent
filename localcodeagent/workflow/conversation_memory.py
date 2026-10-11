@@ -2685,8 +2685,8 @@ class ConversationMemory:
                     r"\b(?:whatever|what\s+you'?re|right\s+now|for\s+now|"
                     r"at\s+the\s+moment|currently)\b"
                     r"|^(?:it|that|this|everything|all\s+that)\b"
-                    r"|^(?:remind|alert|notify|ping|wake)(?:ing)?\s+"
-                    r"me\b"
+                    r"|^(?:remind|alert|notify|ping|wak(?:e|ing))"
+                    r"(?:ing)?\s+me\b"
                     r"|\b(?:reminders?|alarms?|timers?)\b",
                     action, flags=re.IGNORECASE)
                 # Negation-of-positive — "don't forget the keys" means
