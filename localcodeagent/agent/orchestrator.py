@@ -3774,7 +3774,16 @@ class AgentOrchestrator:
         r"builds?|jobs?|missions?|services?|process(?:es)?|requests?|"
         r"events?|incidents?|alerts?|patterns?|behaviou?rs?|timeouts?|"
         r"loops?|repeats?|resets?|retries?|outages?|regressions?|drift|"
-        r"churn|thrash(?:ing)?|spikes?)\b)"
+        r"churn|thrash(?:ing)?|spikes?|systems?|logs?|schedulers?|"
+        r"daemons?|runtimes?|queues?|workers?|nodes?|models?|backends?|"
+        r"servers?|apis?|databases?|disks?|gpus?|networks?|agents?)\b)"
+        # Passive-telemetry claims — "the log showed a timeout",
+        # "metrics confirm the fix" — cite system evidence the model
+        # never actually read.
+        + r"|\b(?:the\s+)?(?:logs?|metrics?|telemetry|traces?|records?|"
+        r"history|ledger|audit|monitor(?:ing|s)?|dashboards?)\s+"
+        r"(?:show(?:ed|s)?|confirm(?:ed|s)?|indicate[sd]?|reveal(?:ed|s)?|"
+        r"report(?:ed|s)?|list(?:ed|s)?|flag(?:ged|s)?)\b"
         # Simple-past execution claims — "I updated the file", "I ran
         # the tests". Phrasal-verb guards keep "I ran into an error",
         # "I checked out a movie", "I started up" from flagging, and

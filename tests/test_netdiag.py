@@ -692,6 +692,13 @@ class TruthGateTests(RecoveryLoopTests):
                 "I observed the retries climbing.",
                 "I've detected the drift since Tuesday.",
                 "I noticed the service restart last night.",
+                "I just noticed the system tried to auto-schedule "
+                "a build.",
+                # Passive telemetry citations — evidence the model
+                # never actually read.
+                "The log showed a timeout right after.",
+                "Metrics confirm the fix held.",
+                "History shows the same failure every night.",
             ):
                 self.assertTrue(det(claim), claim)
             for text in (
@@ -700,6 +707,7 @@ class TruthGateTests(RecoveryLoopTests):
                 "I think it restarted.",
                 "I haven't seen the logs yet.",
                 "I'm watching.",
+                "The history books tell a different story.",
             ):
                 self.assertFalse(det(text), text)
 
