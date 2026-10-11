@@ -2531,7 +2531,8 @@ class AgentOrchestrator:
         r"^\s*(?:remind me\s+(?:(?:of|about)\s+|"
         r"(?:what|when|where|which|who|whose|how)\s+)?|"
         r"what(?:'s|\s+s)?\s+|"
-        r"whats\s+|which\s+|whichever\s+|who'?s?\s+|whos\s+|whose\s+|"
+        r"whats\s+|which\s+|whichever\s+|whos\s+|whose\s+|"
+        r"who\s+all\s+(?:(?:is|are|was|were)\s+)?|who'?s?\s+|"
         r"who\s+(?:is|are|was|were)\s+|when\s+(?:is|are|was|were|"
         r"do|does|did|will)\s+|"
         r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
@@ -2673,7 +2674,17 @@ class AgentOrchestrator:
                         # 'still'/'yet' mark verification mode ("is the
                         # api still on 443") — they ask whether a fact
                         # holds, and no stored fact carries them.
-                        "still", "yet"}
+                        "still", "yet",
+                        # Temporal bounds are recall filler — "who is on
+                        # call this week" asks for the current fact; the
+                        # store holds one value, so 'week' can't
+                        # discriminate and only starves the match.
+                        "week", "weeks", "month", "months", "year",
+                        "years", "weekend", "weekends", "today",
+                        "tonight", "tomorrow", "yesterday",
+                        "morning", "evening", "afternoon", "tonite",
+                        "last", "ago", "previous", "previously",
+                        "earlier", "before", "later", "soon"}
             if not q_terms:
                 return None
             def _terms_hit(terms: set, row) -> bool:
