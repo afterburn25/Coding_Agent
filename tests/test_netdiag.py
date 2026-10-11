@@ -1685,6 +1685,23 @@ class TruthGateTests(RecoveryLoopTests):
             learned = agent.conversation_memory.learn_from_user(
                 "stop waking me up at 6am", project_id="x")
             self.assertFalse(learned.get("behavior_rules"))
+            # A once-row carries the scheduler's DEFAULT hour (3) —
+            # its real clock lives in 'at'. Live, the hour-first read
+            # tokenised '3am' and '6am' missed the row.
+            lt = time.localtime(time.time() + 86400)
+            at_2pm = time.mktime(
+                (lt.tm_year, lt.tm_mon, lt.tm_mday, 14, 0, 0,
+                 lt.tm_wday, lt.tm_yday, lt.tm_isdst))
+            sup.scheduler.add(
+                "reminder: morning pages", "once",
+                at=at_2pm, hour=3, minute=0)
+            once_row = sup.scheduler.rows[-1]
+            r = agent._reminder_reply(
+                "stop the 7am reminder",
+                "stop the 7am reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("don't see", r.content)
+            self.assertTrue(once_row["enabled"])
 
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of

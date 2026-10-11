@@ -3941,8 +3941,11 @@ class AgentOrchestrator:
             text += " hourly" if s.get("interval_s") == 3600 else ""
         # Clock terms — 'the 6am reminder'/'at 6:00' resolve the row
         # firing at that time, the same way 'friday' resolves weekday.
+        # 'hour' is only the fire time on recurring kinds — a once-row
+        # carries the scheduler's default (3), so read 'at' instead.
         clock = None
-        if s.get("hour") is not None:
+        if (s.get("kind") in ("daily", "weekly", "monthly")
+                and s.get("hour") is not None):
             clock = (int(s["hour"]), int(s.get("minute") or 0))
         elif s.get("at") or s.get("next_run"):
             lt = time.localtime(float(s.get("at") or s["next_run"]))
