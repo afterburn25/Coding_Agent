@@ -2260,6 +2260,23 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("any alarms", mode="auto")
             self.assertIn("No alarms", result.content)
             self.assertIn("soonest", result.content)
+            # Imperative/fragment inventory leads — 'tell me about
+            # my reminders' and 'anything scheduled' got model
+            # essays claiming 'nothing scheduled' over live rows;
+            # 'what comes up next' answers the soonest row.
+            for lead in ("tell me about my reminders",
+                         "run through my reminders",
+                         "list my reminders",
+                         "anything scheduled"):
+                result = agent.run(lead, mode="auto")
+                self.assertIn("reminder", result.content.lower(),
+                              lead)
+                self.assertIn("soonest", result.content, lead)
+                self.assertNotIn("about “about”", result.content,
+                                 lead)
+            result = agent.run("what comes up next", mode="auto")
+            self.assertIn("soonest", result.content)
+            self.assertNotIn("later", result.content)
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —

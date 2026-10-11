@@ -3004,10 +3004,11 @@ class AgentOrchestrator:
         # term-match the word 'reminders' against trivia.
         if (self._SCHEDULE_INVENTORY_RE.search(match_text)
                 and re.search(
-                    r"\b(?:what|which|any|how\s+many|list|show|"
-                    r"do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
-                    r"are\s+there|got|active|pending|upcoming|"
-                    r"when)\b",
+                    r"\b(?:what|which|any|anything|how\s+many|list|"
+                    r"show|do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
+                    r"are\s+there|got|active|pending|upcoming|when|"
+                    r"tell\s+me|run\s+through|go\s+through|"
+                    r"walk\s+me\s+through|read\s+(?:out|through))\b",
                     match_text, re.IGNORECASE)
                 and not re.match(
                     r"\s*(?:please\s+)?(?:remind|cancel|delete|"
@@ -3652,6 +3653,19 @@ class AgentOrchestrator:
         r"(?:reminders?|alarms?|timers?)\s+"
         r"(?:at|for|on|about)\s+.+?" + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # Imperative inventory leads — 'tell me about my reminders',
+    # 'run through my reminders', 'list my reminders'. Command
+    # framing skips the question-gated inventory path; the model
+    # narrated 'nothing scheduled' over live rows.
+    _REMINDER_INV_LEAD_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:tell\s+me(?:\s+about)?|run\s+through|go\s+through|"
+        r"walk\s+me\s+through|read\s+(?:out|through)|list|show)\s+"
+        r"(?:(?:my|the|your|all)\s+)?"
+        r"(?:reminders?|alarms?|timers?|schedules?)\b"
+        r"(?:\s+(?:about|regarding|for|on|of|at)\s+.+?)?"
+        + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak)ing|"
@@ -3744,7 +3758,8 @@ class AgentOrchestrator:
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(
-        r"\breminders?\b|\balarms?\b|\btimers?\b", re.IGNORECASE)
+        r"\breminders?\b|\balarms?\b|\btimers?\b|\bschedules?\b|"
+        r"\bscheduled\b|\b(?:comes?|coming)\s+up\b", re.IGNORECASE)
     # Temporal tokens in a failed when-clause → ask when, don't claim.
     _REMINDER_TIMEISH_RE = re.compile(
         r"\d|morning|afternoon|evening|night|noon|midnight|tomorrow|"
@@ -4405,10 +4420,15 @@ class AgentOrchestrator:
             plan_text, re.IGNORECASE)
         if sm is not None:
             scope_terms = self._reminder_terms(re.sub(
-                r"\b(?:reminders?|alarms?|timers?|the|a|an|my|that|"
-                r"me|us|at|in|on)\b",
+                r"\b(?:reminders?|alarms?|timers?|schedules?|"
+                r"scheduled|the|a|an|my|that|me|us|at|in|on)\b",
                 " ", sm.group(1), flags=re.IGNORECASE))
-        if not scope_terms:
+        if sm is None:
+            # No connector tail — 'when is the dentist reminder'
+            # carries the scope BEFORE the noun. ('tell me about my
+            # reminders' matched 'about' above and stripped to
+            # nothing — re-scanning here would echo 'about' as the
+            # scope.)
             tm = re.search(
                 r"\b(?:the\s+|my\s+)?([a-z0-9][a-z0-9'\s]{0,40}?)\s+"
                 r"(?:reminders?|alarms?|timers?)\b", plan_text,
@@ -4416,11 +4436,12 @@ class AgentOrchestrator:
             if tm is not None:
                 scope_terms = self._reminder_terms(re.sub(
                     r"\b(?:what|which|when|does|do|is|are|have|has|any|"
-                    r"go|goes|going|off|fire|fires|firing|set|the|a|an|"
-                    r"my|that|next|time|day|date|hour|i|me|we|you|your|"
-                    r"got|still|really|actually|don'?t|dont|not|no|"
-                    r"more|longer|anymore|list|show|see|how|many|much|"
-                    r"number|count|total|tell|give|display|view)\b",
+                    r"anything|go|goes|going|off|fire|fires|firing|set|"
+                    r"the|a|an|my|that|next|time|day|date|hour|i|me|we|"
+                    r"you|your|got|still|really|actually|don'?t|dont|"
+                    r"not|no|more|longer|anymore|list|show|see|how|"
+                    r"many|much|number|count|total|tell|give|display|"
+                    r"view|run|through|walk|read|out)\b",
                     " ", tm.group(1), flags=re.IGNORECASE))
         when_ask = bool(re.match(
             r"\s*(?:when|what\s+time)\b", plan_text, re.IGNORECASE))
@@ -4564,9 +4585,11 @@ class AgentOrchestrator:
                         "Say “turn reminders back on” to resume them.")
             return self._reminder_finish(
                 text, user_text, task_id, event_callback)
-        if self._REMINDER_REFER_RE.match(plan_text):
-            # 'that reminder at 3' — a referential scoped ask, not a
-            # create; the model narrated a fake set over zero rows.
+        if (self._REMINDER_REFER_RE.match(plan_text)
+                or self._REMINDER_INV_LEAD_RE.match(plan_text)):
+            # 'that reminder at 3' / 'tell me about my reminders' —
+            # referential or imperative inventory asks, not creates;
+            # the model narrated fake sets and empty schedules.
             inv = self._reminder_inventory_reply(user_text, plan_text)
             if inv is not None:
                 return self._reminder_finish(
@@ -4988,7 +5011,9 @@ class AgentOrchestrator:
                          or self._REMINDER_DECL_RE.match(plan_text)
                          or self._REMINDER_NOUNFIRST_RE.match(
                              plan_text)
-                         or self._REMINDER_REFER_RE.match(plan_text))):
+                         or self._REMINDER_REFER_RE.match(plan_text)
+                         or self._REMINDER_INV_LEAD_RE.match(
+                             plan_text))):
             return None
         # Checked before parse_local_action, which has no temporal
         # grammar — without this the ask fell to the model and it
