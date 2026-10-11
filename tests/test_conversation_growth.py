@@ -1410,6 +1410,11 @@ class CrossChatMemoryTests(unittest.TestCase):
                 ("set the theme to dark", "theme is dark"),
                 ("use port 8080", "port is 8080"),
                 ("the test database uses port 5433", "test database"),
+                # Numeric adjustment verbs carry an explicit 'to'
+                # connector — they're value-sets, not action requests.
+                ("bump the retry limit to 10", "retry limit is 10"),
+                ("raise the worker ceiling to 12", "worker ceiling is 12"),
+                ("lower the api timeout to 30", "api timeout is 30"),
             ):
                 memory2 = ConversationMemory(
                     Path(td) / f"m{abs(hash(utterance))}.json")

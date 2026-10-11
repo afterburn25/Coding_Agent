@@ -2011,7 +2011,8 @@ class ConversationMemory:
                     # the supersession slot identical to declarative
                     # updates ("the port is 8090").
                     imp = re.match(
-                        r"^(?:use|set|pick|choose|go\s+with|go\s+for)\s+"
+                        r"^(?:use|set|pick|choose|go\s+with|go\s+for|"
+                        r"bump|raise|lower|increase|decrease|drop)\s+"
                         r"(?:the\s+|our\s+|a\s+|an\s+)?"
                         r"([a-z0-9][a-z0-9 ._-]{0,28}?)\s+"
                         r"(?:to|as|is|=)\s+(.+?)[.!?]?$",
