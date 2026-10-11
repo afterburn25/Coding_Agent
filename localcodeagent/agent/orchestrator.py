@@ -3614,7 +3614,8 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_CANCEL_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:cancel|delete|remove|drop|clear|kill|dismiss|end)\s+"
+        r"(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
+        r"skip|scratch)\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
         r"(?:\s*(?:for|about|on|of|to|at)\s+(?P<tail>.+?))?"
         + _REMINDER_TRAIL,
@@ -3630,7 +3631,8 @@ class AgentOrchestrator:
     _REMINDER_TOGGLE_RE = re.compile(
         _REMINDER_POLITE +
         r"(?P<verb>turn|switch|disable|enable|re-?enable|pause|"
-        r"resume|unpause|stop|mute|silence)\s+(?P<body>.+?)?"
+        r"resume|unpause|unmute|unsilence|stop|mute|silence|"
+        r"hold|freeze|suspend|quiet)\s+(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?)\b"
         r"\s*(?P<dir>back\s+on|off|on)?" + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -4036,7 +4038,8 @@ class AgentOrchestrator:
                 want_on = None
         else:
             want_on = bool(re.fullmatch(
-                r"enable|re-?enable|resume|unpause", verb))
+                r"enable|re-?enable|resume|unpause|unmute|unsilence",
+                verb))
         if want_on is None:
             return self._reminder_finish(
                 "Turn them on or off? — e.g. “turn off "

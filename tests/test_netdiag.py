@@ -1792,7 +1792,18 @@ class TruthGateTests(RecoveryLoopTests):
                     ("disable my reminders", False),
                     ("enable my reminders", True),
                     ("pause my reminders", False),
-                    ("resume my reminders", True)):
+                    ("resume my reminders", True),
+                    # Spoken toggle synonyms the model used to narrate
+                    # over unchanged rows — 'unmute my reminders'
+                    # claimed 'already active' while the pool was off.
+                    ("mute my reminders", False),
+                    ("unmute my reminders", True),
+                    ("silence my reminders", False),
+                    ("unsilence my reminders", True),
+                    ("hold my reminders", False),
+                    ("freeze my reminders", False),
+                    ("suspend my reminders", False),
+                    ("quiet the reminders", False)):
                 row["enabled"] = not want_on
                 result = agent.run(text, mode="auto")
                 self.assertEqual(row["enabled"], want_on, text)
@@ -1803,6 +1814,19 @@ class TruthGateTests(RecoveryLoopTests):
                 self.assertEqual(result.task["model_id"],
                                  "builtin-local")
                 self.assertEqual(result.task["model_role"], "utility")
+
+            # 'skip'/'scratch' are cancel verbs — 'skip the 3pm
+            # reminder' got a model-composed 'No reminder scheduled
+            # for 3 PM.' live while the row stayed put.
+            row["enabled"] = True
+            row["name"] = "reminder: standup"
+            lt = time.localtime(time.time() + 86400)
+            row["at"] = time.mktime(
+                (lt.tm_year, lt.tm_mon, lt.tm_mday, 15, 0, 0,
+                 lt.tm_wday, lt.tm_yday, lt.tm_isdst))
+            result = agent.run("skip the 3pm reminder", mode="auto")
+            self.assertIn("Cancel", result.content)
+            self.assertFalse(sup.scheduler.rows)
 
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
