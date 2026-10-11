@@ -198,11 +198,26 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         return now + n * scale
     # 'in 2 and a half hours' — compound worded fraction.
     m = re.fullmatch(
-        r"in\s+(\d+(?:\.\d+)?)\s+and\s+a\s+half\s+"
+        r"in\s+(\d+(?:\.\d+)?|one|two|three|four|five|six|seven|"
+        r"eight|nine|ten|eleven|twelve)\s+and\s+a\s+half\s+"
         r"(minutes?|mins?|hours?|hrs?|days?)", t)
     if m:
+        n = (_WORDS.get(m.group(1)) if not m.group(1)[0].isdigit()
+             else float(m.group(1)))
         scale = {"m": 60, "h": 3600, "d": 86400}[m.group(2)[0]]
-        return now + (float(m.group(1)) + 0.5) * scale
+        return now + (n + 0.5) * scale
+    # 'in an hour and a half' — the fraction trails the unit.
+    m = re.fullmatch(
+        r"in\s+an?\s+(minutes?|mins?|hours?|hrs?|days?)\s+"
+        r"and\s+a\s+half\b", t)
+    if m:
+        scale = {"m": 60, "h": 3600, "d": 86400}[m.group(1)[0]]
+        return now + 1.5 * scale
+    # '(the) day after tomorrow' — a single +2d anchor; without
+    # it the splitter banked 'day after' as the task.
+    if re.fullmatch(
+            r"(?:the\s+|a\s+)?days?\s+after\s+tomorrows?", t):
+        return _clock(9, 0, 2, roll=False)
     # 'on the 15th [of march]' / 'on march 3rd' — calendar dates.
     m = re.fullmatch(
         r"(?:on\s+)?the\s+(\d{1,2})(?:st|nd|rd|th)?"

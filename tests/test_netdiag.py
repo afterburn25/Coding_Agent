@@ -2600,6 +2600,32 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("don't see", result.content)
             sup.scheduler.rows.clear()
 
+            # 'day after tomorrow' is one +2d anchor — the split
+            # used to bank 'day after' as the task at 'tomorrow'.
+            result = agent.run(
+                "remind me day after tomorrow to call bank",
+                mode="auto")
+            self.assertIn("call bank", result.content)
+            self.assertTrue(sup.scheduler.rows)
+            row = sup.scheduler.rows[-1]
+            self.assertIn("call bank", row["name"])
+            self.assertNotIn("day after", row["name"])
+            lt = time.localtime(row["at"])
+            self.assertEqual(lt.tm_mday,
+                             time.localtime(
+                                 time.time() + 2 * 86400).tm_mday)
+            # 'in an hour and a half' — the trailing fraction is
+            # real duration, not a model essay.
+            result = agent.run(
+                "remind me in an hour and a half to stretch",
+                mode="auto")
+            row = sup.scheduler.rows[-1]
+            self.assertIn("stretch", row["name"])
+            delta = row["at"] - time.time()
+            self.assertGreater(delta, 80 * 60)
+            self.assertLess(delta, 100 * 60)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
