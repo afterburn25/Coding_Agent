@@ -3638,7 +3638,8 @@ class AgentOrchestrator:
         r"axe?|ditch|forget)"
         r"|(?:i\s+)?(?:don'?t|do\s+not|dont)\s+"
         r"(?:need|want|use|like))\s+"
-        r"(?:(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
+        r"(?:(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
+        r"it|that|this|them)\b"
         + _REMINDER_ECHO +
         r"(?:\s*(?:for|about|on|of|to|at)\s+(?P<tail>.+?))?"
         # Bare clock target — 'cancel my 9pm' is a scoped cancel; the
@@ -3651,7 +3652,8 @@ class AgentOrchestrator:
     _REMINDER_SNOOZE_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:snooze|postpone|delay|push\s+back|push|bump|shift)\s+"
-        r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
+        r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
+        r"it|that|this|them)\b"
         + _REMINDER_ECHO +
         r"(?:\s+(?:(?P<way>for|until|till|to|by|back|up|forward|"
         r"later|earlier|sooner)\s+"
@@ -3663,7 +3665,7 @@ class AgentOrchestrator:
         r"(?P<verb>turn|switch|disable|enable|re-?enable|pause|"
         r"resume|unpause|unmute|unsilence|stop|mute|silence|"
         r"hold|freeze|suspend|quiet|block)\s+(?P<body>.+?)?"
-        r"\b(?P<noun>reminders?|alarms?|timers?)\b"
+        r"\b(?P<noun>reminders?|alarms?|timers?|it|that|this|them)\b"
         + _REMINDER_ECHO +
         r"\s*(?P<dir>back\s+on|off|on)?" + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -3683,7 +3685,7 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:reschedule|move|change)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?"
-        r"\b(?P<noun>reminders?|alarms?|timers?)\b"
+        r"\b(?P<noun>reminders?|alarms?|timers?|it|that|this|them)\b"
         + _REMINDER_ECHO +
         r"\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?)"
         + _REMINDER_TRAIL,
@@ -3936,7 +3938,8 @@ class AgentOrchestrator:
                      .startswith("reminder")
                      or (isinstance(s.get("action"), dict)
                          and s["action"].get("kind") == "notify"))]
-        if noun and noun not in ("reminder", "reminders"):
+        if noun and noun not in ("reminder", "reminders", "it",
+                                 "that", "this", "them"):
             stem = noun.rstrip("s").lower()
             rows = [s for s in rows
                     if str(s.get("name") or "").lower()
@@ -4173,7 +4176,8 @@ class AgentOrchestrator:
                 user_text, task_id, event_callback)
         body = str(mc.group("body") or "").strip(" ,;—-")
         all_flag = bool(
-            re.search(r"\b(?:all|every|each)\b", body, re.IGNORECASE))
+            re.search(r"\b(?:all|every|each)\b", body, re.IGNORECASE)
+            or str(mc.group("noun") or "").lower() == "them")
         topic_src = mc.groupdict().get("ctime") or mc.group(
             "tail") or re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
@@ -4263,6 +4267,7 @@ class AgentOrchestrator:
                            r"day|date|hour|i|me|we|you|your|got|"
                            r"still|really|actually|don'?t|dont|not|"
                            r"no|more|longer|anymore|list|show|see|"
+                           r"how|many|much|number|count|total|"
                            r"tell|give|display|view)\b", " ",
                            tm.group(1), flags=re.IGNORECASE).lower()))
         when_ask = bool(re.match(

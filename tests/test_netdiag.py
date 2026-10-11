@@ -1989,6 +1989,24 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Snoozed", result.content)
             self.assertAlmostEqual(oven_row["at"], before + 3600, 0)
 
+            # Referential objects — 'snooze it' got a model refusal
+            # ('I can't snooze it') and 'cancel that' a model-composed
+            # 'has been canceled' over zero removals. A pronoun binds
+            # like an empty scope: one row → apply; several → the
+            # honest ambiguity list; 'them' → all.
+            sup.scheduler.add(
+                "reminder: referent", "once",
+                at=time.time() + 3600,
+                action={"kind": "notify", "detail": "referent"})
+            result = agent.run("cancel that", mode="auto")
+            self.assertIn("matches 2 reminders", result.content)
+            sup.scheduler.rows[:] = [sup.scheduler.rows[-1]]
+            result = agent.run("snooze it 30 minutes", mode="auto")
+            self.assertIn("Snoozed", result.content)
+            result = agent.run("cancel it", mode="auto")
+            self.assertIn("Cancel", result.content)
+            self.assertFalse(sup.scheduler.rows)
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
