@@ -3772,7 +3772,13 @@ class AgentOrchestrator:
         r"(?:(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
         r"schedules?|it|that|this|them)\b"
         + _REMINDER_ECHO +
-        r"(?:\s*(?:for|about|on|of|to|at)\s+(?P<tail>.+?))?"
+        r"(?:\s*(?:for|about|on|of|to|at|called|named)\s+"
+        r"(?P<tail>.+?))?"
+        # 'cancel the reminder pay' — the topic trails the noun
+        # bare, no connector. Without this the model narrated
+        # 'Cancelled the reminder "pay"' over an untouched row.
+        r"(?:\s+(?P<tail2>(?!please\b|thanks?\b|thank\s+you\b|ty\b|"
+        r"pls\b|plz\b).+?))?"
         # Bare clock target — 'cancel my 9pm' is a scoped cancel; the
         # clock lands in 'ctime' and becomes the topic below.
         r"|(?:(?:the|my|that)\s+)?"
@@ -4458,10 +4464,11 @@ class AgentOrchestrator:
         all_flag = bool(
             re.search(r"\b(?:all|every|each)\b", body, re.IGNORECASE)
             or str(mc.group("noun") or "").lower() == "them")
-        topic_src = mc.groupdict().get("ctime") or mc.group(
-            "tail") or re.sub(
-            r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
-            " ", body, flags=re.IGNORECASE)
+        topic_src = (mc.groupdict().get("ctime") or mc.group("tail")
+                     or mc.groupdict().get("tail2") or re.sub(
+                         r"\b(?:the|my|that|all|every|each|any|of|to|"
+                         r"for|about)\b",
+                         " ", body, flags=re.IGNORECASE))
         topic_terms = self._reminder_terms(topic_src)
         if not topic_terms and re.search(
                 r"\b(?:reminders|alarms|timers)\b", mc.group(0),

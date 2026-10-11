@@ -2569,6 +2569,37 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("do what", result.content)
             sup.scheduler.rows.clear()
 
+            # 'cancel the reminder pay' — the topic trails the noun
+            # bare. The model used to narrate 'Cancelled the
+            # reminder "pay"' and 'No active reminder named X'
+            # while the row sat untouched in the store.
+            sup.scheduler.add(
+                "Reminder: pay rent", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "pay rent"})
+            sup.scheduler.add(
+                "Reminder: stretch", "once",
+                at=time.time() + 90000,
+                action={"kind": "notify", "detail": "stretch"})
+            sup.scheduler.add(
+                "Reminder: pay", "once",
+                at=time.time() + 90000,
+                action={"kind": "notify", "detail": "pay"})
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("cancel the reminder stretch",
+                               mode="auto")
+            self.assertIn("Cancelled", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 - 1)
+            # 'pay' matches both 'pay' and 'pay rent' — ambiguity
+            # must ask, never pick.
+            result = agent.run("cancel the reminder pay",
+                               mode="auto")
+            self.assertIn("matches", result.content)
+            result = agent.run("cancel the reminder nonexistent",
+                               mode="auto")
+            self.assertIn("don't see", result.content)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
