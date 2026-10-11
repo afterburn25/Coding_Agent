@@ -3651,10 +3651,10 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_SNOOZE_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:snooze|postpone|delay|push\s+back|push|bump|shift)\s+"
-        r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
+        r"(?:snooze|postpone|delay|push\s+back|push|bump|shift)"
+        r"(?:\s+(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
         r"it|that|this|them)\b"
-        + _REMINDER_ECHO +
+        + _REMINDER_ECHO + r")?"
         r"(?:\s+(?:(?P<way>for|until|till|to|by|back|up|forward|"
         r"later|earlier|sooner)\s+"
         r"|(?=\d|a\s|an\s|one\s))(?P<dur>.+?))?"
@@ -3667,7 +3667,9 @@ class AgentOrchestrator:
         r"hold|freeze|suspend|quiet|block)\s+(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?|it|that|this|them)\b"
         + _REMINDER_ECHO +
-        r"\s*(?P<dir>back\s+on|off|on)?" + _REMINDER_TRAIL,
+        r"\s*(?P<dir>back\s+on|off|on)?"
+        r"(?:\s+(?:until|till|for)\s+(?P<til>.+?))?"
+        + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_STOP_RE = re.compile(
         _REMINDER_POLITE +
@@ -4163,6 +4165,40 @@ class AgentOrchestrator:
                         f"“{label}”."
                         if n == 1 else
                         f"Turned {state} {n} reminders.")
+                # 'silence my reminders until monday' — the mute is
+                # real and reversible; the flip-back can't run itself,
+                # so schedule a reminder nudge at the named time and
+                # say exactly that instead of claiming auto-resume.
+                til = str(mt.groupdict().get("til") or "").strip(
+                    " ,;—-")
+                if til:
+                    back = "back on" if not want_on else "off"
+                    spec = self._reminder_spec(til, time.time())
+                    if spec is None:
+                        spec = self._reminder_spec("in " + til,
+                                                   time.time())
+                    if (spec is not None
+                            and spec.get("kind") == "once"):
+                        try:
+                            sched.add(
+                                f"reminder: turn reminders {back}",
+                                "once", at=spec["at"],
+                                action={"kind": "notify",
+                                        "title": "Reminder",
+                                        "detail": f"turn reminders "
+                                                  f"{back}"})
+                        except Exception:
+                            spec = None
+                        else:
+                            when = time.strftime(
+                                "%a %H:%M",
+                                time.localtime(spec["at"]))
+                            text += (f" I'll nudge you {when} to "
+                                     f"turn them {back}.")
+                    if spec is None:
+                        text += (f" I couldn't pin “{til}” as a "
+                                 f"time — say “turn reminders "
+                                 f"{back}” when you're ready.")
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 

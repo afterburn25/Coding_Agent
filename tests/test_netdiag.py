@@ -2003,6 +2003,39 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Snoozed", result.content)
             self.assertAlmostEqual(oven_row["at"], before + 3600, 0)
 
+            # Noun-less snooze — 'snooze for 10 minutes' got a model
+            # roleplay ('10 minutes of quiet') claiming a mute that
+            # never happened; a bare snooze binds like an unscoped
+            # one (single row → apply, several → 'say which').
+            sup.scheduler.add(
+                "reminder: nounless", "once",
+                at=time.time() + 3600,
+                action={"kind": "notify", "detail": "nounless"})
+            nl_row = sup.scheduler.rows[-1]
+            # Single-row binding — leave just this row in the pool.
+            sup.scheduler.rows[:] = [nl_row]
+            at0 = nl_row["at"]
+            result = agent.run("snooze for 10 minutes", mode="auto")
+            self.assertIn("Snoozed", result.content)
+            self.assertAlmostEqual(nl_row["at"], at0 + 600, -1)
+            # Timed mute — 'silence my reminders until monday' got a
+            # model claim 'paused until Monday' over zero state. The
+            # lane mutes for real and schedules a re-enable nudge.
+            row["enabled"] = True
+            sup.scheduler.rows.append(row)
+            n0 = len(sup.scheduler.rows)
+            nl_row["enabled"] = True
+            result = agent.run("silence my reminders until monday",
+                               mode="auto")
+            self.assertIn("Turned off", result.content)
+            self.assertFalse(row["enabled"])
+            self.assertFalse(nl_row["enabled"])
+            self.assertIn("nudge", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            self.assertEqual(
+                sup.scheduler.rows[-1]["name"],
+                "reminder: turn reminders back on")
+
             # Referential objects — 'snooze it' got a model refusal
             # ('I can't snooze it') and 'cancel that' a model-composed
             # 'has been canceled' over zero removals. A pronoun binds
