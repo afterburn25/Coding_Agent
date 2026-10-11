@@ -408,7 +408,8 @@ _ACTION_LEAD_RE = re.compile(
     r"gimme|"
     r"repeat|load|unload|dump|flush|visuali[sz]e|imagine|depict|"
     r"illustrate|produce|conjure|compose|see|view|watch|look\s+at|"
-    r"look\s+into|pull\s+up|self[-\s]diagnos\w*)\b",
+    r"look\s+into|pull\s+up|self[-\s]diagnos\w*|cancel|clear|drop|"
+    r"unschedule|reschedule|postpone|snooze|dismiss)\b",
     re.IGNORECASE)
 
 # Explicit request wrappers — "i want you to X", "can you run X".

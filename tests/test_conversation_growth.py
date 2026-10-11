@@ -209,6 +209,33 @@ class ConversationManagerTests(unittest.TestCase):
                 self.assertFalse(
                     learned.get("forgotten_miss"), t)
 
+    def test_universal_forget_purges_everything(self):
+        """'forget everything about me' is a wipe request — every
+        learned fact/rule/example deactivates, never a topic search."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "cm.json")
+            memory._data["facts"].append({
+                "id": "f1", "text": "my port is 9000",
+                "created_at": 1.0, "active": True, "scope": "global"})
+            learned = memory.learn_from_user(
+                "forget everything about me")
+            self.assertTrue(learned["forgotten"])
+            self.assertNotIn("memory_off", learned)
+            self.assertFalse(
+                [r for r in memory._data["facts"] if r.get("active")])
+            # Second ask on an empty store is an honest miss.
+            learned2 = memory.learn_from_user("forget what you know")
+            self.assertTrue(learned2.get("forgotten_miss"))
+
+    def test_dangling_forget_wrapper_asks_what(self):
+        """'forget what i told you about…' trails off — clarify, never
+        wipe the store on an incomplete referent."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "cm.json")
+            learned = memory.learn_from_user(
+                "forget what i told you about")
+            self.assertTrue(learned.get("clarify"))
+
     def test_scoped_forget_still_searches_the_topic(self):
         """A named referent is a fact delete, not a privacy switch —
         'don't remember the wifi password' forgets that fact."""

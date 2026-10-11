@@ -4799,7 +4799,8 @@ class AppState:
         # missions running" answers from the supervisor store, never the
         # model. Interrogative-shaped only; action phrasings ("stop the
         # mission", "run the tests daily") belong to their own lanes.
-        if ((re.search(r"\b(?:standing\s+goals?|missions?|schedul\w*|triggers?)\b", low)
+        if ((re.search(r"\b(?:standing\s+goals?|missions?|schedul\w*|"
+                       r"triggers?|reminders?|alarms?)\b", low)
                 and re.search(
                     r"\b(?:what|which|list|show|any|are\s+there|"
                     r"do\s+you\s+have|how\s+many|running|active)\b", low)
@@ -4815,6 +4816,15 @@ class AppState:
                     r"the\s+(?:scheduled|regular|recurring)\s+\w+)\b"
                     r".{0,40}\bruns?\b",
                     low)):
+            # A reminder-scoped ask ('what reminders do i have',
+            # 'list my reminders') belongs to the reminder lane's
+            # filtered inventory — the full dump would bury a simple
+            # list under goals, daemon schedules, and missions.
+            if (re.search(r"\breminders?\b|\balarms?\b", low)
+                    and not re.search(
+                        r"\b(?:standing|goals?|missions?|triggers?)\b",
+                        re.sub(r"\b(?:reminders?|alarms?)\b", " ", low))):
+                return None
             # A definite 'the <thing> schedule' names a world entity —
             # "what's the backup schedule" asks about the banked fact
             # 'backup schedule is every day at 3am', not the autonomy
@@ -5100,7 +5110,8 @@ class AppState:
         a fallthrough to other lanes.
         """
         import time as _t
-        from .autonomy.scheduler import _next_daily
+        from .autonomy.scheduler import (
+            _next_daily, parse_reminder_when)
 
         def _clock(hour: int, minute: int, mer: str | None,
                    *, days: int = 0) -> float:
@@ -5121,6 +5132,19 @@ class AppState:
                                   lt.tm_mday + days + 1,
                                   hour, minute, 0, 0, 0, -1))
             return cand
+
+        # Leading when — "set a reminder for friday at 3pm to call the
+        # vendor" puts the time phrase BEFORE the task; the trailing
+        # searches below only see the tail. Try each 'to'/'for' split
+        # until the prefix parses as a time.
+        parts = re.split(r"\s+(?:to|for)\s+", body)
+        if len(parts) > 1:
+            for i in range(1, len(parts)):
+                lead_when = parse_reminder_when(
+                    " ".join(parts[:i]), now)
+                if lead_when is not None:
+                    return (lead_when,
+                            " ".join(parts[i:]).strip(" ,;—-"))
 
         m = re.search(
             r"\s+in\s+(\d+)\s+(minutes?|mins?|hours?|hrs?|days?)\s*$",

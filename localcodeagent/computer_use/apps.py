@@ -309,7 +309,10 @@ def launch_verified(path: str, args: list[str] | None = None, *,
             return {"ok": True, "pid": 0, "path": p, "shell": True,
                     "verified": False,
                     "note": "opened via shell — no child process handle"}
-        proc = subprocess.Popen([p, *args], close_fds=True)
+        # Explicit 0 — the user asked to open this app; console-subsystem
+        # targets (cmd/powershell) must show their window.
+        proc = subprocess.Popen([p, *args], close_fds=True,
+                                creationflags=0)
     except OSError as exc:
         return {"ok": False, "verified": False,
                 "error": f"launch failed: {exc}"}
@@ -563,14 +566,18 @@ def run_installer(path: str | Path, *, name_hint: str = "",
     shell_mode = False
     if ident["kind"] == "msi":
         try:
+            # Explicit 0 — an installer the user asked to run shows
+            # its UI (and any console it allocates).
             proc = subprocess.Popen(
-                ["msiexec", "/i", str(p)], close_fds=True)
+                ["msiexec", "/i", str(p)], close_fds=True,
+                creationflags=0)
             pid = int(proc.pid)
         except OSError as exc:
             return {"ok": False, "error": f"msiexec launch failed: {exc}"}
     else:
         try:
-            proc = subprocess.Popen([str(p)], close_fds=True)
+            proc = subprocess.Popen([str(p)], close_fds=True,
+                                    creationflags=0)
             pid = int(proc.pid)
         except OSError as exc:
             if getattr(exc, "winerror", 0) != 740:

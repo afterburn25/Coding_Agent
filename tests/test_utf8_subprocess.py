@@ -46,3 +46,35 @@ def test_utf8_subprocess_encoding():
 if __name__ == "__main__":
     test_utf8_subprocess_encoding()
     print("UTF-8 subprocess encoding test passed!")
+
+def test_children_default_hidden_on_windows():
+    """The backend runs without a console — every console-subsystem
+    child it spawns without CREATE_NO_WINDOW flashes a visible cmd
+    screen for the user (git probes, ffmpeg, scheduled-job ticks).
+    The package-level procutil shim injects the flag by default while
+    honoring explicit creationflags (a user-requested app launch
+    keeps its window)."""
+    import os
+    if os.name != "nt":
+        import pytest
+        pytest.skip("Windows-only console flag")
+    import localcodeagent  # importing the package installs the shim
+    import _winapi
+
+    calls = []
+    orig_cp = _winapi.CreateProcess
+
+    def spy(*a, **kw):
+        calls.append(a[5] if len(a) > 5 else kw.get("creation_flags"))
+        return orig_cp(*a, **kw)
+
+    _winapi.CreateProcess = spy
+    try:
+        subprocess.run(["python", "-c", "pass"], capture_output=True)
+        subprocess.run(["python", "-c", "pass"],
+                       creationflags=0, capture_output=True)
+    finally:
+        _winapi.CreateProcess = orig_cp
+
+    assert calls[0] & subprocess.CREATE_NO_WINDOW
+    assert not (calls[1] & subprocess.CREATE_NO_WINDOW)
