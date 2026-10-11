@@ -1837,7 +1837,12 @@ class TruthGateTests(RecoveryLoopTests):
                           # 'nothing to forget' ack while the row
                           # stayed live. The miss-ack demotes when
                           # the turn is a reminder-control shape.
-                          "forget the standup reminder"):
+                          "forget the standup reminder",
+                          # 'i don't need the X reminder' — the
+                          # model claimed 'No vitamins reminder is
+                          # active' while the row was live.
+                          "i don't need the standup reminder",
+                          "don't want the standup reminder"):
                 n0 = len(sup.scheduler.rows)
                 sup.scheduler.add(
                     "reminder: standup", "once",

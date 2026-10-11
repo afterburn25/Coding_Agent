@@ -3619,9 +3619,11 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_CANCEL_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
+        r"(?:(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
-        r"axe?|ditch|forget)\s+"
+        r"axe?|ditch|forget)"
+        r"|(?:i\s+)?(?:don'?t|do\s+not|dont)\s+"
+        r"(?:need|want|use|like))\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
         + _REMINDER_ECHO +
         r"(?:\s*(?:for|about|on|of|to|at)\s+(?P<tail>.+?))?"
