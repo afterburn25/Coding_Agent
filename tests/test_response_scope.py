@@ -743,6 +743,19 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertNotIn("prod api is on 443", active)
         self.assertNotIn("my favorite color is 8443", active)
 
+    def test_prep_led_value_never_glues_to_verb_predicate(self):
+        # "no the metrics api is on 9100" retargeting 'metrics api
+        # uses port 9090' — the preposition-led value can't glue to a
+        # non-copula predicate ('metrics api uses on 9100'). The
+        # retarget rebuilds with the copula.
+        cm = self._mem()
+        cm.learn_from_user("the metrics api uses port 9090")
+        learned = cm.learn_from_user("no the metrics api is on 9100")
+        active = self._active(cm)
+        self.assertIn("metrics api is on 9100", active)
+        self.assertNotIn("metrics api uses on 9100", active)
+        self.assertNotIn("metrics api uses port 9090", active)
+
     def test_ambiguous_bare_correction_asks_never_guesses(self):
         # Two digit-shaped facts and no conversational focus — "no
         # it's 8443" could mean either; guessing once rewrote

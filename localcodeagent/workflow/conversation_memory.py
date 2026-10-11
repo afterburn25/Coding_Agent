@@ -557,7 +557,24 @@ class ConversationMemory:
                     r"between|among|during|since|with)\b",
                     new, re.IGNORECASE)):
             new = pm.group(1) + " " + new
-        return f"{m.group(1)}{new}"
+        # A preposition-led replacement ('on 9100') can't glue onto a
+        # non-copula predicate — 'metrics api uses on 9100' is
+        # malformed. Rebuild with the copula ('metrics api is on
+        # 9100'); 'runs on' keeps its verb minus the doubled 'on'.
+        head = m.group(1)
+        if re.match(
+                r"(?:on|at|in|to|for|from|by|via|per|under|over|"
+                r"after|before|until|through|around|about|like|as|"
+                r"near|off|into|onto|upon|within|without|against|"
+                r"between|among|during|since|with)\b",
+                new, re.IGNORECASE):
+            head = re.sub(
+                r"\b(?:uses?|prefers?|likes?|loves?|stays?|remains?|"
+                r"should stay|should be|must be|will be)\s*$",
+                "is ", head, flags=re.IGNORECASE)
+            head = re.sub(r"\bruns on\s*$", "runs ", head,
+                          flags=re.IGNORECASE)
+        return f"{head}{new}"
 
     def _correct_fact_value(self, old_value: str, new_value: str) -> str | None:
         """'X not Y' correction — rewrite the fact that ends in Y.
