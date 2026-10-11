@@ -1819,6 +1819,25 @@ class TruthGateTests(RecoveryLoopTests):
             learned = agent.conversation_memory.learn_from_user(
                 "unpause my reminders", project_id="x")
             self.assertFalse(learned.get("behavior_rules"))
+            # 'never <notify/remind/ping/wake> me…' is the same
+            # reminder-scope prohibition wearing a 'never' lead — it
+            # bypassed the revoke-path exemption and banked
+            # 'Never notify me about the build' live. Genuine 'never'
+            # prohibitions still bank.
+            for ephemeral_never in (
+                    "never notify me about the build again",
+                    "never remind me about the deploy",
+                    "never ping me on sundays",
+                    "never wake me up at 6am",
+                    "i don't want you to remind me about the deploy"):
+                learned = agent.conversation_memory.learn_from_user(
+                    ephemeral_never, project_id="x")
+                self.assertFalse(learned.get("behavior_rules"),
+                                 ephemeral_never)
+            learned = agent.conversation_memory.learn_from_user(
+                "never use my real name in commit messages",
+                project_id="x")
+            self.assertTrue(learned.get("behavior_rules"))
 
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of

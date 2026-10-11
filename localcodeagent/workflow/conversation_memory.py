@@ -2760,7 +2760,18 @@ class ConversationMemory:
                 if kind in {"always", "want_always"}:
                     rule = "Always " + body
                 elif kind in {"never", "dont_want"}:
-                    rule = "Never " + body
+                    # 'never remind me about X' / 'i don't want you to
+                    # ping me' are reminder-scope control ops — the
+                    # reminder lane disables the live rows; banking
+                    # 'Never notify me…' would store an unenforced rule
+                    # that just lies. Mirror of the revoke-path
+                    # ephemeral exemption above.
+                    if not re.search(
+                            r"^(?:remind|alert|notify|ping|wak(?:e|ing))"
+                            r"(?:ing)?\s+me\b"
+                            r"|\b(?:reminders?|alarms?|timers?)\b",
+                            body, flags=re.IGNORECASE):
+                        rule = "Never " + body
                 else:
                     rule = body
                 break
