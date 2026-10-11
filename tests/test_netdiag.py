@@ -1879,6 +1879,16 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("any reminders for tomorrow",
                                mode="auto")
             self.assertIn("check the oven", result.content)
+
+            # Vague cadences get the honest ask — 'remind me later
+            # about the build' hit the model live (a stall under a
+            # warming endpoint) because 'later' wasn't timeish.
+            for vague in ("remind me later about the build",
+                          "remind me soon to stretch",
+                          "remind me in a bit about the deploy"):
+                result = agent.run(vague, mode="auto")
+                self.assertIn("couldn't pin a time", result.content,
+                              vague)
             result = agent.run("push the 3pm reminder to 10pm",
                                mode="auto")
             self.assertIn("Snoozed", result.content)
