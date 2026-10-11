@@ -284,7 +284,7 @@ SETTINGS: list[SettingSpec] = [
                 "conversations.",
                 category="memory",
                 aliases=("conversation memory", "remember me",
-                         "remembering"),
+                         "remembering", "memory"),
                 ui_route="/knowledge.html"),
     SettingSpec("answer_memory_enabled", "Answer Memory",
                 "Let trusted learned answers skip model inference.",

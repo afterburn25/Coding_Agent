@@ -197,7 +197,12 @@ class SelfKnowledgeService:
         m_back = re.search(r"\b(turn|switch|set|put)\b.{0,15}\bback\b"
                            r".{0,5}\bon\b|\bback to (normal|before|"
                            r"how it was)\b|\bturn it back\b", t)
-        if m_undo or m_putback or (m_back and last):
+        # 'turn it back on' is undo-shaped only when the target is a
+        # pronoun — 'turn memory back on' names the setting and the
+        # direction explicitly, so the control lane's honest apply
+        # beats a revert-to-previous (which could land on 'off').
+        named_setting = self.settings.find(t) is not None
+        if m_undo or m_putback or (m_back and last and not named_setting):
             # A named referent ("undo that laptop change") scopes the
             # undo — it must bind before the session's last_executed,
             # or "revert the printer change" would silently revert an
@@ -666,7 +671,20 @@ class SelfKnowledgeService:
         # Whole-utterance gate: a mute/setting keyword inside a
         # prohibition ('don't mute yourself'), question about how a
         # setting works, quote, or hypothetical must never mutate.
-        if not self._allows("control"):
+        # Exception: a whole-utterance imperative prohibition that names
+        # a real control target IS the command — 'stop remembering
+        # things' asks for the setting to go off, the same way 'stop the
+        # music' asks playback to stop. Second-person/embedded
+        # prohibitions ('i'm not asking you to X') keep the veto.
+        frame = getattr(self, "_frame", None)
+        stop_cmd = (
+            frame is not None
+            and getattr(frame, "speech_act", "") == "prohibition"
+            and bool(re.match(
+                r"\s*(?:stop|quit|end|cease|kill|no\s+longer)\b", t))
+            and (self.settings.find(t) is not None
+                 or self.actions.find(t) is not None))
+        if not (self._allows("control") or stop_cmd):
             return None
         # "set workers to 4" / "use four workers" / "workers to 4"
         m = re.search(
@@ -708,10 +726,12 @@ class SelfKnowledgeService:
             return self._apply_setting(
                 st, cur - step if down else cur + step)
         wants_on = bool(re.search(
-            r"\b(turn|switch|set|put|keep).{0,15}\bon\b|\benable\b|"
+            r"\b(turn|switch|set|put|keep|bring)\b.{0,30}?\b"
+            r"(?:back\s+on|on\s+again|on)\b|\benable\b|"
             r"\bunmute\b|\bun-mute\b|\bresume\b|\bstart\b", t))
         wants_off = bool(re.search(
-            r"\b(turn|switch|set).{0,15}\boff\b|\bdisable\b|\bmute\b|"
+            r"\b(turn|switch|set|put|keep|bring)\b.{0,30}?\b"
+            r"(?:back\s+off|off\s+again|off)\b|\bdisable\b|\bmute\b|"
             r"\bstop\b|\bshut\b|\bquiet\b|\bpause\b|\bsilence\b", t))
         if st and (wants_on or wants_off):
             # Prefer the domain action over a bare config write when it
@@ -967,6 +987,7 @@ class SelfKnowledgeService:
         # "do you remember our last conversation" must not resolve a
         # catalog alias into a readiness answer.
         if re.search(r"\b(?:remember|recall|remind me|memorized|"
+                     r"memor(?:y|ies)\s+of|"
                      r"what did i (?:tell|say|mention)|"
                      r"did i (?:tell|say|mention))\b", t):
             return None
