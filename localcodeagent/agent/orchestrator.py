@@ -9797,6 +9797,19 @@ class AgentOrchestrator:
             else None
         )
         training_response = self.training_acknowledgement(learned) if mode == "auto" else None
+        if (training_response is not None
+                and builtin_response is not None
+                and learned.get("forgotten_miss")
+                and not any(learned.get(k) for k in (
+                    "facts", "behavior_rules", "training_examples",
+                    "forgotten", "locked", "restated", "hearsay",
+                    "hedged", "superseded"))):
+            # A bare forget-miss ack must not outrank a real lane —
+            # 'stop remembering things I tell you' is a memory-setting
+            # command (self_knowledge already mutated it), and replying
+            # 'nothing to forget' would be both wrong and dishonest.
+            # Deletion acks survive: the forget mutation already ran.
+            training_response = None
         if training_response is not None:
             # The ack only covers the learned clause — a compound turn
             # ("the port is 8080 — also, what is a mutex?") still owes

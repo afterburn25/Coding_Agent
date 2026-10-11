@@ -935,6 +935,37 @@ class SettingsAssertionGateTests(unittest.TestCase):
             self.assertTrue(r.text, t)
 
 
+class PrivacyControlPrecedenceTests(unittest.TestCase):
+    """'stop remembering things I tell you' is a memory-setting command:
+    the imperative prohibition resolves through self_knowledge control,
+    and the bare forget-miss ack must not outrank that reply or falsely
+    claim nothing matched. Real deletions still report their ack."""
+
+    def _wire_sk(self, agent):
+        import tests.test_self_knowledge as tk
+        svc, store, _ = tk.make_service()
+        agent._self_knowledge = svc
+        return svc, store
+
+    def test_stop_remembering_answers_from_control_not_miss(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, _ = _make(Path(td))
+            _, store = self._wire_sk(agent)
+            res = agent.run("stop remembering things I tell you")
+            self.assertIn("memory", res.content.lower())
+            self.assertIn("off", res.content.lower())
+            self.assertNotIn("nothing to forget", res.content.lower())
+            self.assertFalse(store["conversation_memory_enabled"])
+
+    def test_real_forget_still_reports_deletion(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, _ = _make(Path(td))
+            self._wire_sk(agent)
+            agent.run("my port is 9000")
+            res = agent.run("forget what I told you about the port")
+            self.assertIn("forgot", res.content.lower())
+
+
 class GithubContextRepoTests(unittest.TestCase):
     """Slash idioms in assistant prose ('light/dark', 'and/or') must not
     mint a phantom owner/repo referent — the dogfood defect where an
