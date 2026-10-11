@@ -3842,6 +3842,34 @@ class AgentOrchestrator:
                            or s.get("id") or "")
 
     def _reminder_when_text(self, s: dict, now: float) -> str:
+        kind = s.get("kind")
+        hour, minute = s.get("hour"), s.get("minute")
+        if kind == "daily" and hour is not None:
+            return f"daily {int(hour):02d}:{int(minute or 0):02d}"
+        if kind == "weekly" and hour is not None:
+            wd = s.get("weekday")
+            clock = f"{int(hour):02d}:{int(minute or 0):02d}"
+            if isinstance(wd, list):
+                day = ("weekdays" if wd == [0, 1, 2, 3, 4]
+                       else "weekends" if wd == [5, 6]
+                       else "/".join(
+                           ("Mon", "Tue", "Wed", "Thu", "Fri",
+                            "Sat", "Sun")[d] for d in wd))
+                return f"{day} {clock}"
+            if wd is not None:
+                day = ("Mon", "Tue", "Wed", "Thu", "Fri",
+                       "Sat", "Sun")[int(wd)]
+                return f"{day} {clock}"
+        if kind == "interval" and s.get("interval_s"):
+            secs = int(s["interval_s"])
+            if secs % 3600 == 0:
+                span = (f"{secs // 3600}h"
+                        if secs > 3600 else "hourly")
+            elif secs % 60 == 0:
+                span = f"{secs // 60}m"
+            else:
+                span = f"{secs}s"
+            return f"every {span}" if span != "hourly" else "hourly"
         at = s.get("at") or s.get("next_run")
         if not at:
             return "pending"
