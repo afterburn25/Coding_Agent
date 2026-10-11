@@ -3000,7 +3000,9 @@ class AgentOrchestrator:
                 or self._REMINDER_RESCHEDULE_RE.match(match_text)
                 or self._REMINDER_LEAD_WHEN_RE.match(match_text)
                 or self._REMINDER_BARE_RE.match(match_text)
-                or self._REMINDER_HELP_RE.match(match_text)):
+                or self._REMINDER_HELP_RE.match(match_text)
+                or self._REMINDER_WHENONLY_RE.match(match_text)
+                or self._REMINDER_NOUNADJ_RE.match(match_text)):
             return None
         # Reminder inventory — "what reminders do i have" asks the
         # scheduler, not conversational facts; a memory recall can only
@@ -3712,6 +3714,30 @@ class AgentOrchestrator:
         r"(?P<verb>(?:keep\s+)?(?:remind|alert|notify|ping|wak)ing|"
         r"remind|alert|notify|ping|wake)\s+me\b(?:\s+up\b)?"
         + _REMINDER_TRAIL,
+        re.IGNORECASE)
+    # Bare when-only utterances — 'in two hours', 'at half 6',
+    # 'tomorrow'. No verb and no noun; the model narrated 'Alarm set
+    # for in two hours. Got it.' over zero rows. The lead token must
+    # be temporal so ordinary fragments still reach the model.
+    _REMINDER_WHENONLY_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?P<when>(?:at|in|on|every|next|tomorrow|tonight|tonite|"
+        r"today|this|later|soon|daily|weekly|monthly|nightly|hourly|"
+        r"fortnightly|half|quarter|noon|midnight|a\s+(?:few|couple)|"
+        r"\d|one\b|two\b|three\b|four\b|five\b|six\b|seven\b|eight\b|"
+        r"nine\b|ten\b|eleven\b|twelve\b)\b"
+        r"(?!\s+(?:is|are|was|were|be)\b).*?)" + _REMINDER_TRAIL,
+        re.IGNORECASE)
+    # Adjective-lead noun fragments — 'weekday reminders', 'morning
+    # alarm', 'daily timers'. The model narrated 'Weekday reminders
+    # are set for 4' over zero rows.
+    _REMINDER_NOUNADJ_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:daily|weekly|monthly|nightly|hourly|weekdays?|"
+        r"weekends?|workdays?|morning|afternoon|evening|night|"
+        r"tomorrow|tonight)\s+"
+        r"(?P<noun>reminders?|alarms?|timers?)\b"
+        r"(?:\s+(?P<tail>.+?))?" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_NOTASK_RE = re.compile(
         _REMINDER_POLITE +
@@ -4438,7 +4464,8 @@ class AgentOrchestrator:
                 self._REMINDER_HELP_RE,
                 self._REMINDER_LEAD_CADENCE_RE,
                 self._REMINDER_LEAD_WHEN_RE, self._REMINDER_DECL_RE,
-                self._REMINDER_NOUNFIRST_RE, self._REMINDER_REFER_RE,
+                self._REMINDER_NOUNFIRST_RE, self._REMINDER_NOUNADJ_RE,
+                self._REMINDER_REFER_RE, self._REMINDER_WHENONLY_RE,
                 self._REMINDER_INV_LEAD_RE)):
             return True
         return self._reminder_inventory_shaped(text)
@@ -4663,7 +4690,8 @@ class AgentOrchestrator:
                 return self._reminder_finish(
                     inv.text, user_text, task_id, event_callback)
         md = (self._REMINDER_DECL_RE.match(plan_text)
-              or self._REMINDER_NOUNFIRST_RE.match(plan_text))
+              or self._REMINDER_NOUNFIRST_RE.match(plan_text)
+              or self._REMINDER_NOUNADJ_RE.match(plan_text))
         if md is not None:
             # 'i want a reminder for 5pm' / 'give me a 10 minute
             # timer' — the time carries the whole ask; alarm/timer
@@ -5043,6 +5071,32 @@ class AgentOrchestrator:
                         "Remind you to do what — and when? e.g. "
                         "“remind me in 10 minutes to stretch”.",
                         user_text, task_id, event_callback)
+                mwo = self._REMINDER_WHENONLY_RE.match(plan_text)
+                if mwo is not None:
+                    # 'in two hours', 'at half 6' — a bare when with
+                    # no verb; the model narrated 'Alarm set for in
+                    # two hours. Got it.' over zero rows.
+                    wtxt = str(mwo.group("when") or "").strip(" ,;—-")
+                    spec_wo = self._reminder_spec(wtxt, time.time())
+                    for lead_wo in ("at ", "in "):
+                        if spec_wo is not None:
+                            break
+                        if self._reminder_spec(
+                                lead_wo + wtxt, time.time()) is None:
+                            continue
+                        wtxt = lead_wo + wtxt
+                        spec_wo = self._reminder_spec(
+                            wtxt, time.time())
+                    if spec_wo is not None:
+                        return self._reminder_finish(
+                            f"Sure — remind you to do what {wtxt}?",
+                            user_text, task_id, event_callback)
+                    if self._REMINDER_TIMEISH_RE.search(wtxt):
+                        return self._reminder_finish(
+                            f"I couldn't pin a time from “{wtxt}” "
+                            "— say “at 6am”, “in 30 minutes”, or "
+                            "“tomorrow at 9”.",
+                            user_text, task_id, event_callback)
                 return None
             # 'remind me to X' with no time — claim and ask rather
             # than let the model improvise a commitment.
@@ -5222,6 +5276,8 @@ class AgentOrchestrator:
                          or self._REMINDER_DECL_RE.match(plan_text)
                          or self._REMINDER_NOUNFIRST_RE.match(
                              plan_text)
+                         or self._REMINDER_NOUNADJ_RE.match(plan_text)
+                         or self._REMINDER_WHENONLY_RE.match(plan_text)
                          or self._REMINDER_REFER_RE.match(plan_text)
                          or self._REMINDER_INV_LEAD_RE.match(
                              plan_text))):
@@ -5656,7 +5712,12 @@ class AgentOrchestrator:
             cls._REMINDER_RE, cls._REMINDER_CLARIFY_RE,
             cls._REMINDER_NOTASK_RE, cls._REMINDER_CANCEL_RE,
             cls._REMINDER_SNOOZE_RE, cls._REMINDER_TOGGLE_RE,
-            cls._REMINDER_STOP_RE, cls._REMINDER_RESCHEDULE_RE))
+            cls._REMINDER_STOP_RE, cls._REMINDER_RESCHEDULE_RE,
+            cls._REMINDER_LEAD_CADENCE_RE, cls._REMINDER_LEAD_WHEN_RE,
+            cls._REMINDER_BARE_RE, cls._REMINDER_HELP_RE,
+            cls._REMINDER_DECL_RE, cls._REMINDER_NOUNFIRST_RE,
+            cls._REMINDER_NOUNADJ_RE, cls._REMINDER_REFER_RE,
+            cls._REMINDER_WHENONLY_RE, cls._REMINDER_INV_LEAD_RE))
 
     @staticmethod
     def direct_image_generation_intent(user_text: str) -> bool:

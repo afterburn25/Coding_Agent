@@ -2352,6 +2352,38 @@ class TruthGateTests(RecoveryLoopTests):
                 agent.conversation_memory.recall_facts("scheduled"))
             sup.scheduler.rows.clear()
 
+            # When-only utterances — 'in two hours' and 'at half 6'
+            # got model 'Alarm set for in two hours. Got it.' acks
+            # over zero rows; a parseable when asks for the task, an
+            # unparseable one asks for a clock.
+            for bare_when, needle in (
+                    ("in two hours", "do what in two hours"),
+                    ("at half 6", "do what at half 6"),
+                    ("tomorrow", "do what tomorrow"),
+                    ("5 minutes", "do what in 5 minutes"),
+                    ("later", "couldn't pin a time")):
+                n0 = len(sup.scheduler.rows)
+                result = agent.run(bare_when, mode="auto")
+                self.assertIn(needle, result.content, bare_when)
+                self.assertEqual(len(sup.scheduler.rows), n0,
+                                 bare_when)
+            # Copula-guard — 'tomorrow is friday' and 'this is my
+            # favorite mug' are facts, not reminder asks; the
+            # when-only regex must not suppress banking them.
+            learned = agent.conversation_memory.learn_from_user(
+                "this is my favorite mug", project_id="x")
+            self.assertTrue(learned)
+            # Adjective-lead noun fragments — 'weekday reminders'
+            # got a model 'set for 4' claim over zero rows.
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("weekday reminders", mode="auto")
+            self.assertIn("When should", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0)
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("morning alarm at 7", mode="auto")
+            self.assertIn("Alarm set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

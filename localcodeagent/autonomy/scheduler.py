@@ -103,6 +103,14 @@ def _worded_clock(t: str) -> str:
             h = _hour_num(m.group(2))
             if h is not None and 1 <= h <= 12:
                 return t[:m.start()] + f"{h}:{mn:02d}" + t[m.end():]
+    # 'at half 6' — British 'half past' drops the 'past'. Guard the
+    # duration shapes ('half an hour', 'half a day', 'half to…').
+    m = re.search(r"\bhalf\s+(?!past\b|to\b|an?\b|hour|day|of\b)"
+                  r"(\w+)\b", t)
+    if m:
+        h = _hour_num(m.group(1))
+        if h is not None and 1 <= h <= 12:
+            return t[:m.start()] + f"{h}:30" + t[m.end():]
     return t
 
 
