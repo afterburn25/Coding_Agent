@@ -4989,8 +4989,8 @@ class AppState:
         # eligible for the standing-goal lane below).
         rem = re.match(
             r"^(?:please\s+)?(remind\s+me(?:\s+to)?|"
-            r"(?:set|create|add|schedule)\s+(?:a\s+|me\s+a\s+)?"
-            r"reminder(?:\s+(?:for|to|about|that))?|"
+            r"(?:set|create|add|schedule)\s+(?:a\s+|an\s+|me\s+a\s+)?"
+            r"(?:reminder|alarm|timer)(?:\s+(?:for|to|about|that))?|"
             r"remember\s+to)\s+(.+?)[.!?]?$",
             low)
         # "remember to X weekly" is a recurring-work request — the
@@ -5001,9 +5001,13 @@ class AppState:
             # 'remind me ...' defers to the orchestrator lanes when no
             # spec parses — recall ('remind me about X') and clarify
             # ('remind me to X' with no time) are decided there.
+            noun = ("timer" if "timer" in rem.group(1)
+                    else "alarm" if "alarm" in rem.group(1)
+                    else "reminder")
             out = self._set_reminder(
                 sup, rem.group(2),
-                defer_no_time=rem.group(1).startswith("remind me"))
+                defer_no_time=rem.group(1).startswith("remind me"),
+                noun=noun)
             if out is not None:
                 return out
 
@@ -5118,7 +5122,7 @@ class AppState:
         """
         from .autonomy.scheduler import parse_reminder_schedule
         words = str(body or "").split()
-        for i in range(1, len(words)):
+        for i in range(len(words)):
             spec = parse_reminder_schedule(" ".join(words[i:]), now)
             if spec is not None:
                 return spec, " ".join(words[:i]).strip(" ,;—-")
@@ -5163,31 +5167,60 @@ class AppState:
         return f"for {stamp}"
 
     def _set_reminder(self, sup, body: str,
-                      defer_no_time: bool = False) -> dict | None:
+                      defer_no_time: bool = False,
+                      noun: str = "reminder") -> dict | None:
         """'check the deploy tomorrow at 3' → real schedule whose
         fire emits a notification — once or recurring via the shared
-        spec grammar. Never fabricates a reminder — no parseable time
-        gets an honest ask-for-the-time ack, unless defer_no_time
-        hands the ask to the orchestrator's clarify/recall lanes."""
-        spec, desc = self._parse_reminder_time(str(body or ""), time.time())
+        spec grammar. Alarms and timers are the same notify row: a
+        timer's 'task' is the countdown itself, so a missing desc
+        names the noun, and a bare duration ('5 minutes') means
+        'in 5 minutes'. Never fabricates — no parseable time gets an
+        honest ask, unless defer_no_time hands it to the
+        orchestrator's clarify/recall lanes."""
+        body = str(body or "")
+        spec, desc = self._parse_reminder_time(body, time.time())
+        if spec is None and noun != "reminder":
+            # 'set a timer for 5 minutes' — the duration is the
+            # whole ask; 'in <dur>' reads it as a countdown, 'at T'
+            # covers a bare clock ('alarm for 7am' → body '7am').
+            for prefix in ("in ", "at ", ""):
+                spec, _ = self._parse_reminder_time(
+                    prefix + body, time.time())
+                if spec is not None:
+                    desc = ""
+                    break
+        if noun != "reminder" and not desc:
+            desc = noun
         if not desc:
             return {"content": "Remind you to do what?"}
         if spec is None:
             if defer_no_time:
                 return None
+            if noun == "timer":
+                return {"content": (
+                    "A timer needs a duration — say “set a timer for "
+                    "10 minutes”.")}
+            if noun == "alarm":
+                return {"content": (
+                    "An alarm needs a time — say “set an alarm for "
+                    "7am” or “alarm for tomorrow at 6:30”.")}
             return {"content": (
                 f"Noted — “{desc}”. I can't pin a reminder without a "
                 "time — say when, like “at 3pm”, “tomorrow”, "
                 "“every friday”, or “in 30 minutes”.")}
         kind = spec["kind"]
         fields = {k: v for k, v in spec.items() if k != "kind"}
+        label = (noun.capitalize() if desc == noun
+                 else f"{noun.capitalize()}: {desc[:80]}"
+                 if noun != "reminder" else f"Reminder: {desc[:80]}")
         sup.scheduler.add(
-            f"Reminder: {desc[:80]}", kind,
-            action={"kind": "notify", "title": "Reminder",
+            label, kind,
+            action={"kind": "notify", "title": noun.capitalize(),
                     "detail": desc[:300], "level": "important"},
             created_by="chat", **fields)
         return {"content": (
-            f"Reminder set {self._reminder_spec_text(spec)} — {desc}. "
+            f"{noun.capitalize()} set {self._reminder_spec_text(spec)}"
+            + (f" — {desc}" if desc != noun else "") + ". "
             "It'll surface as a notification; cancel it from the "
             "Missions page if plans change.")}
 

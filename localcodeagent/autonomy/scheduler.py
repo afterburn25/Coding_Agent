@@ -98,6 +98,10 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     if m:
         return _clock({"morning": 9, "afternoon": 15,
                        "evening": 19}[m.group(1)], 0)
+    m = re.fullmatch(r"in\s+the\s+(morning|afternoon|evening)", t)
+    if m:
+        return _clock({"morning": 9, "afternoon": 15,
+                       "evening": 19}[m.group(1)], 0)
     if t == "noon":
         return _clock(12, 0)
     if t == "midnight":
@@ -170,6 +174,23 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         return {"kind": "interval", "interval_s": 43200.0}
     if re.fullmatch(r"every\s+other\s+day|every\s+second\s+day", t):
         return {"kind": "interval", "interval_s": 172800.0}
+    # 'every half hour' / 'every half a day' — fractional spans.
+    m = re.fullmatch(
+        r"every\s+(?:half|a\s+half)\s+(?:an?\s+)?(hour|day)", t)
+    if m:
+        return {"kind": "interval",
+                "interval_s": 1800.0 if m.group(1) == "hour"
+                else 43200.0}
+    # 'every couple of hours' — informal two-unit span.
+    m = re.fullmatch(
+        r"every\s+(?:a\s+)?couple\s+of\s+"
+        r"(minutes?|mins?|hours?|hrs?|days?)", t)
+    if m:
+        unit = m.group(1)
+        return {"kind": "interval",
+                "interval_s": 2.0 * (
+                    60 if unit.startswith(("m", "min")) else
+                    3600 if unit.startswith("h") else 86400)}
     # 'every N units' / 'every hour' / 'hourly' — interval cadence.
     m = re.fullmatch(
         r"(?:every\s+(\d+(?:\.\d+)?)\s*"

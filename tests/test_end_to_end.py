@@ -1570,6 +1570,42 @@ class AutonomyApiTests(unittest.TestCase):
                 # Recall vocabulary never reaches the reminder lane.
                 self.assertIsNone(
                     state._mission_command("remind me about the standup"))
+                # Alarms and timers ride the same notify row — the
+                # ack is backed by a real schedule, not a model riff.
+                out = state._mission_command("set an alarm for 7am")
+                self.assertIsNotNone(out)
+                self.assertIn("Alarm set", out["content"])
+                scheds = _reminders()
+                self.assertEqual(len(scheds), 4)
+                self.assertEqual(scheds[-1]["kind"], "once")
+                self.assertEqual(
+                    scheds[-1]["action"]["detail"], "alarm")
+                out = state._mission_command(
+                    "set a timer for 5 minutes")
+                self.assertIsNotNone(out)
+                self.assertIn("Timer set", out["content"])
+                scheds = _reminders()
+                self.assertEqual(len(scheds), 5)
+                self.assertLess(scheds[-1]["at"] - time.time(), 360)
+                # An unparseable duration still gets a time-ask,
+                # never a row.
+                out = state._mission_command(
+                    "set a timer for a while")
+                self.assertIsNotNone(out)
+                self.assertIn("duration", out["content"])
+                self.assertEqual(len(_reminders()), 5)
+                # Whole-body when — 'tomorrow at 6:30' parses as one
+                # clause, not 'at 6:30' today with desc 'tomorrow'.
+                out = state._mission_command(
+                    "set an alarm for tomorrow at 6:30")
+                self.assertIsNotNone(out)
+                self.assertIn("Alarm set", out["content"])
+                scheds = _reminders()
+                lt = time.localtime(scheds[-1]["at"])
+                self.assertEqual(scheds[-1]["action"]["detail"],
+                                 "alarm")
+                self.assertEqual(lt.tm_min, 30)
+                self.assertGreater(scheds[-1]["at"], time.time())
             finally:
                 if getattr(state, "autonomy", None) is not None:
                     state.autonomy.stop()
