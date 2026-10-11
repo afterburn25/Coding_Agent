@@ -432,6 +432,15 @@ class ConversationMemory:
                             continue
                         fsubj = re.sub(r"^(?:my|the|our)\s+", "",
                                        m2.group(1).strip().lower())
+                        # group(1) carries the predicate too ("oncall
+                        # is") — an exact-subject hint must compare
+                        # against the bare subject or every retarget
+                        # reads as a qualified-slot mismatch.
+                        fsubj = re.sub(
+                            r"\b(?:is|are|was|were|uses?|runs on|"
+                            r"prefers?|likes?|loves?|should stay|"
+                            r"should be|must be|will be|stays?|"
+                            r"remains?)\s*$", "", fsubj).strip()
                         if not re.search(
                                 r"\b" + re.escape(hint) + r"\b", fsubj):
                             continue
@@ -608,6 +617,12 @@ class ConversationMemory:
         """Question/command-shaped openings are not fact subjects."""
         if not subj:
             return False
+        # A bare determiner is never a subject — 'the deploy ships
+        # friday' must not parse subj='the', pred='deploy' and bank the
+        # whole sentence verbatim.
+        if subj.strip().casefold() in {
+                "the", "a", "an", "my", "our", "your", "its", "their"}:
+            return False
         if subj.split()[0].casefold() in {
                 "i", "we", "you", "they", "he", "she", "it",
                 "what", "which", "who", "whom", "whose", "why", "how",
@@ -652,13 +667,25 @@ class ConversationMemory:
             r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
             r"(uses?|runs on|is built on|is written in|depends on|prefers?|"
             r"should stay|should be|must be|will be|shall be|stays?|remains?|"
-            r"is|are)\b",
+            r"listens? on|is|are)\b",
             t,
         )
         if m:
             subj = re.sub(r"\s+", " ", m.group(1)).strip()
             subj = re.sub(r"^(?:the|our|a|an)\s+", "", subj)
             pred = re.sub(r"\s+", " ", m.group(2)).strip()
+            tail = t[m.end():].strip()
+            # 'prod api is on 443', 'prod api uses port 443', and 'the
+            # api listens on 9090' fill the same semantic slot — unify
+            # so a newer port fact retires the older phrasing instead
+            # of coexisting as a contradiction.
+            if ((pred in {"is", "are"}
+                    and re.match(r"on\s+\d+\b", tail))
+                    or (pred in {"use", "uses"}
+                        and re.match(r"port\b", tail))
+                    or pred.startswith("listens on")
+                    or pred.startswith("listen on")):
+                pred = "port"
             if subj and subj not in {"i", "we", "you", "they", "he", "she", "it"}:
                 return f"{subj}:{pred}"
         return ""
@@ -1050,6 +1077,21 @@ class ConversationMemory:
                 return result
             raw = forget_body
 
+        # Discourse/correction marker prefixes ride the front of a
+        # statement ("actually no, my editor is neovim") — strip the
+        # STACK of them once so every matcher below sees the clause
+        # that carries the content. Hoisted ahead of the secret gate:
+        # a marker-prefixed credential ("fyi the wifi password is
+        # hunter2") banks its tail through the same paths as the bare
+        # statement, so the gate must see through the marker too.
+        body = re.sub(
+            r"^(?:(?:actually|by\s+the\s+way|btw|also|so|fyi|"
+            r"note\s+(?:that|this)|note|quick\s+note|"
+            r"for\s+the\s+record|just\s+so\s+you\s+know|"
+            r"no|wait|sorry|nm|never\s*mind|scratch\s+that|"
+            r"on\s+second\s+thought|i\s+mean(?:t)?)[,:\s]+)+",
+            "", raw, flags=re.IGNORECASE)
+
         # Credentials are never persisted — "remember my passcode is X"
         # must not bank the secret into facts/rules, sync it to the
         # Brain, or echo it back through prompt_context. Scoped to
@@ -1058,19 +1100,26 @@ class ConversationMemory:
         # it?") must still reach the normal answer lanes. The refusal
         # reuses the `locked` slot so the reply still surfaces.
         from ..answer_memory.validation import contains_secret
+        _learn_lead = (
+            r"^(?:remember|learn|fact\s*:|teach\s*:|training\s*:|"
+            r"note\s*(?::|that\b|this\b)|always\b|never\b|"
+            r"from\s+now\s+on|"
+            r"i\s+want\s+you\s+to|you\s+should|instead\b|no\b|"
+            r"correction\b|actually\b|stop\b|don't\b|do\s+not\b|"
+            r"we\s+(?:decided|chose|switched|moved|migrated|changed|"
+            r"agreed)|let'?s\b|the\s+plan\s+is)")
+        _bare_decl = r"^(?:my|the|our)\s+.{1,40}\s+is\s+.+$"
         is_learning_write = bool(
-            re.match(
-                r"^(?:remember|learn|fact\s*:|teach\s*:|training\s*:|"
-                r"note\s*:|always\b|never\b|from\s+now\s+on|"
-                r"i\s+want\s+you\s+to|you\s+should|instead\b|no\b|"
-                r"correction\b|actually\b|stop\b|don't\b|do\s+not\b|"
-                r"we\s+(?:decided|chose|switched|moved|migrated|changed|"
-                r"agreed)|let'?s\b|the\s+plan\s+is)",
-                raw, flags=re.IGNORECASE)
+            re.match(_learn_lead, raw, flags=re.IGNORECASE)
             or ("?" not in raw
-                and re.match(r"^(?:my|the|our)\s+.{1,40}\s+is\s+.+$",
-                             raw, flags=re.IGNORECASE)))
-        if is_learning_write and contains_secret(raw):
+                and re.match(_bare_decl, raw, flags=re.IGNORECASE))
+            or (body != raw
+                and (re.match(_learn_lead, body, flags=re.IGNORECASE)
+                     or ("?" not in body
+                         and re.match(_bare_decl, body,
+                                      flags=re.IGNORECASE)))))
+        if is_learning_write and (contains_secret(raw)
+                                  or contains_secret(body)):
             result.setdefault("locked", []).append(
                 "I won't store credentials or secrets in memory — "
                 "Brain unlock lives in the Trainer page instead.")
@@ -1117,18 +1166,26 @@ class ConversationMemory:
         and_parts = re.split(r"\s+and\s+", raw)
         if len(and_parts) > 1:
             decl = re.compile(
-                r"^(?:my|the|our|i|we|it)\b.{1,60}?\b"
+                r"^\w.{1,60}?\b"
                 r"(?:" + self._DECL_PRED_ALT + r")\s+\S",
                 re.IGNORECASE)
             if all(decl.match(p.strip()) for p in and_parts):
+                split_out: dict[str, list] = {}
                 for part in and_parts:
                     sub = self.learn_from_user(
                         part.strip(),
                         project_id=project_id,
                         conversation_id=conversation_id)
                     for key, value in sub.items():
+                        split_out.setdefault(key, []).extend(value)
+                if any(split_out.values()):
+                    for key, value in split_out.items():
                         result.setdefault(key, []).extend(value)
-                return result
+                    return result
+                # Every part parsed as a clause yet nothing banked
+                # (e.g. single-noun values killed by the adjective
+                # guard) — fall through so the ordinary single-decl
+                # path can still record the statement verbatim.
 
         # Reported speech / hearsay — "i heard the port is 9090",
         # "someone said the build is green" — is acknowledged but never
@@ -1158,35 +1215,77 @@ class ConversationMemory:
         # parrots whatever it last saw. Same honest ack, same zero
         # writes, distinct marker so the reply can say "hunch" instead
         # of "secondhand".
-        hedged = re.match(
-            r"^(?:i\s+(?:don'?t\s+|do\s+not\s+)?"
-            r"(?:think|believe|guess|suppose|reckon|figure|"
-            r"feel\s+like|suspect)|i'?d\s+say|imo\b|imho\b|"
-            r"in\s+my\s+(?:opinion|view)|my\s+(?:guess|hunch|"
-            r"understanding|impression)\s+is)\s*[,:—-]*\s*"
-            r"(?:that\s+)?(.+?)[.!?]?$",
-            raw, flags=re.IGNORECASE)
-        if hedged:
-            claim = hedged.group(1).strip()
-            # "i think so" / "i think not" carry no claim — and a
+        def _hedged(text: str) -> bool:
+            m = re.match(
+                r"^(?:i\s+(?:don'?t\s+|do\s+not\s+)?"
+                r"(?:think|believe|guess|suppose|reckon|figure|"
+                r"feel\s+like|suspect)|i'?m\s+(?:(?:pretty|fairly|"
+                r"quite|really|not)\s+)?(?:sure|certain)|"
+                r"i'?d\s+(?:say|guess|bet|imagine)|imo\b|imho\b|"
+                r"(?:pretty|fairly|quite|reasonably)\s+sure|"
+                r"in\s+my\s+(?:opinion|view)|my\s+(?:guess|hunch|"
+                r"understanding|impression)\s+is)\s*[,:—-]*\s*"
+                r"(?:that\s+)?(.+?)[.!?]?$",
+                text, flags=re.IGNORECASE)
+            if m is None:
+                # Modal hedges and proposals — "maybe the cache ttl is
+                # 300", "the timeout should be 30 seconds". A
+                # suggestion is an unverified claim about the world:
+                # noted, never banked. Question inversions ("should
+                # we…?") are excluded by the leading-word guard.
+                m = re.match(
+                    r"^(?:maybe|perhaps|possibly|probably)\s*[,:]?\s*"
+                    r"(.+?)[.!?]?$",
+                    text, flags=re.IGNORECASE) or re.match(
+                    r"^((?!(?:what|when|where|which|who|whom|whose|"
+                    r"why|how|is|are|was|were|do|does|did|can|could|"
+                    r"would|shall|may|might|should)\b)[a-z0-9]"
+                    r".{1,90}?\bshould(?:n'?t|\s+not)?\b.+?)[.!?]?$",
+                    text, flags=re.IGNORECASE)
+                # "we agreed the API should stay REST" is a decision
+                # (assertive), not a proposal — the decision lane
+                # banks it. Only 'should' without a decision verb is
+                # an unverified suggestion.
+                if m is not None and re.search(
+                        r"\b(?:decid\w+|agre\w+|settl\w+|conclud\w+|"
+                        r"commit\w+|chose|chosen|elect\w+|opt\w+)\b",
+                        text, flags=re.IGNORECASE):
+                    m = None
+            if not m:
+                return False
+            claim = m.group(1).strip()
+            # "i think so" / "i'm sure" alone carry no claim — and a
             # hedged refusal ("i don't think we should") is still a
             # claim worth noting, so only the length guard applies.
             if len(claim.split()) >= 2:
                 result["hedged"] = [claim]
-                return result
+                return True
+            return False
+
+        if _hedged(raw):
+            return result
 
         with self._lock:
             fact: str | None = None
-            # Discourse/correction marker prefixes ride the front of a
-            # statement ("actually no, my editor is neovim") — strip the
-            # STACK of them once so every matcher below sees the clause
-            # that carries the content.
-            body = re.sub(
-                r"^(?:(?:actually|by\s+the\s+way|btw|also|so|fyi|note|"
-                r"quick\s+note|for\s+the\s+record|just\s+so\s+you\s+know|"
-                r"no|wait|sorry|nm|never\s*mind|scratch\s+that|"
-                r"on\s+second\s+thought|i\s+mean(?:t)?)[,:\s]+)+",
-                "", raw, flags=re.IGNORECASE)
+            # Marker-prefixed hedges — "actually, i think the port is
+            # 9090" — the hoisted `body` is already marker-stripped, so
+            # the same hedged-claim rule applies.
+            if body != raw and _hedged(body):
+                return result
+            # Elliptical "same for X" — the user means "X gets whatever
+            # value was just discussed", but the referent is genuinely
+            # ambiguous and guessing banks a wrong fact (a model once
+            # applied the backup schedule to the staging API). Ask for
+            # the value deterministically instead.
+            same_for = re.match(
+                r"^same\s+(?:for|goes\s+for|with|applies\s+to)\s+"
+                r"(.+?)[.!?]?$",
+                body, flags=re.IGNORECASE)
+            if same_for:
+                result.setdefault("clarify", []).append(
+                    f"Same what for {same_for.group(1).strip()}? "
+                    "Tell me the value and I'll note it.")
+                return result
             for pattern in (
                 r"^remember\s+that\s+(.+)$",
                 r"^remember\s*:\s*(.+)$",
@@ -1861,6 +1960,17 @@ class ConversationMemory:
                                 fact = self._retarget_latest_fact(
                                     new_v, result["superseded"],
                                     subject_hint=hint)
+                            if (fact is None and new_v
+                                    and utb.group(1)):
+                                # No prior fact to supersede — the
+                                # 'now' value is still a current fact:
+                                # "the oncall used to be priya, now
+                                # it's sam" banks 'oncall is sam'
+                                # even when 'priya' was never taught.
+                                hint = self._clean_subject(
+                                    utb.group(1))
+                                if self._fact_subject_ok(hint):
+                                    fact = f"{hint} is {new_v}"
                     if not reset and fact is None:
                         # "i thought the port was 8080 but it was
                         # 8081" — a corrected belief. The 'but it was'
@@ -2544,6 +2654,12 @@ class ConversationMemory:
         q_terms = self._content_terms(query)
         if not q_terms:
             return []
+        # Orthographic compounds — 'on call' queries a banked 'oncall',
+        # 'log in' a banked 'login'. Joined bigrams are extra overlap
+        # candidates only (never required): they widen what surfaces
+        # here while the caller's precision gate decides relevance.
+        toks = re.findall(r"[a-z0-9]+", str(query or "").lower())
+        q_terms |= {toks[i] + toks[i + 1] for i in range(len(toks) - 1)}
 
         def applies(row: dict[str, Any]) -> bool:
             if not row.get("active", True):

@@ -2536,6 +2536,11 @@ class AgentOrchestrator:
         r"do|does|did|will)\s+|"
         r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
         r"do\s+i\s+(?:use|have|like|prefer|run|need)\s+|"
+        # Elliptical verification — "is it still sam", "is the prod
+        # api still on 443" asks recall to confirm against the banked
+        # fact; the anaphor is resolved by the fact itself.
+        r"(?:is|are|was|were)\s+(?:it|that|this|they|he|she|the)\s+"
+        r"(?:(?:still|really|actually|currently)\s+)?|"
         r"(?:did|have|had)\s+i\s+(?:tell|told|mention)\w*\s+you\s+"
         r"(?:about\s+)?)",
         re.IGNORECASE)
@@ -2653,7 +2658,16 @@ class AgentOrchestrator:
                         # 'called/named' are interrogative slot filler —
                         # "what is the build server called" asks for
                         # the name, the stored fact won't carry them.
-                        "called", "named", "known"}
+                        "called", "named", "known",
+                        # 'port/version/number' name the *type* of the
+                        # answer, not the entity — "which port is prod
+                        # on" is answered by 'prod api is on 443', a
+                        # fact that never contains the word 'port'.
+                        "port", "version", "number",
+                        # 'still'/'yet' mark verification mode ("is the
+                        # api still on 443") — they ask whether a fact
+                        # holds, and no stored fact carries them.
+                        "still", "yet"}
             if not q_terms:
                 return None
             def _terms_hit(terms: set, row) -> bool:
@@ -2695,7 +2709,54 @@ class AgentOrchestrator:
                         rows = [r for r in pre_gate
                                 if _terms_hit(t_terms, r)]
             if not rows:
+                # Orthographic compounds — English writes them both
+                # ways ("on call"/oncall, "log in"/login, "set
+                # up"/setup). When the strict terms starve, join each
+                # adjacent body-token pair (pre-stopword, so 'on' can
+                # reach 'call') and retry with the joined variant.
+                toks = re.findall(r"[a-z0-9]+", body.lower())
+                for i in range(len(toks) - 1):
+                    joined = toks[i] + toks[i + 1]
+                    if joined in q_terms:
+                        continue
+                    cand = (q_terms - {toks[i], toks[i + 1]}) | {joined}
+                    hit = [r for r in pre_gate if _terms_hit(cand, r)]
+                    if hit:
+                        rows = hit
+                        break
+            if not rows:
                 return None
+            # Subject anchoring: the question asks ABOUT an entity, so a
+            # fact whose subject carries the query terms ('prod api is
+            # on 443' for "which port is prod on") outranks one where
+            # they surface only in the value ('staging db is postgres
+            # and prod is mysql'). Tail hits survive only when nothing
+            # is subject-anchored.
+            if len(rows) > 1:
+                def _subj_hit(row) -> bool:
+                    slot = str(row.get("slot") or "")
+                    if slot.startswith("my:"):
+                        subj = slot.split(":", 1)[1]
+                    elif ":" in slot:
+                        subj = slot.split(":", 1)[0]
+                    else:
+                        m = re.match(
+                            r"(.*?)\b(?:"
+                            + self.conversation_memory._DECL_PRED_ALT
+                            + r")\b", str(row.get("text", "")),
+                            re.IGNORECASE)
+                        subj = (m.group(1) if m
+                                else str(row.get("text", "")))
+                    st = self.conversation_memory._content_terms(subj)
+                    return all(
+                        t in st
+                        or (len(t) >= 4 and t.endswith("s")
+                            and not t.endswith(("ss", "us", "is"))
+                            and t[:-1] in st)
+                        for t in q_terms)
+                subj_rows = [r for r in rows if _subj_hit(r)]
+                if subj_rows:
+                    rows = subj_rows
         items = [self._recalled_fact_sentence(r) for r in rows[:4]]
         my_rows = [r for r in rows[:4]
                    if str(r.get("slot") or "").startswith("my:")]
@@ -4021,8 +4082,9 @@ class AgentOrchestrator:
         miss = learned.get("forgotten_miss") or []
         hearsay = learned.get("hearsay") or []
         hedged = learned.get("hedged") or []
+        clarify = learned.get("clarify") or []
         if not (facts or rules or examples or forgotten or locked or restated
-                or miss or hearsay or hedged):
+                or miss or hearsay or hedged or clarify):
             return None
         parts = []
         if locked:
@@ -4051,6 +4113,8 @@ class AgentOrchestrator:
             parts.append(
                 f"Noted — {hedged[0]} — though that's a hunch, "
                 "so I'll treat it as unverified.")
+        elif clarify:
+            parts.append(str(clarify[0]))
         elif not parts and not miss:
             parts.append("Got it.")
         if rules:

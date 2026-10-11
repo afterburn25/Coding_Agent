@@ -100,8 +100,10 @@ def references_conversation(text: str) -> bool:
 _SECRET_PATTERNS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
     re.compile(r"\b(?:api[_\s-]?key|apikey|access[_\s-]?token|"
-               r"auth[_\s-]?token|secret[_\s-]?key|client[_\s-]?secret|"
-               r"ssh[_\s-]?key|private[_\s-]?key|signing[_\s-]?key)\b"
+               r"auth[_\s-]?token|secret[_\s-]?(?:key|token|word|phrase)|"
+               r"client[_\s-]?secret|ssh[_\s-]?key|private[_\s-]?key|"
+               r"signing[_\s-]?key|(?:session|refresh|jwt|oauth|"
+               r"bearer|id|pat)[_\s-]?token|token)\b"
                r"\s*(?:[:=]|\bis\b)\s*[^\s]{6,}", re.I),
     re.compile(r"\b(?:password|passwd|pwd|passcode|pass[\s_-]?phrase)\b"
                r"\s*[:=]\s*[^\s]{4,}", re.I),

@@ -144,6 +144,13 @@ class ConversationManagerTests(unittest.TestCase):
                 "the api key is abc123xyz",
                 "our ssh key is AAAAB3NzaCfakekey",
                 "the access token is xyz1234567",
+                # Marker-prefixed secrets bank their tail through the
+                # same lane — the gate must see through the marker.
+                "fyi the wifi password is hunter2",
+                "btw the api key is abc123xyz",
+                "note that the wifi password is hunter2",
+                "the secret token is tok_999",
+                "the session token is abc123xyz",
             ):
                 learned = memory.learn_from_user(q)
                 self.assertIn("locked", learned, q)
@@ -152,6 +159,11 @@ class ConversationManagerTests(unittest.TestCase):
             # Policy statements mentioning credentials still bank.
             out = memory.learn_from_user("the password policy is 90 days")
             self.assertEqual(out["facts"], ["password policy is 90 days"])
+            # "note that <declarative>" is a learning lead — the tail
+            # banks like the bare statement.
+            out = memory.learn_from_user(
+                "note that the build server is falcon")
+            self.assertEqual(out["facts"], ["build server is falcon"])
 
     def test_credential_questions_are_not_hijacked(self):
         """A question merely mentioning a credential must still reach the
@@ -1519,6 +1531,10 @@ class CrossChatMemoryTests(unittest.TestCase):
                 "i guess the cache is stale",
                 "i don't think the build is broken",
                 "imo the api is slow",
+                "i'm pretty sure the port is 9090",
+                "i'm not sure the backup ran",
+                "i'd bet the cache is stale",
+                "actually, i think the port is 9090",
             ):
                 learned = memory.learn_from_user(utterance)
                 self.assertFalse(learned["facts"], utterance)
@@ -1533,6 +1549,57 @@ class CrossChatMemoryTests(unittest.TestCase):
             learned = memory.learn_from_user(
                 "the registry mount is at HKLM")
             self.assertTrue(learned["facts"])
+
+    def test_modal_hedges_and_proposals_never_bank(self):
+        # BUG-082 follow-on — "maybe X", "perhaps X", and "X should be
+        # Y" proposals are unverified claims too; unhandled they fell
+        # to the model which riffed fabricated persona confirmations.
+        # Question inversions and elliptical deferrals must not claim.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for utterance in (
+                "maybe the timeout should be 30 seconds",
+                "the timeout should be 30 seconds",
+                "perhaps the queue is draining slowly",
+                "we shouldn't deploy on fridays",
+            ):
+                learned = memory.learn_from_user(utterance)
+                self.assertFalse(learned["facts"], utterance)
+                self.assertEqual(len(learned.get("hedged") or []), 1,
+                                 utterance)
+            for not_claim in (
+                "maybe later",
+                "should we deploy now",
+                "we agreed the API should stay REST",  # a decision
+            ):
+                self.assertFalse(
+                    memory.learn_from_user(not_claim).get("hedged"),
+                    not_claim)
+            self.assertFalse(
+                [r for r in memory._data["facts"]
+                 if r.get("active") and "timeout" in r["text"]])
+
+    def test_same_for_asks_never_guesses(self):
+        # "same for the staging api" is an elliptical value request
+        # whose referent is ambiguous — a model riff once applied the
+        # backup schedule ("runs at 2am") to the staging API and the
+        # fabrication banked into Answer Memory. The deterministic lane
+        # asks for the value and banks nothing.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("the backup runs at 2am")
+            for utterance in (
+                "same for the staging api",
+                "same goes for the prod api",
+            ):
+                learned = memory.learn_from_user(utterance)
+                self.assertFalse(learned["facts"], utterance)
+                self.assertEqual(len(learned.get("clarify") or []), 1,
+                                 utterance)
+            # Only the real fact is active — nothing guessed.
+            self.assertEqual(
+                [r["text"] for r in memory._data["facts"]
+                 if r.get("active")], ["backup runs at 2am"])
 
     def test_stated_plan_banks_as_plan(self):
         # BUG-082 — "we're switching to mysql next week" declares

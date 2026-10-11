@@ -559,6 +559,31 @@ class SelfRepairCoordinator:
             if f.startswith(("..", "/", "\\")) or ".." in Path(f).parts:
                 notes.append(f"patch escapes repo: {f}")
                 ok = False
+            # Destructive-diff guard — a "minimal patch" never guts a
+            # file. A generated stub still imports cleanly, so tests
+            # can't catch a 14k-line file collapsing to a scaffold;
+            # review must. New files have no baseline and skip.
+            stable = self.repo_root / f
+            cand = wt / f
+            if stable.is_file():
+                try:
+                    old_n = len(stable.read_text(
+                        encoding="utf-8", errors="replace").splitlines())
+                    new_n = len(cand.read_text(
+                        encoding="utf-8", errors="replace").splitlines()
+                        ) if cand.is_file() else 0
+                except OSError:
+                    continue
+                if old_n >= 50 and new_n < old_n * 0.2:
+                    notes.append(
+                        f"candidate guts {f}: {old_n} → {new_n} lines")
+                    ok = False
+            elif len(Path(f).parts) == 1:
+                # Scratch files at repo root (diagnosis helpers,
+                # reports) must never promote — new modules live inside
+                # a package.
+                notes.append(f"new repo-root file: {f}")
+                ok = False
         if not (inc.get("patch_files")):
             ok = False
             notes.append("empty patch")
