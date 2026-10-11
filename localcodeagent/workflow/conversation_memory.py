@@ -1239,6 +1239,7 @@ class ConversationMemory:
             r"no|wait|sorry|nm|never\s*mind|scratch\s+that|"
             r"on\s+second\s+thought|i\s+mean(?:t)?|"
             r"and|but|then|or|plus|"
+            r"ok(?:ay)?|yeah|yep|yup|well|hey|"
             r"hmm+|hm+|um+|uh+|er+|erm+|ah+|oh)[,:\s]+)+",
             "", raw, flags=re.IGNORECASE)
         # Confirmation tags — "the api keys rotate monthly, right?" —

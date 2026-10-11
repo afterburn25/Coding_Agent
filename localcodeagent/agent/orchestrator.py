@@ -2530,6 +2530,11 @@ class AgentOrchestrator:
     _FACT_RECALL_RE = re.compile(
         r"^\s*(?:remind me\s+(?:(?:of|about)\s+|"
         r"(?:what|when|where|which|who|whose|how)\s+)?|"
+        # Meta-recall idioms — "what was it again — the retry limit"
+        # defers the referent; the tail terms do the store match.
+        # Must precede the bare 'what ' alternative or it loses the
+        # alternation.
+        r"what\s+was\s+(?:it|that|this)\s+again\b[\s,—–\-]*|"
         r"what(?:'s|\s+s)?\s+|"
         r"whats\s+|which\s+|whichever\s+|whos\s+|whose\s+|"
         r"who\s+all\s+(?:(?:is|are|was|were)\s+)?|who'?s?\s+|"
@@ -2539,8 +2544,16 @@ class AgentOrchestrator:
         # the recall request; the self-deprecating lead is filler.
         r"(?:i\s+forgot(?:ten)?|i\s+keep\s+forgetting|"
         r"i\s+(?:can'?t|cannot|couldn'?t|don'?t|do\s+not|didn'?t|"
-        r"did\s+not)\s+(?:remember|recall))\s+"
+        r"did\s+not)\s+(?:remember|recall)|"
+        r"i\s+(?:keep\s+)?(?:meaning|wanted|meant)\s+to\s+ask)\s+"
         r"(?:(?:what|when|where|which|who|whose|how)\s+)?|"
+        # Reported-speech verification — "didn't you say X" and the
+        # tagged "you said X, right" ask the store to confirm or
+        # contradict, not the model. Untagged 'you said X' stays
+        # assertion-framed and never reaches this lane.
+        r"(?:didn'?t|did\s+not)\s+you\s+say\s+|did\s+you\s+say\s+|"
+        r"you\s+(?:said|told\s+me)\s+|i\s+thought\s+you\s+"
+        r"(?:said|told\s+me)\s+|"
         r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
         r"do\s+i\s+(?:use|have|like|prefer|run|need)\s+|"
         # Verification with an explicit subject — "does the metrics
@@ -2609,6 +2622,15 @@ class AgentOrchestrator:
                 match_text = stripped
         except Exception:
             pass
+        # Confirmation tags ask for agreement — "you told me the retry
+        # limit was 10, yeah" — and aren't part of the stored value;
+        # the learn path already strips them, recall must too or the
+        # tag pollutes the term match.
+        match_text = re.sub(
+            r"[,;]?\s*(?:right|correct|yeah|ok(?:ay)?|huh|eh|yes|no|"
+            r"isn'?t\s+(?:it|that\s+so)|don'?t\s+you\s+think|"
+            r"you\s+know)\s*[?!.]?\s*$",
+            "", match_text, flags=re.IGNORECASE).strip()
         if (self.conversation_memory is None
                 or self._FACT_RECALL_SKIP_RE.search(match_text)):
             return None

@@ -802,13 +802,59 @@ class TruthGateTests(RecoveryLoopTests):
             for q in ("oh and what port was prod on",
                       "and what port is prod on",
                       "but when is the standup",
-                      "so where is the config"):
+                      "so where is the config",
+                      "ok so what time is the standup",
+                      "yeah and what port is prod on",
+                      "well who is on call",
+                      "hey what is the deadline"):
                 self.assertEqual(cm.learn_from_user(q)["facts"], [], q)
-            # Coordinators before real declaratives still bank.
+            # Politeness/discourse leads before real declaratives still
+            # bank — the strip only takes the marker stack.
             r = cm.learn_from_user("and the deadline is friday")
             self.assertEqual(r["facts"], ["deadline is friday"])
             r = cm.learn_from_user("but the build is green")
             self.assertEqual(r["facts"], ["build is green"])
+            r = cm.learn_from_user("ok the port is 8080")
+            self.assertEqual(r["facts"], ["port is 8080"])
+            r = cm.learn_from_user("yeah the maintainer is sam")
+            self.assertEqual(r["facts"], ["maintainer is sam"])
+
+    def test_reported_speech_and_meta_recall(self):
+        # Live: "you said my editor was cursor, right" let the MODEL
+        # contradict the store; "what was it again — the retry limit"
+        # hallucinated a stale value; "i keep meaning to ask" missed
+        # recall entirely. Verification and meta-recall idioms must
+        # answer deterministically from the banked fact.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my editor is cursor")
+            agent.conversation_memory.learn_from_user("retry limit is 10")
+            agent.conversation_memory.learn_from_user("my shell is zsh")
+            cases = (
+                ("you said my editor was cursor, right", "cursor"),
+                ("you told me the retry limit was 10, yeah", "10"),
+                ("didn't you say the prod api was on 443", "prod api"),
+                ("did you say my editor was cursor", "cursor"),
+                ("what was it again — the retry limit", "10"),
+                ("i keep meaning to ask what shell I use", "zsh"),
+            )
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            for q, want in cases:
+                reply = agent._single_fact_recall_reply(q, "conv", "proj")
+                self.assertIsNotNone(reply, q)
+                self.assertIn(want, reply.text, q)
+            # An untagged 'you said …' is a complaint/assertion, not a
+            # verification — it must NOT recall.
+            for q in ("you said this would work",
+                      "you said the deploy was fine"):
+                self.assertIsNone(
+                    agent._single_fact_recall_reply(q, "conv", "proj"), q)
 
     def test_port_probe_is_answer_type_slot(self):
         # "which port is prod on" — 'port' names the answer's type, not

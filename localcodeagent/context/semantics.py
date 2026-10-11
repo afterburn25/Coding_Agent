@@ -445,6 +445,8 @@ _WANT_TO_KNOW_RE = re.compile(
     r"\b(?:tell|let)\s+me\s+know\b|\btell\s+me\s+(?:whether|if|what|"
     r"why|how|about|your|the)\b|\bi'?m\s+(?:curious|wondering)\b|"
     r"\bi\s+wonder\b|\bwondering\s+(?:if|whether|what|how|why)\b|"
+    r"\bi\s+(?:keep\s+)?(?:meaning|wanted|meant|was\s+going|"
+    r"have\s+been\s+meaning)\s+to\s+ask\b|"
     r"\bwhat\s+does\b.{0,60}\bmean\b|\bwhat\s+(?:does|do|did)\s+"
     r"(?:that|this|it)\s+mean\b",
     re.IGNORECASE)
@@ -983,6 +985,15 @@ def _speech_act(clause: str, *, raw_norm: str) -> str:
         return COMMAND
     if _COMPLAINT_RE.search(low):
         return COMPLAINT
+    # Reported speech + confirmation tag — "you said my editor was
+    # cursor, right" is a verification ask (the tag may drop the '?').
+    if re.match(r"^(?:you\s+(?:said|told\s+me)|i\s+thought\s+you\s+"
+                r"(?:said|told\s+me))\b",
+                low) and re.search(
+                r"[,;]?\s*(?:right|correct|yeah|huh|eh|yes|no|"
+                r"isn'?t\s+(?:it|that\s+so)|don'?t\s+you\s+think)\s*"
+                r"[?!.]?\s*$", low):
+        return QUESTION
     return ASSERTION
 
 
