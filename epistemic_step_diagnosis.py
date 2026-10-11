@@ -7,5 +7,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-        "root_cause": root_cause,
-        "suggestion": "Fix the capacity restoration logic in the code to ensure it properly handles capacity changes and allows the system to speak when needed."}
