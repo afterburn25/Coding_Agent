@@ -868,6 +868,54 @@ class TruthGateTests(RecoveryLoopTests):
                 self.assertIsNone(
                     agent._single_fact_recall_reply(q, "conv", "proj"), q)
 
+    def test_scoped_recall_and_inventory_asks(self):
+        # Live: "do you have anything on the backup schedule" dumped
+        # the AUTONOMY inventory (standing goals/missions) instead of
+        # the banked fact, and "what do you remember about my shell"
+        # dumped every fact in the store. Scoped asks must resolve the
+        # named subject only; "what do you" must not blanket-skip
+        # memory-shaped verbs (have/know/remember).
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "the backup schedule is every day at 3am")
+            agent.conversation_memory.learn_from_user(
+                "retry limit is 10")
+            agent.conversation_memory.learn_from_user(
+                "my shell is zsh")
+            for q, want in (
+                    ("do you have anything on the backup schedule",
+                     "3am"),
+                    ("what do you have on the retry limit", "10"),
+                    ("got anything about the backup schedule", "3am"),
+                    ("you got any info on the retry limit", "10"),
+                    ("what do you know about the retry limit", "10"),
+                    ("what do you remember about my shell", "zsh")):
+                reply = (agent._single_fact_recall_reply(q, "conv",
+                                                       "proj")
+                         or agent._facts_recall_reply(q, "conv", "proj"))
+                self.assertIsNotNone(reply, q)
+                self.assertIn(want, reply.text, q)
+            # Scoped dump returns ONLY the matching fact — the whole
+            # store must not ride along.
+            reply = agent._facts_recall_reply(
+                "what do you remember about my shell", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("zsh", reply.text)
+            self.assertNotIn("retry", reply.text)
+            # Unscoped/about-me still dumps; non-memory "what do you"
+            # stays skipped; unknown scopes fall through.
+            for q in ("what do you do on weekends",
+                      "what do you think about it",
+                      "do you have something on the deploy pipeline"):
+                self.assertIsNone(
+                    agent._single_fact_recall_reply(q, "conv", "proj"),
+                    q)
+
     def test_topic_pivot_preamble_strips_on_learn(self):
         # "speaking of ports, prod uses 8443" — the bankable clause
         # follows the pivot's comma. The pivot itself must not bank

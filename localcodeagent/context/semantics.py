@@ -451,6 +451,11 @@ _WANT_TO_KNOW_RE = re.compile(
     # "is there any chance you know" — the politeness wrapper is
     # filler; the tail is the ask.
     r"\bany\s+chance\s+you\s+\w|\bis\s+there\s+any\s+chance\s+you\b|"
+    # Elided 'have you got' — "got anything on the backup schedule"
+    # asks for stored info; without the verb it's assertion-shaped.
+    r"\b(?:you\s+)?got\s+(?:(?:any|anything|some|something|"
+    r"everything|stuff|info|details|data|notes?|news|dirt|intel)"
+    r"\s+){1,2}(?:on|about|for|regarding)\b|"
     r"\bwhat\s+does\b.{0,60}\bmean\b|\bwhat\s+(?:does|do|did)\s+"
     r"(?:that|this|it)\s+mean\b",
     re.IGNORECASE)

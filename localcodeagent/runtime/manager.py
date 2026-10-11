@@ -784,7 +784,8 @@ class RuntimeManager:
                 out = subprocess.run(
                     ["netstat", "-ano", "-p", "tcp"],
                     capture_output=True, text=True, timeout=15,
-                encoding="utf-8", errors="replace").stdout
+                    encoding="utf-8", errors="replace",
+                    creationflags=no_window_flags()).stdout
                 for line in out.splitlines():
                     parts = line.split()
                     if (len(parts) >= 5 and parts[0].upper() == "TCP"
@@ -795,7 +796,8 @@ class RuntimeManager:
                 out = subprocess.run(
                     ["lsof", "-nP", "-ti", f":{port}", "-sTCP:LISTEN"],
                     capture_output=True, text=True, timeout=15,
-                encoding="utf-8", errors="replace").stdout
+                encoding="utf-8", errors="replace",
+                    creationflags=no_window_flags()).stdout
                 for line in out.splitlines():
                     if line.strip().isdigit():
                         pids.add(int(line.strip()))
@@ -1133,7 +1135,8 @@ class RuntimeManager:
                 out = subprocess.run(
                     ["lsof", "-nP", "-ti", f":{port}", "-sTCP:LISTEN"],
                     capture_output=True, text=True, timeout=15,
-                encoding="utf-8", errors="replace").stdout
+                encoding="utf-8", errors="replace",
+                    creationflags=no_window_flags()).stdout
                 for line in out.splitlines():
                     if line.strip().isdigit():
                         pids.add(int(line.strip()))

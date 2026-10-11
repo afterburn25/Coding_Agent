@@ -2505,8 +2505,8 @@ class AgentOrchestrator:
 
     _FACTS_RECALL_RE = re.compile(
         r"\bwhat do you (?:know|remember|have)(?:\s+learned)?\s+"
-        r"about me\b|\bwhat do you remember\b|\bwhat have you "
-        r"(?:learned|remembered)(?:\s+about me)?\b|\bwhat have i "
+        r"about\b|\bwhat do you remember\b|\bwhat have you "
+        r"(?:learned|remembered)\b|\bwhat have i "
         r"told you\b|\bwhat(?:'s| do you have) (?:on|saved about) "
         r"me\b", re.IGNORECASE)
     _RULES_RECALL_RE = re.compile(
@@ -2560,6 +2560,14 @@ class AgentOrchestrator:
         r"do\s+you\s+(?:happen\s+to\s+)?(?:know|remember|recall|"
         r"recollect)\s+|(?:is\s+there\s+)?any\s+chance\s+you\s+"
         r"(?:remember|know|recall)\s+|"
+        # Scoped inventory asks — "do you have anything on the backup
+        # schedule" asks memory, not the autonomy lane; the server-side
+        # inventory deferral hands these off when the scope names a
+        # stored subject.
+        r"(?:do\s+you\s+have|have\s+you\s+got|what\s+do\s+you\s+have|"
+        r"you\s+got|got)\s+(?:(?:any|anything|some|something|"
+        r"everything|stuff|info|details|data|notes?|news|dirt|intel)"
+        r"\s+){0,2}(?:on|about|for|regarding)\s+|"
         r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
         r"do\s+i\s+(?:use|have|like|prefer|run|need)\s+|"
         # Verification with an explicit subject — "does the metrics
@@ -2576,7 +2584,8 @@ class AgentOrchestrator:
         r"(?:about\s+)?)",
         re.IGNORECASE)
     _FACT_RECALL_SKIP_RE = re.compile(
-        r"^\s*what\s+(?:do you|should|would|could|can|"
+        r"^\s*what\s+(?:do\s+you(?!\s+(?:have|got|know|remember|"
+        r"recall|recollect)\b)|should|would|could|can|"
         r"did\s+(?:you|we|they|he|she|it|that|this)|"
         r"does\s+(?:it|that|this|he|she|they)|will|"
         r"happens|happened|else|if)\b|"
@@ -2912,6 +2921,29 @@ class AgentOrchestrator:
                 canonical=canonical)
         facts = self.conversation_memory.active_facts(
             project_id=project_id, conversation_id=conversation_id)
+        # Scoped recall — "what do you remember about my shell" asks
+        # for the shell fact, not the whole store. The dump is only for
+        # unscoped/about-me introspection; a named topic filters the
+        # facts and an unmatched scope defers to the single-fact lane.
+        scope = re.search(
+            r"\babout\s+(.+?)\s*[?!.]*$", probe, re.IGNORECASE)
+        if scope:
+            scope_words = scope.group(1).strip().lower()
+            if scope_words not in (
+                    "me", "us", "myself", "what i said",
+                    "what i told you", "the things i said",
+                    "the stuff i told you"):
+                scope_terms = (
+                    self.conversation_memory._content_terms(scope_words))
+                if scope_terms:
+                    def _hit(f: str) -> bool:
+                        ft = self.conversation_memory._fact_query_terms(
+                            f, self.conversation_memory._fact_slot(f))
+                        return bool(scope_terms & ft)
+                    hits = [f for f in facts if _hit(f)]
+                    if not hits:
+                        return None
+                    facts = hits
         if not facts:
             canonical = ("Nothing yet — you haven't taught me anything "
                          "to keep.")

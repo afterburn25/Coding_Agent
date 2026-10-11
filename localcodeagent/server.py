@@ -4719,18 +4719,39 @@ class AppState:
             # A definite 'the <thing> schedule' names a world entity —
             # "what's the backup schedule" asks about the banked fact
             # 'backup schedule is every day at 3am', not the autonomy
-            # inventory. Defer to fact recall when the qualified noun
-            # is a stored fact's subject; bare 'the schedule'/'any
-            # schedules' still list the inventory.
+            # inventory. Same for scoped inventory phrasings — "do you
+            # have anything on the backup schedule" names the same
+            # subject through a different interrogative shape. Defer
+            # to fact recall when the named scope is a stored fact's
+            # subject; bare 'the schedule'/'any schedules' still list
+            # the inventory.
             cm = getattr(self, "conversation_memory", None)
             dqm = re.match(
                 r"what(?:'s|\s+is)\s+(?:the\s+|my\s+|our\s+)?"
                 r"(.+?)[?!.\s]*$", low)
-            if cm is not None and dqm:
-                et = cm._content_terms(dqm.group(1)) - {
+            scope_text = dqm.group(1) if dqm else None
+            if scope_text is None:
+                # Scoped inventory asks — strip the interrogative and
+                # inventory vocabulary; whatever content terms remain
+                # name the thing asked about.
+                scope_text = re.sub(
+                    r"\b(?:do\s+you\s+have|do\s+you|have\s+you\s+got|"
+                    r"what|which|list|show|any|anything|something|"
+                    r"are\s+there|how\s+many|running|active|about|on|"
+                    r"of|the|a|an|my|our|me|tell\s+me)\b",
+                    " ", low, flags=re.IGNORECASE)
+            if cm is not None and scope_text:
+                et = cm._content_terms(scope_text) - {
                     "schedule", "schedules", "goal", "goals",
                     "mission", "missions", "trigger", "triggers",
-                    "standing"}
+                    "standing",
+                    # Slot-filler — the answer's type, not the entity:
+                    # 'anything on the deploy status' asks about the
+                    # deploy; 'the port version' asks about the thing,
+                    # not the word 'port'.
+                    "status", "state", "port", "version", "number",
+                    "time", "date", "called", "named", "known",
+                    "thing", "info", "details"}
                 if et:
                     for row in cm.recall_facts(low):
                         slot = str(row.get("slot") or "")
