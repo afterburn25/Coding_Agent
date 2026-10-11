@@ -14,6 +14,23 @@ from localcodeagent.agent.orchestrator import AgentOrchestrator
 from localcodeagent.answer_memory.service import AnswerMemory
 
 
+class _RetriedTemporaryDirectory(tempfile.TemporaryDirectory):
+    """Race-safe teardown: the store's background integrity checker can
+    still hold a side connection (and WAL sidecars) inside the tempdir
+    when the test finishes — on Linux that surfaces as ENOTEMPTY. The
+    writer finishes within milliseconds, so a short retry makes
+    teardown deterministic."""
+
+    def cleanup(self) -> None:
+        import time
+        for _ in range(40):
+            try:
+                return super().cleanup()
+            except OSError:
+                time.sleep(0.05)
+        return super().cleanup()
+
+
 class TestIdentityAnswers(unittest.TestCase):
     def test_birthday_questions(self):
         for q in ("when is your birthday", "what's your birthday",
@@ -311,7 +328,7 @@ class TestFamilyCanon(unittest.TestCase):
 
 class TestLockedIdentityGuards(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = _RetriedTemporaryDirectory()
         self.am = AnswerMemory(str(Path(self.tmp.name) / "am.db"))
 
     def tearDown(self):

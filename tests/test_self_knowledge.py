@@ -195,6 +195,49 @@ class TestServiceControl(unittest.TestCase):
         self.assertEqual(res.kind, "execute")
         self.assertFalse(store["voice_enabled"])
 
+    def test_privacy_paraphrases_disable_conversation_memory(self):
+        # Imperative stop-forms that name the memory setting are
+        # whole-utterance prohibitions, but the prohibition IS the
+        # command — they must reach the same setting mutation as
+        # 'turn off conversation memory' instead of falling to the
+        # forget/model path.
+        for text in ("stop remembering things I tell you",
+                     "stop remembering what i say",
+                     "disable memory",
+                     "turn off conversation memory"):
+            svc, store, _ = make_service()
+            res = svc.respond(text)
+            self.assertIsNotNone(res, text)
+            self.assertEqual(res.kind, "execute", text)
+            self.assertFalse(store["conversation_memory_enabled"], text)
+
+    def test_privacy_paraphrases_re_enable_and_status(self):
+        svc, store, _ = make_service()
+        svc.respond("disable memory")
+        res = svc.respond("turn memory back on")
+        self.assertIsNotNone(res)
+        self.assertEqual(res.kind, "execute")
+        self.assertTrue(store["conversation_memory_enabled"])
+        res = svc.respond("is memory on")
+        self.assertIsNotNone(res)
+        self.assertIn("on", res.text.lower())
+
+    def test_memory_alias_does_not_hijack_recall_asks(self):
+        # The bare 'memory' alias must not claim recall-shaped asks —
+        # 'do you have memory of X' is a memory_recall question, not a
+        # feature-status probe.
+        svc, store, _ = make_service()
+        res = svc.respond("do you have any memory of the port")
+        self.assertIsNone(res)
+
+    def test_embedded_prohibition_still_vetoes_control(self):
+        # 'i am not asking you to remember' is reported speech, not a
+        # command — the prohibition veto must stand.
+        svc, store, _ = make_service()
+        res = svc.respond("i am not asking you to remember things")
+        self.assertIsNone(res)
+        self.assertNotIn("conversation_memory_enabled", store)
+
     def test_turn_voice_back_on_followup(self):
         svc, store, _ = make_service()
         svc.respond("turn voice off")

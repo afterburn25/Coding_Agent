@@ -502,6 +502,7 @@ class AgentOrchestrator:
         artifacts=None,
         social=None,
         state_db=None,
+        autonomy=None,
     ) -> None:
         self.config = config
         self.router = router
@@ -590,6 +591,11 @@ class AgentOrchestrator:
         # Transactional state layer — durable exactly-once operation
         # claims for external side effects (social sends, …).
         self.state_db = state_db
+        # Callable returning the AutonomousSupervisor — lazy because
+        # AppState builds the orchestrator before the supervisor.
+        # Powers the deterministic reminder lane ("remind me in 5
+        # minutes to X" → a real once-schedule with a notify action).
+        self._autonomy = autonomy
         # Requirement-change propagation — AppState wires this to the
         # mission store so a superseded conversation fact flags
         # in-flight mission nodes referencing the stale value.
@@ -2734,7 +2740,8 @@ class AgentOrchestrator:
         "mentioned", "made"})
 
     def _discourse_referent(self, prop: str) -> str | None:
-        """'user' | 'user_q' | 'assistant' | None — the prop names a
+        """'user' | 'user_q' | 'assistant' (+ '_first' variants) | None —
+        the prop names a
         discourse-role referent (an answer I gave / a question or
         statement you gave me) and carries no topic terms. A pure
         referent resolves against the recorded turns, never against
@@ -2751,10 +2758,10 @@ class AgentOrchestrator:
         # 'asked' referent prefers actual questions; a 'thing I told
         # you' referent takes the latest user turn either way.
         user_head = re.search(
-            r"\b(?:my|the)\s+(?:last|previous|first|earlier|recent)\s+"
-            r"(?:question|query|thing\s+i\s+(?:asked|told|said|"
-            r"mentioned|shared))\b|"
-            r"\b(?:last|previous|first|recent)\s+thing\s+i\s+"
+            r"\b(?:my|the)\s+(?P<ord>last|previous|first|earlier|"
+            r"recent)\s+(?:question|query|thing\s+i\s+(?:asked|told|"
+            r"said|mentioned|shared))\b|"
+            r"\b(?P<ord2>last|previous|first|recent)\s+thing\s+i\s+"
             r"(?:asked|told|said|mentioned|shared)\b|"
             r"\b(?:did\s+)?i\s+(?:just\s+)?ask(?:ed)?\b",
             prop, re.IGNORECASE)
@@ -2766,12 +2773,16 @@ class AgentOrchestrator:
                 prefer_q = not re.search(
                     r"thing\s+i\s+(?:told|said|mentioned|shared)",
                     user_head.group(0), re.IGNORECASE)
-                return ("user_q" if prefer_q else "user")
+                first = (user_head.group("ord")
+                         or user_head.group("ord2") or "").lower()
+                kind = "user_q" if prefer_q else "user"
+                return kind + ("_first" if first == "first" else "")
         # A bare noun is not anaphoric — "do the thing" strips to
         # prop="thing", which must not read as a discourse referent.
         # Definite reference needs the article/possessive or a pronoun.
         head = re.search(
-            r"\b(?:the\s+|your\s+)(?:answer|reply|response|thing|"
+            r"\b(?:the\s+|your\s+)(?:(?P<ord3>last|first|previous|"
+            r"earlier|recent)\s+)?(?:answer|reply|response|thing|"
             r"result|outcome|decision|verdict)\b|\b(?:it|that)\b",
             prop, re.IGNORECASE)
         if head is None:
@@ -2779,6 +2790,8 @@ class AgentOrchestrator:
         rest = prop[:head.start()] + " " + prop[head.end():]
         if memory._content_terms(rest) - self._ANAPHORA_FILLER_TERMS:
             return None
+        if (head.group("ord3") or "").lower() == "first":
+            return "assistant_first"
         return "assistant"
 
     def _anaphoric_replay(self, prop: str, history: list) -> str | None:
@@ -2790,21 +2803,28 @@ class AgentOrchestrator:
         if memory is None:
             return None
         referent = self._discourse_referent(prop)
-        if referent in ("user", "user_q"):
-            return self._user_recall_replay(
-                history, prefer_question=(referent == "user_q"))
-        if referent != "assistant":
+        if referent is None:
             return None
-        quoted = self._last_assistant_quote(history)
+        first = referent.endswith("_first")
+        if referent.startswith("user"):
+            return self._user_recall_replay(
+                history, prefer_question=referent.startswith("user_q"),
+                from_start=first)
+        if not referent.startswith("assistant"):
+            return None
+        quoted = self._assistant_quote(history, first=first)
         if quoted is not None:
             return f"Earlier I said: \"{quoted}\""
         return "I don't have an earlier answer on record."
 
-    def _last_assistant_quote(self, history: list) -> str | None:
-        """Most recent non-meta assistant utterance, normalized to one
-        line, truth-gate marker preserved verbatim — the quoted
-        substance for replays and repeats."""
-        for row in reversed(history):
+    def _assistant_quote(self, history: list,
+                         first: bool = False) -> str | None:
+        """Most recent (or, for 'the first thing you said', earliest)
+        non-meta assistant utterance, normalized to one line,
+        truth-gate marker preserved verbatim — the quoted substance
+        for replays and repeats."""
+        rows = history if first else reversed(history)
+        for row in rows:
             if str(row.get("role")) != "assistant":
                 continue
             content = re.sub(
@@ -2842,20 +2862,22 @@ class AgentOrchestrator:
             history = memory.history(limit=40)
         except Exception:
             return None
-        return self._last_assistant_quote(history)
+        return self._assistant_quote(history)
 
     def _user_recall_replay(self, history: list,
-                            prefer_question: bool = True) -> str | None:
+                            prefer_question: bool = True,
+                            from_start: bool = False) -> str | None:
         """'my last question / what did I just ask / the last thing I
-        told you' — resolve to the last user turn on record. A
-        'question' referent prefers actual questions over interleaved
-        statements; 'the last thing I told you' takes the latest user
-        turn either way."""
+        told you' — resolve to a user turn on record, latest by
+        default or earliest for 'first'. A 'question' referent
+        prefers actual questions over interleaved statements; 'the
+        last thing I told you' takes the user turn either way."""
         memory = self.conversation_memory
         if memory is None:
             return None
         fallback = None
-        for row in reversed(history):
+        rows = history if from_start else reversed(history)
+        for row in rows:
             if str(row.get("role")) != "user":
                 continue
             content = re.sub(
@@ -2964,6 +2986,14 @@ class AgentOrchestrator:
                 return RenderedReply(
                     text=f"Here it is again: \"{quoted}\"",
                     speech_act="answer")
+        # Action-shaped reminders ('remind me in 5 minutes to check
+        # the build', 'remind me to take out the trash') are schedule
+        # asks owned by the reminder lane — the 'remind me' recall
+        # lead would otherwise term-match the task's topic against
+        # stored facts and answer a scheduling request with trivia.
+        if (self._REMINDER_RE.match(match_text)
+                or self._REMINDER_CLARIFY_RE.match(match_text)):
+            return None
         if frame is not None and not frame.allows("memory_recall"):
             return None
         if (self.conversation_memory is None
@@ -3013,8 +3043,10 @@ class AgentOrchestrator:
                 history = []
             verdict = (
                 self._user_recall_replay(
-                    history, prefer_question=(referent == "user_q"))
-                if referent in ("user", "user_q")
+                    history,
+                    prefer_question=referent.startswith("user_q"),
+                    from_start=referent.endswith("_first"))
+                if referent.startswith("user")
                 else self._anaphoric_replay(prop, history))
             if verdict is not None:
                 from ..context.realize import RenderedReply
@@ -3530,6 +3562,123 @@ class AgentOrchestrator:
         low = str(masked_text or "").lower()
         return any(re.search(rf"\b{re.escape(v)}\b", low) for v in verbs)
 
+    _REMINDER_RE = re.compile(
+        r"^\s*(?:please\s+)?remind\s+me\s+"
+        r"(?:(?:in\s+(?P<amt>\d+(?:\.\d+)?)\s*"
+        r"(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?|days?))|"
+        r"(?P<tomorrow>tomorrow(?:\s+(?:morning|afternoon|evening))?)|"
+        r"(?:at\s+(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*"
+        r"(?P<ampm>a\.?\s?m\.?|p\.?\s?m\.?)?))"
+        r"[\s,]*(?:to|about|of|that)\s+(?P<task>.+?)\s*[.!?]?\s*$",
+        re.IGNORECASE)
+    _REMINDER_CLARIFY_RE = re.compile(
+        r"^\s*(?:please\s+)?remind\s+me\s+to\s+(?P<task>.+?)"
+        r"\s*[.!?]?\s*$", re.IGNORECASE)
+
+    def _reminder_at(self, m: re.Match) -> float | None:
+        """Wall-clock timestamp for the matched time phrase."""
+        now = time.time()
+        amt = m.group("amt")
+        if amt:
+            unit = (m.group("unit") or "minutes").lower()
+            secs = (1 if unit.startswith(("sec",)) else
+                    86400 if unit.startswith("day") else
+                    3600 if unit.startswith(("h",)) else 60)
+            return now + float(amt) * secs
+        if m.group("tomorrow"):
+            lt = time.localtime(now + 86400)
+            part = m.group("tomorrow").lower()
+            hour = (9 if "morning" in part else
+                    15 if "afternoon" in part else
+                    19 if "evening" in part else 9)
+            return time.mktime(
+                (lt.tm_year, lt.tm_mon, lt.tm_mday, hour, 0, 0,
+                 -1, -1, -1))
+        hour = int(m.group("hour") or 0)
+        minute = int(m.group("minute") or 0)
+        ampm = re.sub(r"[\s.]", "", (m.group("ampm") or "").lower())
+        if ampm == "pm" and hour < 12:
+            hour += 12
+        elif ampm == "am" and hour == 12:
+            hour = 0
+        lt = time.localtime(now)
+        at = time.mktime(
+            (lt.tm_year, lt.tm_mon, lt.tm_mday, hour, minute, 0,
+             -1, -1, -1))
+        if at <= now:
+            at += 86400
+        return at
+
+    def _reminder_reply(self, user_text: str, plan_text: str,
+                        task_id: str, *, event_callback=None):
+        """'remind me in 5 minutes to X' — a real once-schedule with a
+        notify action through the autonomy scheduler, not a promise.
+        Falls through (None) for 'remind me the tag' recall asks —
+        those belong to memory lanes."""
+        m = self._REMINDER_RE.match(plan_text)
+        clarify = None
+        if m is None:
+            m2 = self._REMINDER_CLARIFY_RE.match(plan_text)
+            if m2 is None:
+                return None
+            # 'remind me to X' with no time — claim and ask rather
+            # than let the model improvise a commitment.
+            clarify = str(m2.group("task") or "").strip()
+        task = (clarify if clarify is not None
+                else str(m.group("task") or "")).strip().rstrip(".")
+        if not task:
+            return None
+        sup = (self._autonomy() if callable(self._autonomy)
+               else self._autonomy)
+        sched = getattr(sup, "scheduler", None)
+        if clarify is not None:
+            text = (f"When should I remind you to {clarify}? — e.g. "
+                    f"“remind me in 10 minutes to {clarify}”.")
+        elif sched is None:
+            text = ("I can't set reminders — the scheduler isn't "
+                    "running in this session.")
+        else:
+            at = self._reminder_at(m)
+            if at is None:
+                return None
+            try:
+                sched.add(
+                    f"reminder: {task[:100]}", "once", at=at,
+                    action={"kind": "notify", "title": "Reminder",
+                            "detail": task},
+                    created_by="user")
+            except Exception as exc:
+                text = f"I couldn't set the reminder ({exc})."
+            else:
+                when = time.strftime("%H:%M", time.localtime(at))
+                if at - time.time() > 20 * 3600:
+                    when = time.strftime(
+                        "%a %H:%M", time.localtime(at))
+                text = (f"Reminder set for {when} — I'll ping you "
+                        f"to {task}.")
+        decision = RoutingDecision(
+            role="utility", model_id="builtin-local",
+            reasons=["reminder lane — no model call"], complexity=0)
+        builtin_event = {
+            "type": "builtin_utility", "model_id": "builtin-local",
+            "role": "utility", "reason": "reminder lane"}
+        self._safe_emit(
+            event_callback, {"type": "model", "event": builtin_event})
+        done = self.tasks.update(
+            task_id, status="completed", phase="done",
+            model_id="builtin-local", model_role="utility",
+            summary=text, final_content=text, steps=0)
+        self._safe_emit(
+            event_callback, {"type": "task", "task": done.as_dict()})
+        if self.conversation_memory is not None:
+            self._record_conversation_exchange(user_text, text)
+        if self.conversation_manager is not None:
+            self.conversation_manager.record_exchange(user_text, text)
+        return AgentResult(
+            content=text, routing=decision,
+            model_events=[builtin_event], steps=0,
+            task=done.as_dict())
+
     def _local_action_reply(self, user_text: str, task_id: str,
                             event_callback=None, env=None):
         """Deterministic computer-task lane — 'create a folder
@@ -3553,6 +3702,16 @@ class AgentOrchestrator:
         plan_text = (frame.masked_case
                      if frame is not None and frame.masked_case
                      else user_text)
+        # Reminders are a bounded local action: 'remind me in 5
+        # minutes to X' → a real once-schedule firing a notification.
+        # Checked before parse_local_action, which has no temporal
+        # grammar — without this the ask fell to the model and it
+        # regurgitated stored facts about the reminder's topic.
+        reminder = self._reminder_reply(
+            user_text, plan_text, task_id,
+            event_callback=event_callback)
+        if reminder is not None:
+            return reminder
         # Compound local actions — "create folder x, then delete y.txt".
         # Every clause must parse: one unparseable clause hands the WHOLE
         # turn to the model lane (never partially executed on a guess).
@@ -9638,6 +9797,43 @@ class AgentOrchestrator:
             else None
         )
         training_response = self.training_acknowledgement(learned) if mode == "auto" else None
+        if learned.get("memory_off"):
+            # Universal-scope privacy asks ("stop remembering things I
+            # tell you", "don't remember what I say") target the whole
+            # memory — apply the conversation-memory setting through
+            # the same registry so the reply is mechanically true.
+            svc = self._self_knowledge_service()
+            applied = False
+            if svc is not None:
+                try:
+                    if svc.settings.current(
+                            "conversation_memory_enabled") is False:
+                        applied = True  # already off — reply stays true
+                    else:
+                        applied = bool(svc.settings.set(
+                            "conversation_memory_enabled",
+                            False).get("ok"))
+                except Exception:
+                    applied = False
+            training_response = (
+                "Conversation memory is now off — I won't store new "
+                "things you tell me."
+                if applied else
+                "I couldn't switch conversation memory off from here "
+                "— the toggle is under Settings → memory.")
+        if (training_response is not None
+                and builtin_response is not None
+                and learned.get("forgotten_miss")
+                and not any(learned.get(k) for k in (
+                    "facts", "behavior_rules", "training_examples",
+                    "forgotten", "locked", "restated", "hearsay",
+                    "hedged", "superseded"))):
+            # A bare forget-miss ack must not outrank a real lane —
+            # 'stop remembering things I tell you' is a memory-setting
+            # command (self_knowledge already mutated it), and replying
+            # 'nothing to forget' would be both wrong and dishonest.
+            # Deletion acks survive: the forget mutation already ran.
+            training_response = None
         if training_response is not None:
             # The ack only covers the learned clause — a compound turn
             # ("the port is 8080 — also, what is a mutex?") still owes

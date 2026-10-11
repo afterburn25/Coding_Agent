@@ -1047,6 +1047,32 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("port is 9090", r.text.lower())
 
+    def test_first_ordinal_scans_the_record_forward(self):
+        # Live: "what was the first thing I asked you?" replayed the
+        # LAST user turn — 'first' was in the ordinal set but the
+        # replay only scanned backwards. Ordinals carry direction.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            cm = agent.conversation_memory
+            cm.record_exchange("hello nexus", "Hi there.")
+            cm.record_exchange("what port should the api use",
+                               "Use port 8080.")
+            cm.record_exchange("sounds good", "Cool.")
+            r = agent._single_fact_recall_reply(
+                "what was the first thing i asked you?",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("port should the api use", r.text.lower())
+            r = agent._single_fact_recall_reply(
+                "what was the first thing you said to me?",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("hi there", r.text.lower())
+
     def test_repeat_ask_replays_last_reply(self):
         # Live: "repeat what you just said" reached the model, which
         # paraphrased instead of quoting — and "say that again" fell
@@ -1105,6 +1131,55 @@ class TruthGateTests(RecoveryLoopTests):
                 "what was the deadline for the launch?",
                 "conv", "proj")
             self.assertIsNone(r)
+
+    def test_reminder_creates_real_schedule(self):
+        # Live: "remind me in 5 minutes to check the build" answered
+        # with stored build facts — no lane owned scheduling asks.
+        # The reminder lane creates a real once-schedule with a notify
+        # action; recall-shaped 'remind me what X' stays with memory.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+
+            def add(self, name, kind, **kw):
+                self.rows.append({"name": name, "kind": kind, **kw})
+                return {"id": "sc-1"}
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            task = agent.tasks.create("x", "auto")
+            r = agent._reminder_reply(
+                "remind me in 5 minutes to check the build",
+                "remind me in 5 minutes to check the build", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("check the build", r.content)
+            self.assertEqual(len(sup.scheduler.rows), 1)
+            row = sup.scheduler.rows[0]
+            self.assertEqual(row["kind"], "once")
+            self.assertEqual(row["action"]["kind"], "notify")
+            self.assertIn("check the build", row["action"]["detail"])
+            self.assertGreater(row["at"], 0)
+            # No-time asks clarify instead of guessing a commitment.
+            r = agent._reminder_reply(
+                "remind me to take out the trash",
+                "remind me to take out the trash", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("when", r.content.lower())
+            # 'remind me what X' is recall, not a schedule.
+            self.assertIsNone(agent._reminder_reply(
+                "remind me what my editor is",
+                "remind me what my editor is", task.id))
+            self.assertEqual(len(sup.scheduler.rows), 1)
 
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of
