@@ -1030,6 +1030,16 @@ class TruthGateTests(RecoveryLoopTests):
                 "what was my last question?", "conv", "proj")
             self.assertIsNotNone(r)
             self.assertIn("port should the api use", r.text.lower())
+            # A stored fact sharing filler vocabulary ('last') must
+            # not hijack the referent — live, 'the backup ran
+            # successfully last night' answered this ask via a
+            # term-coincidence fact hit.
+            cm.learn_from_user(
+                "the backup ran successfully last night")
+            r = agent._single_fact_recall_reply(
+                "what was my last question?", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("port should the api use", r.text.lower())
 
     def test_bare_wh_anaphora_replays_record(self):
         # Live: "what was it — the answer you gave me?" carries no

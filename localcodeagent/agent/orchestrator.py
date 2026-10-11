@@ -2718,11 +2718,12 @@ class AgentOrchestrator:
         "replied", "respond", "responded", "answered", "mention",
         "mentioned", "made"})
 
-    def _anaphoric_replay(self, prop: str, history: list) -> str | None:
-        """'the answer / the reply / what was it' — a discourse-role
-        referent with no topic terms resolves by recency, not term
-        match: quote the most recent non-meta assistant turn verbatim
-        (truth-gate markers preserved)."""
+    def _discourse_referent(self, prop: str) -> str | None:
+        """'user' | 'assistant' | None — the prop names a discourse-role
+        referent (an answer I gave / a question you asked) and carries
+        no topic terms. A pure referent resolves against the recorded
+        turns, never against stored facts — a 'matching' fact could
+        only have hit on filler vocabulary ('last', 'answer')."""
         memory = self.conversation_memory
         if memory is None:
             return None
@@ -2737,10 +2738,11 @@ class AgentOrchestrator:
             r"\b(?:did\s+)?i\s+(?:just\s+)?ask(?:ed)?\b",
             prop, re.IGNORECASE)
         if user_head is not None:
-            rest = prop[:user_head.start()] + " " + prop[user_head.end():]
+            rest = (prop[:user_head.start()] + " "
+                    + prop[user_head.end():])
             if not (memory._content_terms(rest)
                     - self._ANAPHORA_FILLER_TERMS):
-                return self._user_recall_replay(history)
+                return "user"
         # A bare noun is not anaphoric — "do the thing" strips to
         # prop="thing", which must not read as a discourse referent.
         # Definite reference needs the article/possessive or a pronoun.
@@ -2751,9 +2753,22 @@ class AgentOrchestrator:
         if head is None:
             return None
         rest = prop[:head.start()] + " " + prop[head.end():]
-        rest_terms = (memory._content_terms(rest)
-                      - self._ANAPHORA_FILLER_TERMS)
-        if rest_terms:
+        if memory._content_terms(rest) - self._ANAPHORA_FILLER_TERMS:
+            return None
+        return "assistant"
+
+    def _anaphoric_replay(self, prop: str, history: list) -> str | None:
+        """'the answer / the reply / what was it' — a discourse-role
+        referent with no topic terms resolves by recency, not term
+        match: quote the most recent non-meta assistant turn verbatim
+        (truth-gate markers preserved)."""
+        memory = self.conversation_memory
+        if memory is None:
+            return None
+        referent = self._discourse_referent(prop)
+        if referent == "user":
+            return self._user_recall_replay(history)
+        if referent != "assistant":
             return None
         for row in reversed(history):
             if str(row.get("role")) != "assistant":
@@ -2917,6 +2932,25 @@ class AgentOrchestrator:
             if clause_match is None:
                 return None
             match_text = clause_match
+        # A pure discourse referent ("my last question", "the answer")
+        # carries no topic terms — a fact row could only match on filler
+        # vocabulary ('last', 'answer') and replay the wrong record.
+        # Resolve against the turn history before fact lookup.
+        prop = self._FACT_RECALL_RE.sub("", match_text)
+        prop = prop.rstrip("?.!").strip()
+        referent = self._discourse_referent(prop)
+        if referent is not None:
+            try:
+                history = self.conversation_memory.history(limit=40)
+            except Exception:
+                history = []
+            verdict = (
+                self._user_recall_replay(history)
+                if referent == "user"
+                else self._anaphoric_replay(prop, history))
+            if verdict is not None:
+                from ..context.realize import RenderedReply
+                return RenderedReply(text=verdict, speech_act="answer")
         rows = self.conversation_memory.recall_facts(
             match_text, project_id=project_id,
             conversation_id=conversation_id)
