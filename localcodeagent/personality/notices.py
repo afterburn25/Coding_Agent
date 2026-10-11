@@ -218,12 +218,5 @@ def persona_notice(kind: str, fact_text: str, card: dict | None,
     return f"{head} {fact}".strip()
 
 
-def error_explanation(kind: str, detail: str,
-                      card: dict | None) -> str:
-    """User-facing error line — persona lead-in + verbatim technical
-    detail. Detail is never rewritten."""
-    return persona_notice("failed", str(detail or ""), card)
-
-
 def status_summary(facts: str, card: dict | None) -> str:
     return persona_notice("status", str(facts or ""), card)

@@ -481,6 +481,18 @@ class AutonomousSupervisor:
         return self.store.standing_goals.rows()
 
     def _spawn_goal_mission(self, goal: dict, *, origin: str) -> dict:
+        # One live mission per goal — a due schedule must not stack a
+        # second spawned run while an earlier one is still pending or
+        # executing (the earlier run IS the pending instance).
+        terminal = {"completed", "completed_with_warnings",
+                    "failed", "cancelled", "archived"}
+        gid = str(goal.get("id"))
+        for m in self.missions.list():
+            if (str(m.get("source_id") or "") == gid
+                    and str(m.get("status")) not in terminal):
+                self._audit("goal_mission_deduped", goal=gid,
+                            mission=m.get("id"), origin=origin)
+                return m
         mission = self.missions.create(
             objective=goal["objective"],
             title=f"[{goal.get('id')}] {goal['objective'][:90]}",
@@ -631,10 +643,35 @@ class AutonomousSupervisor:
             if goal is not None and goal.get("enabled"):
                 self._spawn_goal_mission(goal, origin=origin)
             return
+        if kind == "notify":
+            # A reminder fires a notification — real delivery through the
+            # notifications surface, never a mission for "ping me".
+            try:
+                self.notifications.notify(
+                    str(action.get("title") or "Reminder"),
+                    level=str(action.get("level") or "important"),
+                    detail=str(action.get("detail") or ""))
+            except Exception:
+                pass
+            return
         if kind == "mission":
             objective = str(action.get("objective") or "").strip()
             if not objective:
                 return
+            # Schedule/trigger-spawned missions dedupe — an hourly fire
+            # must not stack identical waiting_approval missions; one
+            # live mission per origin+objective. Once it reaches a
+            # terminal state the next fire spawns fresh.
+            terminal = {"completed", "completed_with_warnings",
+                        "failed", "cancelled", "archived"}
+            for m in self.missions.list():
+                if (str(m.get("source_id") or "") == origin
+                        and str(m.get("objective") or "")
+                        .startswith(objective[:60])
+                        and str(m.get("status")) not in terminal):
+                    self._audit("materialize_deduped", origin=origin,
+                                mission=m.get("id"))
+                    return
             prior = self.procedures.summary(
                 {"source": origin.split(":")[0], "source_id": origin})
             mission = self.missions.create(

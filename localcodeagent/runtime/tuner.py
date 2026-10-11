@@ -19,7 +19,7 @@ import re
 import subprocess
 import time
 import urllib.request
-from dataclasses import dataclass, field
+
 from pathlib import Path
 
 from ..fsutil import atomic_write_text
@@ -73,15 +73,6 @@ def context_class(need_tokens: int) -> str:
 
 def context_class_size(name: str) -> int:
     return CONTEXT_CLASSES.get(name, CONTEXT_CLASSES["medium"])
-
-
-@dataclass(slots=True)
-class TuningResult:
-    args: list[str]
-    source: str = "heuristic"  # heuristic | benchmarked | manual
-    metrics: dict[str, Any] = field(default_factory=dict)
-    fingerprint: str = ""
-    tuned_at: float = 0.0
 
 
 class RuntimeTuner:

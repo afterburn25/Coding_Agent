@@ -31,7 +31,7 @@ from .agent.orchestrator import (
 )
 from .image.manager import ImageManager
 from .config import AgentConfig, ModelProfile, load_config
-from .models.router import ModelRouter
+from .models.router import ModelRouter, ModelUnavailableError
 from .models.telemetry import ModelPerformanceTelemetry
 from .runtime.manager import RuntimeManager
 from .runtime.setup import apply_detected_models, suggest_model_profiles, write_suggested_models
@@ -1760,10 +1760,20 @@ class AppState:
             "github_test": _github_test,
             "safe_mode_exit": _safe_mode_exit,
             "self_repair_apply": _self_repair_apply,
+            # Live runtime picture — model residency, hardware, storage.
+            # Lets the status lane answer 'what model are you using' /
+            # 'how much disk space' with real numbers instead of a
+            # model riff or an underclaim.
+            "runtime_summary": lambda: self.runtime.summary(
+                probe_external=False),
             # Universal change journal — lets the control plane fall back
             # to the durable ledger for "undo that" and record every
             # registry-mediated settings write.
             "change_journal": lambda: getattr(self, "changes", None),
+            # Scoped-undo needs the fact store — "undo that laptop
+            # change" can restore a superseded memory fact.
+            "conversation_memory": lambda: getattr(
+                self, "conversation_memory", None),
             "on_change": self._journal_setting,
         }
         return SelfKnowledgeService(env)
@@ -3291,10 +3301,12 @@ class AppState:
             "evict_idle_models": lambda: self.runtime.evict_idle(),
             "release_vram": lambda gb: self.runtime.release_managed_models_for_vram(
                 required_vram_gb=float(gb),
-                busy_models=self._busy_model_ids()),
+                busy_models=self._busy_model_ids(),
+                include_baseline=False),
             "release_ram": lambda gb: self.runtime.release_managed_models_for_ram(
                 required_ram_gb=float(gb),
-                busy_models=self._busy_model_ids()),
+                busy_models=self._busy_model_ids(),
+                include_baseline=False),
             "stop_models": lambda: self.runtime.stop_all(),
             "restart_model": lambda: self.runtime.restart_unhealthy_managed(),
             # Marker — the executor's per-request auto-fallback already
@@ -4672,6 +4684,115 @@ class AppState:
                                  or "Nothing is running right now."),
                     "situation": sit}
 
+        # Memory writes/erases carry cadence words inside the fact
+        # itself — "forget db backups run nightly and the logs archive
+        # weekly" asks to delete a stored fact; the 'weekly' belongs to
+        # the remembered thing, not to a request to run work. Never let
+        # a memory op spawn a standing goal or mission. "remember to X"
+        # stays eligible — that's a reminder, not a memory write.
+        if re.match(
+                r"^(?:forget\b|never\s*mind\b|nm\b|stop\s+remembering|"
+                r"delete\s+(?:the\s+)?facts?\b|remember\b(?!\s+to\s))",
+                low):
+            return None
+
+        # Inventory query — "what standing goals do you have" / "are any
+        # missions running" answers from the supervisor store, never the
+        # model. Interrogative-shaped only; action phrasings ("stop the
+        # mission", "run the tests daily") belong to their own lanes.
+        if ((re.search(r"\b(?:standing\s+goals?|missions?|schedul\w*|triggers?)\b", low)
+                and re.search(
+                    r"\b(?:what|which|list|show|any|are\s+there|"
+                    r"do\s+you\s+have|how\s+many|running|active)\b", low)
+                and not re.search(
+                    r"\b(?:stop|cancel|pause|resume|create|make|start|"
+                    r"run|every|each|daily|weekly|hourly)\b", low))
+                or re.search(
+                    r"\bwhat'?s\s+running\b|\bwhat\s+is\s+running\b|"
+                    r"\b(?:is\s+)?anything\s+running\b", low)
+                or re.search(
+                    r"\bwhen\s+(?:do|does|will|should)\s+"
+                    r"(?:things?|anything|everything|they|it|these|those|"
+                    r"the\s+(?:scheduled|regular|recurring)\s+\w+)\b"
+                    r".{0,40}\bruns?\b",
+                    low)):
+            # A definite 'the <thing> schedule' names a world entity —
+            # "what's the backup schedule" asks about the banked fact
+            # 'backup schedule is every day at 3am', not the autonomy
+            # inventory. Defer to fact recall when the qualified noun
+            # is a stored fact's subject; bare 'the schedule'/'any
+            # schedules' still list the inventory.
+            cm = getattr(self, "conversation_memory", None)
+            dqm = re.match(
+                r"what(?:'s|\s+is)\s+(?:the\s+|my\s+|our\s+)?"
+                r"(.+?)[?!.\s]*$", low)
+            if cm is not None and dqm:
+                et = cm._content_terms(dqm.group(1)) - {
+                    "schedule", "schedules", "goal", "goals",
+                    "mission", "missions", "trigger", "triggers",
+                    "standing"}
+                if et:
+                    for row in cm.recall_facts(low):
+                        slot = str(row.get("slot") or "")
+                        if slot.startswith("my:"):
+                            ssubj = slot[3:]
+                        elif ":" in slot:
+                            ssubj = slot.rpartition(":")[0]
+                        else:
+                            ssubj = slot
+                        if et <= cm._content_terms(ssubj):
+                            return None
+            goals = [g for g in (sup.standing_goals() or [])
+                     if g.get("enabled", True)]
+            scheds = [s for s in (sup.scheduler.list() or [])
+                      if s.get("enabled", True)]
+            live_ms = [m for m in sup.missions.list()
+                       if m.get("status") in
+                       {"ready", "active", "planning", "executing",
+                        "verifying", "evaluating", "replanning",
+                        "waiting_dependency", "waiting_approval",
+                        "paused", "blocked"}]
+            if not goals and not scheds and not live_ms:
+                return {"content": (
+                    "No standing goals, schedules, or active missions "
+                    "right now. Tell me to check something on a schedule — "
+                    "'every morning, run the smoke tests' — or "
+                    "'make this a mission' to start autonomous work.")}
+            parts = []
+            if goals:
+                parts.append(
+                    "Standing goal" + ("s" if len(goals) > 1 else "")
+                    + ": "
+                    + "; ".join(f'"{g.get("objective", "")[:80]}"'
+                                for g in goals[:5]))
+            if scheds:
+                def _sched_desc(s: dict) -> str:
+                    kind = s.get("kind")
+                    if kind == "interval":
+                        secs = int(s.get("interval_s") or 3600)
+                        if secs % 3600 == 0:
+                            return f"every {secs // 3600}h"
+                        if secs % 60 == 0:
+                            return f"every {secs // 60}m"
+                        return f"every {secs}s"
+                    if kind in ("daily", "weekly"):
+                        return (f"{kind} at {int(s.get('hour') or 0):02d}"
+                                f":{int(s.get('minute') or 0):02d}")
+                    return str(kind or "once")
+                parts.append(
+                    "Schedule" + ("s" if len(scheds) > 1 else "") + ": "
+                    + "; ".join(
+                        f'"{s.get("name") or s.get("id")}" '
+                        f'({_sched_desc(s)})' for s in scheds[:5]))
+            if live_ms:
+                parts.append(
+                    "Active mission" + ("s" if len(live_ms) > 1 else "")
+                    + ": "
+                    + "; ".join(f'"{m.get("title", "")[:80]}" '
+                                f'({m.get("status", "?")})'
+                                for m in live_ms[:5]))
+            return {"content": "  ·  ".join(parts)}
+
         if any(p in low for p in ("cancel the mission", "stop the mission",
                                   "stop working on that mission",
                                   "cancel that mission", "stop that mission")):
@@ -4729,13 +4850,91 @@ class AppState:
                         f"{int(float(w.get('progress') or 0) * 100)}%")
                 return {"content": "\n".join(lines)}
 
-        wants_standing = any(p in low for p in self._MISSION_STANDING_PHRASES)
-        wants_mission = any(p in low for p in self._MISSION_CREATE_PHRASES)
+        # Reminders — "remind me to check the deploy tomorrow", "set a
+        # reminder for the meeting at 3". A real once-schedule whose
+        # action fires a notification — never a model narrating "I've
+        # set a reminder" with nothing behind it. "remind me about/of"
+        # stays a recall probe; "remember to" only diverts here when it
+        # carries a parseable time (a bare "remember to X" remains
+        # eligible for the standing-goal lane below).
+        rem = re.match(
+            r"^(?:please\s+)?(remind\s+me\s+to|"
+            r"(?:set|create|add|schedule)\s+(?:a\s+|me\s+a\s+)?"
+            r"reminder(?:\s+(?:for|to|about|that))?|"
+            r"remember\s+to)\s+(.+?)[.!?]?$",
+            low)
+        # "remember to X weekly" is a recurring-work request — the
+        # standing-goal lane below owns cadence phrasing.
+        if rem and not (rem.group(1).startswith("remember")
+                        and any(p in low
+                                for p in self._MISSION_STANDING_PHRASES)):
+            out = self._set_reminder(sup, rem.group(2))
+            if out is not None:
+                return out
+
+        # Autonomy triggers must come from the user's own words, in a
+        # request — not from quoted text ('the doc says "keep working
+        # until done"') and not from statements that merely mention a
+        # cadence ("the review cadence is weekly", "standing goals are
+        # useful"). The frame's quote-masked text feeds phrase matching;
+        # its speech act gates goal creation.
+        try:
+            from .context.semantics import (
+                analyze as _sem, ASSERTION, COMMAND, QUESTION, REQUEST)
+            frame = _sem(message)
+            masked = frame.masked or low
+            act = frame.speech_act
+            main = frame.main_clause or ""
+        except Exception:
+            masked, act, main = low, None, ""
+        # The trigger phrase must modify the requested work — inside the
+        # command's own clause ("review my PRs weekly") or leading the
+        # message ("every morning, run the smoke tests"). A cadence in a
+        # neighboring statement clause does not schedule anything.
+        def _modifies_command(phrase: str) -> bool:
+            # The phrases are inherently imperative; when one IS (or
+            # leads) the main clause, only a plain statement or question
+            # act vetoes it. An embedded phrase mid-clause is reported
+            # intent, not a command — "she told me to keep working on
+            # this" reads complaint-ish yet requests nothing.
+            # A phrase right after a copula is a predicate complement
+            # describing a subject — "the review cadence IS weekly"
+            # states a property; it schedules nothing, even when the
+            # sentence leads with an action-shaped word ("review").
+            pre = masked.split(phrase, 1)[0]
+            if re.search(
+                    r"\b(?:is|are|was|were|be|been|being|seems?|"
+                    r"feels?|remains?)\s*$", pre):
+                return False
+            if act not in (ASSERTION, QUESTION) and phrase in main:
+                head = main.split(phrase, 1)[0].strip(" ,—–-")
+                if act in (COMMAND, REQUEST) or len(head) <= 2:
+                    return True
+            head = masked.split(phrase, 1)[0].strip(" ,—–-")
+            if len(head) > 2:
+                return False
+            try:
+                return _sem(masked.replace(phrase, " ", 1)
+                            ).speech_act in (COMMAND, REQUEST)
+            except Exception:
+                return False
+        wants_standing = any(p in masked and _modifies_command(p)
+                             for p in self._MISSION_STANDING_PHRASES)
+        wants_mission = any(p in masked and _modifies_command(p)
+                            for p in self._MISSION_CREATE_PHRASES)
         if not (wants_mission or wants_standing):
             return None
 
         context = self._mission_context_request(message)
-        objective = context or message
+        referential = bool(re.search(r"\b(?:this|that|it)\b", masked))
+        if wants_standing and not referential:
+            # The scheduling request names its own work — "review my PRs
+            # weekly" — the message IS the objective. Referential forms
+            # ("check this daily", "make it a standing goal") still pull
+            # the objective from the preceding turn.
+            objective = message
+        else:
+            objective = context or message
         if not objective.strip():
             return {"content": "What should the mission objective be?"}
         if wants_standing:
@@ -4769,6 +4968,110 @@ class AppState:
             "The supervisor is planning it now — watch live progress on the "
             "Missions page. It runs under the Local Autonomous profile; "
             "sensitive actions still ask for approval.")}
+
+    _REMINDER_WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3,
+                          "fri": 4, "sat": 5, "sun": 6}
+
+    def _parse_reminder_time(self, body: str, now: float):
+        """Split a trailing time phrase → (timestamp, description).
+
+        Returns (None, body) when nothing parseable is present — the
+        caller decides whether that's an honest "need a time" reply or
+        a fallthrough to other lanes.
+        """
+        import time as _t
+        from .autonomy.scheduler import _next_daily
+
+        def _clock(hour: int, minute: int, mer: str | None,
+                   *, days: int = 0) -> float:
+            if mer:
+                mer = mer.lower()
+                if mer == "pm" and hour < 12:
+                    hour += 12
+                elif mer == "am" and hour == 12:
+                    hour = 0
+            elif hour <= 6:
+                # Bare "at 3" in reminder speech is afternoon, not 3am.
+                hour += 12
+            lt = _t.localtime(now)
+            cand = _t.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + days,
+                              hour, minute, 0, 0, 0, -1))
+            if cand <= now:
+                cand = _t.mktime((lt.tm_year, lt.tm_mon,
+                                  lt.tm_mday + days + 1,
+                                  hour, minute, 0, 0, 0, -1))
+            return cand
+
+        m = re.search(
+            r"\s+in\s+(\d+)\s+(minutes?|mins?|hours?|hrs?|days?)\s*$",
+            body, flags=re.IGNORECASE)
+        if m:
+            n, unit = int(m.group(1)), m.group(2).lower()
+            scale = 60 if unit.startswith(("min", "m")) else \
+                3600 if unit.startswith("h") else 86400
+            return now + n * scale, body[:m.start()].strip(" ,;—-")
+        m = re.search(
+            r"\s+tomorrow(?:\s+at\s+(\d{1,2})(?::(\d{2}))?"
+            r"\s*(am|pm)?)?\s*$",
+            body, flags=re.IGNORECASE)
+        if m:
+            desc = body[:m.start()].strip(" ,;—-")
+            if m.group(1):
+                return (_clock(int(m.group(1)), int(m.group(2) or 0),
+                               m.group(3), days=1), desc)
+            lt = _t.localtime(now)
+            return (_t.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + 1,
+                              9, 0, 0, 0, 0, -1)), desc)
+        m = re.search(r"\s+(tonight|today)\s*$", body,
+                      flags=re.IGNORECASE)
+        if m:
+            desc = body[:m.start()].strip(" ,;—-")
+            word = m.group(1).lower()
+            if word == "tonight":
+                return _clock(20, 0, None), desc
+            # "today" — next top of the hour, same day.
+            return now - (now % 3600) + 3600, desc
+        m = re.search(
+            r"\s+(?:on\s+)?(mon|tue|wed|thu|fri|sat|sun)"
+            r"(?:day|sday|rsday|urday)?\s*$",
+            body, flags=re.IGNORECASE)
+        if m:
+            return (_next_daily(9, 0,
+                                weekday=self._REMINDER_WEEKDAYS[
+                                    m.group(1)[:3].lower()],
+                                after=now),
+                    body[:m.start()].strip(" ,;—-"))
+        m = re.search(
+            r"\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*$",
+            body, flags=re.IGNORECASE)
+        if m:
+            return (_clock(int(m.group(1)), int(m.group(2) or 0),
+                           m.group(3)),
+                    body[:m.start()].strip(" ,;—-"))
+        return None, body.strip()
+
+    def _set_reminder(self, sup, body: str) -> dict | None:
+        """'check the deploy tomorrow at 3' → real once-schedule whose
+        fire emits a notification. Never fabricates a reminder — no
+        parseable time gets an honest ask-for-the-time ack."""
+        when, desc = self._parse_reminder_time(str(body or ""), time.time())
+        if not desc:
+            return {"content": "Remind you to do what?"}
+        if when is None:
+            return {"content": (
+                f"Noted — “{desc}”. I can't pin a reminder without a "
+                "time — say when, like “at 3pm”, “tomorrow”, or "
+                "“in 30 minutes”.")}
+        sup.scheduler.add(
+            f"Reminder: {desc[:80]}", "once", at=when,
+            action={"kind": "notify", "title": "Reminder",
+                    "detail": desc[:300], "level": "important"},
+            created_by="chat")
+        stamp = time.strftime("%a %I:%M %p", time.localtime(when))
+        return {"content": (
+            f"Reminder set for {stamp} — {desc}. "
+            "It'll surface as a notification; cancel it from the "
+            "Missions page if plans change.")}
 
     def _mission_reply_result(self, text: str) -> dict:
         """Synthesize an agent-result-shaped payload for command replies."""
@@ -5047,14 +5350,30 @@ class AppState:
         conversation_path = Path(config.conversation_memory_path).expanduser()
         if not conversation_path.is_absolute():
             conversation_path = self.runtime.base_dir / conversation_path
-        self.conversation_memory = ConversationMemory(
-            conversation_path,
-            enabled=config.conversation_memory_enabled,
-            history_limit=config.conversation_history_limit,
-            rule_limit=config.conversation_rule_limit,
-            fact_limit=config.conversation_fact_limit,
-            training_limit=config.conversation_training_limit,
-        )
+        conversation_path = conversation_path.resolve()
+        cm = self.conversation_memory
+        if cm is not None and getattr(cm, "path", None) == conversation_path:
+            # Reuse the live store — a second ConversationMemory on the
+            # same file is a stale-writer: each instance snapshot-saves
+            # its own in-memory copy, so a save from the one that loaded
+            # earlier silently clobbers rows the other just banked
+            # (observed: an acked 'code freeze lifts on monday' fact
+            # vanished from disk after a reload-era save).
+            cm.enabled = bool(config.conversation_memory_enabled)
+            cm.history_limit = max(20, int(config.conversation_history_limit))
+            cm.rule_limit = max(20, int(config.conversation_rule_limit))
+            cm.fact_limit = max(20, int(config.conversation_fact_limit))
+            cm.training_limit = max(
+                20, int(config.conversation_training_limit))
+        else:
+            self.conversation_memory = ConversationMemory(
+                conversation_path,
+                enabled=config.conversation_memory_enabled,
+                history_limit=config.conversation_history_limit,
+                rule_limit=config.conversation_rule_limit,
+                fact_limit=config.conversation_fact_limit,
+                training_limit=config.conversation_training_limit,
+            )
         conversations_path = Path(config.conversations_path).expanduser()
         if not conversations_path.is_absolute():
             conversations_path = self.runtime.base_dir / conversations_path
@@ -5104,6 +5423,15 @@ class AppState:
         self.agent.model_growth = self.model_growth
         self.agent.nexus_brain = self.nexus_brain
         self.agent.answer_memory = self.answer_memory
+        # The brain's hippocampus captured these services at init —
+        # without re-pointing, it keeps writing through stale (and for
+        # answer_memory, closed) handles after a reload.
+        hipp = getattr(getattr(self.agent, "brain", None),
+                       "hippocampus", None)
+        if hipp is not None:
+            hipp.conversation_memory = self.conversation_memory
+            hipp.answer_memory = self.answer_memory
+            hipp.knowledge_memory = self.knowledge_memory
         self.history = self.conversation_manager.history(limit=32)
         self.images.config = config
         self.images.adult_content_allowed = lambda: self.brain_allows("adult_content", True)
@@ -6766,6 +7094,29 @@ class AppState:
                     })
                 except Exception as exc:
                     self._voice_finish(voice_rid)
+                    # Interactive queue items are chat turns — a failure
+                    # must not lose the user's message. Record the honest
+                    # reply (friendly text when the error carries one);
+                    # mission-submitted work stays out of conversation
+                    # history per the work-gate.
+                    if not entry.get("mission_id"):
+                        try:
+                            honest = (
+                                str(getattr(exc, "friendly", ""))
+                                or f"Your queued request failed "
+                                   f"({type(exc).__name__}: {exc})")
+                            self.conversation_manager.record_exchange(
+                                str(entry.get("prompt") or ""),
+                                self._persona_notice("failed", honest),
+                                intent="conversation",
+                                response_source=(
+                                    "model_unavailable"
+                                    if isinstance(exc, ModelUnavailableError)
+                                    else "error"))
+                            self.history = self.conversation_manager.history(
+                                limit=32)
+                        except Exception:
+                            pass
                     # A run that dies before its first logged event leaves a
                     # terminal task with an empty transcript — record the
                     # failure so the ledger always explains the outcome.
@@ -7780,7 +8131,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
-        data = json.loads(self.rfile.read(length) or b"{}")
+        raw = self.rfile.read(length) or b"{}"
+        try:
+            data = json.loads(raw)
+        except UnicodeDecodeError:
+            # cp1252/smart punctuation from Windows clients — decode
+            # losslessly rather than failing the request.
+            data = json.loads(raw.decode("cp1252", errors="replace"))
         # Every route uses body.get(...) — a non-object JSON body would
         # AttributeError into a 500. It's a client error: 400.
         if not isinstance(data, dict):
@@ -11212,6 +11569,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json({"error": "unknown answer-memory endpoint"}, 404)
 
+    def _record_degraded_exchange(self, message: str, assistant_text: str) -> None:
+        """Record an honest degradation turn (model unavailable, etc.) into
+        the active conversation so the user's message isn't lost — the reply
+        is honest text, never a fabricated success. Best-effort."""
+        try:
+            self.state.conversation_manager.record_exchange(
+                message,
+                self.state._persona_notice("failed", assistant_text),
+                intent="conversation",
+                response_source="model_unavailable")
+            self.state.history = self.state.conversation_manager.history(limit=32)
+        except Exception:
+            pass
+
     def _agent_payload(self, result, *, voice_task_id: str = "") -> dict:
         payload = {
             "content": result.content,
@@ -11409,20 +11780,31 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/nexus-brain/initialize":
-                state = self.state.nexus_brain.initialize_creator(
-                    str(body.get("creator_name", "")).strip(),
-                    str(body.get("passcode", "")),
-                )
+                try:
+                    state = self.state.nexus_brain.initialize_creator(
+                        str(body.get("creator_name", "")).strip(),
+                        str(body.get("passcode", "")),
+                    )
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
                 synced = self.state.sync_nexus_brain()
                 token = self.state.open_brain_creator_session()
                 self._json({"ok": True, "brain": state, "synced": synced, "creator_token": token})
                 return
 
             if path == "/api/nexus-brain/unlock":
-                state = self.state.nexus_brain.unlock(
-                    str(body.get("creator_name", "")).strip(),
-                    str(body.get("passcode", "")),
-                )
+                try:
+                    state = self.state.nexus_brain.unlock(
+                        str(body.get("creator_name", "")).strip(),
+                        str(body.get("passcode", "")),
+                    )
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+                except RuntimeError as exc:
+                    self._json({"error": str(exc)}, 409)
+                    return
                 synced = self.state.sync_nexus_brain()
                 token = self.state.open_brain_creator_session()
                 self._json({"ok": True, "brain": state, "synced": synced, "creator_token": token})
@@ -11527,10 +11909,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/policy/mode":
-                saved = self.state.set_conversation_policy_mode(
-                    str(body.get("mode", "")),
-                    ethical_temperature=body.get("ethical_temperature"),
-                )
+                try:
+                    saved = self.state.set_conversation_policy_mode(
+                        str(body.get("mode", "")),
+                        ethical_temperature=body.get("ethical_temperature"),
+                    )
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
                 self._json({"ok": True, **saved})
                 return
 
@@ -11752,7 +12138,11 @@ class Handler(BaseHTTPRequestHandler):
                 if runtime is None:
                     self._json({"error": f"unknown image backend '{name}'"}, 400)
                     return
-                runtime.start()
+                try:
+                    runtime.start()
+                except RuntimeError as exc:
+                    self._json({"error": str(exc)}, 503)
+                    return
                 self._json({"ok": True, "image": self.state.images.summary()})
                 return
 
@@ -12403,12 +12793,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/conversations/feedback":
-                saved = self.state.conversation_manager.add_feedback(
-                    message_id=str(body.get("message_id", "")),
-                    rating=str(body.get("rating", "")),
-                    note=str(body.get("note", "")),
-                    conversation_id=str(body.get("conversation_id", "")) or None,
-                )
+                try:
+                    saved = self.state.conversation_manager.add_feedback(
+                        message_id=str(body.get("message_id", "")),
+                        rating=str(body.get("rating", "")),
+                        note=str(body.get("note", "")),
+                        conversation_id=str(body.get("conversation_id", "")) or None,
+                    )
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
                 self.state.model_growth.import_conversation_feedback(
                     self.state.conversation_manager.snapshot()
                 )
@@ -12516,15 +12910,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/model-growth/job":
-                job = self.state.model_growth.create_training_job(
-                    base_model_id=str(body.get("base_model_id", "qwen3-14b")).strip(),
-                    dataset_path=str(body.get("dataset_path", "")).strip(),
-                    method=str(body.get("method", "lora")).strip(),
-                    output_name=str(body.get("output_name", "")).strip(),
-                    trainer_backend=str(body.get("trainer_backend", self.state.config.trainer_backend)).strip(),
-                    trainer_command=str(body.get("trainer_command", self.state.config.trainer_command)).strip(),
-                    hyperparameters=dict(body.get("hyperparameters") or {}),
-                )
+                try:
+                    job = self.state.model_growth.create_training_job(
+                        base_model_id=str(body.get("base_model_id", "qwen3-14b")).strip(),
+                        dataset_path=str(body.get("dataset_path", "")).strip(),
+                        method=str(body.get("method", "lora")).strip(),
+                        output_name=str(body.get("output_name", "")).strip(),
+                        trainer_backend=str(body.get("trainer_backend", self.state.config.trainer_backend)).strip(),
+                        trainer_command=str(body.get("trainer_command", self.state.config.trainer_command)).strip(),
+                        hyperparameters=dict(body.get("hyperparameters") or {}),
+                    )
+                except (ValueError, FileNotFoundError) as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
                 self._json({"ok": True, "job": job})
                 return
 
@@ -12757,6 +13155,11 @@ class Handler(BaseHTTPRequestHandler):
                         events.put({"type": "result", **payload})
                     except Exception as exc:
                         self.state._voice_finish(voice_rid)
+                        if isinstance(exc, ModelUnavailableError):
+                            # The turn must not vanish: record the honest
+                            # reply so the user's message stays in history.
+                            self._record_degraded_exchange(
+                                message, str(getattr(exc, "friendly", "") or exc))
                         err = f"{type(exc).__name__}: {exc}"
                         # Transport-classified failures carry a friendly
                         # message + structured diagnostic so the chat UI can
@@ -12926,6 +13329,25 @@ class Handler(BaseHTTPRequestHandler):
                     self.state._voice_finish(voice_rid, result.content,
                         delivery=getattr(result, "delivery", None))
                     self.state._persona_note_turn(message, result.content)
+                except ModelUnavailableError as exc:
+                    # Honest degradation, not a lost turn: record the exchange
+                    # so the user's message stays in history and reply 503 with
+                    # the same friendly text the stream lane would render.
+                    self.state._voice_finish(voice_rid)
+                    honest = str(getattr(exc, "friendly", "") or
+                                 "No usable model is currently available.")
+                    self._record_degraded_exchange(message, honest)
+                    self._json({
+                        "content": self.state._persona_notice("failed", honest),
+                        "error": honest,
+                        "code": "model_unavailable",
+                        "degraded": True,
+                        "diagnostic": exc.diagnostic() if callable(
+                            getattr(exc, "diagnostic", None)) else {},
+                        "queued": False, "tool_events": [], "model_events": [],
+                        "pending_approval": None, "verification": [], "steps": 0,
+                    }, 503)
+                    return
                 except Exception:
                     self.state._voice_finish(voice_rid)
                     raise

@@ -511,9 +511,11 @@ class _ScriptedProvider:
     def __init__(self, messages: list[dict]):
         self.queue = list(messages)
         self.calls = 0
+        self.last_messages = None
 
     def complete(self, *, messages, tools=None, max_tokens=None):
         self.calls += 1
+        self.last_messages = list(messages)
         msg = self.queue.pop(0) if self.queue else {
             "role": "assistant", "content": "Done."}
         return ProviderResponse(message=msg, raw={})
@@ -577,6 +579,491 @@ class TruthGateTests(RecoveryLoopTests):
             hits = det("I've checked the logs and found a mismatch. "
                        "✅ CI now passes.")
             self.assertTrue(hits)
+
+    def test_detector_catches_simple_past_and_work_verbs(self):
+        # Part-28 audit: the most common fabrication shapes missed —
+        # simple-past "I ran/updated" and the everyday work vocabulary
+        # (created/wrote/deleted/modified/edited/saved/made).
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            det = agent._executed_action_claims
+            for claim in (
+                "I ran the test suite — all green.",
+                "I updated the config file for you.",
+                "I created the file as requested.",
+                "I wrote the new module.",
+                "I deleted the stale cache.",
+                "I modified the handler to catch that.",
+                "I edited the file — it now returns 400.",
+                "I've made the requested changes.",
+                "I changed the port to 9000.",
+                "The bug is fixed.",
+                "The file has been created successfully.",
+                "Your changes are saved.",
+                "I've been rewriting the module.",
+                "I found the root cause in the logs.",
+            ):
+                self.assertTrue(det(claim), claim)
+
+    def test_detector_ignores_non_claim_shapes(self):
+        # Guards: phrasal-verb non-claims, mind-change hedges, and
+        # habitual/historical passive statements must not badge.
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            det = agent._executed_action_claims
+            for text in (
+                "I ran into an error trying that.",
+                "I checked out the new store downtown.",
+                "I made a mistake earlier, sorry.",
+                "I changed my mind about that.",
+                "The config is updated automatically on every release.",
+                "It says the file was deleted last week.",
+                "The bug was fixed upstream in v2.",
+                "Patches are applied by the vendor.",
+                # Intransitive progressive self-state — persona color,
+                # not a work claim (BUG-029 tail, live FP: "I'm already
+                # running with what's here" badged).
+                "I'm already running with what's here.",
+                "I'm still working on it.",
+                "I'm running now.",
+                "I'm watching.",
+                "I'm checking it for you.",
+                "I'm just preparing.",
+            ):
+                self.assertFalse(det(text), text)
+            for claim in (
+                "I'm running the tests.",
+                "I'm checking the logs.",
+                "I'm working on the fix.",
+                "I'm setting up the server.",
+                "I'm verifying the deploy.",
+            ):
+                self.assertTrue(det(claim), claim)
+
+    def test_detector_catches_bare_verb_openers(self):
+        # BUG-045: "Updated — your workstation is now called vector" is a
+        # memory-write claim with an implied subject; the I-subject and
+        # emoji shapes missed it, so a fabricated update sailed past the
+        # gate unmarked.
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            det = agent._executed_action_claims
+            for claim in (
+                "Updated — your workstation is now called vector.",
+                "Saved: the port is 9090.",
+                "Corrected, the tag is now v11.",
+            ):
+                self.assertTrue(det(claim), claim)
+            # Honest value-statements about the world are not claims.
+            for text in (
+                "The API timeout is now 60 seconds.",
+                "Updated rows appear automatically once a sync runs.",
+            ):
+                self.assertFalse(det(text), text)
+
+    def test_my_probe_empty_store_answers_honestly(self):
+        # BUG-051: "what is my editor" with nothing taught must answer
+        # "you haven't told me" — possessive probes can only be
+        # answered by taught facts, so an empty store IS the answer;
+        # falling through to the model risks a fabricated guess/503.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            reply = agent._single_fact_recall_reply(
+                "what is my editor", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("haven't told me", reply.text.lower())
+            agent.conversation_memory.learn_from_user(
+                "my editor is neovim")
+            reply = agent._single_fact_recall_reply(
+                "what is my editor", "conv", "proj")
+            self.assertIn("neovim", reply.text)
+
+    def test_wh_slot_probe_recalls_pronounless_fact(self):
+        # "what time is the standup" — no possessive pronoun, and the
+        # interrogative slot word (time) is answer-type metadata, not
+        # an entity term; the precision gate must not require it.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my standup is at 9am on weekdays")
+            reply = agent._single_fact_recall_reply(
+                "what time is the standup", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("9am", reply.text)
+            # Genuine general-knowledge probes still fall through.
+            self.assertIsNone(agent._single_fact_recall_reply(
+                "what color is the sky", "conv", "proj"))
+
+    def test_called_named_probe_is_slot_filler(self):
+        # "what is the build server called" — 'called' asks for the
+        # name; it is never a term inside the stored fact, so the
+        # precision gate must not require it (BUG-077 follow-on).
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "call the build server titan")
+            reply = agent._single_fact_recall_reply(
+                "what is the build server called", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("titan", reply.text)
+            reply = agent._single_fact_recall_reply(
+                "whats the build server named", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("titan", reply.text)
+
+    def test_recall_through_discourse_preambles(self):
+        # Discourse preambles ("sorry,", "i forgot", "wait —") framed
+        # the turn as assertion and bounced it off the recall lane.
+        # The analyzer strips punctuation-separated markers, and a
+        # wh-complement under a forgetting verb is itself the ask.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my shell is zsh")
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            for q in (
+                    "sorry, what's my shell",
+                    "i forgot what my shell is",
+                    "i forgot — what is my shell",
+                    "i can't remember what my shell is",
+                    "wait — is the prod api on 443",
+                    "i don't remember what port the prod api uses"):
+                reply = agent._single_fact_recall_reply(
+                    q, "conv", "proj")
+                self.assertIsNotNone(reply, q)
+            # An admission with no wh stays out of recall.
+            self.assertIsNone(agent._single_fact_recall_reply(
+                "i forgot the deadline", "conv", "proj"))
+
+    def test_filler_sounds_never_pollute_banked_facts(self):
+        # "hmm the port is 8080" used to bank 'hmm the port is 8080'
+        # verbatim — filler syllables leaked into stored text. And
+        # "hmm what was my editor" banked the QUESTION as a fact
+        # ('hmm what' parsed as the subject of 'was').
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            r = cm.learn_from_user("hmm the port is 8080")
+            self.assertEqual(r["facts"], ["port is 8080"])
+            r = cm.learn_from_user("uh my editor is vim")
+            self.assertEqual(r["facts"], ["my editor is vim"])
+            for q in ("hmm what was my editor",
+                      "um what is the port",
+                      "hmm what was my editor again"):
+                self.assertEqual(cm.learn_from_user(q)["facts"], [], q)
+
+    def test_connector_led_wh_question_recalls_fact(self):
+        # Companion to never-banking: "oh and what port was prod on" must
+        # still reach recall once it classifies as a question — the
+        # connector strip feeds the same text to the recall anchor.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            for q in ("oh and what port was prod on",
+                      "and what port is the prod api on"):
+                reply = agent._single_fact_recall_reply(q, "conv", "proj")
+                self.assertIsNotNone(reply, q)
+                self.assertIn("443", reply.text, q)
+
+    def test_connector_led_wh_question_never_banks(self):
+        # Live: "oh and what port was prod on" banked 'and what port was
+        # prod on' as a fact — 'oh' was stripped but 'and' survived, so
+        # subj 'and what port' + pred 'was' slipped past the wh guards.
+        # Leading coordinators strip like other discourse markers, and a
+        # subject whose FIRST token is an interrogative determiner is
+        # question-shaped, never a fact.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            for q in ("oh and what port was prod on",
+                      "and what port is prod on",
+                      "but when is the standup",
+                      "so where is the config",
+                      "ok so what time is the standup",
+                      "yeah and what port is prod on",
+                      "well who is on call",
+                      "hey what is the deadline"):
+                self.assertEqual(cm.learn_from_user(q)["facts"], [], q)
+            # Politeness/discourse leads before real declaratives still
+            # bank — the strip only takes the marker stack.
+            r = cm.learn_from_user("and the deadline is friday")
+            self.assertEqual(r["facts"], ["deadline is friday"])
+            r = cm.learn_from_user("but the build is green")
+            self.assertEqual(r["facts"], ["build is green"])
+            r = cm.learn_from_user("ok the port is 8080")
+            self.assertEqual(r["facts"], ["port is 8080"])
+            r = cm.learn_from_user("yeah the maintainer is sam")
+            self.assertEqual(r["facts"], ["maintainer is sam"])
+
+    def test_reported_speech_and_meta_recall(self):
+        # Live: "you said my editor was cursor, right" let the MODEL
+        # contradict the store; "what was it again — the retry limit"
+        # hallucinated a stale value; "i keep meaning to ask" missed
+        # recall entirely. Verification and meta-recall idioms must
+        # answer deterministically from the banked fact.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my editor is cursor")
+            agent.conversation_memory.learn_from_user("retry limit is 10")
+            agent.conversation_memory.learn_from_user("my shell is zsh")
+            agent.conversation_memory.learn_from_user(
+                "staging api uses port 8443")
+            cases = (
+                ("you said my editor was cursor, right", "cursor"),
+                ("you told me the retry limit was 10, yeah", "10"),
+                ("didn't you say the prod api was on 443", "prod api"),
+                ("did you say my editor was cursor", "cursor"),
+                ("what was it again — the retry limit", "10"),
+                ("i keep meaning to ask what shell I use", "zsh"),
+                # Hedged/polite recall leads — live these fell to a
+                # model that contradicted the banked fact.
+                ("do you happen to know my editor", "cursor"),
+                ("do you know my editor", "cursor"),
+                ("any chance you remember the retry limit", "10"),
+                ("is there any chance you know my shell", "zsh"),
+                ("out of curiosity what shell do I run", "zsh"),
+                ("speaking of ports, what does staging use", "8443"),
+            )
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            for q, want in cases:
+                reply = agent._single_fact_recall_reply(q, "conv", "proj")
+                self.assertIsNotNone(reply, q)
+                self.assertIn(want, reply.text, q)
+            # An untagged 'you said …' is a complaint/assertion, not a
+            # verification — it must NOT recall. Nor should a general
+            # question whose terms hit nothing.
+            for q in ("you said this would work",
+                      "you said the deploy was fine",
+                      "do you know the capital of france"):
+                self.assertIsNone(
+                    agent._single_fact_recall_reply(q, "conv", "proj"), q)
+
+    def test_topic_pivot_preamble_strips_on_learn(self):
+        # "speaking of ports, prod uses 8443" — the bankable clause
+        # follows the pivot's comma. The pivot itself must not bank
+        # (it did not, but only because the comma routed the turn
+        # away — the strip makes the tail reachable deliberately).
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            for q, want in (
+                    ("speaking of ports, prod uses 8443",
+                     ["prod uses 8443"]),
+                    ("as for the deadline, it is friday", []),  # 'it' anaphora
+                    ("regarding the cache, it expires hourly",
+                     [])):  # ditto
+                self.assertEqual(cm.learn_from_user(q)["facts"], want, q)
+
+    def test_port_probe_is_answer_type_slot(self):
+        # "which port is prod on" — 'port' names the answer's type, not
+        # the entity; the stored fact is 'prod api is on 443' and never
+        # carries the word 'port' (live-observed 503).
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            agent.conversation_memory.learn_from_user(
+                "staging api uses port 8443")
+            reply = agent._single_fact_recall_reply(
+                "which port is prod on", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("443", reply.text)
+            self.assertNotIn("8443", reply.text)
+            # A fact that merely *mentions* 'prod' in its value loses
+            # to the subject-anchored one — the question asks about the
+            # entity, not an incidental tail term.
+            agent.conversation_memory.learn_from_user(
+                "staging db is postgres and prod is mysql")
+            reply = agent._single_fact_recall_reply(
+                "which port is prod on then", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertEqual("The prod api is on 443.", reply.text)
+
+    def test_compound_spelling_and_verification_recall(self):
+        # 'on call' queries a banked 'oncall' — English writes compounds
+        # both ways, and a strict token gate starves the split spelling.
+        # 'is it still X' is a verification probe — recall restates the
+        # fact instead of falling to the model.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "the oncall used to be priya, now it's sam")
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            for probe in ("who is on call", "who's on call",
+                          "is it still sam"):
+                reply = agent._single_fact_recall_reply(
+                    probe, "conv", "proj")
+                self.assertIsNotNone(reply, probe)
+                self.assertIn("sam", reply.text)
+            reply = agent._single_fact_recall_reply(
+                "is the prod api still on 443", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("443", reply.text)
+
+    def test_does_the_x_verification_recalls_fact(self):
+        # "does the metrics api run on 9100" — a yes/no verification
+        # with an explicit subject. The interrogative verb ('run') is
+        # filler the fact never carries; recall restates the fact
+        # rather than stalling the model lane (live-observed 180s
+        # stall on the shared GPU).
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "the metrics api is on 9100")
+            reply = agent._single_fact_recall_reply(
+                "does the metrics api run on 9100", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("9100", reply.text)
+            # A wrong value in the question doesn't confirm — recall
+            # still surfaces the stored fact verbatim.
+            reply = agent._single_fact_recall_reply(
+                "does the metrics api use port 8080", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("9100", reply.text)
+
+    def test_when_does_probe_drops_trailing_verb(self):
+        # "when does the freeze lift" — the probe's own verb isn't a
+        # fact term; after the strict subset fails, retry on the noun
+        # phrase alone so 'code freeze lifts on monday' answers.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "the code freeze lifts on monday")
+            reply = agent._single_fact_recall_reply(
+                "when does the freeze lift", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("monday", reply.text)
+            self.assertIsNone(agent._single_fact_recall_reply(
+                "when does the comet arrive", "conv", "proj"))
+
+    def test_when_do_plural_probe_matches_singular_fact(self):
+        # "when do the backups run" — the plural probe binds the
+        # singular 'backup schedule is …' fact (fold-tolerant terms)
+        # and the trailing 'run' verb retries dropped.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "backup schedule is every day at 3am")
+            reply = agent._single_fact_recall_reply(
+                "when do the backups run", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("3am", reply.text)
+
+    def test_remind_me_probe_uses_recall_lane(self):
+        # "remind me about my editor" is a memory recall request — the
+        # frame must not classify 'remind' as an assertion and veto
+        # the lane into a model riff.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my editor is vim")
+            reply = agent._single_fact_recall_reply(
+                "remind me about my editor", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("vim", reply.text)
+
+    def test_echoed_notice_stripped_from_stored_reply(self):
+        # BUG-029: the badge lives verbatim in stored history, so small
+        # models learn to parrot it as their own sign-off. An echoed
+        # notice is furniture — strip it before storage so it can't be
+        # banked into Answer Memory as a trusted answer.
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            provider = _ScriptedProvider([{
+                "role": "assistant",
+                "content": (
+                    "Got it — keeping at it.\n\n"
+                    "Everything's humming. ✅  \n\n"
+                    "⚠ **Unverified action claims** — no tools or "
+                    "commands ran in this reply. Statements asserting "
+                    "completed actions above are narrative, not "
+                    "confirmed execution."),
+            }])
+            agent._provider_for = lambda p, **kw: provider
+            result = agent.run("keep working on this")
+            self.assertNotIn("Unverified action claims", result.content)
+            self.assertIn("humming", result.content)
+
+    def test_badged_history_turns_are_stripped_for_model(self):
+        # BUG-029: a genuinely badged reply stays badged in the visible
+        # transcript, but annotation furniture must never re-enter the
+        # model's context — feeding it back teaches the model to append
+        # fake badges (and to imitate fabrication).
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            provider = _ScriptedProvider([{
+                "role": "assistant", "content": "Still here."}])
+            agent._provider_for = lambda p, **kw: provider
+            agent.run("how is it going", history=[
+                {"role": "user", "content": "did you run the tests?"},
+                {"role": "assistant",
+                 "content": (
+                     "I ran the tests — all green. ✅\n\n"
+                     "⚠ **Unverified action claims** — no tools or "
+                     "commands ran in this reply. Statements asserting "
+                     "completed actions above are narrative, not "
+                     "confirmed execution.")},
+            ])
+            sent = json.dumps(provider.last_messages or [],
+                              ensure_ascii=False)
+            self.assertNotIn("Unverified action claims", sent)
+            self.assertIn("all green", sent)
 
 
 class _DeadProcess:

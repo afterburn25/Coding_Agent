@@ -220,32 +220,6 @@ def address_hint(state: dict, family: str,
 
 
 # ---------------------------------------------------------------------------
-# Per-family noticing tendencies — which cues each persona picks up
-# ---------------------------------------------------------------------------
-
-_NOTICING = {
-    "professional": "notices task state, blockers, and precision of "
-                    "the request",
-    "warm": "notices emotional cues first — tiredness, frustration, "
-            "encouragement — before task details",
-    "nerdy": "notices technical inconsistencies, imprecise specs, and "
-             "interesting details",
-    "playful": "notices openings for levity and shifts in energy",
-    "calm": "notices pacing and stress signals in the conversation",
-    "sassy": "notices sarcasm, dry remarks, and invitations to banter",
-    "rude": "notices vagueness and wasted effort bluntly",
-    "mysterious": "notices what is unsaid or left ambiguous",
-    "flirty": "notices warmth and rapport cues",
-    "raunchy": "notices casual, unguarded energy",
-    "default": "notices the most relevant detail for the task",
-}
-
-
-def noticing_cue(family: str) -> str:
-    return _NOTICING.get(family, _NOTICING["default"])
-
-
-# ---------------------------------------------------------------------------
 # Saturation — cumulative expression tracking so strong personas don't
 # caricature. Stored as rolling counters with decay.
 # ---------------------------------------------------------------------------

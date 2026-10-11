@@ -38,14 +38,6 @@ class Vocalization:
     adult: bool = False      # requires an 18+ persona to keep
 
 
-@dataclass(frozen=True)
-class GestureEvent:
-    """Semantic gesture paired with a vocalization (future avatar hooks)."""
-    gesture: str
-    intensity: float
-    source: str              # vocalization style that produced it
-
-
 @dataclass
 class ResolveResult:
     speech_text: str

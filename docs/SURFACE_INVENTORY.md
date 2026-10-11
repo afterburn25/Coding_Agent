@@ -84,3 +84,13 @@ families, not every suffix route.
 - `?`-method routes above are dispatched inside handler helpers whose
   method detection the extractor could not attribute — most are GET+POST
   pairs in the shared dispatch helpers (`_handle_*_post`, profile API).
+- Live POST fuzz (this pass, round 3): all 134 literal POST routes
+  probed with empty `{}` bodies — 6 handlers leaked service exceptions
+  as raw 500s → BUG-021 (fixed, mapped to 400/409/503). Re-probe plus
+  69 safe routes × 3 wrong-typed bodies: zero 500s.
+- UI↔API consistency sweep (this pass): 317 fetch/api call sites in
+  `web/*.js` all resolve to real routes; all inline handlers defined;
+  all JS-referenced DOM ids exist (one genuinely dead feature found →
+  BUG-023, `#nexusPresence` never in markup — fixed); SSE client
+  subscriptions all map to real emitters. Remaining UI gap is only the
+  interactive click-path (needs a browser session).

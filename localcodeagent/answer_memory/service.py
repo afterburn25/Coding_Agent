@@ -188,6 +188,10 @@ class AnswerMemory:
                 and (validation.is_error_answer(str(r.get("answer_text") or ""))
                      or validation.is_fragment_answer(
                          str(r.get("answer_text") or ""))
+                     or validation.is_ack_answer(
+                         str(r.get("answer_text") or ""))
+                     or validation.is_refusal_answer(
+                         str(r.get("answer_text") or ""))
                      or validation.is_machine_authored_question(
                          str(r.get("canonical_question")
                              or r.get("normalized_question") or "")))
@@ -203,6 +207,12 @@ class AnswerMemory:
                         if validation.is_machine_authored_question(
                             str(r.get("canonical_question")
                                 or r.get("normalized_question") or ""))
+                        else "ack-shaped reply stored as answer"
+                        if validation.is_ack_answer(
+                            str(r.get("answer_text") or ""))
+                        else "refusal-shaped reply stored as answer"
+                        if validation.is_refusal_answer(
+                            str(r.get("answer_text") or ""))
                         else "fragment answer stored as answer")
                 except Exception:
                     pass
@@ -353,6 +363,20 @@ class AnswerMemory:
         # A failure report ("I couldn't reach GitHub — unknown tool …")
         # is not evidence of a good answer — never let it become one.
         if validation.is_error_answer(answer):
+            out["suppressed"] = True
+            self.store.bump("suppressed_experiences")
+            return out
+        # Ack-shaped text ("Got it — the deadline is Wednesday") is a
+        # transaction confirmation, not a reusable answer — banked, it
+        # replays a write-claim nobody executed.
+        if validation.is_ack_answer(answer):
+            out["suppressed"] = True
+            self.store.bump("suppressed_experiences")
+            return out
+        # Refusal-shaped text ("I won't store credentials…") declines
+        # the attempt, not the question — banked, it replays a refusal
+        # on harmless lookalike turns.
+        if validation.is_refusal_answer(answer):
             out["suppressed"] = True
             self.store.bump("suppressed_experiences")
             return out

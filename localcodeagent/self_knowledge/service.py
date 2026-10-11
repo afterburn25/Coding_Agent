@@ -134,6 +134,7 @@ class SelfKnowledgeService:
                 return None
             for probe in (self._followup, self._diagnostics,
                           self._control, self._where,
+                          self._runtime,
                           self._status_or_explain):
                 res = probe(t)
                 if res is not None:
@@ -185,11 +186,85 @@ class SelfKnowledgeService:
         # an unrelated journaled change.
         m_undo = re.search(r"\bundo\b|\bundo that\b|\bput it back\b|"
                            r"\brevert\b|\bchange it back\b", t)
+        # "put the scooter back" / "roll back the migration" name a
+        # referent without an undo keyword — the same scoped restore.
+        # Bare pronouns/quantifiers (it/things/everything) capture
+        # nothing and stay generic.
+        m_putback = re.search(
+            r"\b(?:put|switch|change|take|move)\s+"
+            r"(?:the|that|it|things|everything)\s*(.*?)\s*\bback\b|"
+            r"\broll(?:ed)?\s+back\s+(?:the|that)\s+(.+?)\s*$", t)
         m_back = re.search(r"\b(turn|switch|set|put)\b.{0,15}\bback\b"
                            r".{0,5}\bon\b|\bback to (normal|before|"
                            r"how it was)\b|\bturn it back\b", t)
-        if m_undo or (m_back and last):
+        if m_undo or m_putback or (m_back and last):
+            # A named referent ("undo that laptop change") scopes the
+            # undo — it must bind before the session's last_executed,
+            # or "revert the printer change" would silently revert an
+            # unrelated setting just because it ran most recently.
+            referent = re.search(
+                r"\b(?:undo|revert)\s+(?:that|the)\s+"
+                r"([a-z0-9][a-z0-9 ._-]{0,38}?)\s*"
+                r"(?:change|edit|update|rename|move|switch|fix|"
+                r"modification)\b", t)
+            ref_text = referent.group(1).strip() if referent else ""
+            if ref_text and not any(
+                    w not in {"the", "that", "last", "recent", "change",
+                              "edit", "update", "rename", "move",
+                              "switch", "fix", "modification",
+                              "correction", "adjustment", "tweak"}
+                    for w in re.findall(r"[a-z0-9]{3,}", ref_text)):
+                # "undo the last change" — the captured referent is all
+                # stopwords, so there's no scope at all; keep it generic.
+                ref_text = ""
+            if not ref_text:
+                # Looser referential forms — "undo the correction to
+                # the editor" names a target without the `X change`
+                # template. Drop the operation words and keep whatever
+                # entity terms remain; "undo the change" / "undo the
+                # last edit" reduce to nothing and stay generic.
+                broad = re.search(
+                    r"\b(?:undo|revert)\s+(?:that|the)\s+(.+?)\s*$", t)
+                if broad:
+                    words = [w for w in re.findall(
+                        r"[a-z0-9]{3,}", broad.group(1))
+                        if w not in {"the", "that", "last", "recent",
+                                     "change", "edit", "update",
+                                     "rename", "move", "switch", "fix",
+                                     "modification", "correction",
+                                     "adjustment", "tweak"}]
+                    ref_text = " ".join(words)
+            if not ref_text and m_putback:
+                # "put the scooter back" — the captured span between
+                # the pronoun and `back` names the referent; pronouns
+                # and filler reduce to nothing and stay generic.
+                span = m_putback.group(1) or m_putback.group(2) or ""
+                words = [w for w in re.findall(r"[a-z0-9]{3,}", span)
+                         if w not in {"the", "that", "it", "all",
+                                      "last", "recent", "how", "was",
+                                      "before", "way", "normal",
+                                      "were"}]
+                ref_text = " ".join(words)
             undo = (last or {}).get("undo")
+            if undo and ref_text:
+                # Session undo only applies when the referent actually
+                # names it — otherwise the scoped resolver owns the turn.
+                parts = [last.get("setting"), last.get("action")]
+                for src in (last.get("params"), undo.get("params"),
+                            undo.get("action")):
+                    if isinstance(src, dict):
+                        parts.extend(src.values())
+                    else:
+                        parts.append(src)
+                subj_terms = set(re.findall(
+                    r"[a-z0-9]{3,}",
+                    " ".join(str(x or "") for x in parts).lower()))
+                ref_terms = {x for x in re.findall(r"[a-z0-9]{3,}",
+                             ref_text)
+                             if x not in {"the", "that", "last",
+                                          "recent"}}
+                if not (ref_terms & subj_terms):
+                    return self._scoped_undo(ref_text)
             if undo:
                 if undo.get("action") == "_set":
                     spec_s = self.settings.get(undo["params"]["key"])
@@ -207,6 +282,13 @@ class SelfKnowledgeService:
             if m_back:
                 return Resolution("answer", "undo",
                     text="The last change can't be undone from chat.")
+            # Referent extracted above — a named target scopes the
+            # undo; journal rows are matched by subject, and a
+            # superseded memory fact restores when the referent names
+            # a taught entity. No referent match → honest miss; the
+            # latest journaled row is never reverted on a guess.
+            if ref_text:
+                return self._scoped_undo(ref_text)
             return self._journal_undo()
         if re.search(r"\bopen it\b|\bopen that\b|\btake me\b", t):
             route = (proposed or {}).get("route") or \
@@ -221,6 +303,92 @@ class SelfKnowledgeService:
             return fn() if callable(fn) else None
         except Exception:
             return None
+
+    def _scoped_undo(self, referent: str) -> Resolution:
+        """'undo that <referent> change' — bind the journal row or
+        memory fact the referent names. A named referent that matches
+        nothing gets an honest miss, never a guess-revert."""
+        ref_terms = [t for t in re.findall(r"[a-z0-9]{3,}", referent)
+                     if t not in {"the", "that", "last", "recent"}]
+        cj = self._journal()
+        if cj is not None and ref_terms:
+            try:
+                for row in cj.recent(50):
+                    if row.get("undone"):
+                        continue
+                    subject = str(row.get("subject") or "").lower()
+                    if any(t in subject for t in ref_terms):
+                        if not getattr(self, "_execute", True):
+                            return Resolution(
+                                "confirm", "undo",
+                                text=(f"The \"{row.get('subject')}\" "
+                                      f"change would be reverted."),
+                                truth={"kind": "journal",
+                                       "dry_run": True})
+                        res = cj.undo(str(row.get("id") or ""))
+                        if res.get("ok"):
+                            return Resolution(
+                                "execute", "undo",
+                                text=str(res.get("message")
+                                         or "Undone."),
+                                result=ActionResult(
+                                    True,
+                                    verified=bool(res.get("verified")),
+                                    detail=str(res.get("detail") or "")),
+                                truth={"kind": "journal",
+                                       "subject": res.get("subject")})
+                        return Resolution(
+                            "answer", "undo",
+                            text=str(res.get("message")
+                                     or "I couldn't undo that."),
+                            truth={"kind": "journal",
+                                   "subject": res.get("subject")})
+            except Exception:
+                pass
+        # Memory-fact revert — "undo that laptop change" while
+        # 'my laptop is pulsar' superseded 'my laptop is quasar'
+        # restores the prior value.
+        cm = self._env.get("conversation_memory")
+        try:
+            store = cm() if callable(cm) else cm
+        except Exception:
+            store = None
+        if store is not None and ref_terms:
+            if not getattr(self, "_execute", True):
+                # Dry-run probe (would_answer) — peek only; a real
+                # revert must happen exactly once, on the real pass.
+                try:
+                    peek = getattr(store, "peek_revert_fact", None)
+                    cand = peek(referent) if callable(peek) else None
+                except Exception:
+                    cand = None
+                if cand:
+                    return Resolution(
+                        "confirm", "undo",
+                        text=f"{cand} would be restored.",
+                        truth={"kind": "memory", "dry_run": True})
+                return Resolution(
+                    "answer", "undo",
+                    text=(f"I don't have a journaled or remembered "
+                          f"change matching \"{referent}\" — nothing "
+                          f"to undo."),
+                    truth={"kind": "none", "subject": referent})
+            try:
+                restored = store.revert_fact(referent)
+            except Exception:
+                restored = None
+            if restored:
+                return Resolution(
+                    "execute", "undo",
+                    text=(f"Reverted — {restored}."),
+                    result=ActionResult(True, verified=True),
+                    truth={"kind": "memory", "subject": referent})
+        what = referent or "that"
+        return Resolution(
+            "answer", "undo",
+            text=(f"I don't have a journaled or remembered change "
+                  f"matching \"{what}\" — nothing to undo."),
+            truth={"kind": "none", "subject": referent})
 
     def _journal_undo(self) -> Resolution:
         cj = self._journal()
@@ -719,6 +887,73 @@ class SelfKnowledgeService:
             truth={"kind": "action", "action": spec.id, "ok": False})
 
     # -- status / explain ---------------------------------------------------
+
+    # -- live runtime ----------------------------------------------------
+
+    _RUNTIME_Q_RE = re.compile(
+        r"\b(?:what|which)\s+(?:model|llm)\s+(?:are\s+you\s+"
+        r"(?:using|running|on)|is\s+(?:this|loaded|resident|serving))|"
+        r"\bwhat\s+model\b.{0,20}\b(?:powering|driving|serving)\b|"
+        r"\b(?:how\s+much|how\s+many)\s+(?:free\s+)?"
+        r"(?:disk|storage|drive|ram|memory|vram)\b|"
+        r"\bfree\s+(?:disk|storage|drive|ram|memory|vram)\s+"
+        r"(?:space|left|available|do\s+i\s+have)\b",
+        re.IGNORECASE)
+
+    def _runtime(self, t: str) -> Resolution | None:
+        """'What model are you using' / 'how much free disk space' —
+        answered from the live runtime summary, never a model riff or
+        an underclaim."""
+        if not self._RUNTIME_Q_RE.search(t):
+            return None
+        if not self._allows("feature_status"):
+            return None
+        fn = self._env.get("runtime_summary")
+        try:
+            info = fn() if callable(fn) else None
+        except Exception:
+            info = None
+        if not isinstance(info, dict):
+            return None
+        # Serving-model question — report the resident runtimes.
+        if re.search(r"\bmodel\b|\bllm\b", t) and not re.search(
+                r"\bdisk|storage|drive|ram|memory|vram\b", t):
+            live = [r for r in info.get("runtimes", [])
+                    if isinstance(r, dict)
+                    and str(r.get("state")) in ("running", "healthy",
+                                                "external")]
+            if live:
+                descs = []
+                for r in live[:4]:
+                    kind = ("external" if not r.get("managed")
+                            else "managed")
+                    descs.append(
+                        f"{r.get('model_id')} ({kind}, "
+                        f"{r.get('endpoint')})")
+                text = "Serving right now: " + "; ".join(descs) + "."
+            else:
+                text = ("No language model is resident right now — "
+                        "deterministic lanes answered this turn.")
+            return Resolution("answer", "model_status", text=text)
+        # Capacity question — report real numbers.
+        hw = info.get("hardware") or {}
+        store = info.get("model_storage") or {}
+        bits = []
+        if re.search(r"\bdisk|storage|drive\b", t):
+            free_gb = (store.get("free_bytes") or 0) / 1e9
+            if free_gb:
+                bits.append(f"{free_gb:,.0f} GB free on the models "
+                            f"drive ({store.get('path', '')})")
+        if re.search(r"\bvram\b", t):
+            bits.append(f"{hw.get('free_vram_gb', 0):.1f} of "
+                        f"{hw.get('total_vram_gb', 0):.0f} GB VRAM free")
+        elif re.search(r"\bram|memory\b", t):
+            bits.append(f"{hw.get('available_ram_gb', 0):.1f} of "
+                        f"{hw.get('total_ram_gb', 0):.0f} GB RAM free")
+        if not bits:
+            return None
+        return Resolution("answer", "capacity",
+                          text="; ".join(bits) + ".")
 
     def _status_or_explain(self, t: str) -> Resolution | None:
         """'Can you X', 'what is X', 'why can't you X', 'how do I X'."""

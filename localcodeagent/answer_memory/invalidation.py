@@ -97,10 +97,3 @@ def dependency_status(row: dict, *, config_fp: str = "", repo_head_sha: str = ""
         if stored and stored != config_fp:
             return "stale"
     return "current"
-
-
-def mark_stale_fields(row: dict) -> dict[str, Any]:
-    return {
-        "trust_state": "stale",
-        "invalidation_reason": "dependency fingerprint changed — verification required",
-    }

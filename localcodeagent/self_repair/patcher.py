@@ -16,10 +16,6 @@ from typing import Callable
 from ..procutil import no_window_flags
 
 
-class WorktreeError(RuntimeError):
-    pass
-
-
 class Patcher:
     def __init__(self, repo_root: Path, *,
                  git: Callable[..., subprocess.CompletedProcess] | None = None):

@@ -356,6 +356,7 @@ class RuntimeManagerTests(unittest.TestCase):
                 id="victim", model_path="models/victim.gguf",
                 executable=str(root / "llama-server"),
                 estimated_vram_gb=8.0, estimated_ram_gb=6.0,
+                gpu_layers="40",
                 keep_loaded=False)
             _write_fake_exe(root / "llama-server")
             cfg = AgentConfig(models=[victim])
@@ -554,6 +555,130 @@ class RuntimeManagerTests(unittest.TestCase):
             stopped = manager.release_managed_models_for_ram(required_ram_gb=20.0)
             self.assertEqual(stopped, [])
             self.assertEqual(calls, [])
+
+    def test_pressure_eviction_skips_futile_release(self):
+        # Regression (live): a queued node demanding VRAM evicted the sole
+        # resident every supervisor tick even though the model was fully
+        # CPU-offloaded (~0 VRAM held) — the eviction could never satisfy
+        # the request, so it was pure churn. When measured releasable VRAM
+        # cannot reach the target, nothing is stopped.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "resident.gguf").write_bytes(b"GGUF")
+            resident = self._profile(
+                id="resident", model_path="models/resident.gguf",
+                executable=str(root / "llama-server"), port=8081)
+            _write_fake_exe(root / "llama-server")
+            manager = RuntimeManager(AgentConfig(models=[resident]), base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=320, used_vram_mb=11968)])
+            proc = _attach_fake_managed(manager, resident)
+            # The resident is CPU-offloaded — nvidia-smi reports ~300 MB.
+            manager.measure_resident = lambda mid: {"vram_used_mb": 320.0}
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(stopped, [])
+            self.assertFalse(proc.terminated)
+
+            # But when the resident genuinely holds enough, eviction proceeds.
+            manager.measure_resident = lambda mid: {"vram_used_mb": 8000.0}
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(stopped, ["resident"])
+            self.assertTrue(proc.terminated)
+
+    def test_pressure_eviction_skips_mid_launch_model(self):
+        # Regression (live): _stop_managed mid-load is the "exited with
+        # code 1" spawn-death signature — a model in _starting is serving
+        # an admitted demand and must not be evicted.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "loading.gguf").write_bytes(b"GGUF")
+            loading = self._profile(
+                id="loading", model_path="models/loading.gguf",
+                executable=str(root / "llama-server"), port=8081,
+                estimated_vram_gb=8.0)
+            _write_fake_exe(root / "llama-server")
+            manager = RuntimeManager(AgentConfig(models=[loading]), base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=1024, used_vram_mb=11264)])
+            proc = _attach_fake_managed(manager, loading)
+            manager._starting.add("loading")
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(stopped, [])
+            self.assertFalse(proc.terminated)
+
+    def test_offloadable_model_not_deferred_on_vram_shortfall(self):
+        # gpu_layers=auto can CPU-offload — a VRAM-only shortfall must not
+        # defer its relaunch after a demand eviction (the card may stay
+        # saturated by another process for hours while the model could
+        # still serve on CPU).
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "victim.gguf").write_bytes(b"GGUF")
+            victim = self._profile(
+                id="victim", model_path="models/victim.gguf",
+                executable=str(root / "llama-server"),
+                estimated_vram_gb=8.0, estimated_ram_gb=6.0,
+                gpu_layers="auto", keep_loaded=False)
+            _write_fake_exe(root / "llama-server")
+            cfg = AgentConfig(models=[victim])
+            manager = RuntimeManager(cfg, base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=2048, used_vram_mb=10240)])
+            launches: list[str] = []
+            manager._start_llama_cpp = (
+                lambda p, ctx_override=None: launches.append(p.id) or "http://x/v1")
+            manager._demand_evicted["victim"] = (time.time(), "vram")
+            manager.ensure_ready(victim)
+            self.assertEqual(launches, ["victim"])
+
+    def test_mission_shortfall_release_spares_keep_loaded_baseline(self):
+        # Regression (live): the supervisor's admission-shortfall hook
+        # evicted the keep_loaded interactive model for a queued repair
+        # node every tick — user chat then cold-loaded the same weights
+        # the node would have reused. Mission-grade releases never touch
+        # the baseline; image jobs (include_baseline=True) still can.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "base.gguf").write_bytes(b"GGUF")
+            baseline_model = self._profile(
+                id="base", model_path="models/base.gguf",
+                executable=str(root / "llama-server"), port=8081,
+                keep_loaded=True, estimated_vram_gb=8.0)
+            _write_fake_exe(root / "llama-server")
+            manager = RuntimeManager(
+                AgentConfig(models=[baseline_model]), base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=1024, used_vram_mb=11264)])
+            proc = _attach_fake_managed(manager, baseline_model)
+            stopped = manager.release_managed_models_for_vram(
+                required_vram_gb=4.0, include_baseline=False)
+            self.assertEqual(stopped, [])
+            self.assertFalse(proc.terminated)
+            # An image job still gets the stronger claim on the baseline.
+            stopped = manager.release_managed_models_for_vram(
+                required_vram_gb=4.0, include_baseline=True)
+            self.assertEqual(stopped, ["base"])
+            self.assertTrue(proc.terminated)
 
     def test_fresh_hardware_reprobes_stale_snapshot(self):
         # Regression: budget auto-resume read runtime.hardware — a cached
@@ -1640,15 +1765,21 @@ class OrphanSweepTests(unittest.TestCase):
                        "llama-server.exe")
             self.assertTrue(manager._exe_is_ours(ours, ""))
 
+    def _register_orphan(self, manager, pid, model_path, port):
+        endpoint = f"http://127.0.0.1:{port}"
+        manager._register_spawn(pid, "coder", endpoint, model_path)
+        cmd = f"llama-server --model {model_path} --port {port}"
+        return cmd
+
     def test_healthy_matching_orphan_is_adopted_not_killed(self):
         with tempfile.TemporaryDirectory() as td:
             manager = self._manager(Path(td))
             model_path = str(manager.models_dir / "coder.gguf")
-            cmd = f"llama-server --model {model_path} --port 51234"
-            orphan = {"pid": 4242, "exe": "llama-server", "cmdline": cmd}
+            cmd = self._register_orphan(manager, 4242, model_path, 51234)
             killed = []
-            with patch.object(manager, "_our_runtime_processes",
-                              return_value=[orphan]), \
+            with patch.object(manager, "_pid_image_cmdline",
+                              return_value=("llama-server.exe", cmd)), \
+                 patch.object(manager, "_exe_is_ours", return_value=True), \
                  patch.object(manager, "_adopt_healthy_orphan",
                               return_value=True) as adopt, \
                  patch.object(manager, "_kill_pid",
@@ -1661,17 +1792,69 @@ class OrphanSweepTests(unittest.TestCase):
     def test_unmatched_orphan_is_killed(self):
         with tempfile.TemporaryDirectory() as td:
             manager = self._manager(Path(td))
-            orphan = {"pid": 7777, "exe": "llama-server",
-                      "cmdline": "llama-server --model /other/x.gguf "
-                                 "--port 51111"}
+            cmd = self._register_orphan(
+                manager, 7777, "/other/x.gguf", 51111)
             killed = []
-            with patch.object(manager, "_our_runtime_processes",
-                              return_value=[orphan]), \
+            with patch.object(manager, "_pid_image_cmdline",
+                              return_value=("llama-server.exe", cmd)), \
+                 patch.object(manager, "_exe_is_ours", return_value=True), \
                  patch.object(manager, "_kill_pid",
                               side_effect=lambda p: killed.append(p)):
                 result = manager.sweep_orphan_runtimes()
             self.assertEqual(killed, [7777])
             self.assertEqual(result["adopted"], [])
+
+    def test_foreign_same_binary_process_is_never_touched(self):
+        # Cross-instance hazard: a second Nexus install's llama-server
+        # runs the SAME executable — image identity cannot separate
+        # owners. It is never in this install's spawn registry, so the
+        # sweep must not adopt or kill it.
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            killed = []
+            with patch.object(manager, "_kill_pid",
+                              side_effect=lambda p: killed.append(p)), \
+                 patch.object(manager, "_adopt_healthy_orphan",
+                              return_value=True) as adopt:
+                result = manager.sweep_orphan_runtimes()
+            self.assertEqual(killed, [])
+            self.assertEqual(result["adopted"], [])
+            adopt.assert_not_called()
+
+    def test_reused_pid_is_dropped_not_killed(self):
+        # A registered pid that now hosts a different command line was
+        # reused after our server exited — killing it would hit an
+        # unrelated process.
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            model_path = str(manager.models_dir / "coder.gguf")
+            self._register_orphan(manager, 6666, model_path, 51234)
+            killed = []
+            with patch.object(manager, "_pid_image_cmdline",
+                              return_value=("llama-server.exe",
+                                            "llama-server --model z.gguf "
+                                            "--port 40000")), \
+                 patch.object(manager, "_exe_is_ours", return_value=True), \
+                 patch.object(manager, "_kill_pid",
+                              side_effect=lambda p: killed.append(p)):
+                result = manager.sweep_orphan_runtimes()
+            self.assertEqual(killed, [])
+            self.assertEqual(result["adopted"], [])
+            self.assertNotIn("6666", manager._spawn_registry())
+
+    def test_dead_registered_pid_is_dropped_not_killed(self):
+        with tempfile.TemporaryDirectory() as td:
+            manager = self._manager(Path(td))
+            model_path = str(manager.models_dir / "coder.gguf")
+            self._register_orphan(manager, 5555, model_path, 51234)
+            killed = []
+            with patch.object(manager, "_pid_image_cmdline",
+                              return_value=("", "")), \
+                 patch.object(manager, "_kill_pid",
+                              side_effect=lambda p: killed.append(p)):
+                result = manager.sweep_orphan_runtimes()
+            self.assertEqual(killed, [])
+            self.assertNotIn("5555", manager._spawn_registry())
 
     def test_duplicate_orphan_for_managed_profile_is_killed(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1681,12 +1864,12 @@ class OrphanSweepTests(unittest.TestCase):
             # A managed sibling already owns the profile — a second
             # server of the same checkpoint is a double-load leak.
             model_path = str(manager.models_dir / "coder.gguf")
-            orphan = {"pid": 8888, "exe": "llama-server",
-                      "cmdline": f"llama-server --model {model_path} "
-                                 "--port 51235"}
+            cmd = self._register_orphan(
+                manager, 8888, model_path, 51235)
             killed = []
-            with patch.object(manager, "_our_runtime_processes",
-                              return_value=[orphan]), \
+            with patch.object(manager, "_pid_image_cmdline",
+                              return_value=("llama-server.exe", cmd)), \
+                 patch.object(manager, "_exe_is_ours", return_value=True), \
                  patch.object(manager, "_kill_pid",
                               side_effect=lambda p: killed.append(p)):
                 result = manager.sweep_orphan_runtimes()
@@ -1700,44 +1883,20 @@ class OrphanSweepTests(unittest.TestCase):
             fake = _attach_fake_managed(manager, profile)
             fake_pid = 9999
             fake.pid = fake_pid  # stand-in pid for the managed entry
-            orphan = {"pid": fake_pid, "exe": "llama-server",
-                      "cmdline": "llama-server --port 51236"}
+            self._register_orphan(
+                manager, fake_pid,
+                str(manager.models_dir / "coder.gguf"), 51236)
             killed = []
-            with patch.object(manager, "_our_runtime_processes",
-                              return_value=[orphan]), \
+            with patch.object(manager, "_pid_image_cmdline",
+                              return_value=("llama-server.exe",
+                                            "llama-server --port 51236")), \
+                 patch.object(manager, "_exe_is_ours", return_value=True), \
                  patch.object(manager, "_kill_pid",
                               side_effect=lambda p: killed.append(p)):
                 manager.sweep_orphan_runtimes()
             self.assertEqual(killed, [])
-
-    def test_process_managed_mid_enumeration_is_not_killed(self):
-        # Regression: _our_runtime_processes() is a slow external probe —
-        # a launch registering _managed between enumeration and the
-        # per-pid ownership check used to read as an orphan and fall
-        # through to _kill_pid, killing the just-launched server (seen as
-        # repeated llama-server deaths seconds after boot). Membership is
-        # re-read under the lock on every pid now.
-        with tempfile.TemporaryDirectory() as td:
-            manager = self._manager(Path(td))
-            profile = manager.config.models[0]
-            model_path = str(manager.models_dir / "coder.gguf")
-            orphan = {"pid": 5555, "exe": "llama-server",
-                      "cmdline": f"llama-server --model {model_path} "
-                                 "--port 51234"}
-
-            def enumerate_then_register():
-                fake = _attach_fake_managed(manager, profile)
-                fake.pid = 5555
-                return [orphan]
-
-            killed = []
-            with patch.object(manager, "_our_runtime_processes",
-                              side_effect=enumerate_then_register), \
-                 patch.object(manager, "_kill_pid",
-                              side_effect=lambda p: killed.append(p)):
-                result = manager.sweep_orphan_runtimes()
-            self.assertEqual(killed, [])
-            self.assertEqual(result["adopted"], [])
+            # Still-managed pids keep their registry entry.
+            self.assertIn(str(fake_pid), manager._spawn_registry())
 
 
 if __name__ == "__main__":

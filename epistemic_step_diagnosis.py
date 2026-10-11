@@ -1,9 +1,18 @@
+import traceback
 import sys
-import os
 
 def main():
     # Apply diagnosis logic here
     print("Diagnosis applied to epistemic_step_diagnosis.py - Fixing capacity restoration logic")
 
-if __name__ == "__main__":
-    main()
+
+def diagnose_test_error(error_trace):
+    """Diagnose a test error and return a structured analysis."""
+    # Parse the error trace
+    error_lines = error_trace.split('\n')
+    
+    # Identify the root cause - look for the last exception line
+    root_cause = None
+    error_message = None
+    
+    # Look for the last line that contains an exception

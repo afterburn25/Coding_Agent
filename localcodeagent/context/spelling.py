@@ -334,6 +334,15 @@ def _morph_shield(low: str) -> str | None:
     return None
 
 
+def _is_compound(low: str, known: frozenset[str]) -> bool:
+    """Token splits into two real words ('standup' → 'stand'+'up') —
+    an unknown compound is a word, not a typo."""
+    for i in range(2, len(low) - 1):
+        if low[:i] in known and low[i:] in known:
+            return True
+    return False
+
+
 def _looks_like_word(low: str) -> bool:
     """Real word (dictionary), vocab member, or inflection of one."""
     return low in _known() or _morph_shield(low) is not None
@@ -371,6 +380,32 @@ def _candidates(token: str, ctx_words: set[str], *,
     for word, wsk in word_sk.items():
         if word == token or len(word) < 3:
             continue
+        # A candidate that is the token minus its first or last
+        # character is not a typo fix — it's an assumption that the
+        # user typed a stray letter. Proper nouns and names die here:
+        # 'jira'->'ira', 'kanye'->'kane', 'slack'->'lack'.
+        if word == token[1:] or word == token[:-1]:
+            continue
+        # The mirror image is just as unsafe: a candidate that is the
+        # token PLUS one edge character assumes the user dropped a
+        # letter at the boundary — 'vega'->'vegas', 'priya'->'priyam'.
+        # True letter-drop typos almost always happen mid-word
+        # ('desrt'->'dessert', 'chek'->'check' stay allowed); edge
+        # shapes on an unknown token are names, not mistakes.
+        if (len(word) == len(token) + 1
+                and (word[:-1] == token or word[1:] == token)):
+            continue
+        # Short tokens fix conservatively — every letter the user typed
+        # must survive in the fix (insertions 'desrt'->'dessert' and
+        # 'chek'->'check' qualify), and pure anagrams must be a single
+        # adjacent swap ('teh'->'the', not 'kanye'->'kenya'). Dropping or
+        # substituting a short token's letters mangles names — 'priya'->
+        # 'pray', 'jira'->'ira'. Longer tokens stay flexible.
+        if len(token) <= 5:
+            from collections import Counter as _C
+            if (_C(token) - _C(word)) or (sorted(token) == sorted(word)
+                                          and _dl(token, word) > 1):
+                continue
         sk_eq = sk == wsk
         if not sk_eq and len(word) - len(token) > 4:
             continue  # far too long to be this typo
@@ -397,6 +432,26 @@ def _candidates(token: str, ctx_words: set[str], *,
             sim = max(sim, 1.9 - 0.15 * max(0, dl - 3))
         if sim < 0:
             continue
+        # A candidate that doesn't share the token's phonetic skeleton
+        # is a different word, not the same word mistyped — 'boson'->
+        # 'boston', 'fermion'->'version' rode plain edit distance into
+        # common-word magnets. A ≥4-char shared prefix legitimates it
+        # ('fettucini'->'fettuccine' keeps 'fettu'); context presence
+        # deliberately does NOT — a misspelled value banked into
+        # history would otherwise keep legitimizing the same
+        # correction forever.
+        if not sk_eq:
+            pref = 0
+            for a, b in zip(token, word):
+                if a != b:
+                    break
+                pref += 1
+            # A shorter off-skeleton candidate is a truncation-plus-
+            # rewrite of letters the user actually typed — 'standup'->
+            # 'stands' is a different word, not a dropped-letter typo
+            # (real letter-drops grow the fix: 'fettucini'->'fettuccine').
+            if pref < 4 or len(word) < len(token):
+                continue
         score = sim + _freq_bonus(word)
         if word in ctx_words:
             score += 2.5
@@ -494,6 +549,22 @@ def normalize_user_text(
         # --- protection gates ------------------------------------------------
         if len(low) < 3 or low in known or _in_spans(s, spans):
             pieces.append(tok)
+            continue
+        if len(low) >= 6 and _is_compound(low, known):
+            # Unknown to the lexicon but splits into two real words —
+            # 'standup', 'dropoff', 'mornin' are compounds, not typos.
+            # Without this every missing compound is a magnet for its
+            # nearest common word ('standup'->'standout'/'stands').
+            # Like the morph shield it yields to a decisive same-
+            # skeleton one-edit fix — 'chiken'->'chicken' still lands.
+            fixed = _pick(low, ctx_words, decisive_only=True)
+            if fixed is None:
+                pieces.append(tok)
+                continue
+            if tok[0].isupper():
+                fixed = fixed.capitalize()
+            pieces.append(fixed)
+            fixes.append({"raw": tok, "fixed": fixed})
             continue
         if "'" in low:
             # Possessives/contractions ("cat's", "dogs'") — the tail

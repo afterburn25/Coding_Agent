@@ -99,8 +99,3 @@ _VERIFICATION_RANK = {
 
 def verification_rank(method: str) -> int:
     return _VERIFICATION_RANK.get(method, 0)
-
-
-def is_promoted(state: str) -> bool:
-    """True when a record has reached evidence-backed standing."""
-    return state in (VERIFIED, TRUSTED)

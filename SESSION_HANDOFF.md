@@ -90,6 +90,26 @@ honest `error`/`done` + friendly message, malformed input → 400,
 malformed query int → 200 fallback. Suite: **3685 passed, 4 skipped,
 530 subtests**.
 
+Latest round (BUG-064..066, commits through `3ca4cbf8`):
+- **Persistence split-brain** — `reload_model_configuration` spawned a
+  second `ConversationMemory` on the same file whose snapshot-save
+  clobbered newly banked facts; reload now reuses the live store and
+  re-points the agent + hippocampus refs.
+- **Referent-scoped undo** — `undo that laptop change` used to revert
+  the newest journal row regardless of referent (reverted
+  `worker_ceiling` instead); now binds the named journal row or
+  restores the superseded memory fact on that slot, honest-misses
+  otherwise. Generic `undo that` still falls back to the journal.
+- **Dry-run undo hazard** — `would_answer` probes run
+  `respond(execute=False)`; `_scoped_undo` mutated during the probe so
+  the real pass reverted a different row (live: `Reverted — pulsar`
+  while quasar was supposed to be restored). Both branches now honor
+  `_execute`; `peek_revert_fact` gives dry-runs a read-only check.
+- Status-verb predicates (`pass/fail/ship/land`) bank declaratively —
+  `the tests pass on main` no longer falls to a model that riffs a
+  fake `Got it` ack (the truth-gate badge was correct output for a
+  model reply; the fix removes the fall-through).
+
 Still open: UI click-dogfood, voice/image/browser live workflows, soak,
 dead-code sweep, remaining audit parts (see BUG_LEDGER discovery queue).
 
@@ -4878,7 +4898,295 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   crashes, all return error strings. Permission matrix: NEVER_AUTO
   keys ⊆ PERMISSION_INFO, all builtin tool permissions resolve;
   `audio.*` synthesizes correctly via `_PREFIX_CATEGORY`.
+- long-150 seeded soak on latest code: **158 turns, 0 failures**.
+- Part 4 dead-code sweep (`cded208c`): 19 confirmed-unreferenced
+  symbols removed (orphan helpers, half-wired span mask/restore,
+  dead types); focused batteries green (148 + 429 + 142 tests).
 - Still open: UI click-dogfood (needs interactive browser), installer
-  cycle, dead-code deep sweep, external llama:8391 intermittent
-  disconnects (environment fragility — managed reaper covers managed
-  runtimes only).
+  cycle, external llama:8391 intermittent disconnects (environment
+  fragility — managed reaper covers managed runtimes only).
+
+### Round 11 — Surface audit closeout: POST fuzz + truth-gate recall + UI dead feature (HEAD 992a3cfa)
+
+- **BUG-021** (`69545986`): live POST-fuzz of all 134 literal routes
+  with empty bodies found 6 handlers leaking service-layer exceptions
+  as raw 500s (`conversations/feedback`, `image/backend/start`,
+  `model-growth/job`, `nexus-brain/initialize|unlock`, `policy/mode`).
+  All now map ValueError→400 / not-initialized→409 / missing-dep→503;
+  regression test covers all six plus a valid-path sanity.
+  Side-discovery: fuzz hit `/api/shutdown` — that's a legitimate
+  kill-switch, not a crash.
+- **BUG-022** (`4c3e01f3`, P0 false-success): Part-28 truth-gate audit —
+  `_EXECUTED_CLAIM_RE` had a recall hole: 18/20 adversarial probes
+  escaped. Every simple-past claim ("I ran the tests", "I updated the
+  file") slipped through, plus the everyday work verbs (created/wrote/
+  deleted/modified/edited/saved/made). Extended the same pattern class
+  with phrasal-verb guards ("ran into"/"checked out" excluded),
+  object-required guards for ambiguous verbs, `I've been X-ing`, and a
+  habitual/historical lookahead on passive claims. 24/24 recall, 0/13
+  false positives.
+- **BUG-023 → resolved as design**: `#nexusPresence` absence is
+  intentional — `test_topbar_has_no_duplicate_brand_or_presence`
+  documents the portrait was removed (duplicated brand lockup, broke
+  the topbar grid). avatar.js/CSS/`/api/nexus/avatar` remain as
+  documented foundation; the `if (!el) return` dormant load is
+  harmless. Initial re-add reverted.
+- **UI↔API consistency sweep**: all 317 fetch/api call sites resolve to
+  real routes (0 missing); all inline handlers defined; all 595 DOM ids
+  referenced exist (1 dead feature found → BUG-023); SSE subscriptions
+  all wired to real emitters.
+- Suite: canonical rerun **3709 passed, 4 skipped, 530 subtests**;
+  3 failures all dispositioned as environmental (isolated-instance
+  smoke `rag_api` timeout under suite load — passes in isolation;
+  `screen_hash_stable` — live screen content changes between captures;
+  Chatterbox worker 180s model-load timeout under load). One real
+  conflict: BUG-023's element re-add violated the intentional-removal
+  test → reverted.
+- **BUG-024** (`cf19e59f`, P1 secrets): corrupt master key → silent
+  re-key wiped the vault. Key write is atomic; corrupt-but-readable
+  keys quarantine (`InvalidToken`/bad-key → `needs_rekey`, never
+  regenerate over ciphertext).
+- **Tier-2 persistence** (`4cb1507b`, `496ebba2`): atomic writes for
+  image profiles + sidecars, runtime catalog metadata, research stats,
+  image-manager job output sidecars (library reads them).
+- **BUG-025** (`6260846`/`852588cb`, P1 learning): imperative questions
+  ("explain what a mutex is") were banked as facts — the ack swallowed
+  the real question. Subject-absorbing matchers gate on
+  `_ACTION_LEAD_RE`; compound turns bound facts to their first clause
+  (`_first_clause`) and the ack no longer short-circuits when a
+  second clause carries its own intent.
+- **BUG-026** (`2b7925ac`/`9b2674a2`, P1 chat lane): model exhaustion →
+  raw 500 + silently lost turn. `ModelUnavailableError` (ValueError
+  subclass w/ friendly+diagnostic contract); chat/SSE/queue lanes
+  record the degraded exchange + 503 `model_unavailable`.
+- **BUG-027** (`a8fa2663`, P1 autonomy): "the review cadence is weekly"
+  created a standing goal titled by a PREVIOUS turn. `_mission_command`
+  phrase-matches on the semantic frame's quote-masked text and requires
+  the trigger to modify the requested work; quoted imperatives and
+  reported intent can't trigger; non-referential scheduling requests
+  use their own message as objective. Plus `also` → discourse prefix,
+  `--` → fact clause boundary.
+- **BUG-028** (`fa59e4fb`, P0 runtime): boot orphan-sweep identified
+  processes by exe path — two installs share one llama binary, so each
+  could adopt/kill the other's live servers. Ownership is now a
+  persistent spawn registry (`spawned_pids.json`): only registered
+  pids still alive + running the recorded port/model are touched;
+  PID-reuse/foreign/stale records drop untouched. Live-verified:
+  booted with deployed's :8080/:8084 servers running — zero kills.
+- **BUG-029** (`88f6b67c`/`f907862d`, P1 truth gate): the
+  `⚠ Unverified action claims` notice lives verbatim in stored
+  assistant history → small models parroted it as their own sign-off,
+  and the echoed marker rode `main_content` into the transcript AND
+  Answer Memory (echo isn't a real claim → `unverified_claims` stayed
+  False → banked as trusted, live row `e88dc3cc086248f0`).
+  `_strip_unverified_notice` now removes the marker wherever content
+  becomes model-facing (both history-injection lanes) or gets persisted
+  (pre-scan on fresh model output). Detector tail: intransitive
+  progressive self-state ("I'm already running", "I'm working on it")
+  no longer badges — object-required lookahead. Live-verified clean.
+  NB: the 8391 "vanished server" mystery is resolved as our own
+  `release_managed_models_for_vram` balanced-policy eviction under
+  shared-GPU pressure — not a foreign kill.
+- **BUG-030** (P1 conversation memory / lane precedence): fact slots
+  split-brain — `my deploy tag is v10` and `deploy tag is v9` keyed
+  different slots (`my:<noun>` vs `<noun>:is`) → supersession skipped,
+  both live. `_slot_canonical` now unifies `my X`/`the X`/`X is` to one
+  slot at write AND read (`recall_facts`, `prompt_context`,
+  `active_facts` — latest wins, so pre-fix stores self-heal). Lane
+  precedence: stored-fact recall now beats the self-knowledge
+  capability card (`sk_reply` no longer short-circuits `recall_reply`)
+  — `"what's the deploy tag?"` returns v10, not the adapters blurb.
+  Referential update tails (`overwrite the old one`, `forget that`)
+  stay with the learning clause instead of kicking to a model refusal;
+  tails carrying a NEW value (`update it to v12`) still split as real
+  clauses. Live-verified: ack + recall both correct.
+- **BUG-031** (P2 recall precision): prohibition questions returned
+  wrong facts + "the never use port 3000" garble; ephemeral "stop
+  whatever you're doing" banked durable "Never whatever…" rules.
+  Subset-overlap drop + negation sentinel in recall_facts; imperative
+  facts skip the definite article; ephemeral cease-requests can't
+  bank. Junk live rule invalidated.
+- **BUG-032** (P1 corrections): "actually no, my editor is neovim"
+  banked "my favorite color is my editor is neovim" — stacked-marker
+  strip + bare-value copula guard + post-copula adverb strip. Live
+  store repaired; "what's my editor?" → "your editor is emacs".
+- **BUG-033** (P1 forget lane): `forget the staging port fact` missed
+  (trailing "fact" broke the probe) then fell to a down model → 503.
+  Trailing container-nouns strip; no-match forgets get a deterministic
+  honest miss reply; referential probes ("forget it") can't
+  substring-match the store.
+- **BUG-034** (P2 write gate): `?`-less questions ("y do ppl use rust")
+  and abortive markers ("nm that last thing") banked as facts via the
+  generic decl pattern. Subject reject set covers colloquial leads;
+  `nm` = nevermind across forget/correction/marker-strip with
+  abortive-vs-statement tail split.
+- **BUG-035** (P1 negation): `X is not Y, it's Z` banked verbatim;
+  `X isn't Y anymore` claimed "Updated" while the fact stayed live.
+  New negated-copula matcher: with Z → canonical `X is Z` supersession;
+  bare → unique-fact retraction into `forgotten` (honest ack).
+- **BUG-036** (P2 rules): `don't X` prohibitions had no lane (only
+  `don't X anymore`) — fell to a dead model → 503. Now banks `Never X`
+  with negation-of-positive + ephemeral guards; live-verified model-free.
+- Deterministic standing-goal/mission inventory lane added to
+  `_mission_command` — "what standing goals do you have?" answers from
+  the autonomy store with no model. Stale BUG-027-contaminated goal
+  disabled via API (SQLite DocStore is authoritative; JSON is shadow).
+- **BUG-037** (P1 autonomy): recurring schedule stacked one mission per
+  fire — 9 identical `waiting_approval` epistemic missions. Both spawn
+  paths (`_materialize_action` mission kind, `_spawn_goal_mission`) now
+  dedupe on live same-`source_id` missions; terminal rows never block
+  the next run. Live pileup drained: 15 stacked duplicates cancelled via
+  API (auditable), one instance kept. Regression test + live-verified.
+- **BUG-038** (P1 routing): `"what's running"` fell to the model which
+  hallucinated "nothing's running" mid-execution. Bare running-queries
+  now hit the deterministic inventory lane.
+- **BUG-039** (P1 regression, CI-flagged by the self-repair watcher):
+  the BUG-032 marker strip sent `"actually i prefer green now"` down the
+  `i prefer` fast-path, so it banked fresh instead of superseding
+  `favorite color`. Marker-prefixed preference restatements now retarget
+  the unique same-class fact first.
+- **BUG-040** (P1 corrections): `never mind` spelled-out wasn't a marker;
+  `it's 60` had no referential-update lane — model claimed updates that
+  never landed. `never\s*mind` + `it's X` retarget (literal-gated).
+- **BUG-041** (P2 API): non-UTF-8 bodies → raw UnicodeDecodeError.
+  `_body()` retries via cp1252.
+- **BUG-042** (P1 memory): `"remember that"` + quoted rule dropped the
+  learning request → 503. Quoted referent now feeds the pipeline.
+- **BUG-043** (P2 inspection): `what rules do you follow` had no lane →
+  503. `active_rules()` + `_RULES_RECALL_RE` list behavior_rules.
+- Also fixed: restored `tests/test_voice_polish.py` (854-line suite)
+  gutted by deployed-instance commit 84f3edeb — its stub imported
+  `agent.state` (exists nowhere) and broke all suite collection.
+- **Canonical suite: 3741 passed, 4 skipped, 530 subtests — all green.**
+- Ops note: backend launch args are `--workspace .dogfood --config
+  .dogfood/config.json --host 127.0.0.1 --port 8790 --server` — a
+  `--data-dir` restart attempt silently failed earlier this session and
+  left a stale-code process serving; verify the pid/CLI after restart.
+  Detached launches need PowerShell `Start-Process` — a `(… &)` subshell
+  dies with its parent.
+- Live store repaired across all of these (corrupt rows invalidated,
+  legacy split-brain slots consolidated, stale facts retracted).
+  Batteries: 135 + 579 + 149 autonomy green across conversation_growth,
+  netdiag, self_knowledge, semantic_frame, answer_memory, autonomy.
+- Still open: UI click-dogfood (needs interactive browser), installer
+  cycle execution, model-lane churn under shared-GPU contention
+  (environmental — balanced-policy eviction + deployed instance).
+
+### Round: BUG-044 runtime self-knowledge + BUG-045 referential renames
+- **BUG-044** (P1 self-knowledge): runtime questions answered from live
+  data via `_runtime` probe + `runtime_summary` env hook — model, disk,
+  VRAM, RAM all deterministic. Live: `qwen3-4b-instruct (external,
+  :8080); qwen3-4b-all (managed, :8391)`, `0.3 of 12 GB VRAM free`.
+- **BUG-045** (P1 memory + truth-gate): `actually the name changed — it
+  is now called vector` fabricated "Updated" with no write. Fixes:
+  referential rename lane (`it/name is now called|named X`, `renamed to
+  X`, `rename it to X`, `call(ing) it X`, `use X as the name` — all
+  retarget the latest fact; `now` required on called/named to keep
+  "it's called being careful" idiomatic); explicit-subject `the X is
+  now named Y` rewrites its own slot; declarative `is (now)
+  called|named|known as` canonicalizes predicate to `is` (slot shared
+  with plain restatements; naming predicates bypass the single-word
+  adjective gate); truth gate gained bare verb-initial claims
+  (`Updated —/:/, X`) → unverified_claims.
+- Live-verified: teach → rename → recall chain supersedes correctly for
+  all five rename phrasings; `call it apex` and `use mercury as the
+  name` both ack + persist.
+- Commits: `2f9583aa` (BUG-044) → `af4e8c79` → `171e3534` (BUG-045).
+- Canonical suite re-running on HEAD; focused batteries green (220).
+
+### Round tail: BUG-045 follow-ons + BUG-046 intent routing
+- BUG-045 follow-ons (live-verified): imperative renames `rename it to
+  X` / `call it X` / `use X as the name` retarget; `use X as the name`
+  previously inverted via `use A as B` into "X is the name";
+  `_retarget_latest_fact` gained `subject_hint` — "the render box is
+  now named titan" binds `render box name` instead of forking a
+  parallel `render box` slot; correction-marker context ("that's wrong
+  —") legitimizes `it's called X` without `now`.
+- **BUG-046** (P1 intent): `forget render box` → image-generation
+  reply. `render` double-counted as verb+visual-noun; visual evidence
+  must now be a distinct token, and memory/meta imperative heads veto
+  image classification.
+- Commits: `af4e8c79`, `171e3534`, `43b0a325`, `f4158440`, `263c49e4`.
+- Live-verified full rename matrix: teach → `it's now called` → `rename
+  it to` → `call it` → `use X as the name` → `the X is now named` →
+  `that's wrong — it's called` → recall, all persistent.
+- **BUG-047** (P1 memory): `not X, it's Y` fabricated acks (no lane);
+  value-matched via `_correct_fact_value` (the negated value names its
+  own fact — verified live: `no not cobalt, it's onyx` corrected the
+  cobalt row while `cache db` was newer). `and`-joined declaratives
+  split when every part is a complete statement.
+- Commit `7b2cb052` + `5214726a`. Live matrix all persistent.
+- **BUG-048** (P1 memory): `X moved to Y` minted parallel `uses` slots;
+  `, and <marker>` compounds banked verbatim; connector-less
+  `make/move X <literal>` had no lane. All retarget the entity slot.
+- Commits `73e3c94b`. Live: `the standup moved to 10:30` superseded the
+  9am fact; compound deadline+standup banked as two facts.
+
+### BUG-049..064 round (conversation memory convergence)
+- **BUG-049** negation banking + `did I tell you` recall (commit `befcd95d`-era).
+- **BUG-050** forgotten facts invalidate banked AM answers (`67d1ed44` chain).
+- **BUG-051** empty `my`-scoped probes answer honestly instead of 503.
+- **BUG-052** `what time is the X` wh-slot probes recall (`53307938`).
+- **BUG-053** `remind me` + `i changed my mind` corrections (`bd1454fb`).
+- **BUG-054/055** cadence statements are facts not goals; passive moves strip aux (`183f6f48`).
+- **BUG-056/057** negated-prep retractions + `i no longer use X` disuse lane (`dd1c490c`).
+- **BUG-058/059/060** spell-corrector name-mangling, AM lane-reply contamination, dotfile space collapse.
+- **BUG-061** `used to be A but now it's B` temporal supersession (`6af34111`).
+- **BUG-062** `my X changed to Y` mints `is`; spell short-token rule (letters must survive, anagrams = adjacent swap only — `priya`/`kanye` safe, `teh`/`chek`/`desrt` still fix); invokeai test de-flaked (`d0d6ea98`).
+- **BUG-063** `when do/does` recall lead + marker-led decl legitimize+retarget (`311566cb`).
+- **BUG-064** P0: acked-but-unbanked fact (`code freeze lifts`) — added `lifts/holds/begins/resumes` predicates; **split-brain store**: `reload_model_configuration` built a second ConversationMemory while `agent.brain.hippocampus` kept the stale instance → stale snapshot saves clobbered fresh rows. Reload now reuses the live store and re-points hippocampus handles. Generic `when do X run` status regex narrowed to generic subjects; precision gate is plural-tolerant with trailing-verb retry (`7c6cc9ee` + `6d88bdce`).
+- Canonical suite: **3764 passed, 4 skipped, 530 subtests** (mid-session run). All probes live-verified on latest.
+
+### BUG-065..072 round (scoped undo + truth-gate + spelling magnets)
+- **BUG-065** `undo that <X> change` binds the named referent — journal subject match first, else `ConversationMemory.revert_fact()` restores the superseded row; unmatched referents get an honest miss, never a blind latest-row revert. Status-verb family (`pass/fail/ship/land`) banks declaratively (`c2c2c307`).
+- **BUG-066** P0: `respond(execute=False)` dry-run (the `would_answer` no-model probe) ran `_scoped_undo` for real — probe restored quasar, real call then reverted *again* to pulsar. Journal + memory branches are now read-only under dry run (`3ca4cbf8`).
+- **BUG-067** named referent beats session `last_executed` undo (`revert the printer change` no longer reverts `worker_ceiling`) (`a7e7617a`).
+- **BUG-068** loose referential forms (`undo the correction to the editor`) scope on entity terms; `is now/currently/just X` strips leading adverbs (`a9da7507` + `8ef2b5a8` — `undo the last change` stopword reduction).
+- **BUG-069** recall retry only drops trailing *verb* tokens — `what color is the sky` can no longer hijack `favorite color` (`52f31235`).
+- **BUG-070/072** spelling normalizer name-mangling: boundary appends (`vega`→`vegas`) blocked; off-skeleton candidates (`boson`→`boston`, `fermion`→`version`) need a ≥4-char shared prefix — **context presence deliberately does NOT legitimate** (a corrupted value in history self-perpetuated the fix) (`ff17678b` + `3207c7e7`).
+- **BUG-071** `put/switch/take/move <X> back` + `roll back the <X>` feed the scoped resolver; pronoun/quantifier captures stay generic (`3a839788`).
+- Canonical suite on `52f31235`: **3752 passed, 4 skipped, 530 subtests** all green. Scoped undo live-verified end-to-end incl. across restart (memory-fact restore with no journal row) and repeated toggles (falcon↔orion, dart↔wisp).
+- **Watch**: deterministic undo replies still get Answer-Memory repeat wrappers (`Unchanged from last time — Reverted …`) — cosmetic only; state verified correct via store. If a mutating turn ever replays a *stale* reply instead of executing, that's a P0 — re-check if seen.
+
+### Ops notes
+- Kill backend by LISTENING PORT only — a filter containing 'localcodeagent' self-kills the powershell; `Start-Process` detaches fine.
+- Live dogfood store: `.dogfood/.dogfood/runtime/data/conversation_memory.json` (nested — workspace `.dogfood` + config-relative path).
+- Answer Memory: `.dogfood/data/nexus_brain/answer_memory.db` (SQLite, `answers` table).
+
+### BUG-073..079 round (hearsay, AM gates, temporal facts, naming)
+- **BUG-073** reported speech (`i heard…`, `someone said…`, `they say…`)
+  acks deterministically as *unverified*, never banks (`242a11ef`).
+- **BUG-075** `scratch that, <stmt>` correction marker; ack-shaped AM
+  poison gate at learn + lookup self-heal; `rotates` predicate (`4ec7f196`).
+- **BUG-076** P0: AM hit-replay gated on speech act — conditional/command
+  turns (`if the build fails, ping me`) never replay cached answers;
+  `i thought X was A but it was B` belief-correction lane banks the true
+  value (`50668afd` era).
+- **BUG-077** standalone `was`/`were` declaratives bank as historical
+  facts; recall demotes them under a live `is`/`are` same-subject row.
+- **BUG-078** `call/name/dub <thing> <name>` naming lane (pronoun
+  referents retarget, idioms/phone-calls excluded); `called|named|known`
+  are slot-filler in the recall precision gate (`70407019`).
+- **BUG-079** P0: prefix-hint retargets onto *more qualified* subjects
+  (`deploy` ⊂ `deploy region`) now require value-type compatibility —
+  `fyi the deploy is at noon tomorrow` no longer clobbers a region slot;
+  `don't forget <declarative>` learns the tail (`698bd796`).
+- **Merge-damage repair** (`0aaa0c21`): commit `2987f187` pushed by the
+  deployed instance had server.py's stdlib header replaced by a 9-line
+  repair-worktree stub + dangling `>>>>>>>` marker — module wouldn't
+  import. Restored byte-identical to `50668afd`. **Root cause worth
+  following up**: a `repair-worktrees/ri-41109fbe50/
+  epistemic_step_diagnosis.py` artifact apparently overwrote the deployed
+  instance's own server.py — an autonomous repair wrote to the wrong
+  path. If that instance restarts before pulling `0aaa0c21`, it will
+  fail the same way.
+- Batteries: 262 + 66 green. Live-verified: naming, `called` probes,
+  don't-forget learn, deploy/region isolation.
+
+### Watch items
+- Complaint turns (`the api times out after 30 seconds`) stall ~180s
+  when the shared GPU leaves <1GB free for llama load — expected churn,
+  but a complaint should arguably get a deterministic empathize+
+  evidence-capture ack instead of blocking on the model.
+- The deployed instance (:56071) self-corrupted server.py once — audit
+  which repair/self-edit lane can write outside its worktree.

@@ -111,6 +111,25 @@ class TestNormalizeUserText(unittest.TestCase):
         self.assertIn("invokeai", out)
         self.assertIn("comfyui", out)
 
+    def test_short_proper_nouns_never_relettered(self):
+        # BUG-062 — interior drops and multi-position anagrams on short
+        # unknown tokens are name-mangling, not typo repair.
+        for text, keep in (
+                ("the oncall is priya", "priya"),
+                ("call kanye tonight", "kanye"),
+                ("i stopped using jira", "jira"),
+                ("deploy to onyx", "onyx")):
+            out = self.norm(text)
+            self.assertIn(keep, out)
+
+    def test_short_insertions_and_swaps_still_fix(self):
+        # The conservative short-token rule must not block the classic
+        # fixes: dropped letters and adjacent transpositions.
+        self.assertIn("check", self.norm("chek github"))
+        self.assertIn("the", self.norm("teh end"))
+        self.assertIn("desert",
+                      self.norm("want some desrt", ctx={"desert", "sand"}))
+
     # --- real words that stay -------------------------------------------------
     def test_dose_of_medicine_kept(self):
         out = self.norm("take a dose twice a day")
@@ -156,6 +175,59 @@ class TestNormalizeUserText(unittest.TestCase):
         self.assertEqual(
             self.norm("actually the deadlien was friday not monday"),
             "actually the deadline was friday not monday")
+
+    def test_leading_deletion_never_a_fix(self):
+        """'jira' -> 'ira' corrupted a tool name live. A candidate that
+        is the token minus its first or last char assumes a stray
+        letter — proper nouns and brands die to it."""
+        for sent in (
+            "i stopped using jira",
+            "i use jira for work",
+            "the kanye album",
+            "we deploy on kubernetes",   # 'kubernetes' minus 's' ->
+                                        # 'kubernete' must not win
+        ):
+            self.assertEqual(self.norm(sent), sent, sent)
+
+    def test_boundary_append_never_a_fix(self):
+        """'vega' -> 'vegas' corrupted a named monitor live. A candidate
+        that is the token plus one edge character assumes the user
+        dropped a boundary letter — names die to it. Mid-word letter
+        drops ('desrt'->'desert') still fix."""
+        for sent in (
+            "my monitor is named vega",
+            "the project is vega",
+            "meet me at the vega diner",
+        ):
+            self.assertEqual(self.norm(sent), sent, sent)
+
+    def test_skeleton_mismatch_never_a_silent_fix(self):
+        """'boson' -> 'boston' and 'fermion' -> 'version' corrupted
+        names live — a candidate that doesn't share the token's
+        phonetic skeleton is a different word, not the same word
+        mistyped. Only context or a long shared prefix legitimizes it
+        ('fettucini' -> 'fettuccine' keeps 'fettu')."""
+        for sent in (
+            "my headphones are named boson",
+            "actually the headphones are fermion",
+            "the particle is a boson",
+            "the fermion condensate",
+        ):
+            self.assertEqual(self.norm(sent), sent, sent)
+        self.assertIn("fettuccine", self.norm("how do I make fettucini"))
+
+    def test_unknown_compounds_are_real_words(self):
+        """'standup' -> 'standout'/'stands' corrupted a meeting name
+        live. A lexicon-unknown token that splits into two real words
+        is a compound, not a typo — but the shield yields to a
+        decisive same-skeleton one-edit fix ('chiken'->'chicken')."""
+        for sent in (
+            "the standup moves to fridays",
+            "the dropoff is at noon",
+            "mornin all",
+        ):
+            self.assertEqual(self.norm(sent), sent, sent)
+        self.assertIn("chicken", self.norm("chiken alfredo"))
 
     def test_dictionary_words_never_mangled(self):
         """The protective dictionary (SCOWL-60 + proper names) shields

@@ -17,7 +17,13 @@ from pathlib import Path
 from .fsutil import atomic_write_text
 from typing import Any
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
+
+
+class SecretsKeyCorrupt(RuntimeError):
+    """The master key file existed but could not be decoded — quarantined
+    for recovery; reads degrade to empty while writes fail loudly so a
+    fresh key never overwrites irreplaceable ciphertext."""
 
 
 class SecretVault:
@@ -35,6 +41,7 @@ class SecretVault:
         self.key_path = self.path.with_name(self.path.stem + ".key")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._key_error: SecretsKeyCorrupt | None = None
         self._store: dict[str, dict[str, Any]] = {}
         self._load()
 
@@ -108,26 +115,49 @@ class SecretVault:
             text = self.key_path.read_text().strip()
         except OSError:
             return None
-        if text.startswith("dpapi:"):
-            raw = base64.b64decode(text[6:])
-            key = self._dpapi_unprotect(raw)
-            return key
-        return text.encode("ascii")
+        try:
+            if text.startswith("dpapi:"):
+                raw = base64.b64decode(text[6:])
+                key = self._dpapi_unprotect(raw)
+                if key is None:
+                    raise ValueError("dpapi key unwrap failed")
+                return key
+            if len(base64.urlsafe_b64decode(text.encode("ascii"))) != 32:
+                raise ValueError("fernet key is not 32 bytes")
+            return text.encode("ascii")
+        except (ValueError, TypeError, UnicodeError) as exc:
+            # A corrupt key must never be regenerated over — re-keying
+            # would destroy every stored secret. Quarantine the evidence
+            # (same convention as StateDB) and mark the vault degraded:
+            # reads return empty, writes raise SecretsKeyCorrupt.
+            self._key_error = SecretsKeyCorrupt(
+                f"secrets key is corrupt ({exc}); file quarantined to "
+                f"{self.key_path.name}.corrupt")
+            try:
+                self.key_path.replace(
+                    self.key_path.with_name(self.key_path.name + ".corrupt"))
+            except OSError:
+                pass
+            return None
 
     def _write_key(self, key: bytes) -> None:
         protected = self._dpapi_protect(key)
         if protected is not None:
-            self.key_path.write_text(
+            atomic_write_text(self.key_path,
                 "dpapi:" + base64.b64encode(protected).decode("ascii"))
         else:
-            self.key_path.write_text(key.decode("ascii"))
+            atomic_write_text(self.key_path, key.decode("ascii"))
         try:
             os.chmod(self.key_path, 0o600)
         except OSError:
             pass
 
     def _fernet(self) -> Fernet:
+        if self._key_error is not None:
+            raise self._key_error
         key = self._read_key()
+        if self._key_error is not None:
+            raise self._key_error
         if key is not None:
             return Fernet(key)
         key = Fernet.generate_key()
@@ -143,7 +173,8 @@ class SecretVault:
             payload = json.loads(plaintext.decode("utf-8"))
             if isinstance(payload, dict):
                 self._store = {str(k): dict(v) for k, v in payload.get("secrets", {}).items() if isinstance(v, dict)}
-        except (OSError, ValueError, KeyError):
+        except (OSError, ValueError, KeyError, SecretsKeyCorrupt,
+                InvalidToken):
             self._store = {}
 
     def _save(self) -> None:

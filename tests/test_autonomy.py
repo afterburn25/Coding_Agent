@@ -2033,6 +2033,27 @@ class TriggerTests(unittest.TestCase):
             self.assertEqual(sup.missions.list(), [])
             sup.stop()
 
+    def test_spawned_missions_dedupe_while_pending(self):
+        """A schedule/trigger firing hourly must not stack identical
+        pending missions — the second fire returns the live one; after
+        the live mission goes terminal the next fire spawns fresh."""
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            sup.triggers.add("auto", "schedule_due",
+                             debounce_s=0,
+                             action={"kind": "mission",
+                                     "objective": "epistemic sweep"})
+            sup.triggers.fire("schedule_due", {})
+            sup.triggers.fire("schedule_due", {})
+            sup.triggers.fire("schedule_due", {})
+            missions = sup.missions.list()
+            self.assertEqual(len(missions), 1)
+            sup.missions.transition(missions[0]["id"], "cancelled")
+            sup.triggers.fire("schedule_due", {})
+            missions = sup.missions.list()
+            self.assertEqual(len(missions), 2)
+            sup.stop()
+
 
 class EvaluatorTests(unittest.TestCase):
     def test_incomplete_while_open(self):

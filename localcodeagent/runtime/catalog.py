@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from ..fsutil import atomic_write_text
+
 
 @dataclass(frozen=True, slots=True)
 class CodingModelAsset:
@@ -193,7 +195,7 @@ class CodingModelCatalogManager:
         return [self.status(item) for item in CODING_MODEL_CATALOG]
 
     def _write_metadata(self, asset: CodingModelAsset) -> None:
-        self._metadata_path(asset).write_text(json.dumps({"catalog_id": asset.id, "filename": asset.filename, "sha256": asset.sha256, "size_bytes": asset.size_bytes, "verified_at": time.time(), "source_repo": asset.source_repo}, indent=2) + "\n", encoding="utf-8")
+        atomic_write_text(self._metadata_path(asset), json.dumps({"catalog_id": asset.id, "filename": asset.filename, "sha256": asset.sha256, "size_bytes": asset.size_bytes, "verified_at": time.time(), "source_repo": asset.source_repo}, indent=2) + "\n", encoding="utf-8")
 
     def verify(self, catalog_id: str, deep_hash: bool = True) -> dict[str, Any]:
         asset = self.asset(catalog_id)

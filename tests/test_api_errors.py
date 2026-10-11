@@ -108,6 +108,77 @@ class TestApiErrors(unittest.TestCase):
         finally:
             self.state.decisions.list = orig
 
+    def test_chat_model_unavailable_is_503_not_500_and_records(self):
+        # BUG-026 — when every enabled runtime fails, the chat lane must
+        # degrade honestly (503 + friendly text + code), not leak a raw
+        # 500 while the user's turn vanishes from history.
+        from localcodeagent.models.router import ModelUnavailableError
+        orig_run = self.state.agent.run
+        orig_ready = self.state.runtime.readiness
+        try:
+            def boom(*_a, **_k):
+                raise ModelUnavailableError(
+                    "No enabled model remains after excluding failed candidates")
+            self.state.agent.run = boom
+            self.state.runtime.readiness = (
+                lambda **_: {"ready_to_code": True})
+            code, raw = self._post("/api/chat", {"message": "ping the model"})
+            self.assertEqual(code, 503, raw)
+            payload = json.loads(raw)
+            self.assertEqual(payload.get("code"), "model_unavailable")
+            self.assertTrue(payload.get("degraded"))
+            self.assertIn("couldn't reach", payload["content"])
+            # The exchange is recorded — the turn is not lost.
+            msgs = self.state.conversation_manager.active().get("messages", [])
+            self.assertGreaterEqual(len(msgs), 2)
+            self.assertEqual(msgs[-1]["role"], "assistant")
+            self.assertIn("couldn't reach", msgs[-1]["content"])
+            self.assertEqual(msgs[-2]["role"], "user")
+            self.assertEqual(msgs[-2]["content"], "ping the model")
+        finally:
+            self.state.agent.run = orig_run
+            self.state.runtime.readiness = orig_ready
+
+    def test_statement_cadence_does_not_create_standing_goal(self):
+        # BUG-027 — "the review cadence is weekly" is a statement, not a
+        # scheduling imperative. Autonomy triggers must come from the
+        # user's own request-shaped words, not substring matches.
+        goals = self.state.autonomy.store.standing_goals.data["goals"]
+        before = len(goals)
+        try:
+            code, raw = self._post(
+                "/api/chat",
+                {"message": "the review cadence is weekly — also, "
+                            "what is a hash map?"})
+            payload = json.loads(raw)
+            self.assertNotIn("Standing goal",
+                             str(payload.get("content") or ""))
+            self.assertEqual(len(goals), before)
+        finally:
+            del goals[before:]
+
+    def test_reported_intent_does_not_create_mission(self):
+        # BUG-027 tail — "she told me to keep working on this" reports
+        # someone else's request; the embedded imperative phrase must
+        # not spawn a mission. Mission creation is reserved for
+        # phrases that lead the user's own clause.
+        store = self.state.autonomy.store
+        missions = getattr(store, "missions", None)
+        rows = missions.data.get("missions", []) if missions else []
+        before = len(rows)
+        try:
+            code, raw = self._post(
+                "/api/chat",
+                {"message": "she told me to keep working on this"})
+            payload = json.loads(raw)
+            self.assertNotIn("Mission created",
+                             str(payload.get("content") or ""))
+            if missions:
+                self.assertEqual(len(rows), before)
+        finally:
+            if missions:
+                del rows[before:]
+
     def test_patch_outside_profiles_is_405(self):
         code, raw = self._raw("/api/decisions", b"{}", method="PATCH")
         self.assertEqual(code, 405)
@@ -174,6 +245,32 @@ class TestApiErrors(unittest.TestCase):
         code, _ = self._post("/api/assumptions/state",
                              {"id": "asm-nope", "state": "verified"})
         self.assertEqual(code, 404)
+
+    def test_service_errors_map_to_4xx_not_500(self):
+        # Live POST-fuzz found these handlers leaking service-layer
+        # ValueError/RuntimeError as raw 500s on an empty body.
+        code, raw = self._post("/api/conversations/feedback", {})
+        self.assertEqual(code, 400, raw)
+        self.assertIn("rating", raw.decode())
+
+        code, raw = self._post("/api/policy/mode", {})
+        self.assertEqual(code, 400, raw)
+        code, raw = self._post("/api/policy/mode", {"mode": "balanced"})
+        self.assertEqual(code, 200, raw)
+
+        code, raw = self._post("/api/nexus-brain/initialize", {})
+        self.assertEqual(code, 400, raw)
+
+        code, raw = self._post("/api/nexus-brain/unlock", {})
+        self.assertIn(code, (400, 409), raw)
+
+        code, raw = self._post("/api/model-growth/job", {})
+        self.assertEqual(code, 400, raw)
+
+        # ComfyUI absent in test env: must be a clean dependency error
+        # (503) or unknown-backend 400 — never a raw 500.
+        code, raw = self._post("/api/image/backend/start", {})
+        self.assertIn(code, (400, 503), raw)
 
 
 if __name__ == "__main__":
