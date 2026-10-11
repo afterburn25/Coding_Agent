@@ -1242,6 +1242,28 @@ class ConversationMemory:
             raw, flags=re.IGNORECASE)
         if forget_match:
             forget_body = forget_match.group(1).strip()
+            # Discourse wrappers name the topic indirectly — 'forget
+            # what I told you about the port' wants 'the port'
+            # forgotten, not a fact literally containing 'what I told
+            # you about'. Strip the frame so the matcher sees the
+            # referent, not the wrapper.
+            forget_body = re.sub(
+                r"^(?:what\s+i\s+(?:told|said|mentioned|shared)\s+"
+                r"(?:you\s+)?(?:about\s+)?|"
+                r"the\s+(?:thing|stuff|part|bit)\s+(?:i\s+(?:told|"
+                r"said|mentioned|shared)\s+(?:you\s+)?)?about\s+|"
+                r"everything\s+i\s+(?:told|said|mentioned)\s+"
+                r"(?:you\s+)?about\s+)",
+                "", forget_body, flags=re.IGNORECASE).strip()
+            if not forget_body:
+                return result
+            # A bare deictic ('forget that') names nothing to match —
+            # ask for the referent instead of searching for 'that'.
+            if forget_body.lower().rstrip(".!?") in {
+                    "that", "it", "this", "those", "them"}:
+                result.setdefault("clarify", []).append(
+                    "Forget what, exactly?")
+                return result
             # "nm, my editor is vim" — an abortive marker followed by a
             # fresh statement is a correction, not a forget: the tail
             # re-enters the learning pipeline. True forget verbs keep
