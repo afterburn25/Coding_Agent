@@ -1622,6 +1622,20 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("don't have any active reminders",
                           r.content)
 
+            # 'anymore'/'again'/'any more' are adverbs, not topic —
+            # 'don't remind me about X anymore' must scope to X;
+            # live it captured 'the cat anymore' and missed the row.
+            agent._reminder_reply(
+                "turn reminders back on",
+                "turn reminders back on", task.id)
+            r = agent._reminder_reply(
+                "don't remind me about the stretching anymore",
+                "don't remind me about the stretching anymore",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("off", r.content)
+            self.assertFalse(row["enabled"])
+
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of
         # 10 active rules with no indication the set was truncated —

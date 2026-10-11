@@ -3631,9 +3631,10 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:don'?t|do\s+not|stop|quit|never)\s+"
         r"(?:remind(?:ing)?|alert(?:ing)?|notify(?:ing)?|"
-        r"ping(?:ing)?|wak(?:e|ing))\s+me\b"
-        r"(?:\s+(?:to|about)\s+(?P<topic>.+?)|"
-        r"\s+(?:anymore|again|any\s+more|any\s+longer))?\s*[.!?]?\s*$"
+        r"ping(?:ing)?|wak(?:e|ing))\s+me\b(?:\s+up\b)?"
+        r"(?:\s+(?:to|about)\s+(?P<topic>.+?))?"
+        r"(?:\s+(?:anymore|again|any\s+more|any\s+longer))?"
+        r"\s*[.!?]?\s*$"
         r"|^\s*(?:no\s+more|enough\s+(?:of|with))\s+"
         r"(?:the\s+)?reminders?\s*[.!?]?\s*$",
         re.IGNORECASE)
