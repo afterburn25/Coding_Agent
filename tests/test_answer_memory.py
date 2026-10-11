@@ -18,6 +18,7 @@ from localcodeagent.answer_memory import feedback, invalidation, ttl, validation
 from localcodeagent.answer_memory.embeddings import embedder
 from localcodeagent.answer_memory.normalization import normalize_question
 from localcodeagent.answer_memory.service import AnswerMemory as _AM
+from localcodeagent.answer_memory.store import AnswerMemoryStore
 from localcodeagent.agent.orchestrator import AgentOrchestrator
 from localcodeagent.config import AgentConfig, ModelProfile
 from localcodeagent.models.provider import ProviderResponse
@@ -788,6 +789,41 @@ class AdminTests(unittest.TestCase):
             self.assertTrue(am.store.corrupt_quarantine)
             self.assertTrue(Path(am.store.corrupt_quarantine).exists())
             am.store.close()
+
+    def test_clean_open_defers_integrity_check(self):
+        # quick_check(1) scans every index (~15s on a real store) — it
+        # stalled app boot past the port bind. On a clean close the check
+        # must move to a background pass, never the _open path.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            path = Path(td) / "am.db"
+            am = _mem(td)
+            am.store.close()
+            scheduled = []
+            orig = AnswerMemoryStore._schedule_integrity_check
+            AnswerMemoryStore._schedule_integrity_check = (
+                lambda self: scheduled.append(self))
+            try:
+                am2 = _mem(td)
+                am2.store.close()
+            finally:
+                AnswerMemoryStore._schedule_integrity_check = orig
+            self.assertTrue(scheduled)
+
+    def test_corrupt_pending_marker_quarantines_on_open(self):
+        # A background check that finds corruption writes
+        # `.corrupt-pending`; the next _open must quarantine the file.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            path = Path(td) / "am.db"
+            am = _mem(td)
+            am.store.close()
+            marker = path.with_name(path.name + ".corrupt-pending")
+            marker.touch()
+            am2 = _mem(td)
+            try:
+                self.assertTrue(am2.store.corrupt_quarantine)
+                self.assertFalse(marker.exists())
+            finally:
+                am2.store.close()
 
     def test_disabled_service_degrades_gracefully(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
