@@ -1311,6 +1311,39 @@ class TruthGateTests(RecoveryLoopTests):
                 "snooze the nonexistent reminder", task.id)
             self.assertIn("don't see a reminder", r.content)
 
+            # Reschedule updates the row in place — 'to friday at
+            # 3pm' lands as a real spec, not a new schedule.
+            r = agent._reminder_reply(
+                "reschedule the build reminder to friday at 3pm",
+                "reschedule the build reminder to friday at 3pm",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Rescheduled", r.content)
+            self.assertEqual(build_row["kind"], "once")
+            lt = time.localtime(build_row["at"])
+            self.assertEqual((lt.tm_hour, lt.tm_min), (15, 0))
+            self.assertEqual(lt.tm_wday, 4)
+
+            # Worded durations and synonym leads schedule for real.
+            n0 = len(sup.scheduler.rows)
+            r = agent._reminder_reply(
+                "wake me up in an hour to catch the flight",
+                "wake me up in an hour to catch the flight", task.id)
+            self.assertIsNotNone(r)
+            row = sup.scheduler.rows[-1]
+            self.assertGreaterEqual(row["at"], time.time() + 3500)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+
+            # Re-reminding the same task moves the row — duplicate
+            # schedules make 'say which' lists unusable.
+            r = agent._reminder_reply(
+                "remind me tomorrow at 8am to check the build",
+                "remind me tomorrow at 8am to check the build",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Moved", r.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of
         # 10 active rules with no indication the set was truncated —
