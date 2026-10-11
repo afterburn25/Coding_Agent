@@ -149,6 +149,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     t = " ".join(str(when or "").lower().split())
     if not t:
         return None
+    t = re.sub(r"\bat\s+noon\b", "at 12:00 pm", t)
+    t = re.sub(r"\bat\s+midnight\b", "at 12:00 am", t)
 
     def _meridian(hour: int, mer: str | None) -> int:
         mer = re.sub(r"[\s.]", "", mer or "")
@@ -198,7 +200,7 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 "minute": int(mn or 0)}
     # 'every weekday/weekend [at T]' — multi-day weekly cadence.
     m = re.fullmatch(
-        r"every\s+(weekdays?|weekends?)" + clock_tail, t)
+        r"(?:every\s+|on\s+)?(weekdays?|weekends?)" + clock_tail, t)
     if m:
         days = ([0, 1, 2, 3, 4] if m.group(1).startswith("weekday")
                 else [5, 6])
@@ -206,9 +208,19 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         return {"kind": "weekly", "weekday": days,
                 "hour": _meridian(int(hr), mer) if hr else 9,
                 "minute": int(mn or 0)}
-    # 'every <weekday> [at T]' — weekly cadence.
+    # Bare plurals — 'remind me fridays' recurs; the singular
+    # 'friday' stays a one-shot handled by parse_reminder_when.
+    m = re.fullmatch(r"(\w+day)s\b" + clock_tail, t)
+    if m:
+        wd = _WEEKDAY_NAMES.get(m.group(1))
+        if wd is not None:
+            hr, mn, mer = m.group(2), m.group(3), m.group(4)
+            return {"kind": "weekly", "weekday": wd,
+                    "hour": _meridian(int(hr), mer) if hr else 9,
+                    "minute": int(mn or 0)}
+    # 'every <weekday> [at T]' / 'on fridays [at T]' — weekly cadence.
     m = re.fullmatch(
-        r"every\s+(\w+?)" + clock_tail, t)
+        r"(?:every|on)\s+(\w+?)s?" + clock_tail, t)
     if m:
         wd = _WEEKDAY_NAMES.get(m.group(1))
         if wd is not None:
