@@ -1,0 +1,146 @@
+## model selected qwen3-14b primary_coder
+## model activation_fallback qwen3-8b light_coder
+## task running/planning
+## task running/working
+## perf qwen3-8b 49.98 tok/s
+$ git_status .
+· git_status ok
+## perf qwen3-8b 49.47 tok/s
+$ read_file epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 47.03 tok/s
+$ read_file test_fix_verification.py
+· read_file ok
+## perf qwen3-8b 45.06 tok/s
+$ read_file test_reproduction_fixed.py
+· read_file ok
+## perf qwen3-8b 43.83 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 39.33 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-8b 35.07 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 34.58 tok/s
+$ list_files .
+· list_files ok
+## perf qwen3-8b 33.5 tok/s
+$ read_file test_reproduction_fixed.py
+· read_file ok
+## perf qwen3-8b 33.12 tok/s
+$ read_file test_reproduction.py
+· read_file ok
+## perf qwen3-8b 31.94 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 31.5 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 31.36 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 31.13 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 30.96 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 30.84 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 30.68 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 30.5 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 30.23 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 30.0 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 29.89 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 29.72 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 29.53 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 29.43 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 29.31 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 29.18 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 28.87 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 28.76 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 28.66 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 28.54 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 28.22 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 28.15 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 27.96 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 27.83 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 27.68 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 27.5 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 27.34 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 27.19 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 27.07 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 26.9 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 26.61 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 26.59 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 26.47 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 26.32 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 26.2 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 25.83 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 25.89 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 25.77 tok/s

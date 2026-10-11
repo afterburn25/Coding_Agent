@@ -1,0 +1,179 @@
+## model selected qwen3-14b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-14b 20.92 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 19.85 tok/s
+$ read_file repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/tests/test_selftest.py
+· read_file failed
+## perf qwen3-14b 20.89 tok/s
+$ read_file repair-worktrees/ri-07fb1d092c/tests/test_selftest.py
+· read_file failed
+## perf qwen3-14b 20.09 tok/s
+$ read_file repair-worktrees/ri-0a4fc727af/tests/test_selftest.py
+· read_file failed
+## perf qwen3-14b 19.77 tok/s
+$ read_file repair-worktrees/ri-1268972786/tests/test_selftest.py
+· read_file failed
+## perf qwen3-14b 20.49 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.43 tok/s
+$ read_file repair-worktrees/ri-44704702b5/tests/test_selftest.py
+· read_file failed
+## perf qwen3-14b 2.48 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.54 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.41 tok/s
+$ read_file tests/test_selftest.py
+· read_file ok
+## perf qwen3-14b 2.44 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.21 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.12 tok/s
+$ read_file localcodeagent/selftest.py
+· read_file ok
+## perf qwen3-14b 2.13 tok/s
+$ read_file localcodeagent/selftest.py
+· read_file ok
+## perf qwen3-14b 2.12 tok/s
+$ search_text
+· search_text ok
+## model context_trim qwen3-14b
+## perf qwen3-14b 2.39 tok/s
+$ read_file localcodeagent/selftest.py
+· read_file ok
+## perf qwen3-14b 2.68 tok/s
+$ read_file localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 2.71 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.77 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.79 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.76 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.72 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 2.7 tok/s
+$ write_file repair-worktrees/ri-44704702b5/epistemic_step_diagnosis.py
+· write_file ok
+## perf qwen3-14b 2.74 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.73 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.57 tok/s
+$ read_file tests/test_selftest.py
+· read_file ok
+## perf qwen3-14b 2.54 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.57 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.26 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.27 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.33 tok/s
+$ read_file localcodeagent/selftest.py
+· read_file ok
+## perf qwen3-14b 1.72 tok/s
+$ read_file localcodeagent/selftest.py
+· read_file ok
+## perf qwen3-14b 2.2 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.12 tok/s
+$ write_file repair-worktrees/ri-44704702b5/localcodeagent/selftest.py
+· write_file ok
+## perf qwen3-14b 2.29 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.16 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.11 tok/s
+$ write_file repair-worktrees/ri-44704702b5/localcodeagent/selftest.py
+· write_file ok
+## perf qwen3-14b 2.1 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 1.94 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.04 tok/s
+$ write_file repair-worktrees/ri-44704702b5/tests/test_selftest.py
+· write_file ok
+## perf qwen3-14b 2.15 tok/s
+$ run_shell pytest tests/test_selftest.py --capture=no
+'pytest' is not recognized as an internal or external command,
+operable program or batch file.
+· run_shell failed
+## perf qwen3-14b 3.19 tok/s
+$ run_shell pip install pytest
+Defaulting to user installation because normal site-packages is not writeable
+Requirement already satisfied: pytest in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (9.1.1)
+Requirement already satisfied: colorama>=0.4 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (0.4.6)
+Requirement already satisfied: iniconfig>=1.0.1 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (2.3.0)
+Requirement already satisfied: packaging>=22 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (26.3)
+Requirement already satisfied: pluggy<2,>=1.5 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (1.6.0)
+Requirement already satisfied: pygments>=2.7.2 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (2.21.0)
+· run_shell ok
+## perf qwen3-14b 3.61 tok/s
+$ run_shell pytest tests/test_selftest.py --capture=no
+'pytest' is not recognized as an internal or external command,
+operable program or batch file.
+· run_shell failed
+## perf qwen3-14b 4.03 tok/s
+$ run_shell python -m pytest tests/test_selftest.py --capture=no
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+___ ERROR collecting repair-worktrees/ri-44704702b5/tests/test_selftest.py ____
+ImportError while importing test module 'D:\Nexus_Core\Source\repair-worktrees\ri-44704702b5\tests\test_selftest.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_selftest.py:2: in <module>
+    from localcodeagent.selftest import validate_self_update, is_chat_nexus_tree
+E   ImportError: cannot import name 'is_chat_nexus_tree' from 'localcodeagent.selftest' (D:\Nexus_Core\Source\repair-worktrees\ri-44704702b5\localcodeagent\selftest.py)
+=========================== short test summary info ===========================
+ERROR tests\test_selftest.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 1.24s ===============================
+· run_shell failed
+## perf qwen3-14b 4.61 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 5.18 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 5.36 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 5.6 tok/s

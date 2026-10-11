@@ -1,0 +1,875 @@
+## model selected qwen3-14b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-14b 11.1 tok/s
+$ find_tools
+· find_tools ok
+## perf qwen3-14b 11.25 tok/s
+$ find_tools
+· find_tools ok
+## perf qwen3-14b 10.49 tok/s
+$ find_tools
+· find_tools ok
+## perf qwen3-14b 9.39 tok/s
+$ run_shell git log -n 3 --grep='test_capacity_reduction_speaks_once_per_level'
+· run_shell ok
+## perf qwen3-14b 9.09 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 7.24 tok/s
+$ read_file tests\test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 6.91 tok/s
+$ run_shell git diff --cached tests/test_voice_polish.py
+· run_shell ok
+## perf qwen3-14b 6.8 tok/s
+$ run_shell git diff tests/test_voice_polish.py
+· run_shell ok
+## perf qwen3-14b 6.61 tok/s
+$ run_shell git log -n 1 --pretty=format:%B tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 6.47 tok/s
+$ run_shell git diff --name-only
+· run_shell ok
+## perf qwen3-14b 6.39 tok/s
+$ run_shell git status --porcelain
+· run_shell ok
+## perf qwen3-14b 6.54 tok/s
+$ run_shell git log -n 1 --pretty=format:%B
+BUG-025 tail: compound turns corrupt fact values + ack swallows remainder
+
+"the port is 8080 — also, what is a mutex?" banked the entire tail as
+the fact value and the training ack swallowed the question. Learned
+facts/rules are now bounded to a single declarative clause via
+_first_clause: hard boundaries plus comma-splice only when the
+post-comma tail opens a new interrogative/imperative clause (semantic
+lead detectors reused; "from now on,"-style marker heads keep their
+comma; list/dotted values survive). The orchestrator no longer lets the
+ack short-circuit a turn with an unlearned remainder — the model lane
+handles both halves.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 6.36 tok/s
+$ run_shell git log -n 1 --pretty=format:%B tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 6.09 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 5.9 tok/s
+$ run_shell git diff --cached tests/test_voice_polish.py
+· run_shell ok
+## perf qwen3-14b 6.11 tok/s
+$ run_shell git diff tests/test_voice_polish.py
+· run_shell ok
+## perf qwen3-14b 5.94 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 5.87 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 5.52 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 5.48 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 5.17 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 5.24 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 3.25 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 2.07 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 3.03 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 2.98 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 1.61 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 3.08 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 4.12 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 4.42 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 4.77 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 5.24 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 5.45 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 5.37 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 5.55 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 6.18 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 6.51 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 6.7 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 7.07 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 7.98 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 8.3 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 8.18 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 8.25 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 8.81 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## model context_trim qwen3-14b
+## perf qwen3-14b 15.88 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 15.16 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 14.38 tok/s
+$ run_shell git log -n 1 --pretty=format:%B -- tests/test_voice_polish.py
+Fix test/fixture drift surfaced by isolated self-update validation
+
+Three stale expectations in the suite, all from intentional behavior
+changes that outpaced their tests:
+
+- Voice capacity notices: _StubState lacked _notice_last and two tests
+  still asserted pre-cooldown semantics. Commit 62a43c10 added a
+  10-minute family cooldown specifically to stop flap narration —
+  deeper cuts and oscillation inside the window now correctly stay
+  silent. Tests updated to assert the cooldown contract.
+- Lightweight utility route: two workflow tests used repository-summary
+  prompts that the deterministic github_read lane now answers locally,
+  so the model provider was never invoked. Prompts changed to exercise
+  the path each test actually targets (question prompt for the clock/
+  prefix-cache assertion; action prompt for the tool-schema check).
+- server.py: removed dead-code route stubs left over from the Phase A
+  route relocation — they tripped the route-coverage lint.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
+· run_shell ok
+## perf qwen3-14b 14.69 tok/s

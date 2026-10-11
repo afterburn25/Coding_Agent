@@ -1,0 +1,146 @@
+## model selected qwen3-14b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-14b 5.33 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 5.1 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 5.11 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 5.08 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 5.15 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 5.08 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 4.74 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 4.35 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 3.47 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 3.1 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 8.46 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 12.35 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.91 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## model context_trim qwen3-14b
+## perf qwen3-14b 15.08 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 14.23 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 11.85 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.4 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 12.45 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.86 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 10.14 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 11.76 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 10.3 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.19 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 11.12 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.81 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 10.0 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 11.16 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 10.26 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 1.99 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 8.34 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 7.75 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 9.32 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 11.04 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 10.48 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.99 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 11.48 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.64 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 10.3 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 11.57 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 10.17 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.71 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 10.41 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 11.51 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 10.59 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 11.16 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 10.16 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.64 tok/s
+$ read_file .repair-worktrees/ri-b1a4eeeac3/tests/test_workspace.py
+· read_file ok
+## perf qwen3-14b 10.09 tok/s

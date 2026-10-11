@@ -18,6 +18,9 @@ def diagnose_test_error(error_trace):
         elif 'Error:' in line or 'Exception:' in line or line.strip().endswith(':'):
             root_cause = line.strip()
             break
+        elif 'raise' in line:
+            root_cause = line.strip()
+            break
     
     # If we didn't find a specific error, use the last line with content
     if not root_cause:

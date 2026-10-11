@@ -1,0 +1,212 @@
+{
+  "cached_at": 1791509236.0763414,
+  "provider": "github_api",
+  "query": "auto||python error ERENT Error github issue",
+  "version": "",
+  "value": [
+    {
+      "title": "docs: one template for every benchmark page, and a chart above every sweep",
+      "source_type": "github_pr",
+      "url": "https://github.com/prog893/mlx-asr/pull/10",
+      "excerpt": "Restructures every page in `docs/benchmarks/` to one template, and charts every sweep. All charts are drawn from the tables already published.\n\n## Template\n\nLever and engine pages:\n\n1. **Title**, prefixed `Lever:` or `Engine:`.\n2. **Conclusion**, then a `setting | default | why` table.\n3. **Setup:** one line that links [corpus.md](docs/benchmarks/corpus.md) instead of re-describing the corpus.\n4. **One section per experiment**, with the chart directly above its table.\n5. **Optional sections:** How it works, Superseded, Not settled.\n6. **Related.**\n\nReference pages (corpus, metrics, determinism, peak-memory) use a lighter layout.\n\n\"ships\" is gone everywhere, docs and charts alike. Every option is offered; the docs name the **default**.\n\n## Corpus described once\n\n`corpus.md` now carries stable anchors (`#the-20-file-corpus`, `#the-7-file-subset`, `#the-single-clip`, `#timed-references`). No page keeps its own Corpus section.\n\nIt also states what the timed set actually is, which two pages had wrong: the single clip plus six published videos that are part of the 20 files.\n\n## Charts\n\nThere are 29 charts now, up from 7, and every sweep table has one. Each chart is light/dark SVG, uses the validated palette, distinct markers, and direct end labels from four series up.\n\n- **Per-page data:** each page's chart data lives in `scripts/docs/sweeps/<page>.py`. The page owns it, so pages can be edited independently.\n- **Row matching:** `tests/test_sweeps.py` matches each chart row to its table row: row-wise, or column-wise for the config-by-threshold `min_cut` tables.\n- **Honest axes:** memory axes start at 0, and ties get a minimum y span so a difference inside noise does not draw as a slope.\n- **Links:** `tests/test_doc_links.py` checks that every relative link and `#anchor` in the docs resolves.\n- **Freshness:** the existing chart tests still compare the committed SVGs byte for byte against a fresh render.\n\n## Content fixes found while restructuring\n\nEach was checked against code or source:\n\n- qwen3-asr's window is 30s; one line said 60s (`models.py`).\n- Voxtral's 6.77GB peak was measured at the old 60s/B16 profile; the current Ultra profile is 30s/B32.\n- `--prompt` exits 2 on other engines. The page said it was \"reported as ignored\" (`cli.py`).\n- No-condition applies to Whisper `small` and up only.\n- Machine labels use nameplate GiB: 16GB and 128GB, not 17GB and 137GB.\n- determinism.md now lists every greedy engine.\n- The qwen3-asr precision ladder is described as measured everywhere, including the CLI help.\n\nRestructured by one agent per page in parallel, then integrated and checked centrally: full suite 1072 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n## Summary by CodeRabbit\n\n* **Documentation**\n  * Expanded benchmark guides with updated results, model recommendations, setup details, and clearer explanations of accuracy, speed, memory, and configuration trade-offs.\n  * Added responsive charts with light- and dark-mode support across benchmark pages.\n  * Improved navigation to detailed engine reports, reference metrics, and corpus information.\n* **Bug Fixes**\n  * Corrected outdated benchmark links and clarified measured defaults and limitations.\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+      "provider": "github_api",
+      "id": "443c96b19089",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-09T00:30:11Z",
+      "retrieved_at": 1791509235.7402492,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 7,
+          "reset": 1791509289,
+          "resource": "search"
+        },
+        "repository": "prog893/mlx-asr",
+        "number": 10,
+        "state": "open",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "feat: add Caresse and Werkmeister app profiles",
+      "source_type": "github_pr",
+      "url": "https://github.com/kristofferR/ha-adjustable-bed/pull/639",
+      "excerpt": "Caresse Remote and Werkmeister app behavior cannot be represented safely by the generic Vibradorm controller. Shared BLE transport does not identify their command layout, feature gates or onboarding behavior.\n\nAdd explicit app profiles with artifact-backed commands, held-control cleanup, floor and mood lighting, massage controls, metadata and native-bond onboarding. Preserve generic Vibradorm entries and expose the new controls through Home Assistant and the paired bed card.\n\nThe accepted two-package audit and cluster reconciliation cover 1,169 discoveries: 813 implemented, 0 already implemented, and 356 explicitly excluded. Every exclusion and its source reason is recorded in `docs/apk-analysis/row031-dispositions.md`; exclusions concern unreachable code, unrelated app/platform behavior, and unsafe callback/state behavior. Hardware operation remains unverified.\n\nValidation: 7,851 Python tests pass, Ruff and Pyright pass, and the frontend builds with all 69 tests passing. Artifact-vector, lifecycle, entity/service and paired-routing tests cover the new behavior. Independent convergence review verifies the implementation bindings and exclusions.\n\nRef #162, #403, #436, #443, #447.\n",
+      "provider": "github_api",
+      "id": "ad91d6419b06",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-05T22:12:56Z",
+      "retrieved_at": 1791509235.7402549,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 7,
+          "reset": 1791509289,
+          "resource": "search"
+        },
+        "repository": "kristofferR/ha-adjustable-bed",
+        "number": 639,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Add long-term disability and death costs",
+      "source_type": "github_pr",
+      "url": "https://github.com/jameel-institute/EpiEconShocks.jl/pull/22",
+      "excerpt": "This PR adds functions to calculate the long-term costs of disability and death from infection using a human capital approach and a friction cost approach. This PR fixes #18.\r\n\r\nThis PR builds off #17 so I have removed the CR auto-generated summary; will request a re-review once this PR is rebased on main after PR #17 is merged.\r\n\r\n## Getting started\r\n\r\nThe best place to get started with reviewing the functionality in this PR is the long-form docs, see `docs/src/disability_costs.md`. Activate the `docs` environment to work through the file.\r\n\r\n## Relation to report text\r\n\r\nThe functions here are pretty similar to the methods described in the report text, with some simplifications.\r\n\r\n1. Each method implementation is simplified down to $V_0 = V^W + V^D$, with the net present value calculated at $t=0$ post-epidemic; the method here assumes retrospective estimation rather than aligning with the time-series of epidemic outcomes. Since the value of interest is a sum over a multi-decade horizon, I didn't think it was necessary to align with an epidemic time series as we are initially aiming this at fairly short-lived epidemics. The usefulness of aligning would increase if users are interested in the temporal dynamics of the value.\r\n2. I have also simplified the split in $V^W$ and $V^C$ by allowing each age group and economic sector to have independent delays until labour force entry and exit. Current workers can be modelled as having no delay until entry.\r\n3. The probability of employment $e_{j,k}$ is constant over time, and only varies over age groups and over economic sectors.\r\n4. The annual wage $W_{j,k}$ is constant over time, and only varies over age groups and economic sectors.\r\n5. I have not included care costs $\\mathcal{T}_t$ in either method as we discussed adding these to a separate fiscal costs method.\r\n6. I am still not fully able to decide how the effect of schooling loss on earnings should be added to the HCA function; the parsimonious approach is that it would be best for users to calculate the expected wages for each age and economic sector as they see fit before passing them to the function, and this may include scaling for schooling loss for future workers (children).",
+      "provider": "github_api",
+      "id": "db5b53379a41",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-08-17T11:16:18Z",
+      "retrieved_at": 1791509235.740258,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 7,
+          "reset": 1791509289,
+          "resource": "search"
+        },
+        "repository": "jameel-institute/EpiEconShocks.jl",
+        "number": 22,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Slice 2: object cards for the ICM system map's 11 noun types",
+      "source_type": "github_pr",
+      "url": "https://github.com/brandondees/code-quality-atlas/pull/237",
+      "excerpt": "## Summary\n\nSlice 2 of the ICM system map's human-gated audit pipeline (Slice 0+1 —\ninventory + catalog — shipped in #236): one card per closed node type in\n`docs/map/_meta/schema.md`.\n\n### Added\n\n- `docs/map/objects/generation-pipeline/{manifest,lens,category,collapsed-entrypoint}.md`\n- `docs/map/objects/eval-hardening/eval-scenario.md`\n- `docs/map/objects/decisions-and-tracking/{decision,gap,plan-doc}.md`\n- `docs/map/objects/{command,runbook,hook}.md` — flat cards for the three\n  types `objects/CONTEXT.md` already flagged as not having a dedicated\n  cluster yet\n\nEvery card cites source directly (`skills/manifest.yaml`,\n`docs/research/cluster-*.md`, `docs/open-questions.md`, `docs/map-gaps.md`,\n`docs/plans/`, `commands/`, `docs/runbooks/`, `hooks/hooks.json`) and is\ndated/commit-pinned per `objects/CONTEXT.md`'s \"verified\" status rule — no\ncard restates a current-state count (per this repo's standing drift-prone-\nfacts rule).\n\n### Also fixed, adjacent to this slice\n\n- `_meta/schema.md`'s Naming rule for `Decision` only named the `QN` form\n  (a header under \"Open questions\"). Real `Decision` instances also exist\n  as `DN` bullets under \"Decisions made\" — a different marker, same closed\n  type. Fixed so the rule is re-derivable from source alone, as the rule\n  itself requires.\n- `objects/_index.md`'s status column and Card links updated from `stub` to\n  `verified` for all 11 types.\n- `docs/map/CLAUDE.md` (+ `AGENTS.md`/`routing.md` twins) now routes to\n  `objects/<cluster>/` since it exists; `processes/*.md` and\n  `effects/CONTEXT.md` stay out of scope until their own later slices.\n\n### Not in this PR (deliberately)\n\nSlice 3 (process cards) and Slice 4 (the effects/change-impact index)\nremain separate, human-gated next steps — stopping here for review before\ncontinuing, per this map's own audit-pipeline discipline.\n\n## Verification\n\n- `python -m pytest`: 403 passed\n- `python -m tooling.cli drift`: clean\n- `ruff check .`: clean\n- `markdownlint-cli2 docs/map/**`: clean\n- Every new card's YAML frontmatter parsed and type-checked (all string\n  fields, no unquoted-placeholder YAML gotcha)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01TSuF44qHo35brGecv5jT9b)_\n\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n## Summary by CodeRabbit\n\n* **New Features**\n  * Added documentation cards for 11 map object types, including commands, decisions, plans, lenses, hooks, and runbooks.\n  * Added an index linking each verified object type to its dedicated documentation.\n  * Added routing for direct noun/object lookups.\n  * Expanded decision documentation to support both settled decisions and open questions.\n\n* **Documentation**\n  * Clarified object relationships, metadata, validation, generation behavior, and change impact.\n  * Documented that process and effects documentation is not yet available.\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+      "provider": "github_api",
+      "id": "19dfdbf5391c",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-08-15T21:44:37Z",
+      "retrieved_at": 1791509235.740261,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 7,
+          "reset": 1791509289,
+          "resource": "search"
+        },
+        "repository": "brandondees/code-quality-atlas",
+        "number": 237,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Self-healing lifecycle hardening (H1–H4)",
+      "source_type": "github_pr",
+      "url": "https://github.com/jasonjknapp/cheapskate/pull/1",
+      "excerpt": "Implements docs/specs/self-healing-lifecycle-hardening.md (spec-gated) — H4→H3→H1→H2.\n\n- **H4** served-model provenance gate on the explicit-model generate_json path.\n- **H3** complete() drives off the full quarantine-aware role_candidates() list (drops the (None,role) seed that could re-serve a quarantined incumbent).\n- **H1** engine rollback callback, mandatory-with-promote (a failed challenger is rolled back to the proven incumbent).\n- **H2** rollback snapshot resolution inside resolve() (true backend/endpoint/size, not string inference).\n\n+14 tests; full suite 438 green; ruff clean; no assertion weakened.\n\n**Review gate:** 2 consecutive CLEAN adversarial rounds (Opus, different lenses — round-1 fix-conformance, round-2 regression/integration). Sol tier was saturated by a concurrent session's review load.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n\n## Summary by CodeRabbit\n\n* **New Features**\n  * Added role-based model selection with compatible fallback and self-healing recovery.\n  * Added capability-aware job contracts, failure classification, rollback protection, and model provenance reporting.\n  * Added ranked model discovery and safer storage-pressure cleanup planning.\n  * Added strict local-only routing for `never_cloud` requests.\n  * Added raw JSON schema validation and improved backend/model matching.\n\n* **Bug Fixes**\n  * Improved fallback behavior, quarantine handling, rollback restoration, and Ollama tag matching.\n  * Prevented mismatched or unidentified served models from being accepted.\n\n* **Documentation**\n  * Expanded architecture, lifecycle, QA, roadmap, style, and release handoff documentation.\n\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+      "provider": "github_api",
+      "id": "91a74757b5bc",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-07-23T23:54:38Z",
+      "retrieved_at": 1791509235.7402637,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 7,
+          "reset": 1791509289,
+          "resource": "search"
+        },
+        "repository": "jasonjknapp/cheapskate",
+        "number": 1,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "feat(contract): add initial files",
+      "source_type": "github_pr",
+      "url": "https://github.com/hoprnet/contracts/pull/1",
+      "excerpt": "\n\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n## Summary by CodeRabbit\n\n- **New Features**\n  - Added a full smart‑contract suite (channels, announcements, registry, staking seasons, tokens/wrappers, node management, factories) and deployment scripts for multiple environments; published type‑safe Rust bindings.\n\n- **Tests**\n  - Large set of unit and integration tests validating contracts, staking, cryptography, wallets, and tooling.\n\n- **Documentation**\n  - New READMEs, contributing/releasing/security guidance, changelogs, and license files.\n\n- **Chores**\n  - CI/workflow, linting, pre‑commit, packaging and workspace config, gitignore and gitattributes updates.\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+      "provider": "github_api",
+      "id": "9206dd605191",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-06-18T11:20:06Z",
+      "retrieved_at": 1791509235.7402675,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 7,
+          "reset": 1791509289,
+          "resource": "search"
+        },
+        "repository": "hoprnet/contracts",
+        "number": 1,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    }
+  ]
+}

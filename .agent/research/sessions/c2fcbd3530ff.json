@@ -1,0 +1,1165 @@
+{
+  "task": "check the github repository for latest work",
+  "mode": "official",
+  "plan": {
+    "task": "check the github repository for latest work",
+    "mode": "official",
+    "needed": true,
+    "reasons": [
+      "task references APIs/versions/current behavior that may have changed"
+    ],
+    "questions": [
+      {
+        "text": "What does the authoritative documentation say for the version used by this project?",
+        "category": "official_docs",
+        "priority": 95,
+        "version_sensitive": true
+      },
+      {
+        "text": "Does this repository already contain a compatible implementation pattern that should be extended?",
+        "category": "repository",
+        "priority": 100,
+        "version_sensitive": false
+      }
+    ],
+    "environment": {
+      "system": {
+        "os": "Windows-11-10.0.26200-SP0",
+        "architecture": "AMD64",
+        "python": "3.14.7",
+        "python_executable": "D:\\Nexus_Core\\backend\\ChatNexus.Backend.exe"
+      },
+      "packages": [
+        {
+          "ecosystem": "python",
+          "name": "cryptography",
+          "version": "==50.0.1",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "py7zr",
+          "version": "==1.1.3",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "playwright",
+          "version": ">=1.55",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "sounddevice",
+          "version": "==0.5.6",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "faster-whisper",
+          "version": "==1.2.1",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "av",
+          "version": "==18.1.0",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "tree-sitter",
+          "version": "==0.26.0",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "tree-sitter-python",
+          "version": "==0.25.0",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "tree-sitter-javascript",
+          "version": "==0.25.0",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "tree-sitter-typescript",
+          "version": "==0.23.2",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "python-lsp-server",
+          "version": "==1.15.0",
+          "source": "pyproject.toml"
+        }
+      ],
+      "runtime_packages": [
+        {
+          "ecosystem": "python-runtime",
+          "name": "click",
+          "version": "8.5.0",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "cryptography",
+          "version": "50.0.1",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "espeakng-loader",
+          "version": "0.2.4",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "greenlet",
+          "version": "3.5.6",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "importlib_metadata",
+          "version": "9.0.1",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "kokoro-onnx",
+          "version": "0.6.1",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "numpy",
+          "version": "2.3.5",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "onnxruntime",
+          "version": "1.30.0",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "phonemizer",
+          "version": "3.4.0",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "playwright",
+          "version": "1.55.0",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "tqdm",
+          "version": "4.70.1",
+          "source": "agent-python-runtime"
+        }
+      ],
+      "manifests": [
+        "pyproject.toml"
+      ]
+    },
+    "local_hits": [
+      {
+        "path": "tests/test_workflow.py",
+        "size": 88563,
+        "mtime": 1791513655.086497,
+        "symbols": [
+          "WorkflowTests",
+          "_FakeRuntime",
+          "_SequencedProvider",
+          "_FinishedProvider",
+          "_CaptureProvider",
+          "_RepeatedRefusalProvider",
+          "LightweightUtilityRouteTests",
+          "PermissiveConversationRetryTests",
+          "DirectImageRoutingTests",
+          "ConversationMemoryTests",
+          "ApprovalResumeTests",
+          "TaskRecoveryTests",
+          "_RepairProvider",
+          "VerificationRepairLoopTests",
+          "_PatchThenReviewProvider",
+          "ModelActivationFallbackTests",
+          "SelfHostingContextTests",
+          "_RepeatToolProvider",
+          "AutonomousContinuationTests",
+          "_StallThenToolProvider",
+          "_StallOnlyProvider",
+          "ActionNudgeTests",
+          "test_transactional_patch_and_restore",
+          "test_task_log_persists_and_reads_tail",
+          "test_orphan_checkpoints_pruned_on_load",
+          "test_patchset_validates_before_writing",
+          "test_repository_index_searches_paths_and_symbols",
+          "test_verification_detection",
+          "refresh_hardware",
+          "fresh_hardware",
+          "ensure_ready",
+          "recover",
+          "__init__",
+          "complete",
+          "complete",
+          "__init__",
+          "complete",
+          "__init__",
+          "complete",
+          "test_live_clock_questions_are_answered_without_model_activation",
+          "test_model_conversation_receives_current_clock_context",
+          "test_clock_block_is_last_system_message_for_prefix_cache",
+          "test_knowledge_graph_context_injected_for_known_entity",
+          "test_enabled_skill_instructions_reach_prompt",
+          "test_greeting_skips_repository_research_and_coding_tools",
+          "test_capability_question_is_answered_without_model_activation",
+          "test_self_learning_question_includes_general_and_conversation_learning",
+          "_agent",
+          "test_repeated_generic_refusals_are_discarded_until_direct_answer",
+          "test_retry_exhaustion_reports_model_level_blocker_not_policy_ban",
+          "test_normal_image_request_bypasses_chat_model",
+          "test_image_request_with_approval_waits_without_chat_model",
+          "test_taught_rules_and_facts_survive_restart",
+          "test_correction_becomes_reviewable_training_example",
+          "test_training_command_is_saved_without_model_activation",
+          "test_saved_rules_are_injected_into_future_model_prompt",
+          "test_approval_resumes_exact_tool_call",
+          "test_concurrent_resume_single_flights_the_drive",
+          "test_persisted_approval_resumes_after_process_restart",
+          "test_taskstore_marks_inflight_task_interrupted_after_restart",
+          "test_newer_completed_task_replaces_old_interrupted_as_current",
+          "test_interrupted_task_can_recover_from_durable_state",
+          "test_nonterminal_task_survives_persistence_window",
+          "test_recover_stamps_model_id_when_row_lacks_one",
+          "__init__",
+          "complete",
+          "test_failed_verification_reenters_agent_then_retests",
+          "test_resume_after_failed_verification_redrives_repair",
+          "__init__",
+          "complete",
+          "test_auto_mode_falls_back_when_deep_model_cannot_start",
+          "test_review_model_start_failure_falls_back_and_still_returns_final_result",
+          "test_fresh_self_development_task_gets_guardrail_context",
+          "test_ui_self_development_launcher_prefills_without_autosubmit",
+          "__init__",
+          "complete",
+          "_agent",
+          "test_autonomous_mode_continues_past_step_limit",
+          "test_step_limit_still_applies_without_autonomous_mode",
+          "test_identical_failing_call_is_dedup_blocked",
+          "test_step_limit_records_outcome_with_memory_components",
+          "test_autonomous_continuations_are_bounded",
+          "test_task_cancellation_skips_remaining_tool_calls",
+          "test_hung_tool_times_out_instead_of_stalling",
+          "test_long_runs_trim_old_tool_output_from_context",
+          "test_tool_events_stream_start_output_complete_in_order",
+          "__init__",
+          "complete",
+          "__init__",
+          "complete",
+          "_agent",
+          "test_stall_on_action_request_nudges_once_and_executes",
+          "test_question_shape_is_not_nudged",
+          "test_nudge_fires_at_most_once",
+          "test_schema_pruning_limits_advertised_categories",
+          "test_schema_set_shrinks_to_minimal_on_small_windows",
+          "handler",
+          "make_tools",
+          "fake_shell",
+          "fake_shell",
+          "provider_for",
+          "provider_for",
+          "cancel_now",
+          "_CancelProvider",
+          "slow",
+          "_ShellProvider",
+          "complete",
+          "complete"
+        ],
+        "preview": "import json import tempfile import threading import time import unittest from pathlib import Path from localcodeagent.agent.orchestrator import AgentOrchestrator from localcodeagent.config import AgentConfig, ModelProfile from localcodeagent.models.provider import ProviderResponse from localcodeagent.models.router import ModelRouter from localcodeagent.tools.base import ToolRegistry, ToolSpec from localcodeagent.tools.filesystem import register_filesystem_tools from localcodeagent.workflow.checkpoint import CheckpointManager from localcodeagent.workflow.conversation_memory import ConversationMemory from localcodeagent.workflow.conversation_manager import ConversationManager from localcodeagent.workflow.memory import ProjectMemory from localcodeagent.workflow.repository import RepositoryIndex from localcodeagent.workflow.tasks import TaskStore from localcodeagent.workflow.verify import detect_verification_commands class WorkflowTests(unittest.TestCase): def test_transactional_patch_and_restore(self): with tempfile.TemporaryDirectory() as td: root = Path(td) original = root / \"a.txt\" original.write_text(\"hello world\\n\", encoding=\"utf",
+        "score": 36
+      },
+      {
+        "path": "localcodeagent/tools/github.py",
+        "size": 78865,
+        "mtime": 1791499708.3161154,
+        "symbols": [
+          "_UploadCancelled",
+          "cancel_upload_job",
+          "_ProgressReader",
+          "_run_git",
+          "_repo_slug_from_remote",
+          "_current_branch",
+          "_repo_slug",
+          "_safe_git_paths",
+          "GitHubCodingClient",
+          "register_github_tools",
+          "__init__",
+          "read",
+          "close",
+          "__init__",
+          "authenticated",
+          "_headers",
+          "request_meta",
+          "request",
+          "api_url",
+          "upload_file",
+          "_ensure_token",
+          "_journal",
+          "_emit",
+          "_emit_ci",
+          "_emit_pr",
+          "git_current_branch",
+          "git_create_branch",
+          "git_commit",
+          "git_push",
+          "github_repository",
+          "github_list_issues",
+          "github_create_issue",
+          "github_create_pull_request",
+          "github_ci_status",
+          "github_auth_status",
+          "github_connect",
+          "github_disconnect",
+          "github_list_repos",
+          "github_clone",
+          "github_pull_request",
+          "github_actions_run",
+          "github_rerun",
+          "github_issue_comment",
+          "github_compare",
+          "github_checkout_pr",
+          "_slug",
+          "_release",
+          "_asset_view",
+          "github_list_releases",
+          "github_get_release",
+          "github_create_release",
+          "github_list_release_assets",
+          "_local_artifact_or_path",
+          "github_upload_release_asset",
+          "github_cancel_upload",
+          "github_download_release_asset",
+          "github_delete_release_asset",
+          "_pick_asset",
+          "github_list_run_artifacts",
+          "github_download_run_artifact",
+          "github_get_repo_file",
+          "_do_upload",
+          "_prog",
+          "_run"
+        ],
+        "preview": "from __future__ import annotations import base64 import json import os import re import subprocess import threading import time from pathlib import Path from typing import Any from urllib.error import HTTPError, URLError from urllib.parse import quote, urlencode from urllib.request import Request, urlopen from ..config import AgentConfig from ..procutil import no_window_flags from .base import ToolRegistry, ToolSpec class _UploadCancelled(RuntimeError): \"\"\"Raised inside the streaming reader when the job's cancel flag flips — aborts the POST between blocks; GitHub creates no asset on an aborted body, so nothing partial is left server-side.\"\"\" _UPLOAD_LOCK = threading.Lock() _UPLOAD_FLAGS: dict[str, threading.Event] = {} _UPLOAD_LATEST: list[str] = [] def cancel_upload_job(job_id: str = \"\") -> str | None: \"\"\"Abort an in-flight asset upload by job id (or the most recent). Returns the cancelled job id, or None when nothing is running. Shared by the ``github_cancel_upload`` tool and the generic ``/api/jobs/cancel`` route.\"\"\" with _UPLOAD_LOCK: jid = job_id or (_UPLOAD_LATEST[-1] if _UPLOAD_LATEST else \"\") flag = _UPLOAD_FLAGS.get(j",
+        "score": 31
+      },
+      {
+        "path": "tests/test_platform_services.py",
+        "size": 21762,
+        "mtime": 1791513655.0642111,
+        "symbols": [
+          "FakeConnector",
+          "ConnectorTests",
+          "KnowledgeGraphTests",
+          "_mk_skill",
+          "SkillTests",
+          "SimulationTests",
+          "EvalLabTests",
+          "ExperimentTests",
+          "RagTests",
+          "health",
+          "call",
+          "_reg",
+          "test_call_and_audit",
+          "test_permission_denied",
+          "test_unknown_capability",
+          "test_rate_limit",
+          "test_error_tracked_and_recovers",
+          "test_disabled",
+          "test_github_connector_routes_and_auth_gate",
+          "test_github_connector_vault_token_fallback",
+          "test_entities_edges_neighbors",
+          "test_upsert_and_find",
+          "test_context_for",
+          "test_link_resolves_names_to_entity_ids",
+          "test_neighbors_matches_legacy_name_stored_edges",
+          "test_persists_across_instances",
+          "test_scan_list_enable",
+          "test_install_and_remove",
+          "test_invalid_skill_rejected",
+          "test_instructions_and_tools",
+          "test_disabled_persists",
+          "test_verify_reports_manifest_surface",
+          "test_broad_permission_and_bad_name_rejected",
+          "test_update_rollback_and_snapshot_bound",
+          "test_health_check_is_declared_not_executed_by_default",
+          "test_simulation_does_not_execute",
+          "test_policy_verdicts",
+          "test_mission_dag_nodes_translate_to_steps",
+          "test_suite_run_and_history",
+          "test_compare",
+          "test_lifecycle",
+          "test_reproducible_config",
+          "_repo",
+          "test_index_and_search",
+          "test_incremental_update",
+          "test_deleted_file_dropped",
+          "StubClient",
+          "EnvlessClient",
+          "FakeVault",
+          "factory",
+          "P",
+          "request",
+          "__init__",
+          "authenticated",
+          "request",
+          "get",
+          "check"
+        ],
+        "preview": "\"\"\"Connectors, knowledge graph, skills, simulation, eval lab, repo RAG.\"\"\" from __future__ import annotations import json import tempfile import time import unittest from pathlib import Path from localcodeagent.connectors import Connector, ConnectorRegistry from localcodeagent.knowledge import KnowledgeGraph from localcodeagent.skills import SkillRegistry from localcodeagent.simulate import simulate_plan from localcodeagent.eval import EvalLab, ExperimentStore from localcodeagent.rag import RepoIndex class FakeConnector(Connector): name = \"fake-svc\" capabilities = (\"fetch\", \"write\") permission = \"network.read\" rate_limit_per_min = 3 def health(self): return {\"ok\": True, \"latency_ms\": 5} def call(self, capability, **params): if capability == \"fetch\": return {\"ok\": True, \"data\": params.get(\"url\", \"\")} if capability == \"write\": raise RuntimeError(\"boom\") return {\"ok\": False} class ConnectorTests(unittest.TestCase): def _reg(self, perm=\"allow\"): return ConnectorRegistry(permission_check=lambda p: perm) def test_call_and_audit(self): reg = self._reg() reg.register(Fak",
+        "score": 30
+      },
+      {
+        "path": "localcodeagent/workflow/repository.py",
+        "size": 5456,
+        "mtime": 1791513654.7472477,
+        "symbols": [
+          "RepositoryIndex",
+          "__init__",
+          "_load",
+          "_symbols_for",
+          "build",
+          "ensure",
+          "summary",
+          "search"
+        ],
+        "preview": "from __future__ import annotations import ast import json import re import threading import time from pathlib import Path from ..fsutil import atomic_write_text from typing import Any IGNORED_DIRS = {\".git\", \".agent\", \"node_modules\", \".venv\", \"venv\", \"__pycache__\", \"dist\", \"build\"} TEXT_EXTENSIONS = { \".py\", \".js\", \".jsx\", \".ts\", \".tsx\", \".c\", \".cc\", \".cpp\", \".cxx\", \".h\", \".hpp\", \".cs\", \".java\", \".go\", \".rs\", \".php\", \".rb\", \".swift\", \".kt\", \".kts\", \".html\", \".css\", \".scss\", \".json\", \".toml\", \".yaml\", \".yml\", \".md\", \".txt\", \".sql\", \".sh\", \".ps1\", \".bat\", \".cmake\", } class RepositoryIndex: \"\"\"Dependency-free lightweight repository index for local retrieval.\"\"\" def __init__(self, workspace: Path) -> None: self.workspace = workspace.resolve() self.path = self.workspace / \".agent\" / \"repo_index.json\" self.path.parent.mkdir(parents=True, exist_ok=True) self._lock = threading.RLock() self._data: dict[str, Any] = {\"version\": 1, \"generated_at\": 0.0, \"files\": []} self._load() def _load(self) -> None: if not self.path.exists(): return try: raw = json.loads(self.path.read_tex",
+        "score": 29
+      },
+      {
+        "path": "tests/test_git_github.py",
+        "size": 9258,
+        "mtime": 1791513655.0463247,
+        "symbols": [
+          "_git_available",
+          "_reg",
+          "_exec",
+          "_init_repo",
+          "LocalGitToolTests",
+          "FakeVault",
+          "_Cfg",
+          "_fake_response",
+          "GitHubClientTests",
+          "test_init_status_commit_log",
+          "test_user_changes_detects_dirty_and_untracked",
+          "test_switch_and_stash",
+          "test_path_outside_roots_refused",
+          "test_extra_roots_allows_registered",
+          "__init__",
+          "get",
+          "set",
+          "delete",
+          "_Resp",
+          "test_request_meta_returns_headers",
+          "test_request_requires_auth_for_write",
+          "test_connect_validates_then_stores",
+          "test_disconnect_removes_vault_token",
+          "test_auth_status_unauthorized_without_token",
+          "__init__",
+          "read",
+          "__enter__",
+          "__exit__"
+        ],
+        "preview": "\"\"\"Local git + GitHub connector tools — real git ops, fake REST.\"\"\" from __future__ import annotations import json import subprocess import tempfile import unittest from pathlib import Path from unittest.mock import patch from localcodeagent.tools.base import ToolRegistry from localcodeagent.tools.git import register_git_tools from localcodeagent.tools import github as gh PERMS = {\"filesystem.read\": \"allow\", \"filesystem.write\": \"allow\", \"git.execute\": \"allow\", \"github.read\": \"allow\", \"github.write\": \"allow\", \"shell.execute\": \"allow\"} def _git_available() -> bool: try: return subprocess.run([\"git\", \"--version\"], capture_output=True).returncode == 0 except OSError: return False def _reg(workspace: Path, extra_roots=None) -> ToolRegistry: reg = ToolRegistry(dict(PERMS)) register_git_tools(reg, workspace, extra_roots=extra_roots) return reg def _exec(reg: ToolRegistry, name: str, args: dict) -> str: return reg.get(name).handler(args) def _init_repo(root: Path) -> None: subprocess.run([\"git\", \"init\"], cwd=root, check=True, capture_output=True) subprocess.run([\"g",
+        "score": 26
+      },
+      {
+        "path": "localcodeagent/workflow/checkpoint.py",
+        "size": 6008,
+        "mtime": 1791513654.7437046,
+        "symbols": [
+          "CheckpointManager",
+          "__init__",
+          "_task_dir",
+          "_relative",
+          "_manifest_path",
+          "_load_manifest",
+          "_save_manifest",
+          "snapshot",
+          "changed_files",
+          "diff",
+          "prune_orphans",
+          "restore"
+        ],
+        "preview": "from __future__ import annotations import difflib import json import shutil import threading import time from pathlib import Path from ..fsutil import atomic_write_text from typing import Any class CheckpointManager: \"\"\"Per-task first-write snapshots with deterministic restore.\"\"\" def __init__(self, workspace: Path) -> None: self.workspace = workspace.resolve() self.root = self.workspace / \".agent\" / \"checkpoints\" self.root.mkdir(parents=True, exist_ok=True) self._lock = threading.RLock() def _task_dir(self, task_id: str) -> Path: if not task_id or any(ch not in \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_\" for ch in task_id): raise ValueError(\"invalid task id\") return self.root / task_id def _relative(self, path: Path) -> Path: resolved = path.resolve() if resolved != self.workspace and self.workspace not in resolved.parents: raise ValueError(\"path escapes the selected workspace\") rel = resolved.relative_to(self.workspace) if rel.parts and rel.parts[0] == \".agent\": raise ValueError(\"agent metadata cannot be edited through w",
+        "score": 25
+      },
+      {
+        "path": "localcodeagent/github_account.py",
+        "size": 16986,
+        "mtime": 1791513654.619293,
+        "symbols": [
+          "_scopes_from",
+          "GitHubAccountService",
+          "sanitize_log_line",
+          "__init__",
+          "_env_token",
+          "_vault_token",
+          "_resolve_token",
+          "authorized",
+          "_client_token",
+          "_refresh_connector",
+          "_invalidate",
+          "_classify",
+          "_workspace_slug",
+          "_probe_user",
+          "status",
+          "connect",
+          "disconnect",
+          "list_repos",
+          "test",
+          "step"
+        ],
+        "preview": "\"\"\"First-class GitHub account service — one coherent account state for the API, tools, connector, and capability surfaces. The agent tools historically exposed ``github_connect``/``github_disconnect`` behind the ``github.write`` permission — connecting an account required broad repository-write approval, and the connector/capability registries each maintained their own idea of whether a credential existed (often stale until a restart or first call). This service is the single source of truth: - token resolution: env var first, then encrypted SecretVault — the same precedence the connector uses; there is exactly one credential store - connect(): validate against ``GET /user``, capture granted scopes, persist to the vault, then refresh every dependent surface immediately (shared client instance, connector registry auth flag) - disconnect(): remove the vault credential and reset the shared client to any env-var credential - status(): differentiated state — not_configured / connected / invalid_token / permission_blocked / network_error — never a blanket \"connection failed\" - test(): real read-only evidence (user, repos, workspace repo metadata with push permission, act",
+        "score": 23
+      },
+      {
+        "path": "tests/test_artifact_handoff.py",
+        "size": 21523,
+        "mtime": 1791513655.0322826,
+        "symbols": [
+          "IntentParseTests",
+          "_make_file",
+          "ArtifactManagerViewTests",
+          "ExecutePlanCardTests",
+          "ServerRouteTests",
+          "ArtifactPersistenceTests",
+          "setUp",
+          "tearDown",
+          "_parse",
+          "test_give_me_the_file",
+          "test_give_me_nonfile_falls_through",
+          "test_upload_to_github",
+          "test_cancel_the_upload",
+          "test_download_from_github",
+          "test_run_artifact_from_build",
+          "test_repo_file",
+          "setUp",
+          "tearDown",
+          "test_client_view_hides_path",
+          "test_attach_remote_sanitizes",
+          "test_retention_classes",
+          "test_find_latest_and_name",
+          "test_verify_detects_tamper_and_missing",
+          "setUp",
+          "tearDown",
+          "_tools",
+          "test_artifact_show_attaches_views",
+          "test_artifact_show_empty_is_honest",
+          "test_github_upload_card_resolves",
+          "test_github_upload_failure_is_honest",
+          "test_upload_requires_approval_under_ask",
+          "setUp",
+          "tearDown",
+          "_get",
+          "test_download_roundtrip",
+          "test_unknown_and_traversal_rejected",
+          "test_tampered_artifact_409",
+          "test_missing_file_404",
+          "_post",
+          "test_reveal_resolves_by_id_never_client_path",
+          "test_open_verifies_before_launch",
+          "test_list_never_leaks_paths",
+          "test_verify_cache_bypassed_by_fresh",
+          "test_open_reveal_unknown_and_bogus_routes",
+          "setUp",
+          "tearDown",
+          "test_record_exchange_stores_artifact_ids",
+          "test_ids_extracted_from_tool_results"
+        ],
+        "preview": "\"\"\"Artifact handoff — registry client views, remote provenance, the download endpoint, and card extraction from tool results.\"\"\" from __future__ import annotations import hashlib import json import os import sys import tempfile import threading import unittest import urllib.error import urllib.request from pathlib import Path from unittest import mock from localcodeagent.action_ops import ( ActionPlan, execute_plan, parse_local_action) from localcodeagent.artifacts import ArtifactManager class IntentParseTests(unittest.TestCase): def setUp(self): self._td = tempfile.TemporaryDirectory(ignore_cleanup_errors=True) self.ws = Path(self._td.name) def tearDown(self): self._td.cleanup() def _parse(self, text): return parse_local_action(text, workspace=self.ws) def test_give_me_the_file(self): for text in (\"give me the installer\", \"send me the zip\", \"hand me the report.pdf\", \"where's the installer\", \"give me a download link\"): plan = self._parse(text) self.assertIsNotNone(plan, text) self.assertEqual(plan.kind, \"artifact_show\"",
+        "score": 23
+      }
+    ],
+    "id": "1dd20324efbd",
+    "created_at": 1791558195.1993802
+  },
+  "id": "c2fcbd3530ff",
+  "status": "completed",
+  "sources": [
+    {
+      "title": "GitHub · Change is constant. GitHub keeps you ahead. · GitHub",
+      "source_type": "web_search",
+      "url": "https://github.com/",
+      "excerpt": "GitHub · Change is constant. GitHub keeps you ahead. · GitHub · GitHub\n\n Skip to content\n\nNavigation Menu\n\nSign in\n\nPlatform\n\nAI CODE CREATION\nGitHub CopilotWrite better code with AI\n\nGitHub Copilot appDirect agents from issue to merge\n\nMCP RegistryIntegrate external tools\n\nDEVELOPER WORKFLOWS\nActionsAutomate any workflow\n\nCodespacesInstant dev environments\n\nIssuesPlan and track work\n\nCode ReviewManage code changes\n\nCode QualityEnforce quality at merge\n\nAPPLICATION SECURITY\nGitHub Advanced SecurityFind and fix vulnerabilities\n\nCode securitySecure your code as you build\n\nSecret protectionStop leaks before they start\n\nEXPLORE\nWhy GitHub\n\nDocumentation\n\nBlog\n\nChangelog\n\nMarketplace\n\nView all features\n\nSolutions\n\nBY COMPANY SIZE\nEnterprises\n\nSmall and medium teams\n\nStartups\n\nNonprofits\n\nBY USE CASE\nApp Modernization\n\nDevSecOps\n\nDevOps\n\nCI/CD\n\nView all use cases\n\nBY INDUSTRY\nHealthcare\n\nFinancial services\n\nManufacturing\n\nGovernment\n\nView all industries\n\nView all solutions\n\nResources\n\nEXPLORE BY TOPIC\nAI\n\nSoftware Development\n\nDevOps\n\nSecurity\n\nView all topics\n\nEXPLORE BY TYPE\nCustomer stories\n\nEvents & webinars\n\nEbooks & reports\n\nBusiness insights\n\nGitHub Skills\n\nSUPPORT & SERVICES\nDocumentation\n\nCustomer support\n\nCommunity forum\n\nTrust center\n\nPartners\n\nView all resources\n\nOpen Source\n\nCOMMUNITY\nGitHub SponsorsFund open source developers\n\nPROGRAMS\nSecurity Lab\n\nMaintainer Community\n\nGitHub Stars\n\nArchive Program\n\nREPOSITORIES\nTopics\n\nTrending\n\nCollections\n\nEnterprise\n\nENTERPRISE SOLUTIONS\nEnterprise platformAI-powered developer platform\n\nAVAILABLE ADD-ONS\nGitHub Advanced SecurityEnterprise-grade security features\n\nCopilot for BusinessEnterprise-grade AI features\n\nPremium SupportEnterprise-grade 24/7 support\n\nPricing\n\nSearch/\n\nSign in\nSign up\n\n You signed in with another tab or window. Reload to refresh your session.\n You signed out in another tab or window. Reload to refresh your session.\n You switched accounts on another tab or window. Reload to refresh your session.\n\nDismiss alert\n\n{{ message }}\n\nThe future of building happens together\n\nTools and trends evolve, but collaboration endures. With GitHub, developers, agents, and code come together on one platform.\n\nEnter your email\nSign up for GitHub\nDownload GitHub Copilot app\n\nGitHub features\n\nA demonstration animation of a code editor using GitHub Copilot Chat, where the user requests GitHub Copilot to refactor duplicated logic and extract it into a reusable function for a given code snippet.\n\nCodePlanCollaborateAutomateSecure\n\nCode\n\nWrite, test, and fix code quickly with GitHub Copilot, from simple boilerplate to complex features.\n\nGitHub customers\n\nAccelerate your entire workflow\n\nFrom your first line of code to final deployment, GitHub provides AI and automation tools to help you build and ship better software faster.\n\nA Copilot chat window with the 'Ask' mode enabled. The user switches from 'Ask' mode to 'Agent' mode from a dropdown menu, then sends the prompt 'Update the website to allow searching for running races by name.' Copilot analyzes the codebase, then explains the required edits for three files before generating them. Copilot then confirms completion and summarizes the implemented changes for the new functionality allowing users to search races by name and view paginated, filtered results.\n\nYour AI partner everywhere. Copilot is ready to work with you at each step of the software development lifecycle.\n\nExplore GitHub Copilot\n\nDuolingo boosts developer speed by 25% with GitHub Copilot\nRead customer story\n\n2025 Gartner® Magic Quadrant™ for AI Code Assistants\nRead industry report\n\nAutomate your path to production\n\nShip faster with secure, reliable CI/CD.\nExplore GitHub Actions\n\nCode instantly from anywhere\n\nLaunch a full, cloud-based development environment in seconds.\nExplore GitHub Codespaces\n\nKeep momentum on the go\n\nManage projects and assign tasks to Copilot, all from your mobile device.\nExplore GitHub Mobile\n\nShape your toolchain\n\nExtend your stack with apps, actions, and AI models.\nExplore GitHub Marketplace\n\nBuilt-in application security where found means fixed\n\nUse AI to find and fix vulnerabilities so your team can ship more secure software faster.\n\nApply fixes in seconds. Spend less time debugging and more time building features with Copilot Autofix.\n\nExplore GitHub Advanced Security\n\nSecurity debt, solved. Leverage security campaigns and Copilot Autofix to reduce application vulnerabilities.\nLearn about GitHub Code Security\n\nDependencies you can depend on. Update vulnerable dependencies with supported fixes for breaking changes.\nLearn about Dependabot\n\nYour secrets, your business. Detect, prevent, and remediate leaked secrets across your organization.\nLearn about GitHub Secret Protection\n\n70% MTTR reduction with Copilot Autofix\n\n8.3M secret leaks stopped in the past 12 months with push protection\n\nWork together, achieve more\n\nFrom planning and discussion to code review, GitHub keeps your team’s conversation and context next to your code.\n\nPlan with clarity. Organize everything from high-level roadmaps to everyday tasks.\n\nExplore GitHub Projects\n\n“\nIt helps us onboard new software engineers and get them productive right away. We have all our source code, issues, and pull requests in one place... GitHub is a complete platform that frees us from menial tasks and enables us to do our best work.\n\nFabian FaulhaberApplication manager at Mercedes-Benz\n\nKeep track of your tasks\n\nCreate issues and manage projects with tools that adapt to your code.\nExplore GitHub Issues\n\nShare ideas and ask questions\n\nCreate space for open-ended conversations alongside your project.\nExplore GitHub Discussions\n\nReview code changes together\n\nAssign initial reviews to Copilot for greater speed and quality.\nExplore code review\n\nFund open source projects\n\nBecome an open source partner and support the tools and libraries that power your work.\nExplore GitHub Sponsors\n\nFrom startups to enterprises, GitHub scales with teams of any size in any industry.\n\nBy industryBy sizeBy use case\n\nBy industry\n\nTechnology\nFigma streamlines development and strengthens security\n\nRead customer story\n\nAutomotive\nMercedes-Benz standardizes source code and automates onboarding\n\nRead customer story\n\nFinancial services\nMercado Libre cuts coding time by 50%\n\nRead customer story\n\nExplore customer stories\n\nView all solutions\n\nMillions of developers and businesses call GitHub home\n\nWhether you’re scaling your development process or just learning how to code, GitHub is where you belong. Join the world’s most widely adopted developer platform to build the technologies that shape what’s next.\n\nEnter your email\nSign up for GitHub\nDownload GitHub Copilot app\n\nSite-wide Links\n\nThe developer newsletter\n\nGet tips, technical guides, and best practices. Twice a month. Right in your inbox.\nSubscribe\n\nPlatform\n\nFeatures\n\nEnterprise\n\nCopilot\n\nAI\n\nSecurity\n\nPricing\n\nTeam\n\nResources\n\nRoadmap\n\nCompare GitHub\n\nEcosystem\n\nDeveloper API\n\nPartners\n\nEducation\n\nGitHub CLI\n\nGitHub Desktop\n\nGitHub Mobile\n\nGitHub Marketplace\n\nMCP Registry\n\nSupport\n\nDocs\n\nCommunity Forum\n\nProfessional Services\n\nPremium Support\n\nSkills\n\nStatus\n\nContact GitHub\n\nWhat is Git?\n\nSitemap\n\nCompany\n\nAbout\n\nWhy GitHub\n\nCustomer Stories\n\nBlog\n\nThe ReadME Project\n\nCareers\n\nInclusion\n\nSocial Impact\n\nShop\n\n© 2026 GitHub, Inc.\n\nTerms\n\nPrivacy\n\nManage cookies\n\nDo not share my personal information\n\nGitHub on LinkedIn\n\nGitHub on Instagram\n\nGitHub on YouTube\n\nGitHub on X\n\nGitHub on TikTok\n\nGitHub on Twitch\n\nGitHub’s organization on GitHub\n\nEnglish\n\n You can’t perform that action at this time.",
+      "provider": "web",
+      "id": "c165e4a7f642",
+      "authority": "official_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791558195.6433432,
+      "reliability": "Strong",
+      "score": 161.04,
+      "metadata": {
+        "trust_notes": [
+          "specialist for programming",
+          "specialist for programming"
+        ],
+        "content_type": "text/html",
+        "truncated": false,
+        "independence_group": 0
+      },
+      "untrusted": true,
+      "source_class": "original_project",
+      "independence_group": 0,
+      "corroboration_count": 1,
+      "badges": [
+        "PROJECT"
+      ],
+      "score_components": {
+        "domain_prior": 64.0,
+        "authority": 72.4,
+        "version": 0.0,
+        "relevance": 17.14,
+        "freshness": 0.0,
+        "primary_source": 0.0,
+        "evidence_density": 12.0,
+        "content_farm_penalty": -4.5,
+        "duplication_penalty": 0.0
+      },
+      "topics": [
+        "programming"
+      ]
+    },
+    {
+      "title": "Sign in to GitHub · GitHub",
+      "source_type": "web_search",
+      "url": "https://github.com/login",
+      "excerpt": "Sign in to GitHub · GitHub\n\n Skip to content\n\n You signed in with another tab or window. Reload to refresh your session.\n You signed out in another tab or window. Reload to refresh your session.\n You switched accounts on another tab or window. Reload to refresh your session.\n\nDismiss alert\n\nSign in to GitHub\n\n{{ message }}\n\n Username or email address\n\n Password\n\n Forgot password?\n\n Uh oh!\n\nThere was an error while loading. Please reload this page.\n\n New to GitHub?\n Create an account\n\n Sign in with a passkey\n\n Terms\n\n Privacy\n\n Docs\n\n Contact GitHub Support\n\n Manage cookies\n\n Do not share my personal information\n\n You can’t perform that action at this time.",
+      "provider": "web",
+      "id": "70391c1d220c",
+      "authority": "official_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791558195.6433628,
+      "reliability": "Strong",
+      "score": 138.33,
+      "metadata": {
+        "trust_notes": [
+          "specialist for programming",
+          "specialist for programming"
+        ],
+        "content_type": "text/html",
+        "truncated": false,
+        "independence_group": 0
+      },
+      "untrusted": true,
+      "source_class": "original_project",
+      "independence_group": 0,
+      "corroboration_count": 0,
+      "badges": [
+        "PROJECT"
+      ],
+      "score_components": {
+        "domain_prior": 64.0,
+        "authority": 72.4,
+        "version": 0.0,
+        "relevance": 4.29,
+        "freshness": 0.0,
+        "primary_source": 0.0,
+        "evidence_density": 2.14,
+        "content_farm_penalty": -4.5,
+        "duplication_penalty": 0.0
+      },
+      "topics": [
+        "programming"
+      ]
+    },
+    {
+      "title": "What is GitHub? - GeeksforGeeks",
+      "source_type": "web_search",
+      "url": "https://www.geeksforgeeks.org/git/what-is-github/",
+      "excerpt": "What is GitHub? - GeeksforGeeks\n\nCourses\n\nTutorials\n\nInterview Prep\n\nGit Tutorial\n\nInterview Questions\n\nExercises\n\nCheat Sheet\n\nBash\n\nGitHub\n\nBranch\n\nMerge\n\nWorkFlow\n\nHooks\n\nLFS\n\nRebase\n\nWhat is GitHub?\n\nLast Updated : 23 Jul, 2025\n\nFor collaborative software development, version control systems have become an essential part of the development process. GitHub is one of the most popular platforms for version control and collaborative coding, and it plays an important role in how developers work together, manage their code, and contribute to open-source projects.\n\nIn this article, we will explore what GitHub is, how it works, and why it is widely used by developers, organizations, and contributors worldwide.\n\nWhat is GitHub?\n\nGitHub is a web-based platform that stores Git repositories in the cloud, allowing developers to work together on projects. It helps manage code changes and supports both public and private repositories. GitHub is widely used for version control and collaboration in software development.\n\nGitHub allows developers to collaborate on projects, track changes, and maintain a history of all code versions. It is particularly popular in the open-source community and is widely used by individual developers, teams, and large organizations to develop software.\n\nWhy is GitHub Important?\n\nGitHub plays an important role in modern software development, especially in team-based projects and open-source initiatives. \n\nBy offering version control through Git, GitHub helps developers track changes, revert to previous versions, and collaborate on code with others around the world. \n\nIt also serves as a portfolio for developers, showcasing their contributions and projects to potential employers or collaborators. \n\nAdditionally, GitHub streamlines continuous integration and delivery (CI/CD), automating testing, building, and deployment workflows.\n\nFeatures of GitHub\n\nVersion Control: GitHub is built on Git, a distributed version control system that tracks changes to files, ensuring that developers can manage and revert to earlier versions as needed.\n\nCollaboration: Multiple users can work on the same project simultaneously. With features like pull requests and code reviews, GitHub helps easy collaboration and ensures that changes are merged safely.\n\nBranching and Merging: GitHub makes it easy to create branches for features, bug fixes, or experiments, allowing developers to work on separate code sections without disrupting the main codebase.\n\nIssues and Project Management: GitHub offers an integrated issue tracker to manage bugs, tasks, and feature requests. Additionally, users can create projects to organize their work and set deadlines for specific tasks.\n\nGitHub Actions: GitHub’s automation feature, GitHub Actions, allows developers to automate tasks such as code testing, continuous integration, and deployment directly from the repository.\n\nHow Does GitHub Work?\n\nGitHub works by hosting repositories in the cloud, which are connected to local repositories on developers' machines. Developers can clone a repository to their local machine, make changes, and push those changes back to the GitHub repository.\n\nThe key components of GitHub include:\n\nRepositories: A GitHub repository is where your project’s files and version history are stored. you have public or private repositories depending on the project's needs.\n\nBranches: Branches allow developers to work on different parts of the project without affecting the main or \"master\" branch. Changes in branches are merged back into the main project once they are complete.\n\nPull Requests: When a developer is ready to merge changes from their branch into the main branch, they create a pull request. This allows others to review the changes before they are incorporated into the project.\n\nCommits: Every change made to the repository is recorded as a commit, which includes a description of what was changed. Commits create a detailed history of the project, making it easy to track and revert changes if necessary.\n\nIssues and Discussions: GitHub’s issue tracking system allows users to log bugs, features, and tasks. Discussions allow the community to engage and share feedback or ideas related to the project.\n\nHow to Get Started Using GitHub? \n\nGithub is first choice for the developers. It is very easy to use and come up with the different mindblowing features. There are many useful operation you can perform on the github. First you need to set up a github account. These are the steps you can follow to start using github.\n\nStep 1: Create your github account \n\nGo to official github youbsite \n\nThen you can sign using your E-mail address.\n\nStep 2: Create a new repository\n\nAfter setting up your account you can create a new repository\n\nJust click on the + (plus icon)\n\nStep 3: Give a name to your repository \n\nNow you can give a name to your repository. \n\nIf you want to change settings or go with default one.\n\nAnd then click on the create repository button.\n\nNow you can you see your first repository.\n\nUse Cases of GitHub\n\nOpen-Source Projects: GitHub is home to a vast number of open-source projects where developers contribute to shared repositories. It’s the go-to platform for finding and contributing to open-source code.\n\nTeam Collaboration: GitHub enables teams to collaborate on projects with features like pull requests, code reviews, and real-time updates.\n\nPortfolio for Developers: GitHub is often used as a personal portfolio, where developers can showcase their coding skills and share projects they have worked on.\n\nContinuous Integration (CI/CD): Many organizations use GitHub for CI/CD workflows, automating testing, building, and deploying code directly from the platform.\n\nDocumentation: GitHub supports Markdown for project documentation, making it easy to write and maintain README files and wikis.\n\nGitHub Competitors\n\nGitLab: A complete DevOps platform with features similar to GitHub, including repositories, CI/CD pipelines, and project management. GitLab offers more features for private repositories.\n\nBitbucket: Owned by Atlassian, Bitbucket integrates youll with other Atlassian tools like Jira. It’s often used in corporate environments for private repository hosting.\n\nSourceForge: One of the older alternatives, SourceForge focuses on open-source software development and offers repository hosting, bug tracking, and project management tools.\n\nGitKraken: A Git client with a visual interface that integrates with GitHub and other Git platforms, GitKraken offers additional project management tools and visualizations.\n\nGitHub Desktop\n\nGitHub Desktop is a graphical user interface (GUI) that simplifies using Git and GitHub for version control. \n\nIt allows users to clone repositories, make commits, create branches, and sync changes with GitHub without needing to use the command line. \n\nIt is ideal for beginners and those who prefer a visual interface for managing repositories. \n\nyou can easily manage your local and remote repositories, view changes, and resolve conflicts with GitHub Desktop.\n\nFor more details read these articles => GitHub Desktop , Github Desktop Download\n\nConclusion\n\nGitHub has become an essential tool for modern software development. Its poyourful version control features, collaboration tools, and integration with various CI/CD services make it a go-to platform for developers and organizations. Whether you are working solo on a personal project or collaborating with a team on a large-scale software product, GitHub provides the tools necessary to efficiently manage, share, and improve your code.\n\nComment\n\nExplore\n\nGit Introduction\n\nGit Introduction4 min read\n\nIntroduction to Github3 min read\n\nAn Ultimate Guide to Git and Github11 min read\n\nWhat is Git?4 min read\n\nIntroduction to GitLab and CI/CD Pipelines4 min read\n\nGit Bash6 min read\n\nGit Installation and Setup\n\nHow to Install Git on Linux2 min read\n\nGit Environment Setup1 min read\n\nHow To Install Git on Ubuntu 20.043 min read\n\nHow to Install Git in VS Code?2 min read\n\nHow to Install Git on Cygwin?2 min read\n\nHow to Install and Use GIT in Android Studio?4 min read\n\nSetting Up Git Using git config2 min read\n\nHow to install Git on Redhat Linux 9?4 min read\n\nHow to Install Git on Termux?2 min read\n\nHow to Install Git in FreeNAS?4 min read\n\nHow to Install Git on Raspberry Pi?2 min read\n\nHow to Install GIT on VMWare?2 min read\n\nHow to Install Git in Cpanel Server?3 min read\n\nHow To Install Git on AWS?2 min read\n\nGuide to Setting Up a Git Server on Ubuntu4 min read\n\nHow to Install Git on Windows Subsystem for Linux?2 min read\n\nAll Git Commands\n\nBasic Git Commands with Examples4 min read\n\nEssential Git Commands for Beginners and Developers4 min read\n\nGit Commands for Every Developer3 min read\n\nEssential Git Commands3 min read\n\nUseful Git Commands and Basic Concepts3 min read\n\nAll Git Commands You Should Know8 min read\n\nSimple and Concise Git Commands That Every Software Developer Should know4 min read\n\nMost Used Git Commands\n\nGit Init3 min read\n\nGit Pull3 min read\n\nGit Push4 min read\n\nGit Clone4 min read\n\nHow To Fetch Remote Branches in Git ?3 min read\n\nGit Status2 min read\n\nGit Add2 min read\n\nGit Commit2 min read\n\nGit Reset3 min read\n\nGit Branch\n\nBranching Strategies in Git4 min read\n\nIntroduction to Git Branch3 min read\n\nHow To Create Branch In Git?2 min read\n\nHow to Create a Branch In Git from Another Branch?3 min read\n\nHow to Create a New Branch in Git and Push the Code?8 min read\n\nHow To Publish A New Branch In Git?4 min read\n\nHow to Create Git Branch With Current Changes?1 min read\n\nCreate a Git Branch From Another Branch4 min read\n\nCreating a New Branch in Git3 min read\n\nHow to Create Branch From a Previous Commit Using Git?2 min read\n\nHow To Visualizing Branch Topology in Git?3 min read\n\nHow to Check Branch in Git?2 min read\n\nHow to Clone a Branch in Git?3 min read\n\nHow to Fetch All Git Branches?2 min read\n\nGit Merge\n\nGit Merge3 min read\n\nGit Checkout and Merge4 min read\n\nHow to Merge Two Branches in Git?4 min read\n\nHow to Merge a Git Branch into Master?3 min read\n\nHow to Replace Master Branch with Another Branch in GIT?2 min read\n\nGit Merge and Merge Conflict3 min read\n\nGit Tools and Integration\n\nWorking on Git for GUI4 min read\n\nHow Git Version Control Works?11 min read\n\nHow To Write CI/CD Pipeline Using GitLab?8 min read\n\nGit and DevOps: Integrating Version Control with CI/CD Pipelines11 min read\n\nHow To Set Up Continuous Integration With Git and Jenkins?4 min read\n\nHow to Set Up a CI Pipeline for Ktor Using GitHub Actions?6 min read\n\nIntroduction to GitHub Actions2 min read\n\nBasic CI Workflow For Android using GitHub Actions2 min read\n\nIntegrating Jenkins With Popular GitHub8 min read\n\nManaging Git Repositories with GitLab3 min read\n\nGit Remote Repositories\n\nRepositories and Commands in Git5 min read\n\nSetting up a Repository in Git3 min read\n\nCreating Repository in GitHub2 min read\n\nWorking With Git Repositories4 min read\n\nCollaborating with Git\n\nGit Fork3 min read\n\nDifference Between fork and clone in GitHub3 min read\n\nForking a GitHub Repository2 min read\n\nSync Your Fork With Master in GitHub3 min read\n\nHow to Update or Sync a Forked Repository on GitHub?2 min read\n\nAdvanced Git Commands\n\nGit Rebase6 min read\n\nGit - Difference Between Merging and Rebasing3 min read\n\nWhat is Git Interactive Rebasing?4 min read\n\nHow to Undo a Git Rebase?3 min read\n\nHow To Rebase a Local Branch Onto a Remote Master in Git?3 min read\n\nHow to Fix - Git Refusing to Merge Unrelated Histories on Rebase?3 min read\n\nGit Refs and Reflogs3 min read\n\nRecovering Lost Commits in Git2 min read\n\nHow to Restore a Deleted Branch or Commit with Git?3 min read\n\nHow to Change a Git Commit Message After a Push?3 min read\n\nGit - Cherry Pick6 min read\n\nHow to cherry-pick Multiple Commits in Git?4 min read\n\nHow to Use the \"cherry-pick\" Command in Git?3 min read\n\nGit Workflows\n\nGit Workflows For Agile Development Teams6 min read\n\nGit Workflow Etiquettes2 min read\n\nGit Flow vs Github Flow3 min read\n\nGit Workflows With Open Source Collaboration10 min read\n\nAutomate CI/CD Workflow in GitHub Actions5 min read\n\nGit Hooks\n\nGit - Hooks5 min read\n\nHow to Install GIT Hooks?3 min read\n\nCustomizing Git Hooks for Workflow Automation7 min read\n\nHow To Skip Git Commit Hooks?3 min read\n\nManaging Large Git Repositories\n\nHandling Large Repositories With Git2 min read\n\nGit - LFS (Large File Storage)3 min read\n\nGit LFS: Managing Large Files in Git Repositories4 min read\n\nOptimizing Git for Large Binary Files11 min read\n\nRemove Large Files from Commit History in Git2 min read\n\nTroubleshooting Git\n\nHow To Fix Git Error: Pre-Receive Hook Declined?3 min read\n\nCommon Git Problems and Their Fixes3 min read\n\nHow to Resolve \"Another Git Process Seems To Be Running in This Repository\"?3 min read\n\nIssues in GitHub4 min read\n\nHandling Merge Conflicts in Git6 min read\n\nHow To Resolve \"not something we can merge\" error in Git?3 min read\n\nGit Logs4 min read\n\nGit Undo Operations3 min read\n\nHow to Generate Public SSH or GPG Keys Using Git Commands?2 min read\n\nGit Interview Preparation\n\nGit Cheat Sheet9 min read\n\nMost Confusing GIT Concepts3 min read\n\nCourses\n\nPlacement 360 Course2 min read\n\nMERN Full Stack Course2 min read\n\nDevOps/Cloud Course2 min read\n\nCorporate & Communications Address:\n\nA-143, 6th Floor, Sovereign Corporate Tower, Sector- 136, Noida, Uttar Pradesh (201305)\n\nRegistered Address:\n\nK 061, Tower K, Gulshan Vivante Apartment, Sector 137, Noida, Gautam Buddh Nagar, Uttar Pradesh, 201305\n\nCompany\n\nAbout Us\n\nLegal\n\nPrivacy Policy\n\nContact Us\n\nAdvertise with us\n\nGFG Corporate Solution\n\nCampus Training Program\n\nExplore\n\nPOTD\n\nJob-A-Thon\n\nBlogs\n\nNation Skill Up\n\nTutorials\n\nProgramming Languages\n\nDSA\n\nWeb Technology\n\nAI, ML & Data Science\n\nDevOps\n\nCS Core Subjects\n\nInterview Preparation\n\nSoftware and Tools\n\nCourses\n\nML and Data Science\n\nDSA and Placements\n\nWeb Development\n\nProgramming Languages\n\nDevOps & Cloud\n\nGATE\n\nTrending Technologies\n\nVideos\n\nDSA\n\nPython\n\nJava\n\nC++\n\nWeb Development\n\nData Science\n\nCS Subjects\n\nPreparation Corner\n\nInterview Corner\n\nAptitude\n\nPuzzles\n\nGfG 160\n\nSystem Design\n\n@GeeksforGeeks, Sanchhaya Education Private Limited, All rights reserved",
+      "provider": "web",
+      "id": "749be6c64f3b",
+      "authority": "web",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791558196.4667594,
+      "reliability": "Supported",
+      "score": 122.64,
+      "metadata": {
+        "trust_notes": [
+          "specialist for programming",
+          "specialist for programming"
+        ],
+        "content_type": "text/html",
+        "truncated": false,
+        "independence_group": 1
+      },
+      "untrusted": true,
+      "source_class": "reputable_secondary",
+      "independence_group": 1,
+      "corroboration_count": 6,
+      "badges": [
+        "SECONDARY"
+      ],
+      "score_components": {
+        "domain_prior": 52.0,
+        "authority": 46.0,
+        "version": 0.0,
+        "relevance": 17.14,
+        "freshness": 0.0,
+        "primary_source": 0.0,
+        "evidence_density": 12.0,
+        "content_farm_penalty": -4.5,
+        "duplication_penalty": 0.0
+      },
+      "topics": [
+        "programming"
+      ]
+    },
+    {
+      "title": "Home - The GitHub Blog",
+      "source_type": "web_search",
+      "url": "https://github.blog/",
+      "excerpt": "Home - The GitHub Blog\n\n Skip to content \n\n/\n\n Blog\n\nChangelog\n\nDocs\n\nCustomer stories\n\n Try GitHub Copilot app \n\n Attend GitHub Universe \n\nAI & ML\n\nAI & ML\nLearn about artificial intelligence and machine learning across the GitHub ecosystem and the wider industry.\n\nGenerative AI\nLearn how to build with generative AI.\n\nGitHub Copilot\nChange how you work with GitHub Copilot.\n\nLLMs\nEverything developers need to know about LLMs.\n\nMachine learning\nMachine learning tips, tricks, and best practices.\n\nHow AI code generation works\nExplore the capabilities and benefits of AI code generation and how it can improve your developer experience.\nLearn more\n\nDeveloper skills\n\nDeveloper skills\nResources for developers to grow in their skills and careers.\n\nApplication development\nInsights and best practices for building apps.\n\nCareer growth\nTips & tricks to grow as a professional developer.\n\nGitHub\nImprove how you use GitHub at work.\n\nGitHub Education\nLearn how to move into your first professional role.\n\nProgramming languages & frameworks\nStay current on what’s new (or new again).\n\nGet started with GitHub documentation\nLearn how to start building, shipping, and maintaining software with GitHub.\nLearn more\n\nEngineering\n\nEngineering\nGet an inside look at how we’re building the home for all developers.\n\nArchitecture & optimization\nDiscover how we deliver a performant and highly available experience across the GitHub platform.\n\nEngineering principles\nExplore best practices for building software at scale with a majority remote team.\n\nInfrastructure\nGet a glimpse at the technology underlying the world’s leading AI-powered developer platform.\n\nPlatform security\nLearn how we build security into everything we do across the developer lifecycle.\n\nUser experience\nFind out what goes into making GitHub the home for all developers.\n\nHow we use GitHub to be more productive, collaborative, and secure\nOur engineering and security teams do some incredible work. Let’s take a look at how we use GitHub to be more productive, build collaboratively, and shift security left.\nLearn more\n\nEnterprise software\n\nEnterprise software\nExplore how to write, build, and deploy enterprise software at scale.\n\nAutomation\nAutomating your way to faster and more secure ships.\n\nCI/CD\nGuides on continuous integration and delivery.\n\nCollaboration\nTips, tools, and tricks to improve developer collaboration.\n\nDevOps\nDevOps resources for enterprise engineering teams.\n\nDevSecOps\nHow to integrate security into the SDLC.\n\nGovernance & compliance\nEnsuring your builds stay clean.\n\nGitHub recognized as a Leader in the Gartner® Magic Quadrant™ for AI Code Assistants\nLearn why Gartner positioned GitHub as a Leader for the second year in a row.\nLearn more\n\nNews & insights\n\nNews & insights\nKeep up with what’s new and notable from inside GitHub.\n\nCompany news\nAn inside look at news and product updates from GitHub.\n\nProduct\nThe latest on GitHub’s platform, products, and tools.\n\nOctoverse\nInsights into the state of open source on GitHub.\n\nPolicy\nThe latest policy and regulatory changes in software.\n\nResearch\nData-driven insights around the developer ecosystem.\n\nThe library\nOlder news and updates from GitHub.\n\nUnlocking the power of unstructured data with RAG\nLearn how to use retrieval-augmented generation (RAG) to capture more insights.\nLearn more\n\nOpen Source\n\nOpen Source\nEverything open source on GitHub.\n\nGit\nThe latest Git updates.\n\nMaintainers\nSpotlighting open source maintainers.\n\nSocial impact\nHow open source is driving positive change.\n\nGaming\nExplore open source games on GitHub.\n\nAn introduction to innersource\nOrganizations worldwide are incorporating open source methodologies into the way they build and ship their own software.\nLearn more\n\nSecurity\n\nSecurity\nStay up to date on everything security.\n\nApplication security\nApplication security, explained.\n\nSupply chain security\nDemystifying supply chain security.\n\nVulnerability research\nUpdates from the GitHub Security Lab.\n\nWeb application security\nHelpful tips on securing web applications.\n\nThe enterprise guide to AI-powered DevSecOps\nLearn about core challenges in DevSecOps, and how you can start addressing them with AI and automation.\nLearn more\n\n Search \n\nCategories\n\nAI & ML\n\nBackAI & ML\nLearn about artificial intelligence and machine learning across the GitHub ecosystem and the wider industry.\n\nGenerative AI\nLearn how to build with generative AI.\n\nGitHub Copilot\nChange how you work with GitHub Copilot.\n\nLLMs\nEverything developers need to know about LLMs.\n\nMachine learning\nMachine learning tips, tricks, and best practices.\n\nHow AI code generation works\nExplore the capabilities and benefits of AI code generation and how it can improve your developer experience.\nLearn more\n\nDeveloper skills\n\nBackDeveloper skills\nResources for developers to grow in their skills and careers.\n\nApplication development\nInsights and best practices for building apps.\n\nCareer growth\nTips & tricks to grow as a professional developer.\n\nGitHub\nImprove how you use GitHub at work.\n\nGitHub Education\nLearn how to move into your first professional role.\n\nProgramming languages & frameworks\nStay current on what’s new (or new again).\n\nGet started with GitHub documentation\nLearn how to start building, shipping, and maintaining software with GitHub.\nLearn more\n\nEngineering\n\nBackEngineering\nGet an inside look at how we’re building the home for all developers.\n\nArchitecture & optimization\nDiscover how we deliver a performant and highly available experience across the GitHub platform.\n\nEngineering principles\nExplore best practices for building software at scale with a majority remote team.\n\nInfrastructure\nGet a glimpse at the technology underlying the world’s leading AI-powered developer platform.\n\nPlatform security\nLearn how we build security into everything we do across the developer lifecycle.\n\nUser experience\nFind out what goes into making GitHub the home for all developers.\n\nHow we use GitHub to be more productive, collaborative, and secure\nOur engineering and security teams do some incredible work. Let’s take a look at how we use GitHub to be more productive, build collaboratively, and shift security left.\nLearn more\n\nEnterprise software\n\nBackEnterprise software\nExplore how to write, build, and deploy enterprise software at scale.\n\nAutomation\nAutomating your way to faster and more secure ships.\n\nCI/CD\nGuides on continuous integration and delivery.\n\nCollaboration\nTips, tools, and tricks to improve developer collaboration.\n\nDevOps\nDevOps resources for enterprise engineering teams.\n\nDevSecOps\nHow to integrate security into the SDLC.\n\nGovernance & compliance\nEnsuring your builds stay clean.\n\nGitHub recognized as a Leader in the Gartner® Magic Quadrant™ for AI Code Assistants\nLearn why Gartner positioned GitHub as a Leader for the second year in a row.\nLearn more\n\nNews & insights\n\nBackNews & insights\nKeep up with what’s new and notable from inside GitHub.\n\nCompany news\nAn inside look at news and product updates from GitHub.\n\nProduct\nThe latest on GitHub’s platform, products, and tools.\n\nOctoverse\nInsights into the state of open source on GitHub.\n\nPolicy\nThe latest policy and regulatory changes in software.\n\nResearch\nData-driven insights around the developer ecosystem.\n\nThe library\nOlder news and updates from GitHub.\n\nUnlocking the power of unstructured data with RAG\nLearn how to use retrieval-augmented generation (RAG) to capture more insights.\nLearn more\n\nOpen Source\n\nBackOpen Source\nEverything open source on GitHub.\n\nGit\nThe latest Git updates.\n\nMaintainers\nSpotlighting open source maintainers.\n\nSocial impact\nHow open source is driving positive change.\n\nGaming\nExplore open source games on GitHub.\n\nAn introduction to innersource\nOrganizations worldwide are incorporating open source methodologies into the way they build and ship their own software.\nLearn more\n\nSecurity\n\nBackSecurity\nStay up to date on everything security.\n\nApplication security\nApplication security, explained.\n\nSupply chain security\nDemystifying supply chain security.\n\nVulnerability research\nUpdates from the GitHub Security Lab.\n\nWeb application security\nHelpful tips on securing web applications.\n\nThe enterprise guide to AI-powered DevSecOps\nLearn about core challenges in DevSecOps, and how you can start addressing them with AI and automation.\nLearn more\n\nChangelog\n\nDocs\n\nCustomer stories\n\n Attend GitHub Universe \n\n Try GitHub Copilot app \n\nSecurity\n\n How one bug bounty researcher chooses the features they investigate \n\nAs we kick off Cybersecurity Awareness Month, the GitHub Bug Bounty team spotlights @vaib25vicky, exploring their methodology, techniques, and experiences hacking on GitHub.\n\n Shilpa Kumari \n ·\n October 8, 2026\n\nAI & ML\n\n Secret protection must scale with software \n\nDevelopers aren’t becoming more careless; they’re being outpaced. The tools that let developers create more software should also take on more of the work of protecting it.\n\n Erin Havens \n ·\n October 7, 2026\n\nArchitecture & optimization\n\n Building Git infrastructure for agent-scale development \n\nWe’re rebuilding GitHub’s Git infrastructure while GitHub keeps running, creating a foundation for agent-scale software development.\n\n Brian Celenza \n ·\n October 6, 2026\n\nAI & ML\n\n ReviewBench: An open benchmark for AI code review \n\nWe’re launching ReviewBench, a benchmark for code review agents built on representative GitHub pull requests, multi-source ground truth, calibrated evaluation, and production-aligned metrics.\n\n Michelle Zhou & Alejandro Carderera de Diego \n ·\n October 5, 2026\n\nWe do newsletters, too\n\nDiscover tips, technical guides, and best practices in our biweekly newsletter just for devs.\n\n Your email address\n\n *\n Your email address\n\n Subscribe\n\n Yes please, I’d like GitHub and affiliates to use my information for personalized communications, targeted advertising and campaign effectiveness. See the GitHub Privacy Statement for more details. \n\n Subscribe\n\nLatest\n\nView all\n\nAI & ML\n\n AI is changing developer work. Here are three skills to strengthen. \n\nLearn to direct AI agents, critically review their output, and keep technical judgment at the center of your workflow.\n\n Gwen Davis \n ·\n October 2, 2026\n\nCompany news\n\n 10 technical talks I’m excited about at GitHub Universe 2026 \n\nFrom verifying AI-written code to securing npm dependencies, these are the sessions I’m building my Universe agenda around.\n\n Andrea Griffiths \n ·\n October 1, 2026\n\nNews & insights\n\n Developer policy update: Transparency, state policy, and what’s ahead \n\nExplore GitHub’s latest transparency data and learn more about policy updates affecting developers and open source.\n\n Margaret Tucker \n ·\n September 29, 2026\n\nPopular\n\n All categories \n\n All categories \n\n AI & ML \n\n Company \n\n Developer skills \n\n Engineering \n\n Enterprise software \n\n News & insights \n\n Open Source \n\n Security \n\nArchitecture & optimization\n\n Building Git infrastructure for agent-scale development \n\nWe’re rebuilding GitHub’s Git infrastructure while GitHub keeps running, creating a foundation for agent-scale software development.\n\n Brian Celenza \n ·\n October 6, 2026\n\nNews & insights\n\n Raising the bar for software security: GitHub 2FA begins March 13 \n\nOn March 13, we will officially begin rolling out our initiative to require all developers who contribute code on GitHub.com to enable one or more forms of two-factor authentication (2FA) by the end of 2023. Read on to learn about what the process entails and how you can help secure the software supply chain with 2FA.\n\n Laura Paine & Hirsch Singhal \n ·\n March 9, 2023\n\nAI & ML\n\n ReviewBench: An open benchmark for AI code review \n\nWe’re launching ReviewBench, a benchmark for code review agents built on representative GitHub pull requests, multi-source ground truth, calibrated evaluation, and production-aligned metrics.\n\n Michelle Zhou & Alejandro Carderera de Diego \n ·\n October 5, 2026\n\nChangelog\n\n View all changes \n\n Triage role users or higher can now archive pull requests \n\n October 8, 2026 \n\n Screen readers can navigate timelines as lists \n\n October 8, 2026 \n\n Draft pull requests count toward pull request limits \n\n October 8, 2026 \n\n Claude Haiku 5.5 in GitHub Copilot \n\n October 7, 2026 \n\n View all changes \n\nEngineering\n\nMore engineering articles\n\n Improving site performance by shipping more CSS \n\nHow we fully migrated github.com away from CSS-in-JS.\n\n Josh Black & Marie Lucca \n ·\n September 25, 2026\n\n Rendering huge pull requests in the GitHub Copilot app \n\nHow we rebuilt the diff surface in the GitHub Copilot app to open a million-line pull request with hundreds of inline review comments.\n\n Alberto Gimeno \n ·\n September 23, 2026\n\n How we make AI coding more cost efficient without sacrificing task quality \n\nWhy shorter outputs can cost more, and how GitHub Copilot reduces wasted work across the complete coding task.\n\n Erik Kristensen & Napalys Klicius \n ·\n September 2, 2026\n\n Your alt text passes automated checks. That doesn’t mean it’s any good. \n\nWe built a plugin for the GitHub Accessibility Scanner to make sure your alt text is actually accessible. Here’s how it works.\n\n Taarik Ashenafi & Keenan Zhou \n ·\n August 24, 2026\n\n Using the GitHub Copilot SDK for Java \n\nEnterprise Java developers have a new superpower—drive GitHub Copilot from idiomatic Java code with annotations, virtual threads, and more.\n\n Edward Burns \n ·\n August 10, 2026\n\nSpotlight\n\nView GitHub on YouTube\n\nOctoverse 2025: AI, India, and the new #1 programming language\n\nDive into the key findings from Octoverse 2025! This year saw record-breaking growth with over 180 million developers now on GitHub. We explore three big shifts: generative AI becoming ordinary engineering, TypeScript’s rise to the #1 language, and how AI is influencing developer choices. See how the developer map is redrawing itself faster than ever.\n\nThe untold story of Log4j and Log4Shell\n\nIn late 2021, the Log4Shell vulnerability sent shockwaves through the global tech community. Hear the untold, inside story from Christian Grobmeier, a maintainer of the Log4j project.\n\nTwo decades of Git: A conversation with creator Linus Torvalds\n\nTwenty years ago, Linus Torvalds created the basis for Git in just 10 days, forever changing how developers collaborate on code. In this interview, Linus Torvalds discusses Git’s unexpected journey.\n\nFeatured playlists\n\nView all playlists\n\nExplore GitHub Universe 2025\n\nLearn about GitHub Copilot\n\nStay informed with The Download\n\nExplore GitHub Copilot CLI for Beginners\n\nNews & insights\n\nMore News & insights articles\n\n Developers want more efficient software. Here’s what over 1,000 GitHub users told us they need. \n\nNew research from GitHub and Yale Program on Climate Change Communication finds strong demand for tools, measurement, and practical guidance that can help developers reduce wasted compute.\n\n Paull Young \n ·\n September 23, 2026\n\n GitHub availability report: August 2026 \n\nIn August, we experienced five incidents that resulted in degraded performance across GitHub services.\n\n Jakub Oleksy \n ·\n September 9, 2026\n\n The August 17 outage, and the work ahead \n\nAn update on the August 17 outage and the steps we’re taking to improve reliability.\n\n Vlad Fedorov \n ·\n August 20, 2026\n\n Your guide to GitHub Universe 2026 is here: The schedule just launched! \n\nThe GitHub Universe session catalog is live. Explore interactive workshops, community talks, demos, and panels. Plus, register before August 19 to save $300.\n\n Ariel Kanter \n ·\n August 13, 2026\n\n GitHub availability report: July 2026 \n\nIn July, we experienced eight incidents that resulted in degraded performance across GitHub services.\n\n Jakub Oleksy \n ·\n August 12, 2026\n\n GitHub availability report: June 2026 \n\nIn June, we experienced six incidents that resulted in degraded performance across GitHub services.\n\n Jakub Oleksy \n ·\n July 8, 2026\n\n The world's largest developer platform \n\n Docs \n\nEverything you need to master GitHub, all in one place.\n\n Go to Docs \n\n GitHub \n\nBuild what’s next on GitHub, the place for anyone from anywhere to build anything.\n\n Start building \n\n Customer stories \n\nMeet the companies and engineering teams that build with GitHub.\n\n Learn more \n\n GitHub Universe 2026 \n\nJoin us October 28-29 in San Francisco or online for GitHub Universe, our flagship developer event uniting people, agents, and the world’s code.\n\n Register now \n\nSite-wide Links\n\nProduct\n\nFeatures\n\nSecurity\n\nEnterprise\n\nCustomer Stories\n\nPricing\n\nResources\n\nPlatform\n\nDeveloper API\n\nPartners\n\nAtom\n\nElectron\n\nGitHub Desktop\n\nSupport\n\nDocs\n\nCommunity Forum\n\nTraining\n\nStatus\n\nContact\n\nCompany\n\nAbout\n\nBlog\n\nCareers\n\nPress\n\nShop\n\n© 2026 GitHub, Inc.\n\n Terms\n\n Privacy\n\n Manage Cookies\n\n Do not share my personal information\n\n GitHub on LinkedIn\n\n GitHub on Instagram\n\n GitHub on YouTube\n\n GitHub on X\n\n GitHub on TikTok\n\n GitHub on Twitch\n\n GitHub’s organization on GitHub\n\nNotifications",
+      "provider": "web",
+      "id": "74ebdd1a770d",
+      "authority": "web",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791558195.6434264,
+      "reliability": "Unverified",
+      "score": 79.33,
+      "metadata": {
+        "content_type": "text/html",
+        "truncated": false,
+        "independence_group": 2
+      },
+      "untrusted": true,
+      "source_class": "unknown",
+      "independence_group": 2,
+      "corroboration_count": 6,
+      "badges": [],
+      "score_components": {
+        "domain_prior": 24.0,
+        "authority": 26.4,
+        "version": 0.0,
+        "relevance": 21.43,
+        "freshness": 0.0,
+        "primary_source": 0.0,
+        "evidence_density": 12.0,
+        "content_farm_penalty": -4.5,
+        "duplication_penalty": 0.0
+      },
+      "topics": [
+        "programming"
+      ]
+    },
+    {
+      "title": "GitHub - LinkedIn",
+      "source_type": "web_search",
+      "url": "https://www.linkedin.com/company/github",
+      "excerpt": "GitHub | LinkedIn\n\n Skip to main content\n\n LinkedIn\n\n Top Content\n\n People\n\n Learning\n\n Jobs\n\n Games\n\n Sign in\n\n Join now\n\n GitHub\n\n Software Development\n\n San Francisco, CA 6,721,922 followers\n\n The home of software development\n\n See jobs\n\n Follow\n\n Discover all 6,955 employees\n\n Report this company\n\n Overview\n\n Jobs\n\n Life\n\n About us\n\n As the global home for all developers, GitHub is the complete AI-powered developer platform to build, scale, and deliver secure software. Over 100 million people, including developers from 90 of the Fortune 100 companies, use GitHub to build amazing things together across 330+ million repositories. With all the collaborative features of GitHub, it has never been easier for individuals and teams to write faster, better code.\n\n Website\n\n https://github.com\n\nExternal link for GitHub\n\n Industry\n\n Software Development\n\n Company size\n\n 501-1,000 employees\n\n Headquarters\n\n San Francisco, CA\n\n Type\n\n Privately Held\n\n Founded\n\n 2008\n\n Products \n\n No more previous content\n\n GitHub, Version Control Hosting Software\n\n GitHub\n\n Version Control Hosting Software\n\n GitHub Actions\n\n GitHub Advanced Security, Static Application Security Testing (SAST) Software\n\n GitHub Advanced Security\n\n Static Application Security Testing (SAST) Software\n\n GitHub Codespaces\n\n GitHub Copilot, Software Development Agents\n\n GitHub Copilot\n\n Software Development Agents\n\n GitHub Enterprise\n\n GitHub Issues, Project Management Software\n\n GitHub Issues\n\n Project Management Software\n\n No more next content\n\n Locations\n\n Primary\n\n 88 Colin P Kelly Jr St\n\n San Francisco, CA 94107, US\n\n Get directions\n\n Employees at GitHub\n\n Edd Wilder-James\n\n Hugues Martin\n\n Brad Dunn\n\n Philip T.\n\n See all employees\n\n Updates\n\n GitHub\n\n 6,721,922 followers\n\n 11h\n\n Report this post\n\n#GitHubUniverse is just around the corner. 👀 What will you be adding to your agenda?\n\nFrom verifying AI-written code to securing npm dependencies, here are the sessions to keep in mind at this year's event. ⬇️\nhttps://lnkd.in/eDcyrEKs\n\n 10 technical talks I'm excited about at GitHub Universe 2026\n\n https://github.blog\n\n 73\n\n 4 Comments\n\n Like\n\n Comment\n\n Share\n\n GitHub reposted this\n\n GitHub Enterprise\n\n 10,080 followers\n\n 20h\n\n Report this post\n\nWhen developers purchase their own AI tools, it signals unmet needs rather than a simple compliance problem.\n\nInstead of implementing a blanket ban, here's how your organization can provide safe, viable alternatives. Learn more in GitHub's Agentic Engineering System about creating an agent-native platform that supports the developer experience and drives customer value.\nhttps://lnkd.in/e7nyK67y\n\n …more\n\n How to handle non-compliant AI tool usage without slowing down developers\n\n 42\n\n 4 Comments\n\n Like\n\n Comment\n\n Share\n\n GitHub\n\n 6,721,922 followers\n\n 21h\n\n Report this post\n\nAs software creation speeds up, secret protection needs to scale with it. GitHub’s new context-aware classifier evaluates candidate secrets in under 2 milliseconds and could more than double the number of secrets we can prevent before they enter repository history.\n\nHere's how secret protection can keep pace as developers and agents move faster.\nhttps://lnkd.in/eAz73thz \n\n Secret protection must scale with software\n\n https://github.blog\n\n 106\n\n 10 Comments\n\n Like\n\n Comment\n\n Share\n\n GitHub reposted this\n\n Port.io\n\n 31,119 followers\n\n 2d\n\n Report this post\n\nWe're excited that our partner and customer GitHub will be joining our upcoming October Community session. \n\nRohan Parakh, Staff Product Manager at GitHub, and Revital Ben Ami from our Product Solutions team will show what our two teams built together.\n\nThey'll show you how the context you already manage in Port, like service tier, ownership, compliance status, business criticality, and agent-readiness, now shows up right on your GitHub repos. That way, your agents get more important context before they start working.\n\nWe'll also cover what else shipped recently, what's next, and of course, answer your burning questions. \n\nAaand we'll share one more thing. Here's a hint: 🕹️ \n\nJoin Rohan and Revital on Thursday, October 22 at 12pm ET / 6pm CEST\n\nGrab your spot here: https://lnkd.in/ebiWKkvy \n\n 93\n\n 4 Comments\n\n Like\n\n Comment\n\n Share\n\n GitHub\n\n 6,721,922 followers\n\n 23h\n\n Report this post\n\nWhat happens when low-quality contributions become one of the biggest pain points for open source maintainers?\n\nCamilla Moraes from GitHub’s Tiny Wins team joins the latest GitHub Podcast to talk about tackling the AI slop problem, listening to maintainers, and deciding what to fix next.\n\nWatch the full GitHub Podcast on YouTube, listen to it wherever you find your podcasts, or find it at gh.io/podcast\n\n …more\n\n 29\n\n 9 Comments\n\n Like\n\n Comment\n\n Share\n\n GitHub\n\n 6,721,922 followers\n\n 1d\n\n Report this post\n\n⚡️ Anthropic's Claude Haiku 5.5 is now generally available in GitHub Copilot.\n\n➡️ It's a lightweight model designed for fast, high-volume work like subagents, quick edits, and terminal tasks.\n➡️ Our early testing showed that it matched Claude Sonnet 5 on many coding tasks while using significantly fewer tokens and steps.\n\nTry it out in the GitHub Copilot app, CLI, or Visual Studio Code.\nhttps://lnkd.in/e3WrxXuX\n\n Claude Haiku 5.5 in GitHub Copilot · GitHub Changelog\n\n https://github.blog\n\n 266\n\n 5 Comments\n\n Like\n\n Comment\n\n Share\n\n GitHub\n\n 6,721,922 followers\n\n 1d\n\n Report this post\n\nLocal sandboxing for GitHub Copilot is now generally available 🙌\n\nThis allows Copilot to run commands in an isolated environment with controlled access to files, networks, system capabilities, and credentials so you have more granular control. It also gives enterprise teams a way to centrally manage policies.\n\nTry it out in GitHub Copilot CLI, GitHub Copilot app or Visual Studio Code. https://lnkd.in/eW_wEdxM\n\n Local sandboxing for GitHub Copilot now generally available - GitHub Changelog\n\n https://github.blog\n\n 427\n\n 12 Comments\n\n Like\n\n Comment\n\n Share\n\n GitHub\n\n 6,721,922 followers\n\n 1d\n\n Report this post\n\n📣 Coming soon to GitHub Copilot: intelligent local model routing.\n\nWe are excited to announce the next step in our Project HydraFusion vision. GitHub Copilot will soon be able to automatically route tasks to a local model when it's most suitable, helping you save on AI credits.\n\nLearn more about how we are bringing local models and sandboxed tools to GitHub Copilot to help you maintain both choice and control over your workflows ⬇️\n\ngh.io/localdevelopment \n\n …more\n\n 768\n\n 29 Comments\n\n Like\n\n Comment\n\n Share\n\n GitHub\n\n 6,721,922 followers\n\n 2d\n\n Report this post\n\nHow can you tell whether an AI code reviewer is finding the issues that matter, and where it falls short?\n\nWe built ReviewBench, a new open benchmark for evaluating code review agents. Its 219 pull requests across 19 languages reflect patterns from an analysis of 103.9 million GitHub pull requests. Findings are assessed against a shared rubric. Senior engineers independently reviewed the golden set, and their judgments agreed with ReviewBench 96.6% of the time.\n\nExplore ReviewBench, compare agents, and evaluate your own.\nhttps://lnkd.in/e8v9BU_d\n\n ReviewBench: An open benchmark for AI code review\n\n https://github.blog\n\n 171\n\n 31 Comments\n\n Like\n\n Comment\n\n Share\n\n GitHub\n\n 6,721,922 followers\n\n 2d\n\n Report this post\n\nGit activity on GitHub more than doubled between September 2025 and August 2026, reaching 473.3 billion events per month. In September, developers and agents made 7.38 billion commits, more than 5× the number a year earlier.\n\nIn the first post of our deep-dive series, we explain why agent-scale development calls for a new Git architecture and how we’re redesigning the infrastructure to scale reads and writes independently. Internal benchmarks show up to 35× higher write throughput, while the principles behind the work keep reliability, governance, and familiar developer workflows at the center.\nhttps://lnkd.in/em-Tyvtx\n\n Building Git infrastructure for agent-scale development\n\n https://github.blog\n\n 243\n\n 10 Comments\n\n Like\n\n Comment\n\n Share\n\n Join now to see what you are missing\n\n Find people you know at GitHub\n\n Browse recommended jobs for you\n\n View all updates, news, and articles\n\n Join now\n\n Affiliated pages\n\n Microsoft\n\n Software Development\n\n Redmond, Washington\n\n GitHub Brasil\n\n Software Development\n\n GitHub LATAM\n\n Software Development\n\n GitHub Education\n\n Software Development\n\n GitHub Enterprise\n\n Software Development\n\n GitHub Security Lab\n\n Software Development\n\n Student Developer Pack\n\n Show more affiliated pages\n\n Show fewer affiliated pages\n\n Similar pages\n\n Microsoft\n\n Software Development\n\n Redmond, Washington\n\n Google\n\n Software Development\n\n Mountain View, CA\n\n OpenAI\n\n Research Services\n\n San Francisco, CA\n\n NVIDIA\n\n Computer Hardware Manufacturing\n\n Santa Clara, CA\n\n Anthropic\n\n Research Services\n\n Amazon\n\n Software Development\n\n IBM\n\n IT Services and IT Consulting\n\n Armonk, New York, NY\n\n GitLab\n\n IT Services and IT Consulting\n\n San Francisco, California\n\n Meta\n\n Software Development\n\n Menlo Park, CA\n\n GeeksforGeeks\n\n Education\n\n NOIDA, G. B. Nagar, Uttar Pradesh\n\n Show more similar pages\n\n Show fewer similar pages\n\n Browse jobs\n\n Engineer jobs\n\n 555,845 open jobs\n\n GitHub jobs\n\n 25,723 open jobs\n\n Developer jobs\n\n 258,935 open jobs\n\n Software Engineer jobs\n\n 300,699 open jobs\n\n Analyst jobs\n\n 694,057 open jobs\n\n Senior Software Engineer jobs\n\n 78,145 open jobs\n\n Manager jobs\n\n 1,880,925 open jobs\n\n Intern jobs\n\n 71,196 open jobs\n\n Scientist jobs\n\n 48,969 open jobs\n\n Project Manager jobs\n\n 253,048 open jobs\n\n Director jobs\n\n 1,220,357 open jobs\n\n Marketing Manager jobs\n\n 106,879 open jobs\n\n Program Manager jobs\n\n 243,900 open jobs\n\n Associate jobs\n\n 1,091,945 open jobs\n\n Account Executive jobs\n\n 71,457 open jobs\n\n Account Manager jobs\n\n 121,519 open jobs\n\n Engineering Manager jobs\n\n 145,990 open jobs\n\n Python Developer jobs\n\n 46,642 open jobs\n\n Full Stack Engineer jobs\n\n 38,546 open jobs\n\n Vice President jobs\n\n 235,270 open jobs\n\n Show more jobs like this\n\n Show fewer jobs like this\n\n More searches\n\n More searches\n\n GitHub jobs\n\n Engineer jobs\n\n Software Engineer jobs\n\n Developer jobs\n\n Analyst jobs\n\n Intern jobs\n\n Senior Software Engineer jobs\n\n Scientist jobs\n\n Manager jobs\n\n Director jobs\n\n Project Manager jobs\n\n Associate jobs\n\n Junior Software Engineer jobs\n\n Program Manager jobs\n\n Account Executive jobs\n\n Full Stack Engineer jobs\n\n Machine Learning Engineer jobs\n\n Engineering Manager jobs\n\n Account Manager jobs\n\n Director of Engineering jobs\n\n Product Designer jobs\n\n Graduate jobs\n\n Vice President jobs\n\n Java Software Engineer jobs\n\n Data Analyst jobs\n\n Marketing Manager jobs\n\n Specialist jobs\n\n Staff Software Engineer jobs\n\n Recruiter jobs\n\n Site Reliability Engineer jobs\n\n Product Manager jobs\n\n Consultant jobs\n\n Sales Manager jobs\n\n Data Engineer jobs\n\n Solutions Engineer jobs\n\n Frontend Developer jobs\n\n Python Developer jobs\n\n Principal Software Engineer jobs\n\n Software Engineering Manager jobs\n\n Researcher jobs\n\n Solutions Architect jobs\n\n User Experience Designer jobs\n\n Data Scientist jobs\n\n Designer jobs\n\n Platform Engineer jobs\n\n Cyber Security Specialist jobs\n\n Senior Program Manager jobs\n\n Associate Product Manager jobs\n\n Senior Manager jobs\n\n Writer jobs\n\n Junior Developer jobs\n\n Graduate Software Engineer jobs\n\n Principal Program Manager jobs\n\n C Developer jobs\n\n Lead jobs\n\n Coordinator jobs\n\n Customer Success Manager jobs\n\n iOS Developer jobs\n\n Marketing Specialist jobs\n\n Customer Director jobs\n\n LinkedIn\n\n © 2026\n\n About\n\n Accessibility\n\n User Agreement\n\n Privacy Policy\n\n Your California Privacy Choices\n\n Cookie Policy\n\n Copyright Policy\n\n Brand Policy\n\n Guest Controls\n\n Community Guidelines\n\n العربية (Arabic)\n\n বাংলা (Bangla)\n\n Čeština (Czech)\n\n Dansk (Danish)\n\n Deutsch (German)\n\n Ελληνικά (Greek)\n\n English (English)\n\n Español (Spanish)\n\n فارسی (Persian)\n\n Suomi (Finnish)\n\n Français (French)\n\n हिंदी (Hindi)\n\n Magyar (Hungarian)\n\n Bahasa Indonesia (Indonesian)\n\n Italiano (Italian)\n\n עברית (Hebrew)\n\n 日本語 (Japanese)\n\n 한국어 (Korean)\n\n मराठी (Marathi)\n\n Bahasa Malaysia (Malay)\n\n Nederlands (Dutch)\n\n Norsk (Norwegian)\n\n ਪੰਜਾਬੀ (Punjabi)\n\n Polski (Polish)\n\n Português (Portuguese)\n\n Română (Romanian)\n\n Русский (Russian)\n\n Svenska (Swedish)\n\n తెలుగు (Telugu)\n\n ภาษาไทย (Thai)\n\n Tagalog (Tagalog)\n\n Türkçe (Turkish)\n\n Українська (Ukrainian)\n\n Tiếng Việt (Vietnamese)\n\n 简体中文 (Chinese (Simplified))\n\n 正體中文 (Chinese (Traditional))\n\n Language\n\n Agree & Join LinkedIn\n\n By clicking Continue to join or sign in, you agree to LinkedIn’s User Agreement, Privacy Policy, and Cookie Policy.\n\n Sign in to see who you already know at GitHub\n\n Email or phone\n\n Password\n\n Show\n\n Forgot password?\n\n Sign in\n\n Sign in with Email\n\n or\n\n New to LinkedIn? Join now\n\n By clicking Continue to join or sign in, you agree to LinkedIn’s User Agreement, Privacy Policy, and Cookie Policy.",
+      "provider": "web",
+      "id": "f39baf5a4081",
+      "authority": "web",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791558196.4667702,
+      "reliability": "Unverified",
+      "score": 70.76,
+      "metadata": {
+        "content_type": "text/html",
+        "truncated": false,
+        "independence_group": 3
+      },
+      "untrusted": true,
+      "source_class": "unknown",
+      "independence_group": 3,
+      "corroboration_count": 6,
+      "badges": [],
+      "score_components": {
+        "domain_prior": 24.0,
+        "authority": 26.4,
+        "version": 0.0,
+        "relevance": 12.86,
+        "freshness": 0.0,
+        "primary_source": 0.0,
+        "evidence_density": 12.0,
+        "content_farm_penalty": -4.5,
+        "duplication_penalty": 0.0
+      },
+      "topics": [
+        "programming"
+      ]
+    },
+    {
+      "title": "GitHub (@github) / X",
+      "source_type": "web_search",
+      "url": "https://x.com/github",
+      "excerpt": "GitHub (@github) / X\n\nLog inSign up\n\nLog inSign up\n\nGitHub\n\n11K posts\n\nGitHub\n\n@github\n\nThe AI-powered developer platform to build, scale, and deliver secure software.\n\nSan Francisco, CA\n\ngithub.com\n\nJoined February 2008\n\n334 Following\n\n2.7M Followers\n\nMention\n\nFollow\n\nPostsPostsRepliesRepliesRepostsRepostsMediaMediaArticlesArticles\n\nLog in or sign up for X\n\nSee what’s happening and join the conversation\n\nContinue with phoneContinue with AppleContinue with Google\n\n or \nLog in with username or email\nTerms·Privacy·Cookies·Accessibility·US TIDA·Ads Info·More© 2026 X Corp.\n\nPinned\n\nGitHub\n\n@github\nOct 7\n\n📣 Coming soon to GitHub Copilot: intelligent local model routing.\n\nWe are excited to announce the next step in our Project HydraFusion vision. GitHub Copilot will soon be able to automatically route tasks to a local model when it's most suitable, helping you save on AI credits.\n\n00:00\n\n41\n\n63\n\n498\n\n87K\n\nGitHub\n\n@github\n14h\n\n#GitHubUniverse is just around the corner. 👀 What will you be adding to your agenda?\n\nFrom verifying AI-written code to securing npm dependencies, here are the sessions to keep in mind at this year's event. ⬇️\n\n10 technical talks I’m excited about at GitHub Universe 2026\n\nFrom github.blog\n\n12\n\n5\n\n68\n\n22K\n\nGitHub\n\n@github\n21h\n\nDevs and agents are moving faster than ever. Secret protection needs to keep pace.\n\nGitHub’s new context-aware classifier checks candidate secrets in under 2 milliseconds and could more than double the number of secrets push protection prevents before they enter repository Show more\n\nSecret protection must scale with software\n\nFrom github.blog\n\n31\n\n17\n\n211\n\n36K\n\nGitHub\n\n@github\n23h\n\nWhat happens when low-quality contributions become one of the biggest pain points for open source maintainers?\n\nCamilla Moraes from GitHub’s Tiny Wins team joins the latest GitHub Podcast to talk about tackling the AI slop problem, listening to maintainers, and deciding what to Show more\n\n00:00\n\n12\n\n8\n\n65\n\n22K\n\nGitHub\n\n@github\nOct 7\n\n⚡️ @AnthropicAI's Claude Haiku 5.5 is now generally available in GitHub Copilot.\n\n➡️ It's a lightweight model designed for fast, high-volume work like subagents, quick edits, and terminal tasks.\n➡️ Our early testing showed that it matched Claude Sonnet 5 on many coding tasks Show more\n\nClaude Haiku 5.5 in GitHub Copilot - GitHub Changelog\n\nFrom github.blog\n\n33\n\n35\n\n327\n\n61K",
+      "provider": "web",
+      "id": "49bb1fe456aa",
+      "authority": "web",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791558195.643445,
+      "reliability": "Weak",
+      "score": 63.25,
+      "metadata": {
+        "content_type": "text/html",
+        "truncated": false,
+        "independence_group": 4
+      },
+      "untrusted": true,
+      "source_class": "forum",
+      "independence_group": 4,
+      "corroboration_count": 0,
+      "badges": [
+        "FORUM"
+      ],
+      "score_components": {
+        "domain_prior": 16.0,
+        "authority": 20.8,
+        "version": 0.0,
+        "relevance": 25.71,
+        "freshness": 0.0,
+        "primary_source": 0.0,
+        "evidence_density": 11.24,
+        "content_farm_penalty": -10.5,
+        "duplication_penalty": 0.0
+      },
+      "topics": [
+        "programming"
+      ]
+    }
+  ],
+  "findings": [
+    "[c165e4a7f642] GitHub · Change is constant. GitHub keeps you ahead. · GitHub: GitHub · Change is constant. GitHub keeps you ahead. · GitHub · GitHub Skip to content Navigation Menu Sign in Platform AI CODE CREATION GitHub CopilotWrite better code with AI GitHub Copilot appDirect agents from issue to merge MCP RegistryIntegrate external tools DEVELOPER WORKFLOWS ActionsAutomate any workflow Codes",
+    "[70391c1d220c] Sign in to GitHub · GitHub: Sign in to GitHub · GitHub Skip to content You signed in with another tab or window. Reload to refresh your session. You signed out in another tab or window. Reload to refresh your session. You switched accounts on another tab or window. Reload to refresh your session. Dismiss alert Sign in to GitHub {{ message }} User",
+    "[749be6c64f3b] What is GitHub? - GeeksforGeeks: What is GitHub? - GeeksforGeeks Courses Tutorials Interview Prep Git Tutorial Interview Questions Exercises Cheat Sheet Bash GitHub Branch Merge WorkFlow Hooks LFS Rebase What is GitHub? Last Updated : 23 Jul, 2025 For collaborative software development, version control systems have become an essential part of the deve",
+    "[74ebdd1a770d] Home - The GitHub Blog: Home - The GitHub Blog Skip to content / Blog Changelog Docs Customer stories Try GitHub Copilot app Attend GitHub Universe AI & ML AI & ML Learn about artificial intelligence and machine learning across the GitHub ecosystem and the wider industry. Generative AI Learn how to build with generative AI. GitHub Copilot Cha",
+    "[f39baf5a4081] GitHub - LinkedIn: GitHub | LinkedIn Skip to main content LinkedIn Top Content People Learning Jobs Games Sign in Join now GitHub Software Development San Francisco, CA 6,721,922 followers The home of software development See jobs Follow Discover all 6,955 employees Report this company Overview Jobs Life About us As the global home for a",
+    "[49bb1fe456aa] GitHub (@github) / X: GitHub (@github) / X Log inSign up Log inSign up GitHub 11K posts GitHub @github The AI-powered developer platform to build, scale, and deliver secure software. San Francisco, CA github.com Joined February 2008 334 Following 2.7M Followers Mention Follow PostsPostsRepliesRepliesRepostsRepostsMediaMediaArticlesArticles "
+  ],
+  "summary": "Research Summary\nMode: official\nQuestions:\n- What does the authoritative documentation say for the version used by this project?\n- Does this repository already contain a compatible implementation pattern that should be extended?\nEvidence confidence: high (primary_plus_secondary; 5 independent source group(s))\nFindings:\n- [c165e4a7f642] GitHub · Change is constant. GitHub keeps you ahead. · GitHub: GitHub · Change is constant. GitHub keeps you ahead. · GitHub · GitHub Skip to content Navigation Menu Sign in Platform AI CODE CREATION GitHub CopilotWrite better code with AI GitHub Copilot appDirect agents from issue to merge MCP RegistryIntegrate external tools DEVELOPER WORKFLOWS ActionsAutomate any workflow Codes\n- [70391c1d220c] Sign in to GitHub · GitHub: Sign in to GitHub · GitHub Skip to content You signed in with another tab or window. Reload to refresh your session. You signed out in another tab or window. Reload to refresh your session. You switched accounts on another tab or window. Reload to refresh your session. Dismiss alert Sign in to GitHub {{ message }} User\n- [749be6c64f3b] What is GitHub? - GeeksforGeeks: What is GitHub? - GeeksforGeeks Courses Tutorials Interview Prep Git Tutorial Interview Questions Exercises Cheat Sheet Bash GitHub Branch Merge WorkFlow Hooks LFS Rebase What is GitHub? Last Updated : 23 Jul, 2025 For collaborative software development, version control systems have become an essential part of the deve\n- [74ebdd1a770d] Home - The GitHub Blog: Home - The GitHub Blog Skip to content / Blog Changelog Docs Customer stories Try GitHub Copilot app Attend GitHub Universe AI & ML AI & ML Learn about artificial intelligence and machine learning across the GitHub ecosystem and the wider industry. Generative AI Learn how to build with generative AI. GitHub Copilot Cha\n- [f39baf5a4081] GitHub - LinkedIn: GitHub | LinkedIn Skip to main content LinkedIn Top Content People Learning Jobs Games Sign in Join now GitHub Software Development San Francisco, CA 6,721,922 followers The home of software development See jobs Follow Discover all 6,955 employees Report this company Overview Jobs Life About us As the global home for a\n- [49bb1fe456aa] GitHub (@github) / X: GitHub (@github) / X Log inSign up Log inSign up GitHub 11K posts GitHub @github The AI-powered developer platform to build, scale, and deliver secure software. San Francisco, CA github.com Joined February 2008 334 Following 2.7M Followers Mention Follow PostsPostsRepliesRepliesRepostsRepostsMediaMediaArticlesArticles \nSources:\n- [c165e4a7f642] GitHub · Change is constant. GitHub keeps you ahead. · GitHub — https://github.com/ — Strong\n- [70391c1d220c] Sign in to GitHub · GitHub — https://github.com/login — Strong\n- [749be6c64f3b] What is GitHub? - GeeksforGeeks — https://www.geeksforgeeks.org/git/what-is-github/ — Supported\n- [74ebdd1a770d] Home - The GitHub Blog — https://github.blog/ — Unverified\n- [f39baf5a4081] GitHub - LinkedIn — https://www.linkedin.com/company/github — Unverified\n- [49bb1fe456aa] GitHub (@github) / X — https://x.com/github — Weak",
+  "errors": [],
+  "started_at": 1791558195.1995397,
+  "finished_at": 1791558201.924543,
+  "evidence": {
+    "confidence": "high",
+    "confidence_reasons": [
+      "primary source with corroboration"
+    ],
+    "corroboration": "primary_plus_secondary",
+    "independent_groups": 5,
+    "conflicts": [],
+    "claims": [
+      {
+        "claim_id": "c0",
+        "claim_text": "GitHub is a complete platform that frees us from menial tasks and enables us to do our best work.",
+        "supporting": [
+          "c165e4a7f642"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "work"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c1",
+        "claim_text": "GitHub is one of the most popular platforms for version control and collaborative coding, and it plays an important role in how developers work together, manage their code, and contribute to open-source projects.",
+        "supporting": [
+          "749be6c64f3b"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "work"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c2",
+        "claim_text": "GitHub is a web-based platform that stores Git repositories in the cloud, allowing developers to work together on projects.",
+        "supporting": [
+          "749be6c64f3b"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "work"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c3",
+        "claim_text": "Branching and Merging: GitHub makes it easy to create branches for features, bug fixes, or experiments, allowing developers to work on separate code sections without disrupting the main codebase.",
+        "supporting": [],
+        "contradicting": [
+          "749be6c64f3b"
+        ],
+        "key_terms": [
+          "github",
+          "work"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c4",
+        "claim_text": "GitHub Actions: GitHub’s automation feature, GitHub Actions, allows developers to automate tasks such as code testing, continuous integration, and deployment directly from the repository.",
+        "supporting": [
+          "749be6c64f3b"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "repository"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c5",
+        "claim_text": "Developers can clone a repository to their local machine, make changes, and push those changes back to the GitHub repository.",
+        "supporting": [
+          "749be6c64f3b"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "repository"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c6",
+        "claim_text": "Repositories: A GitHub repository is where your project’s files and version history are stored.",
+        "supporting": [
+          "749be6c64f3b"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "repository"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c7",
+        "claim_text": "How to Update or Sync a Forked Repository on GitHub?2 min read",
+        "supporting": [
+          "749be6c64f3b"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "repository"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c8",
+        "claim_text": "Change how you work with GitHub Copilot.",
+        "supporting": [
+          "74ebdd1a770d",
+          "74ebdd1a770d"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "work"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c9",
+        "claim_text": "Improve how you use GitHub at work.",
+        "supporting": [
+          "74ebdd1a770d",
+          "74ebdd1a770d"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "work"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c10",
+        "claim_text": "The latest on GitHub’s platform, products, and tools.",
+        "supporting": [
+          "74ebdd1a770d",
+          "74ebdd1a770d"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "latest"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c11",
+        "claim_text": "Explore GitHub’s latest transparency data and learn more about policy updates affecting developers and open source.",
+        "supporting": [
+          "74ebdd1a770d"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "latest"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c12",
+        "claim_text": "Claude Haiku 5.5 in GitHub Copilot",
+        "supporting": [
+          "74ebdd1a770d"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c13",
+        "claim_text": "Why shorter outputs can cost more, and how GitHub Copilot reduces wasted work across the complete coding task.",
+        "supporting": [
+          "74ebdd1a770d"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "work"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c14",
+        "claim_text": "GitHub’s new context-aware classifier evaluates candidate secrets in under 2 milliseconds and could more than double the number of secrets we can prevent before they enter repository history.",
+        "supporting": [
+          "f39baf5a4081"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "repository"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c15",
+        "claim_text": "Camilla Moraes from GitHub’s Tiny Wins team joins the latest GitHub Podcast to talk about tackling the AI slop problem, listening to maintainers, and deciding what to fix next.",
+        "supporting": [
+          "f39baf5a4081"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github",
+          "latest"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c16",
+        "claim_text": "⚡️ Anthropic's Claude Haiku 5.5 is now generally available in GitHub Copilot.",
+        "supporting": [
+          "f39baf5a4081"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c17",
+        "claim_text": "Claude Haiku 5.5 in GitHub Copilot · GitHub Changelog",
+        "supporting": [
+          "f39baf5a4081"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c18",
+        "claim_text": "Its 219 pull requests across 19 languages reflect patterns from an analysis of 103.9 million GitHub pull requests.",
+        "supporting": [
+          "f39baf5a4081"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github"
+        ],
+        "confidence": "",
+        "freshness": ""
+      },
+      {
+        "claim_id": "c19",
+        "claim_text": "Git activity on GitHub more than doubled between September 2025 and August 2026, reaching 473.3 billion events per month.",
+        "supporting": [
+          "f39baf5a4081"
+        ],
+        "contradicting": [],
+        "key_terms": [
+          "github"
+        ],
+        "confidence": "",
+        "freshness": ""
+      }
+    ],
+    "topics": [
+      "programming"
+    ],
+    "high_stakes": false
+  },
+  "topics": [
+    "programming"
+  ],
+  "queries": [
+    "the github repository for latest work",
+    "github repository latest work",
+    "the github repository for latest work release notes"
+  ]
+}

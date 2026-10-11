@@ -1,0 +1,22 @@
+{
+  "task_id": "532b64fd2ddb",
+  "created_at": 1791647030.9552467,
+  "files": {
+    ".repair-worktrees/ri-11735b0364/epistemic_step_diagnosis.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\.repair-worktrees\\ri-11735b0364\\epistemic_step_diagnosis.py",
+      "size": 196
+    },
+    ".repair-worktrees/ri-11735b0364/test_detectors.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\.repair-worktrees\\ri-11735b0364\\test_detectors.py",
+      "size": 254
+    },
+    ".repair-worktrees/ri-11735b0364/repair_log.txt": {
+      "existed": false,
+      "is_dir": false
+    }
+  }
+}

@@ -1,0 +1,449 @@
+{
+  "task": "explain how your brain works?",
+  "mode": "local_only",
+  "plan": {
+    "task": "explain how your brain works?",
+    "mode": "local_only",
+    "needed": false,
+    "reasons": [],
+    "questions": [
+      {
+        "text": "Does this repository already contain a compatible implementation pattern that should be extended?",
+        "category": "repository",
+        "priority": 100,
+        "version_sensitive": false
+      }
+    ],
+    "environment": {
+      "system": {
+        "os": "Windows-11-10.0.26200-SP0",
+        "architecture": "AMD64",
+        "python": "3.14.7",
+        "python_executable": "D:\\Nexus_Core\\backend\\ChatNexus.Backend.exe"
+      },
+      "packages": [
+        {
+          "ecosystem": "python",
+          "name": "cryptography",
+          "version": "==50.0.1",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "py7zr",
+          "version": "==1.1.3",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "playwright",
+          "version": ">=1.55",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "sounddevice",
+          "version": "==0.5.6",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "faster-whisper",
+          "version": "==1.2.1",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "av",
+          "version": "==18.1.0",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "tree-sitter",
+          "version": "==0.26.0",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "tree-sitter-python",
+          "version": "==0.25.0",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "tree-sitter-javascript",
+          "version": "==0.25.0",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "tree-sitter-typescript",
+          "version": "==0.23.2",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "python-lsp-server",
+          "version": "==1.15.0",
+          "source": "pyproject.toml"
+        }
+      ],
+      "runtime_packages": [
+        {
+          "ecosystem": "python-runtime",
+          "name": "click",
+          "version": "8.5.0",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "cryptography",
+          "version": "50.0.1",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "espeakng-loader",
+          "version": "0.2.4",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "greenlet",
+          "version": "3.5.6",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "importlib_metadata",
+          "version": "9.0.1",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "kokoro-onnx",
+          "version": "0.6.1",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "numpy",
+          "version": "2.3.5",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "onnxruntime",
+          "version": "1.30.0",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "phonemizer",
+          "version": "3.4.0",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "playwright",
+          "version": "1.55.0",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "tqdm",
+          "version": "4.70.1",
+          "source": "agent-python-runtime"
+        }
+      ],
+      "manifests": [
+        "pyproject.toml"
+      ]
+    },
+    "local_hits": [
+      {
+        "path": "web/workspace.js",
+        "size": 26289,
+        "mtime": 1791513655.1873436,
+        "symbols": [
+          "esc",
+          "sha1",
+          "langFor",
+          "highlight",
+          "buildTree",
+          "renderTree",
+          "loadWorkspaces",
+          "openWorkspace",
+          "fileName",
+          "renderTabs",
+          "openFile",
+          "activateTab",
+          "showActiveTab",
+          "refreshGutterAndHl",
+          "syncScroll",
+          "saveActive",
+          "pollExternal",
+          "updateExternBar",
+          "lineDiff",
+          "termAppend",
+          "runTerm",
+          "extractProblems",
+          "refreshGit",
+          "showDiff",
+          "refreshServers",
+          "openPreview",
+          "wire"
+        ],
+        "preview": "/* Coding workspace — file tree, tabbed editor with stale-write protection, bounded terminal, problems-from-real-output, git panel. Everything here reads/writes through the registered-workspace API — nothing touches the disk outside approved roots. */ 'use strict'; const api = { get: async (u) => (await fetch(u)).json(), post: async (u, body) => (await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}), })).json(), }; const $ = (id) => document.getElementById(id); const state = { workspaces: [], active: null, root: null, tabs: [], activeTab: -1, dirtyFiles: new Set(), termHistory: [], termIdx: -1, }; /* ---------------------------------------------------------------- helpers */ function esc(s) { return String(s ?? '').replace(/[&<>\"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[c])); } async function sha1(text) { const buf = await crypto.subtle.digest( 'SHA-1', new TextEncoder().encode(text)); return Array.from(new Uint8Array(buf)) .map((b) => b.toString(16).padStart(2, '0')).join(''); } /* ------------------------------------------------------- syn",
+        "score": 19
+      },
+      {
+        "path": "localcodeagent/tools/workspace.py",
+        "size": 3714,
+        "mtime": 1791499708.3239398,
+        "symbols": [
+          "register_workspace_tools",
+          "inspect",
+          "open_workspace",
+          "list_workspaces",
+          "active"
+        ],
+        "preview": "\"\"\"Workspace tools — the agent-callable surface of the WorkspaceManager. `workspace_open` is how \"Work in D:\\\\Projects\\\\MyApp\" becomes a real execution path: inspect + register + mark active in one bounded call. File tools then accept paths inside that root via the extra_roots hook. \"\"\" from __future__ import annotations import json from pathlib import Path from .base import ToolRegistry, ToolSpec def register_workspace_tools(registry: ToolRegistry, manager) -> None: def inspect(args: dict) -> str: path = str(args.get(\"path\") or \"\").strip() if not path: return \"ERROR: 'path' is required\" try: report = manager.inspect(path) except Exception as exc: return f\"ERROR: {type(exc).__name__}: {exc}\" return json.dumps(report, ensure_ascii=False, default=str) def open_workspace(args: dict) -> str: path = str(args.get(\"path\") or \"\").strip() if not path: return \"ERROR: 'path' is required\" try: rec = manager.open(path, create=bool(args.get(\"create\", False))) except FileNotFoundError: return json.dumps({ \"error\": \"path_not_",
+        "score": 15
+      },
+      {
+        "path": "localcodeagent/brain/brainstem.py",
+        "size": 6114,
+        "mtime": 1791513654.5851538,
+        "symbols": [
+          "BrainStem",
+          "__init__",
+          "monitor",
+          "tick",
+          "_component_detail",
+          "_recoverable",
+          "start_watchdog",
+          "stop_watchdog",
+          "resources",
+          "under_pressure",
+          "crash_history",
+          "report_crash",
+          "status",
+          "loop"
+        ],
+        "preview": "\"\"\"Brain Stem — deterministic survival layer. Wraps HealthService (component probes + bounded recovery) and adds: - resource pressure snapshot (VRAM/RAM/CPU/disk) so regions share one source of truth instead of each probing hardware - HealthEvent publication on every state transition so the Thalamus can re-route around a dead model and the PFC can re-plan - watchdog tick that can run entirely without any model loaded - model blacklist consult (runtime.tuner mark_bad) before restarts This module must never import or depend on an LLM. \"\"\" from __future__ import annotations import threading import time from pathlib import Path from typing import Any, Callable from ..health import HealthService, BAD_STATES from .events import EventType, Priority from .regions import BrainRegion from . import events as ev class BrainStem(BrainRegion): name = ev.REGION_BRAINSTEM def __init__(self, bus, health: HealthService | None = None, *, hardware_probe: Callable[[], dict] | None = None, crash_history: Callable[[int], list[dict]] | None = None) -> None: super().__init__(bus) self.health = health or HealthService() self._hardw",
+        "score": 14
+      },
+      {
+        "path": "localcodeagent/brain/core.py",
+        "size": 10840,
+        "mtime": 1791513654.587155,
+        "symbols": [
+          "NexusBrain",
+          "__init__",
+          "attach_ui_bus",
+          "process_input",
+          "answers_without_model",
+          "trace",
+          "trace_summary",
+          "status",
+          "close",
+          "forward"
+        ],
+        "preview": "\"\"\"NexusBrain — the cognitive architecture coordinator. Owns the Corpus Callosum and the seven core regions, wires existing Nexus services into them, and provides the canonical input path: input → Thalamus (classify/fast-path/route) → Hippocampus (memory) → PFC (plan) → BasalGanglia (select action) → MotorCortex (execute) → Cerebellum (record/optimize) → BrainStem (health throughout) Existing subsystems keep doing the work — this layer makes them addressable, traceable, and resilient as one architecture. \"\"\" from __future__ import annotations import time import uuid from pathlib import Path from typing import Any from .bus import CorpusCallosum from .events import CognitiveEvent, EventType, Priority from .regions import BrainRegion from . import events as ev from .brainstem import BrainStem from .hippocampus import Hippocampus from .thalamus import Thalamus from .pfc import PrefrontalCortex from .basal_ganglia import BasalGanglia, ActionCandidate from .motor import MotorCortex from .cerebellum import Cerebellum from .specialists import SPECIALISTS, SpecialistBrain class NexusBrain: \"\"\"The persistent cognitiv",
+        "score": 14
+      },
+      {
+        "path": "localcodeagent/brain/regions.py",
+        "size": 3205,
+        "mtime": 1791513654.5891552,
+        "symbols": [
+          "BrainRegion",
+          "__init__",
+          "publish",
+          "respond",
+          "_guarded_handle",
+          "handle",
+          "poll",
+          "status",
+          "mark_isolated"
+        ],
+        "preview": "\"\"\"BrainRegion — base contract for cognitive regions. A region owns a name, a mailbox on the Corpus Callosum, and a health marker. Regions never call each other directly for cross-cutting work — they publish typed events. A region that raises during ``handle`` is isolated by the bus (the error is traced, not propagated), and regions may enter a degraded state that callers can check before depending on them. \"\"\" from __future__ import annotations import queue import time from typing import Any, Callable from .events import CognitiveEvent class BrainRegion: name: str = \"region\" def __init__(self, bus) -> None: self.bus = bus self.state = \"healthy\" # healthy | degraded | isolated self.last_error = \"\" self._handled = 0 self._errors = 0 self.mailbox = bus.attach_region(self.name, self._guarded_handle) # -- bus plumbing -------------------------------------------------------- def publish(self, type_: str, content: dict[str, Any], *, destination: str = \"\", correlation_id: str = \"\", mission_id: str = \"\", task_id: str = \"\", confidence: float = 1.0,",
+        "score": 14
+      },
+      {
+        "path": "localcodeagent/brain/specialists.py",
+        "size": 8387,
+        "mtime": 1791513654.5891552,
+        "symbols": [
+          "SpecialistSpec",
+          "SpecialistBrain",
+          "__init__",
+          "handle",
+          "request_capability",
+          "status"
+        ],
+        "preview": "\"\"\"Specialist brains — standard interface, shared global infrastructure. Specialists do NOT each duplicate the global architecture. A specialist brain declares its domain (planning context, domain tools, preferred model capabilities, policy, evaluator) and shares the global Corpus Callosum, Hippocampus, Brain Stem, approval framework, and resource scheduler. \"\"\" from __future__ import annotations import json from dataclasses import dataclass, field from typing import Any from .events import CognitiveEvent, EventType from .regions import BrainRegion from .thalamus import ModelRequirement @dataclass(slots=True) class SpecialistSpec: \"\"\"Declarative specialist profile — wiring to real subsystems happens in core.NexusBrain, which hands each specialist the global services.\"\"\" name: str # coding_brain, research_brain, ... domain: str # coding|research|vision|review|systems|language|diagnostics preferred_requirement: ModelRequirement = field(default_factory=ModelRequirement) capabilities: tuple[str, ...] = () # tool capabilities it may request policy: dict[str, Any] = field(default_factory=dict) description:",
+        "score": 14
+      },
+      {
+        "path": "localcodeagent/workspace.py",
+        "size": 15450,
+        "mtime": 1791513654.749277,
+        "symbols": [
+          "_new_id",
+          "_git",
+          "_read_json",
+          "_detect_git_state",
+          "_detect_commands",
+          "_detect_project",
+          "WorkspaceManager",
+          "__init__",
+          "_load",
+          "_save",
+          "inspect",
+          "open",
+          "set_active",
+          "get",
+          "list",
+          "active",
+          "remove",
+          "allowed_roots",
+          "contains"
+        ],
+        "preview": "\"\"\"Workspace Manager — first-class local project workspaces. Nexus must be able to receive \"Work in D:\\\\Projects\\\\MyApp\": inspect the directory, identify the project, adopt it as a workspace (creating it when permitted), and persist everything needed to resume — root, detected project type, toolchain, build system, runtime commands, dev server, tests, git branch/remote, and project conventions. Design notes: * The server's *primary* workspace (passed at boot) anchors the per-workspace stores (.agent task/checkpoint/memory). Additional workspaces opened through this manager are *registered* — filesystem and shell tools accept paths inside them via ``allowed_roots()``, so agent work stays bounded to user-approved roots rather than the whole disk. * Detection is heuristic and honest: it reports what it found, never what it wishes. Unknown project → ``project_type: \"generic\"``. * Persistence is a single JSON document — workspaces survive restart and feed the recent-workspaces UI. \"\"\" from __future__ import annotations import json import os import subprocess import threading import time import uuid from pathlib import Path from .procutil import no_window_flags from ty",
+        "score": 14
+      },
+      {
+        "path": "tests/test_brain.py",
+        "size": 39272,
+        "mtime": 1791513655.0342877,
+        "symbols": [
+          "make_bus",
+          "CorpusCallosumTests",
+          "BrainStemTests",
+          "HippocampusTests",
+          "ThalamusTests",
+          "PFCTests",
+          "BasalGangliaTests",
+          "MotorCortexTests",
+          "CerebellumTests",
+          "SpecialistTests",
+          "NexusBrainIntegrationTests",
+          "test_addressed_delivery",
+          "test_type_subscription_broadcast",
+          "test_correlation_request_response",
+          "test_request_timeout_returns_none",
+          "test_handler_failure_isolated",
+          "test_cancellation_suppresses_delivery",
+          "test_trace_summary_hops",
+          "test_probe_transitions_publish_health_events",
+          "test_crash_report_is_immediate_and_high_priority",
+          "test_recovery_callback_runs_deterministically",
+          "test_resource_snapshot_shared",
+          "setUp",
+          "tearDown",
+          "_hipp",
+          "test_episodic_write_and_recall",
+          "test_episodic_survives_reopen",
+          "test_episodes_bounded_under_retention",
+          "test_procedural_learning_confidence",
+          "test_project_facts_namespaced",
+          "test_invalidation",
+          "test_memory_query_event_round_trip",
+          "test_no_db_graceful",
+          "_thalamus",
+          "test_version_fast_path_no_model",
+          "test_status_fast_path",
+          "test_math_fast_path",
+          "test_math_division_by_zero",
+          "test_math_false_positives_not_caught",
+          "test_config_fast_path",
+          "test_config_false_positives_not_caught",
+          "test_coding_routes_to_coding_model",
+          "test_vision_routes_to_vision_capable_model",
+          "test_benchmark_history_influences_selection",
+          "test_unhealthy_model_not_selected",
+          "test_trusted_memory_hit_skips_model",
+          "test_no_capable_model_reason_recorded",
+          "_pfc",
+          "test_plan_creation",
+          "test_mission_planner_decomposition",
+          "test_replan_inserts_recovery_path",
+          "test_completion_assessment",
+          "test_conflict_monitor_detects_repeated_failure",
+          "test_conflict_monitor_detects_loop",
+          "test_strategy_evaluation_prefers_cheap_safe",
+          "_bg",
+          "test_ranking_prefers_safe_useful",
+          "test_historical_success_biases_selection",
+          "test_selection_event_published",
+          "test_vram_pressure_penalizes_model_invoke",
+          "test_tool_stats_fallback",
+          "_motor",
+          "test_registered_executor_runs",
+          "test_approval_gate_blocks_unapproved",
+          "test_executor_exception_isolated",
+          "test_structured_result_and_events",
+          "test_telemetry_recorded",
+          "_cb",
+          "test_metric_trend",
+          "test_optimization_lifecycle_reversible",
+          "test_consumes_execution_results_from_bus",
+          "test_optimizations_persist",
+          "test_declared_specialists_cover_domains",
+          "test_specialist_requests_capability_not_model_name",
+          "test_specialist_capability_request_round_trip",
+          "test_specialist_domain_memory",
+          "_brain",
+          "test_fast_path_end_to_end",
+          "test_memory_query_round_trip_through_regions",
+          "test_motor_failure_does_not_crash_brain",
+          "test_status_reports_all_regions",
+          "test_diagnostics_specialist_records_repair_health_events",
+          "test_thalamus_routes_diagnostics_intent",
+          "test_state_persists_across_brain_restarts",
+          "test_answers_without_model_gate",
+          "test_ui_bus_bridge",
+          "echo",
+          "boom",
+          "FakeAM",
+          "boom",
+          "M",
+          "lookup",
+          "FakeUIBus",
+          "publish"
+        ],
+        "preview": "\"\"\"Cognitive architecture tests — regions, bus, and integration paths.\"\"\" from __future__ import annotations import tempfile import time import unittest from pathlib import Path from localcodeagent.brain import NexusBrain, CorpusCallosum from localcodeagent.brain.events import CognitiveEvent, EventType, Priority from localcodeagent.brain.bus import CorpusCallosum as Bus from localcodeagent.brain.brainstem import BrainStem from localcodeagent.brain.hippocampus import Hippocampus from localcodeagent.brain.thalamus import Thalamus, ModelRequirement from localcodeagent.brain.pfc import PrefrontalCortex, ConflictMonitor from localcodeagent.brain.basal_ganglia import BasalGanglia, ActionCandidate from localcodeagent.brain.motor import MotorCortex from localcodeagent.brain.cerebellum import Cerebellum from localcodeagent.brain.specialists import SPECIALISTS, SpecialistBrain from localcodeagent.health import HealthService def make_bus() -> Bus: return CorpusCallosum() # --------------------------------------------------------------------------- # Corpus Callosum # --------------------------------------------------------------------------- class CorpusCallosumTests(unittest.TestC",
+        "score": 14
+      }
+    ],
+    "id": "e50a80d207ee",
+    "created_at": 1791567491.3627727
+  },
+  "id": "1cfbd4e87fbf",
+  "status": "completed",
+  "sources": [],
+  "findings": [],
+  "summary": "Research Summary\nMode: local_only\nQuestions:\n- Does this repository already contain a compatible implementation pattern that should be extended?\nEvidence confidence: low (unverified; 0 independent source group(s))\nFindings:\nSources:",
+  "errors": [],
+  "started_at": 1791567491.3629143,
+  "finished_at": 1791567491.3674765,
+  "evidence": {
+    "confidence": "low",
+    "confidence_reasons": [],
+    "corroboration": "unverified",
+    "independent_groups": 0,
+    "conflicts": [],
+    "claims": [],
+    "topics": [
+      "general"
+    ],
+    "high_stakes": false
+  },
+  "topics": [
+    "general"
+  ],
+  "queries": []
+}

@@ -1,0 +1,8 @@
+## model selected qwen3-4b-instruct utility
+## task running/planning
+## task running/working
+## perf qwen3-4b-instruct 178.97 tok/s TTFT 345ms
+## task completed/done
+## result
+{"error": "tool_not_installed", "message": "No tool is available to inspect failure traces or perform diagnostic analysis. Specifically, a tool such as `inspect_failure` or `diagnose_test_error` is not installed to analyze the provided error stack traces or repository state. Please install such a tool to proceed with failure diagnosis and propose a different approach."}
+## end result

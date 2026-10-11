@@ -1,0 +1,1 @@
+{"version": 1, "providers": {"web": {"calls": 133, "failures": 6, "empty": 0, "results": 700, "elapsed_sum": 350.8661589003168}, "github_api": {"calls": 148, "failures": 142, "empty": 1, "results": 30, "elapsed_sum": 43.78877829993144}, "github": {"calls": 91, "failures": 3, "empty": 0, "results": 528, "elapsed_sum": 223.55458850087598}}}

@@ -1,0 +1,781 @@
+{
+  "task": "Exception mission The diagnosis has been successfully applied to `epistemic_step_diagnosis.py`, and the changes have been committed and pushed to the remote repository. The working tree is now clean, and the repository",
+  "mode": "deep",
+  "plan": {
+    "task": "Exception mission The diagnosis has been successfully applied to `epistemic_step_diagnosis.py`, and the changes have been committed and pushed to the remote repository. The working tree is now clean, and the repository",
+    "mode": "deep",
+    "needed": true,
+    "reasons": [
+      "task contains an error/compatibility signal that may be version-specific"
+    ],
+    "questions": [
+      {
+        "text": "What is the root cause of the exact error in this project/version?",
+        "category": "error",
+        "priority": 100,
+        "version_sensitive": true
+      },
+      {
+        "text": "Is the error documented in official docs or upstream issues for the installed version?",
+        "category": "error",
+        "priority": 90,
+        "version_sensitive": true
+      },
+      {
+        "text": "Does this repository already contain a compatible implementation pattern that should be extended?",
+        "category": "repository",
+        "priority": 100,
+        "version_sensitive": false
+      }
+    ],
+    "environment": {
+      "system": {
+        "os": "Windows-11-10.0.26200-SP0",
+        "architecture": "AMD64",
+        "python": "3.14.7",
+        "python_executable": "D:\\Nexus_Core\\backend\\ChatNexus.Backend.exe"
+      },
+      "packages": [
+        {
+          "ecosystem": "python",
+          "name": "cryptography",
+          "version": "==50.0.1",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "py7zr",
+          "version": "==1.1.3",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "playwright",
+          "version": ">=1.55",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "sounddevice",
+          "version": "==0.5.6",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "faster-whisper",
+          "version": "==1.2.1",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "av",
+          "version": "==18.1.0",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "tree-sitter",
+          "version": "==0.26.0",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "tree-sitter-python",
+          "version": "==0.25.0",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "tree-sitter-javascript",
+          "version": "==0.25.0",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "tree-sitter-typescript",
+          "version": "==0.23.2",
+          "source": "pyproject.toml"
+        },
+        {
+          "ecosystem": "python",
+          "name": "python-lsp-server",
+          "version": "==1.15.0",
+          "source": "pyproject.toml"
+        }
+      ],
+      "runtime_packages": [
+        {
+          "ecosystem": "python-runtime",
+          "name": "click",
+          "version": "8.5.0",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "cryptography",
+          "version": "50.0.1",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "espeakng-loader",
+          "version": "0.2.4",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "greenlet",
+          "version": "3.5.6",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "importlib_metadata",
+          "version": "9.0.1",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "kokoro-onnx",
+          "version": "0.6.1",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "numpy",
+          "version": "2.3.5",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "onnxruntime",
+          "version": "1.30.0",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "phonemizer",
+          "version": "3.4.0",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "playwright",
+          "version": "1.55.0",
+          "source": "agent-python-runtime"
+        },
+        {
+          "ecosystem": "python-runtime",
+          "name": "tqdm",
+          "version": "4.70.1",
+          "source": "agent-python-runtime"
+        }
+      ],
+      "manifests": [
+        "pyproject.toml"
+      ]
+    },
+    "local_hits": [
+      {
+        "path": ".repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/tests/test_hypotheses.py",
+        "size": 15356,
+        "mtime": 1791647913.7216046,
+        "symbols": [
+          "HypothesisStoreTests",
+          "CausalMemoryTests",
+          "DecisionJournalTests",
+          "CoordinatorIntegrationTests",
+          "CognitiveHttpTests",
+          "setUp",
+          "test_lifecycle_and_persistence",
+          "test_evidence_moves_confidence_and_status",
+          "test_failed_test_weakens",
+          "test_upsert_dedups_and_discrimination_picks",
+          "test_list_filters",
+          "setUp",
+          "test_record_and_priors",
+          "test_failed_records_rank_lower_and_persist",
+          "test_record_outcome_persistence",
+          "test_pipeline_records_hypotheses_decision_causal",
+          "test_causal_priors_seed_next_diagnosis",
+          "setUpClass",
+          "tearDownClass",
+          "_get",
+          "_post",
+          "test_hypothesis_routes",
+          "test_decision_and_causal_routes"
+        ],
+        "preview": "\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+        "score": 121
+      },
+      {
+        "path": ".repair-worktrees/ri-07fb1d092c/tests/test_hypotheses.py",
+        "size": 15356,
+        "mtime": 1791645503.366244,
+        "symbols": [
+          "HypothesisStoreTests",
+          "CausalMemoryTests",
+          "DecisionJournalTests",
+          "CoordinatorIntegrationTests",
+          "CognitiveHttpTests",
+          "setUp",
+          "test_lifecycle_and_persistence",
+          "test_evidence_moves_confidence_and_status",
+          "test_failed_test_weakens",
+          "test_upsert_dedups_and_discrimination_picks",
+          "test_list_filters",
+          "setUp",
+          "test_record_and_priors",
+          "test_failed_records_rank_lower_and_persist",
+          "test_record_outcome_persistence",
+          "test_pipeline_records_hypotheses_decision_causal",
+          "test_causal_priors_seed_next_diagnosis",
+          "setUpClass",
+          "tearDownClass",
+          "_get",
+          "_post",
+          "test_hypothesis_routes",
+          "test_decision_and_causal_routes"
+        ],
+        "preview": "\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+        "score": 121
+      },
+      {
+        "path": ".repair-worktrees/ri-0a4fc727af/tests/test_hypotheses.py",
+        "size": 15356,
+        "mtime": 1791647971.645599,
+        "symbols": [
+          "HypothesisStoreTests",
+          "CausalMemoryTests",
+          "DecisionJournalTests",
+          "CoordinatorIntegrationTests",
+          "CognitiveHttpTests",
+          "setUp",
+          "test_lifecycle_and_persistence",
+          "test_evidence_moves_confidence_and_status",
+          "test_failed_test_weakens",
+          "test_upsert_dedups_and_discrimination_picks",
+          "test_list_filters",
+          "setUp",
+          "test_record_and_priors",
+          "test_failed_records_rank_lower_and_persist",
+          "test_record_outcome_persistence",
+          "test_pipeline_records_hypotheses_decision_causal",
+          "test_causal_priors_seed_next_diagnosis",
+          "setUpClass",
+          "tearDownClass",
+          "_get",
+          "_post",
+          "test_hypothesis_routes",
+          "test_decision_and_causal_routes"
+        ],
+        "preview": "\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+        "score": 121
+      },
+      {
+        "path": ".repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/tests/test_hypotheses.py",
+        "size": 15356,
+        "mtime": 1791648330.2691185,
+        "symbols": [
+          "HypothesisStoreTests",
+          "CausalMemoryTests",
+          "DecisionJournalTests",
+          "CoordinatorIntegrationTests",
+          "CognitiveHttpTests",
+          "setUp",
+          "test_lifecycle_and_persistence",
+          "test_evidence_moves_confidence_and_status",
+          "test_failed_test_weakens",
+          "test_upsert_dedups_and_discrimination_picks",
+          "test_list_filters",
+          "setUp",
+          "test_record_and_priors",
+          "test_failed_records_rank_lower_and_persist",
+          "test_record_outcome_persistence",
+          "test_pipeline_records_hypotheses_decision_causal",
+          "test_causal_priors_seed_next_diagnosis",
+          "setUpClass",
+          "tearDownClass",
+          "_get",
+          "_post",
+          "test_hypothesis_routes",
+          "test_decision_and_causal_routes"
+        ],
+        "preview": "\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+        "score": 121
+      },
+      {
+        "path": ".repair-worktrees/ri-1268972786/tests/test_hypotheses.py",
+        "size": 15356,
+        "mtime": 1791647288.0461643,
+        "symbols": [
+          "HypothesisStoreTests",
+          "CausalMemoryTests",
+          "DecisionJournalTests",
+          "CoordinatorIntegrationTests",
+          "CognitiveHttpTests",
+          "setUp",
+          "test_lifecycle_and_persistence",
+          "test_evidence_moves_confidence_and_status",
+          "test_failed_test_weakens",
+          "test_upsert_dedups_and_discrimination_picks",
+          "test_list_filters",
+          "setUp",
+          "test_record_and_priors",
+          "test_failed_records_rank_lower_and_persist",
+          "test_record_outcome_persistence",
+          "test_pipeline_records_hypotheses_decision_causal",
+          "test_causal_priors_seed_next_diagnosis",
+          "setUpClass",
+          "tearDownClass",
+          "_get",
+          "_post",
+          "test_hypothesis_routes",
+          "test_decision_and_causal_routes"
+        ],
+        "preview": "\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+        "score": 121
+      },
+      {
+        "path": ".repair-worktrees/ri-1348702036/tests/test_hypotheses.py",
+        "size": 15356,
+        "mtime": 1791650723.7327437,
+        "symbols": [
+          "HypothesisStoreTests",
+          "CausalMemoryTests",
+          "DecisionJournalTests",
+          "CoordinatorIntegrationTests",
+          "CognitiveHttpTests",
+          "setUp",
+          "test_lifecycle_and_persistence",
+          "test_evidence_moves_confidence_and_status",
+          "test_failed_test_weakens",
+          "test_upsert_dedups_and_discrimination_picks",
+          "test_list_filters",
+          "setUp",
+          "test_record_and_priors",
+          "test_failed_records_rank_lower_and_persist",
+          "test_record_outcome_persistence",
+          "test_pipeline_records_hypotheses_decision_causal",
+          "test_causal_priors_seed_next_diagnosis",
+          "setUpClass",
+          "tearDownClass",
+          "_get",
+          "_post",
+          "test_hypothesis_routes",
+          "test_decision_and_causal_routes"
+        ],
+        "preview": "\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+        "score": 121
+      },
+      {
+        "path": ".repair-worktrees/ri-250a95ec3d/tests/test_hypotheses.py",
+        "size": 15356,
+        "mtime": 1791614208.0829837,
+        "symbols": [
+          "HypothesisStoreTests",
+          "CausalMemoryTests",
+          "DecisionJournalTests",
+          "CoordinatorIntegrationTests",
+          "CognitiveHttpTests",
+          "setUp",
+          "test_lifecycle_and_persistence",
+          "test_evidence_moves_confidence_and_status",
+          "test_failed_test_weakens",
+          "test_upsert_dedups_and_discrimination_picks",
+          "test_list_filters",
+          "setUp",
+          "test_record_and_priors",
+          "test_failed_records_rank_lower_and_persist",
+          "test_record_outcome_persistence",
+          "test_pipeline_records_hypotheses_decision_causal",
+          "test_causal_priors_seed_next_diagnosis",
+          "setUpClass",
+          "tearDownClass",
+          "_get",
+          "_post",
+          "test_hypothesis_routes",
+          "test_decision_and_causal_routes"
+        ],
+        "preview": "\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+        "score": 121
+      },
+      {
+        "path": ".repair-worktrees/ri-30771668ad/tests/test_hypotheses.py",
+        "size": 15356,
+        "mtime": 1791607561.6532989,
+        "symbols": [
+          "HypothesisStoreTests",
+          "CausalMemoryTests",
+          "DecisionJournalTests",
+          "CoordinatorIntegrationTests",
+          "CognitiveHttpTests",
+          "setUp",
+          "test_lifecycle_and_persistence",
+          "test_evidence_moves_confidence_and_status",
+          "test_failed_test_weakens",
+          "test_upsert_dedups_and_discrimination_picks",
+          "test_list_filters",
+          "setUp",
+          "test_record_and_priors",
+          "test_failed_records_rank_lower_and_persist",
+          "test_record_outcome_persistence",
+          "test_pipeline_records_hypotheses_decision_causal",
+          "test_causal_priors_seed_next_diagnosis",
+          "setUpClass",
+          "tearDownClass",
+          "_get",
+          "_post",
+          "test_hypothesis_routes",
+          "test_decision_and_causal_routes"
+        ],
+        "preview": "\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+        "score": 121
+      }
+    ],
+    "id": "88b78bb69ddc",
+    "created_at": 1791679874.5151033
+  },
+  "id": "9324d9a57058",
+  "status": "completed",
+  "sources": [
+    {
+      "title": "Installed python package: av",
+      "source_type": "installed_metadata",
+      "url": "",
+      "excerpt": "{\"ecosystem\": \"python\", \"name\": \"av\", \"version\": \"==18.1.0\", \"source\": \"pyproject.toml\"}",
+      "provider": "package_metadata",
+      "id": "0cce43cf3ab8",
+      "authority": "installed_metadata",
+      "software_version": "==18.1.0",
+      "version_relevance": "exact",
+      "published_at": "",
+      "retrieved_at": 1791679963.3002627,
+      "reliability": "Unverified",
+      "score": 221.0,
+      "metadata": {
+        "ecosystem": "python",
+        "name": "av",
+        "version": "==18.1.0",
+        "source": "pyproject.toml",
+        "independence_group": 0
+      },
+      "untrusted": true,
+      "source_class": "unknown",
+      "independence_group": 0,
+      "corroboration_count": 0,
+      "badges": [
+        "EXACT VERSION"
+      ],
+      "score_components": {
+        "domain_prior": 94.0,
+        "authority": 94.0,
+        "version": 25.0,
+        "relevance": 0.0,
+        "primary_source": 8.0
+      },
+      "topics": [
+        "programming"
+      ]
+    },
+    {
+      "title": ".repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/tests/test_hypotheses.py",
+      "source_type": "local_repository",
+      "url": "",
+      "excerpt": "Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_priors, test_failed_records_rank_lower_and_persist, test_record_outcome_persistence, test_pipeline_records_hypotheses_decision_causal, test_causal_priors_seed_next_diagnosis, setUpClass, tearDownClass, _get, _post, test_hypothesis_routes, test_decision_and_causal_routes\n\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+      "provider": "repository",
+      "id": "1fa9e005a340",
+      "authority": "local_repository",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791679874.8154552,
+      "reliability": "Unverified",
+      "score": 210.86,
+      "metadata": {
+        "path": ".repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/tests/test_hypotheses.py",
+        "score": 121,
+        "independence_group": 1
+      },
+      "untrusted": true,
+      "source_class": "unknown",
+      "independence_group": 1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {
+        "domain_prior": 100.0,
+        "authority": 100.0,
+        "version": 0.0,
+        "relevance": 2.86,
+        "primary_source": 8.0
+      },
+      "topics": [
+        "programming"
+      ]
+    },
+    {
+      "title": ".repair-worktrees/ri-07fb1d092c/tests/test_hypotheses.py",
+      "source_type": "local_repository",
+      "url": "",
+      "excerpt": "Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_priors, test_failed_records_rank_lower_and_persist, test_record_outcome_persistence, test_pipeline_records_hypotheses_decision_causal, test_causal_priors_seed_next_diagnosis, setUpClass, tearDownClass, _get, _post, test_hypothesis_routes, test_decision_and_causal_routes\n\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+      "provider": "repository",
+      "id": "edc3be2588a8",
+      "authority": "local_repository",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791679874.815468,
+      "reliability": "Unverified",
+      "score": 210.86,
+      "metadata": {
+        "path": ".repair-worktrees/ri-07fb1d092c/tests/test_hypotheses.py",
+        "score": 121,
+        "independence_group": 1,
+        "duplicate_of": "1fa9e005a340"
+      },
+      "untrusted": true,
+      "source_class": "unknown",
+      "independence_group": 1,
+      "corroboration_count": 0,
+      "badges": [
+        "DUPLICATE"
+      ],
+      "score_components": {
+        "domain_prior": 100.0,
+        "authority": 100.0,
+        "version": 0.0,
+        "relevance": 2.86,
+        "primary_source": 8.0
+      },
+      "topics": [
+        "programming"
+      ]
+    },
+    {
+      "title": ".repair-worktrees/ri-0a4fc727af/tests/test_hypotheses.py",
+      "source_type": "local_repository",
+      "url": "",
+      "excerpt": "Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_priors, test_failed_records_rank_lower_and_persist, test_record_outcome_persistence, test_pipeline_records_hypotheses_decision_causal, test_causal_priors_seed_next_diagnosis, setUpClass, tearDownClass, _get, _post, test_hypothesis_routes, test_decision_and_causal_routes\n\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+      "provider": "repository",
+      "id": "f8e24ba618f8",
+      "authority": "local_repository",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791679874.8154757,
+      "reliability": "Unverified",
+      "score": 210.86,
+      "metadata": {
+        "path": ".repair-worktrees/ri-0a4fc727af/tests/test_hypotheses.py",
+        "score": 121,
+        "independence_group": 1,
+        "duplicate_of": "1fa9e005a340"
+      },
+      "untrusted": true,
+      "source_class": "unknown",
+      "independence_group": 1,
+      "corroboration_count": 0,
+      "badges": [
+        "DUPLICATE"
+      ],
+      "score_components": {
+        "domain_prior": 100.0,
+        "authority": 100.0,
+        "version": 0.0,
+        "relevance": 2.86,
+        "primary_source": 8.0
+      },
+      "topics": [
+        "programming"
+      ]
+    },
+    {
+      "title": ".repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/tests/test_hypotheses.py",
+      "source_type": "local_repository",
+      "url": "",
+      "excerpt": "Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_priors, test_failed_records_rank_lower_and_persist, test_record_outcome_persistence, test_pipeline_records_hypotheses_decision_causal, test_causal_priors_seed_next_diagnosis, setUpClass, tearDownClass, _get, _post, test_hypothesis_routes, test_decision_and_causal_routes\n\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+      "provider": "repository",
+      "id": "92cc71346f1d",
+      "authority": "local_repository",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791679874.8154821,
+      "reliability": "Unverified",
+      "score": 210.86,
+      "metadata": {
+        "path": ".repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/tests/test_hypotheses.py",
+        "score": 121,
+        "independence_group": 1,
+        "duplicate_of": "1fa9e005a340"
+      },
+      "untrusted": true,
+      "source_class": "unknown",
+      "independence_group": 1,
+      "corroboration_count": 0,
+      "badges": [
+        "DUPLICATE"
+      ],
+      "score_components": {
+        "domain_prior": 100.0,
+        "authority": 100.0,
+        "version": 0.0,
+        "relevance": 2.86,
+        "primary_source": 8.0
+      },
+      "topics": [
+        "programming"
+      ]
+    },
+    {
+      "title": ".repair-worktrees/ri-1268972786/tests/test_hypotheses.py",
+      "source_type": "local_repository",
+      "url": "",
+      "excerpt": "Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_priors, test_failed_records_rank_lower_and_persist, test_record_outcome_persistence, test_pipeline_records_hypotheses_decision_causal, test_causal_priors_seed_next_diagnosis, setUpClass, tearDownClass, _get, _post, test_hypothesis_routes, test_decision_and_causal_routes\n\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+      "provider": "repository",
+      "id": "f5448f587c7e",
+      "authority": "local_repository",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791679874.815488,
+      "reliability": "Unverified",
+      "score": 210.86,
+      "metadata": {
+        "path": ".repair-worktrees/ri-1268972786/tests/test_hypotheses.py",
+        "score": 121,
+        "independence_group": 1,
+        "duplicate_of": "1fa9e005a340"
+      },
+      "untrusted": true,
+      "source_class": "unknown",
+      "independence_group": 1,
+      "corroboration_count": 0,
+      "badges": [
+        "DUPLICATE"
+      ],
+      "score_components": {
+        "domain_prior": 100.0,
+        "authority": 100.0,
+        "version": 0.0,
+        "relevance": 2.86,
+        "primary_source": 8.0
+      },
+      "topics": [
+        "programming"
+      ]
+    },
+    {
+      "title": ".repair-worktrees/ri-1348702036/tests/test_hypotheses.py",
+      "source_type": "local_repository",
+      "url": "",
+      "excerpt": "Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_priors, test_failed_records_rank_lower_and_persist, test_record_outcome_persistence, test_pipeline_records_hypotheses_decision_causal, test_causal_priors_seed_next_diagnosis, setUpClass, tearDownClass, _get, _post, test_hypothesis_routes, test_decision_and_causal_routes\n\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+      "provider": "repository",
+      "id": "f9ac04d0cd58",
+      "authority": "local_repository",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791679874.815496,
+      "reliability": "Unverified",
+      "score": 210.86,
+      "metadata": {
+        "path": ".repair-worktrees/ri-1348702036/tests/test_hypotheses.py",
+        "score": 121,
+        "independence_group": 1,
+        "duplicate_of": "1fa9e005a340"
+      },
+      "untrusted": true,
+      "source_class": "unknown",
+      "independence_group": 1,
+      "corroboration_count": 0,
+      "badges": [
+        "DUPLICATE"
+      ],
+      "score_components": {
+        "domain_prior": 100.0,
+        "authority": 100.0,
+        "version": 0.0,
+        "relevance": 2.86,
+        "primary_source": 8.0
+      },
+      "topics": [
+        "programming"
+      ]
+    },
+    {
+      "title": ".repair-worktrees/ri-250a95ec3d/tests/test_hypotheses.py",
+      "source_type": "local_repository",
+      "url": "",
+      "excerpt": "Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_priors, test_failed_records_rank_lower_and_persist, test_record_outcome_persistence, test_pipeline_records_hypotheses_decision_causal, test_causal_priors_seed_next_diagnosis, setUpClass, tearDownClass, _get, _post, test_hypothesis_routes, test_decision_and_causal_routes\n\"\"\"Phase 2 — hypothesis lifecycle, causal memory, decision journal, and their wiring into the self-repair pipeline.\"\"\" import tempfile import unittest from pathlib import Path class HypothesisStoreTests(unittest.TestCase): def setUp(self): self.td = tempfile.TemporaryDirectory() self.addCleanup(self.td.cleanup) from localcodeagent.hypotheses import HypothesisStore self.store = HypothesisStore(Path(self.td.name) / \"hyp.json\") def test_lifecycle_and_persistence(self): h = self.store.propose(\"Port held by stale process\", kind=\"stale_process\", confidence=0.7, incident_id=\"ri-1\", test={\"name\": \"check port binding\"}) self.assertEqual(h[\"status\"], \"proposed\") self.store.set_status(h[\"id\"], \"testing\") self.store.record_test(h[\"id\"], passed=True, output=\"port busy\") row = self.store.get(h[\"id\"]) self.assertEqual(row[\"status\"], \"supported\") self.assertTrue(row[\"test_result\"][\"passed\"]) self.store.confirm(h[\"id\"], evidence=\"incident resolved\") self.assertEqual(self.store.get(h[\"id\"])[\"sta",
+      "provider": "repository",
+      "id": "954704f04f94",
+      "authority": "local_repository",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "",
+      "retrieved_at": 1791679874.8155012,
+      "reliability": "Unverified",
+      "score": 210.86,
+      "metadata": {
+        "path": ".repair-worktrees/ri-250a95ec3d/tests/test_hypotheses.py",
+        "score": 121,
+        "independence_group": 1,
+        "duplicate_of": "1fa9e005a340"
+      },
+      "untrusted": true,
+      "source_class": "unknown",
+      "independence_group": 1,
+      "corroboration_count": 0,
+      "badges": [
+        "DUPLICATE"
+      ],
+      "score_components": {
+        "domain_prior": 100.0,
+        "authority": 100.0,
+        "version": 0.0,
+        "relevance": 2.86,
+        "primary_source": 8.0
+      },
+      "topics": [
+        "programming"
+      ]
+    }
+  ],
+  "findings": [
+    "[0cce43cf3ab8] Installed python package: av: {\"ecosystem\": \"python\", \"name\": \"av\", \"version\": \"==18.1.0\", \"source\": \"pyproject.toml\"}",
+    "[1fa9e005a340] .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio",
+    "[edc3be2588a8] .repair-worktrees/ri-07fb1d092c/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio",
+    "[f8e24ba618f8] .repair-worktrees/ri-0a4fc727af/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio",
+    "[92cc71346f1d] .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio",
+    "[f5448f587c7e] .repair-worktrees/ri-1268972786/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio",
+    "[f9ac04d0cd58] .repair-worktrees/ri-1348702036/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio",
+    "[954704f04f94] .repair-worktrees/ri-250a95ec3d/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio"
+  ],
+  "summary": "Research Summary\nMode: deep\nQuestions:\n- What is the root cause of the exact error in this project/version?\n- Is the error documented in official docs or upstream issues for the installed version?\n- Does this repository already contain a compatible implementation pattern that should be extended?\nEvidence confidence: low (unverified; 2 independent source group(s))\nFindings:\n- [0cce43cf3ab8] Installed python package: av: {\"ecosystem\": \"python\", \"name\": \"av\", \"version\": \"==18.1.0\", \"source\": \"pyproject.toml\"}\n- [1fa9e005a340] .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio\n- [edc3be2588a8] .repair-worktrees/ri-07fb1d092c/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio\n- [f8e24ba618f8] .repair-worktrees/ri-0a4fc727af/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio\n- [92cc71346f1d] .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio\n- [f5448f587c7e] .repair-worktrees/ri-1268972786/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio\n- [f9ac04d0cd58] .repair-worktrees/ri-1348702036/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio\n- [954704f04f94] .repair-worktrees/ri-250a95ec3d/tests/test_hypotheses.py: Symbols: HypothesisStoreTests, CausalMemoryTests, DecisionJournalTests, CoordinatorIntegrationTests, CognitiveHttpTests, setUp, test_lifecycle_and_persistence, test_evidence_moves_confidence_and_status, test_failed_test_weakens, test_upsert_dedups_and_discrimination_picks, test_list_filters, setUp, test_record_and_prio\nSources:\n- [0cce43cf3ab8] Installed python package: av — local — Unverified\n- [1fa9e005a340] .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/tests/test_hypotheses.py — .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/tests/test_hypotheses.py — Unverified\n- [edc3be2588a8] .repair-worktrees/ri-07fb1d092c/tests/test_hypotheses.py — .repair-worktrees/ri-07fb1d092c/tests/test_hypotheses.py — Unverified\n- [f8e24ba618f8] .repair-worktrees/ri-0a4fc727af/tests/test_hypotheses.py — .repair-worktrees/ri-0a4fc727af/tests/test_hypotheses.py — Unverified\n- [92cc71346f1d] .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/tests/test_hypotheses.py — .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/tests/test_hypotheses.py — Unverified\n- [f5448f587c7e] .repair-worktrees/ri-1268972786/tests/test_hypotheses.py — .repair-worktrees/ri-1268972786/tests/test_hypotheses.py — Unverified\n- [f9ac04d0cd58] .repair-worktrees/ri-1348702036/tests/test_hypotheses.py — .repair-worktrees/ri-1348702036/tests/test_hypotheses.py — Unverified\n- [954704f04f94] .repair-worktrees/ri-250a95ec3d/tests/test_hypotheses.py — .repair-worktrees/ri-250a95ec3d/tests/test_hypotheses.py — Unverified",
+  "errors": [],
+  "started_at": 1791679874.5153716,
+  "finished_at": 1791679966.8187854,
+  "evidence": {
+    "confidence": "low",
+    "confidence_reasons": [
+      "insufficient independent evidence"
+    ],
+    "corroboration": "unverified",
+    "independent_groups": 2,
+    "conflicts": [],
+    "claims": [],
+    "topics": [
+      "programming"
+    ],
+    "high_stakes": false
+  },
+  "topics": [
+    "programming"
+  ],
+  "queries": [
+    "Exception mission The diagnosis has been successfully applied to `epistemic_step_diagnosis.py`, and the changes have been committed and pushed to the remote repository. The working tree is now clean, and the repository What is the root cause of the exact error in this project/version?",
+    "Exception mission The diagnosis has been successfully applied to `epistemic_step_diagnosis.py`, and the changes have been committed and pushed to the remote repository. The working tree is now clean, and the repository Is the error documented in official docs or upstream issues for the installed version?",
+    "Exception mission The diagnosis has been successfully applied to `epistemic_step_diagnosis.py`, and the changes have been committed and pushed to the remote repository. The working tree is now clean, and the repository Does this repository already contain a compatible implementation pattern that should be extended?"
+  ]
+}

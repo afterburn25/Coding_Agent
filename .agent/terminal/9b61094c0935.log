@@ -1,0 +1,6 @@
+## task completed: I can answer everyday questions and explain complicated subjects; help you think through decisions and comparisons; inspect, write, and debug code, run tests and builds, and work with Git and GitHub; research current information on the web; work with files and projects on this machine; generate and 
+## model builtin_utility builtin-local utility
+## task completed/done
+## result
+I can answer everyday questions and explain complicated subjects; help you think through decisions and comparisons; inspect, write, and debug code, run tests and builds, and work with Git and GitHub; research current information on the web; work with files and projects on this machine; generate and edit images; remember useful things from our conversations; talk with you by voice; automate multi-step work. For example, you could say: "explain how vaccines work"; "which is better for this project — SQLite or Postgres"; "refactor this function and run the tests". Ask 'what are your technical capabilities' if you want the full subsystem list.
+## end result

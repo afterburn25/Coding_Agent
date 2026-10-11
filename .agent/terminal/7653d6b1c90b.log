@@ -1,0 +1,146 @@
+## model selected qwen3-14b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-14b 22.66 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 21.72 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 21.97 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 18.96 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/tests/test_streaming.py
+· read_file ok
+## perf qwen3-14b 18.28 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 17.51 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 18.13 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 17.1 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 15.4 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 14.6 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 13.75 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 13.88 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 12.38 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 11.42 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.87 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.58 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## model context_trim qwen3-14b
+## perf qwen3-14b 12.72 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 11.77 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 11.01 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 11.16 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.76 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.24 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 11.41 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.61 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 1.91 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 3.1 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 6.02 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 11.31 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 9.95 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 9.62 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.39 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.43 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 9.83 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.16 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 9.43 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 9.41 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.17 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 9.73 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 9.74 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 9.62 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 11.01 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.78 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.09 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 9.65 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 9.37 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.47 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 10.18 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/.nexus/worktrees/ws-b9d4d0c30c/localcodeagent/server.py
+· read_file ok
+## perf qwen3-14b 9.62 tok/s

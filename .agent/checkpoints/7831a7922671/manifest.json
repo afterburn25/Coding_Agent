@@ -1,0 +1,12 @@
+{
+  "task_id": "7831a7922671",
+  "created_at": 1791629901.1025805,
+  "files": {
+    "tests/test_workspace.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\tests\\test_workspace.py",
+      "size": 7332
+    }
+  }
+}

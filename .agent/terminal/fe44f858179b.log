@@ -1,0 +1,753 @@
+## model selected qwen3-14b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-14b 25.41 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 2.79 tok/s
+$ apply_patch
+· apply_patch failed
+## perf qwen3-14b 2.77 tok/s
+$ apply_patch
+· apply_patch failed
+## perf qwen3-14b 2.8 tok/s
+$ read_file .repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 2.78 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.76 tok/s
+$ git_status .repair-worktrees/ri-41109fbe50
+· git_status ok
+## perf qwen3-14b 2.75 tok/s
+$ git_diff .repair-worktrees/ri-41109fbe50
+· git_diff ok
+## perf qwen3-14b 2.83 tok/s
+$ write_file tests/test_fix_verification.py
+· write_file ok
+## perf qwen3-14b 2.83 tok/s
+$ write_file invokeai.yaml
+· write_file ok
+## perf qwen3-14b 2.83 tok/s
+$ run_shell pytest tests/test_fix_verification.py
+'pytest' is not recognized as an internal or external command,
+operable program or batch file.
+· run_shell failed
+## perf qwen3-14b 2.81 tok/s
+$ run_shell pip install pytest
+Defaulting to user installation because normal site-packages is not writeable
+Requirement already satisfied: pytest in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (9.1.1)
+Requirement already satisfied: colorama>=0.4 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (0.4.6)
+Requirement already satisfied: iniconfig>=1.0.1 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (2.3.0)
+Requirement already satisfied: packaging>=22 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (26.3)
+Requirement already satisfied: pluggy<2,>=1.5 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (1.6.0)
+Requirement already satisfied: pygments>=2.7.2 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (2.21.0)
+· run_shell ok
+## perf qwen3-14b 2.84 tok/s
+$ run_shell pytest tests/test_fix_verification.py
+'pytest' is not recognized as an internal or external command,
+operable program or batch file.
+· run_shell failed
+## perf qwen3-14b 2.83 tok/s
+$ run_shell where pytest
+INFO: Could not find files for the given pattern(s).
+· run_shell failed
+## perf qwen3-14b 2.85 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+>       assert diagnosis['root_cause'] == 'CUDA out of memory error'
+E       AssertionError: assert 'RuntimeError...GB total cap)' == 'CUDA out of memory error'
+E         
+E         - CUDA out of memory error
+E         + RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+
+tests\test_fix_verification.py:18: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.10s ==============================
+· run_shell failed
+## perf qwen3-14b 2.85 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.88 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.94 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.89 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.87 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_trace']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_trace'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.9 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.88 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_trace']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_trace'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.85 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 1.96 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.45 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.8 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.77 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.76 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.73 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.71 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.56 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 1.31 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.33 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.5 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.48 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.48 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.06s ==============================
+· run_shell failed
+## perf qwen3-14b 2.45 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.43 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.41 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.41 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.3 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.39 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.35 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.35 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.33 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.33 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.29 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.31 tok/s
+$ run_shell python -m pytest tests/test_fix_verification.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests\test_fix_verification.py F                                         [100%]
+
+================================== FAILURES ===================================
+___________________ test_diagnose_cuda_out_of_memory_error ____________________
+
+    def test_diagnose_cuda_out_of_memory_error():
+        error_trace = """
+        Traceback (most recent call last):
+          File "soak_persona.py", line 62, in <module>
+            test_case.run()
+          File "soak_persona.py", line 45, in run
+            result = self.invoke()
+          File "invokeai.py", line 123, in invoke
+            output = self.model.generate()
+        RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)
+        """
+    
+        diagnosis = diagnose_test_error(error_trace)
+    
+        assert diagnosis['root_cause'] == 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)'
+>       assert 'RuntimeError: CUDA out of memory. Tried to allocate 24GB (GPU 0; 24GB total cap)' in diagnosis['error_lines']
+                                                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'error_lines'
+
+tests\test_fix_verification.py:19: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_fix_verification.py::test_diagnose_cuda_out_of_memory_error
+============================== 1 failed in 0.05s ==============================
+· run_shell failed
+## perf qwen3-14b 2.28 tok/s

@@ -1,0 +1,514 @@
+## model selected qwen3-14b primary_coder
+## model activation_fallback qwen3-coder-30b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-coder-30b 43.92 tok/s TTFT 18048ms
+$ list_files
+· list_files ok
+## perf qwen3-coder-30b 42.17 tok/s TTFT 15480ms
+$ run_shell cd .repair-worktrees\ri-1348702036
+· run_shell ok
+## perf qwen3-coder-30b 43.21 tok/s
+$ read_file epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-coder-30b 45.54 tok/s
+$ read_file tests\test_detectors.py
+· read_file ok
+## perf qwen3-coder-30b 43.92 tok/s TTFT 32489ms
+$ run_shell python -m pytest tests/test_detectors.py -v
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 41 items
+
+tests/test_detectors.py::DetectorUnitTests::test_answer_memory_decay_needs_samples PASSED [  2%]
+tests/test_detectors.py::DetectorUnitTests::test_approval_backlog PASSED [  4%]
+tests/test_detectors.py::DetectorUnitTests::test_ci_failure_carries_log_tail PASSED [  7%]
+tests/test_detectors.py::DetectorUnitTests::test_ci_failure_finding_is_one_shot PASSED [  9%]
+tests/test_detectors.py::DetectorUnitTests::test_ci_failure_signature_uses_failure_key_not_commit PASSED [ 12%]
+tests/test_detectors.py::DetectorUnitTests::test_ci_failures PASSED      [ 14%]
+tests/test_detectors.py::DetectorUnitTests::test_crash_storm_fires_at_threshold PASSED [ 17%]
+tests/test_detectors.py::DetectorUnitTests::test_crash_storm_ignores_old_and_sparse PASSED [ 19%]
+tests/test_detectors.py::DetectorUnitTests::test_crash_storm_survives_bad_source PASSED [ 21%]
+tests/test_detectors.py::DetectorUnitTests::test_disk_pressure_severity PASSED [ 24%]
+tests/test_detectors.py::DetectorUnitTests::test_finding_defaults_and_clamps PASSED [ 26%]
+tests/test_detectors.py::DetectorUnitTests::test_mission_failures PASSED [ 29%]
+tests/test_detectors.py::DetectorUnitTests::test_model_failures PASSED   [ 31%]
+tests/test_detectors.py::DetectorUnitTests::test_ram_pressure PASSED     [ 34%]
+tests/test_detectors.py::DetectorUnitTests::test_repair_thrash PASSED    [ 36%]
+tests/test_detectors.py::DetectorUnitTests::test_startup_regression PASSED [ 39%]
+tests/test_detectors.py::WorkspaceBloatTests::test_below_threshold_silent PASSED [ 41%]
+tests/test_detectors.py::WorkspaceBloatTests::test_fires_at_threshold PASSED [ 43%]
+tests/test_detectors.py::ScannerTests::test_bad_detector_never_stalls PASSED [ 46%]
+tests/test_detectors.py::ScannerTests::test_cooldown_allows_re_route PASSED [ 48%]
+tests/test_detectors.py::ScannerTests::test_dedupe_merges_sightings PASSED [ 51%]
+tests/test_detectors.py::ScannerTests::test_dismiss PASSED               [ 53%]
+tests/test_detectors.py::ScannerTests::test_failed_route_stays_open PASSED [ 56%]
+tests/test_detectors.py::ScannerTests::test_findings_persist_across_restart PASSED [ 58%]
+tests/test_detectors.py::ScannerTests::test_interval_gate PASSED         [ 60%]
+tests/test_detectors.py::ScannerTests::test_one_shot_finding_never_reroutes PASSED [ 63%]
+tests/test_detectors.py::ScannerTests::test_reconcile_prunes_dead_rows PASSED [ 65%]
+tests/test_detectors.py::ScannerTests::test_reconcile_resolves_finished_targets PASSED [ 68%]
+tests/test_detectors.py::ScannerTests::test_resolved_signature_reopens_on_recurrence PASSED [ 70%]
+tests/test_detectors.py::ScannerTests::test_route_called_once_per_finding PASSED [ 73%]
+tests/test_detectors.py::ScannerTests::test_severity_ordering PASSED     [ 75%]
+tests/test_detectors.py::ScannerTests::test_suggestions_never_route PASSED [ 78%]
+tests/test_detectors.py::SupervisorRoutingTests::test_critical_finding_maps_urgent_priority PASSED [ 80%]
+tests/test_detectors.py::SupervisorRoutingTests::test_mission_route_creates_and_dedupes PASSED [ 82%]
+tests/test_detectors.py::SupervisorRoutingTests::test_repair_route_opens_incident PASSED [ 85%]
+tests/test_detectors.py::SupervisorRoutingTests::test_scanner_tick_inside_supervisor PASSED [ 87%]
+tests/test_detectors.py::SupervisorRoutingTests::test_suggestion_route_returns_empty PASSED [ 90%]
+tests/test_detectors.py::SchedulingTests::test_aging_never_outranks_interactive PASSED [ 92%]
+tests/test_detectors.py::SchedulingTests::test_aging_promotes_starved_background PASSED [ 95%]
+tests/test_detectors.py::SchedulingTests::test_lane_busy_blocks_normal_not_urgent PASSED [ 97%]
+tests/test_detectors.py::SchedulingTests::test_priority_ordering PASSED  [100%]
+
+============================= 41 passed in 7.43s ==============================
+· run_shell ok
+## perf qwen3-coder-30b 40.64 tok/s TTFT 7061ms
+$ read_file tests/test_self_repair.py
+· read_file timeout
+## model context_trim qwen3-coder-30b
+## perf qwen3-coder-30b 42.33 tok/s TTFT 70171ms
+$ search_text
+· search_text ok
+## perf qwen3-coder-30b 9.13 tok/s TTFT 3004ms
+$ read_file epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-coder-30b 23.25 tok/s TTFT 2517ms
+$ write_file tests/test_epistemic_diagnosis.py
+· write_file ok
+## perf qwen3-coder-30b 37.98 tok/s TTFT 1093ms
+$ run_shell python -m pytest tests/test_epistemic_diagnosis.py -v
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_____________ ERROR collecting tests/test_epistemic_diagnosis.py ______________
+ImportError while importing test module 'D:\Nexus_Core\Source\tests\test_epistemic_diagnosis.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_epistemic_diagnosis.py:3: in <module>
+    from localcodeagent.self_repair.diagnosis import diagnose_test_error
+E   ImportError: cannot import name 'diagnose_test_error' from 'localcodeagent.self_repair.diagnosis' (D:\Nexus_Core\Source\localcodeagent\self_repair\diagnosis.py)
+=========================== short test summary info ===========================
+ERROR tests/test_epistemic_diagnosis.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.35s ===============================
+· run_shell failed
+## perf qwen3-coder-30b 38.74 tok/s TTFT 2949ms
+$ list_files localcodeagent/self_repair
+· list_files ok
+## perf qwen3-coder-30b 35.05 tok/s TTFT 1360ms
+$ read_file localcodeagent/self_repair/diagnosis.py
+· read_file ok
+## perf qwen3-coder-30b 37.38 tok/s TTFT 30293ms
+$ run_shell find . -name "*.py" -exec grep -l "diagnose_test_error" {} \;
+Access denied - .
+File not found - -NAME
+File not found - -EXEC
+File not found - GREP
+File not found - -L
+File not found - DIAGNOSE_TEST_ERROR
+File not found - {}
+File not found - \;
+· run_shell failed
+## perf qwen3-coder-30b 38.86 tok/s TTFT 1385ms
+$ run_shell python -c "import sys; sys.path.insert(0, '.'); import epistemic_step_diagnosis; print('Import successful')"
+Import successful
+· run_shell ok
+## perf qwen3-coder-30b 39.07 tok/s TTFT 255ms
+$ write_file tests/test_epistemic_diagnosis.py
+· write_file ok
+## perf qwen3-coder-30b 44.8 tok/s
+$ run_shell python -m pytest tests/test_epistemic_diagnosis.py -v
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 3 items
+
+tests/test_epistemic_diagnosis.py::EpistemicDiagnosisTests::test_diagnose_test_error_empty_traceback FAILED [ 33%]
+tests/test_epistemic_diagnosis.py::EpistemicDiagnosisTests::test_diagnose_test_error_with_complex_traceback FAILED [ 66%]
+tests/test_epistemic_diagnosis.py::EpistemicDiagnosisTests::test_diagnose_test_error_with_no_error PASSED [100%]
+
+================================== FAILURES ===================================
+______ EpistemicDiagnosisTests.test_diagnose_test_error_empty_traceback _______
+
+self = <test_epistemic_diagnosis.EpistemicDiagnosisTests testMethod=test_diagnose_test_error_empty_traceback>
+
+    def test_diagnose_test_error_empty_traceback(self):
+        """Test that diagnose_test_error handles empty tracebacks."""
+        error_trace = ""
+    
+        result = diagnose_test_error(error_trace)
+    
+        # Should handle empty tracebacks gracefully
+>       self.assertIsNotNone(result['root_cause'])
+E       AssertionError: unexpectedly None
+
+tests\test_epistemic_diagnosis.py:54: AssertionError
+___ EpistemicDiagnosisTests.test_diagnose_test_error_with_complex_traceback ___
+
+self = <test_epistemic_diagnosis.EpistemicDiagnosisTests testMethod=test_diagnose_test_error_with_complex_traceback>
+
+        def test_diagnose_test_error_with_complex_traceback(self):
+            """Test that diagnose_test_error handles complex tracebacks correctly."""
+            # This is a more complex traceback that should be handled properly
+            error_trace = """Traceback (most recent call last):
+      File "test_module.py", line 10, in <module>
+        result = some_function()
+      File "test_module.py", line 5, in some_function
+        return divide(10, 0)
+      File "test_module.py", line 2, in divide
+        return a / b
+    ZeroDivisionError: division by zero"""
+    
+            result = diagnose_test_error(error_trace)
+    
+            # The diagnosis should identify the root cause properly
+            self.assertIsNotNone(result['root_cause'])
+>           self.assertIn('ZeroDivisionError', result['root_cause'])
+E           AssertionError: 'ZeroDivisionError' not found in 'Traceback (most recent call last):'
+
+tests\test_epistemic_diagnosis.py:27: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_epistemic_diagnosis.py::EpistemicDiagnosisTests::test_diagnose_test_error_empty_traceback
+FAILED tests/test_epistemic_diagnosis.py::EpistemicDiagnosisTests::test_diagnose_test_error_with_complex_traceback
+========================= 2 failed, 1 passed in 0.06s =========================
+· run_shell failed
+## perf qwen3-coder-30b 37.78 tok/s TTFT 4639ms
+$ apply_patch
+· apply_patch ok
+## perf qwen3-coder-30b 37.45 tok/s TTFT 4459ms
+$ run_shell python -m pytest tests/test_epistemic_diagnosis.py -v
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 3 items
+
+tests/test_epistemic_diagnosis.py::EpistemicDiagnosisTests::test_diagnose_test_error_empty_traceback PASSED [ 33%]
+tests/test_epistemic_diagnosis.py::EpistemicDiagnosisTests::test_diagnose_test_error_with_complex_traceback PASSED [ 66%]
+tests/test_epistemic_diagnosis.py::EpistemicDiagnosisTests::test_diagnose_test_error_with_no_error PASSED [100%]
+
+============================== 3 passed in 0.03s ==============================
+· run_shell ok
+## perf qwen3-coder-30b 41.1 tok/s TTFT 1478ms
+$ run_shell python -m pytest tests/test_detectors.py -v
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 41 items
+
+tests/test_detectors.py::DetectorUnitTests::test_answer_memory_decay_needs_samples PASSED [  2%]
+tests/test_detectors.py::DetectorUnitTests::test_approval_backlog PASSED [  4%]
+tests/test_detectors.py::DetectorUnitTests::test_ci_failure_carries_log_tail PASSED [  7%]
+tests/test_detectors.py::DetectorUnitTests::test_ci_failure_finding_is_one_shot PASSED [  9%]
+tests/test_detectors.py::DetectorUnitTests::test_ci_failure_signature_uses_failure_key_not_commit PASSED [ 12%]
+tests/test_detectors.py::DetectorUnitTests::test_ci_failures PASSED      [ 14%]
+tests/test_detectors.py::DetectorUnitTests::test_crash_storm_fires_at_threshold PASSED [ 17%]
+tests/test_detectors.py::DetectorUnitTests::test_crash_storm_ignores_old_and_sparse PASSED [ 19%]
+tests/test_detectors.py::DetectorUnitTests::test_crash_storm_survives_bad_source PASSED [ 21%]
+tests/test_detectors.py::DetectorUnitTests::test_disk_pressure_severity PASSED [ 24%]
+tests/test_detectors.py::DetectorUnitTests::test_finding_defaults_and_clamps PASSED [ 26%]
+tests/test_detectors.py::DetectorUnitTests::test_mission_failures PASSED [ 29%]
+tests/test_detectors.py::DetectorUnitTests::test_model_failures PASSED   [ 31%]
+tests/test_detectors.py::DetectorUnitTests::test_ram_pressure PASSED     [ 34%]
+tests/test_detectors.py::DetectorUnitTests::test_repair_thrash PASSED    [ 36%]
+tests/test_detectors.py::DetectorUnitTests::test_startup_regression PASSED [ 39%]
+tests/test_detectors.py::WorkspaceBloatTests::test_below_threshold_silent PASSED [ 41%]
+tests/test_detectors.py::WorkspaceBloatTests::test_fires_at_threshold PASSED [ 43%]
+tests/test_detectors.py::ScannerTests::test_bad_detector_never_stalls PASSED [ 46%]
+tests/test_detectors.py::ScannerTests::test_cooldown_allows_re_route PASSED [ 48%]
+tests/test_detectors.py::ScannerTests::test_dedupe_merges_sightings PASSED [ 51%]
+tests/test_detectors.py::ScannerTests::test_dismiss PASSED               [ 53%]
+tests/test_detectors.py::ScannerTests::test_failed_route_stays_open PASSED [ 56%]
+tests/test_detectors.py::ScannerTests::test_findings_persist_across_restart PASSED [ 58%]
+tests/test_detectors.py::ScannerTests::test_interval_gate PASSED         [ 60%]
+tests/test_detectors.py::ScannerTests::test_one_shot_finding_never_reroutes PASSED [ 63%]
+tests/test_detectors.py::ScannerTests::test_reconcile_prunes_dead_rows PASSED [ 65%]
+tests/test_detectors.py::ScannerTests::test_reconcile_resolves_finished_targets PASSED [ 68%]
+tests/test_detectors.py::ScannerTests::test_resolved_signature_reopens_on_recurrence PASSED [ 70%]
+tests/test_detectors.py::ScannerTests::test_route_called_once_per_finding PASSED [ 73%]
+tests/test_detectors.py::ScannerTests::test_severity_ordering PASSED     [ 75%]
+tests/test_detectors.py::ScannerTests::test_suggestions_never_route PASSED [ 78%]
+tests/test_detectors.py::SupervisorRoutingTests::test_critical_finding_maps_urgent_priority PASSED [ 80%]
+tests/test_detectors.py::SupervisorRoutingTests::test_mission_route_creates_and_dedupes PASSED [ 82%]
+tests/test_detectors.py::SupervisorRoutingTests::test_repair_route_opens_incident PASSED [ 85%]
+tests/test_detectors.py::SupervisorRoutingTests::test_scanner_tick_inside_supervisor PASSED [ 87%]
+tests/test_detectors.py::SupervisorRoutingTests::test_suggestion_route_returns_empty PASSED [ 90%]
+tests/test_detectors.py::SchedulingTests::test_aging_never_outranks_interactive PASSED [ 92%]
+tests/test_detectors.py::SchedulingTests::test_aging_promotes_starved_background PASSED [ 95%]
+tests/test_detectors.py::SchedulingTests::test_lane_busy_blocks_normal_not_urgent PASSED [ 97%]
+tests/test_detectors.py::SchedulingTests::test_priority_ordering PASSED  [100%]
+
+============================= 41 passed in 0.67s ==============================
+· run_shell ok
+## perf qwen3-coder-30b 38.1 tok/s TTFT 7069ms
+$ run_shell python -m pytest tests/test_self_repair.py -v
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 50 items
+
+tests/test_self_repair.py::DetectorTests::test_critical_class_opens_incident PASSED [  2%]
+tests/test_self_repair.py::DetectorTests::test_dedupe_recurrence_bumps_one_incident PASSED [  4%]
+tests/test_self_repair.py::DetectorTests::test_first_time_noise_suppressed PASSED [  6%]
+tests/test_self_repair.py::DetectorTests::test_severity_escalates_with_recurrence PASSED [  8%]
+tests/test_self_repair.py::DetectorTests::test_signature_stable_across_volatile_bits PASSED [ 10%]
+tests/test_self_repair.py::LocalizerTests::test_ci_runner_path_suffix_matches PASSED [ 12%]
+tests/test_self_repair.py::LocalizerTests::test_no_repo_frames_empty_suspects PASSED [ 14%]
+tests/test_self_repair.py::LocalizerTests::test_traceback_maps_to_repo_file PASSED [ 16%]
+tests/test_self_repair.py::DiagnosisTests::test_disk_pressure_maps_to_cleanup PASSED [ 18%]
+tests/test_self_repair.py::DiagnosisTests::test_model_failure_rate_maps_to_config_reset PASSED [ 20%]
+tests/test_self_repair.py::DiagnosisTests::test_oom_is_operational PASSED [ 22%]
+tests/test_self_repair.py::DiagnosisTests::test_ram_pressure_finding_maps_to_evict PASSED [ 24%]
+tests/test_self_repair.py::DiagnosisTests::test_source_bug_needs_code_path PASSED [ 26%]
+tests/test_self_repair.py::DiagnosisTests::test_transport_reset_is_operational PASSED [ 28%]
+tests/test_self_repair.py::DiagnosisTests::test_unknown_when_no_rule_matches PASSED [ 30%]
+tests/test_self_repair.py::RepairMemoryTests::test_known_bad_suppression PASSED [ 32%]
+tests/test_self_repair.py::RepairMemoryTests::test_persistence_roundtrip PASSED [ 34%]
+tests/test_self_repair.py::RepairMemoryTests::test_recall_prefers_success PASSED [ 36%]
+tests/test_self_repair.py::ModelTests::test_budget_exceeded PASSED       [ 38%]
+tests/test_self_repair.py::ModelTests::test_illegal_transition_rejected PASSED [ 40%]
+tests/test_self_repair.py::ModelTests::test_redact_strips_secrets PASSED [ 42%]
+tests/test_self_repair.py::ScenarioA_CodeRepairPromoted::test_commit_disabled_leaves_working_tree PASSED [ 44%]
+tests/test_self_repair.py::ScenarioA_CodeRepairPromoted::test_end_to_end PASSED [ 46%]
+tests/test_self_repair.py::ScenarioA_CodeRepairPromoted::test_promotion_commits_repair_files PASSED [ 48%]
+tests/test_self_repair.py::ProductionCanaryTests::test_candidate_boots_health_and_dies PASSED [ 50%]
+tests/test_self_repair.py::ProductionCanaryTests::test_candidate_exit_reported PASSED [ 52%]
+tests/test_self_repair.py::ResearchHookTests::test_researcher_failure_is_tolerated PASSED [ 54%]
+tests/test_self_repair.py::ResearchHookTests::test_strong_diagnosis_skips_research PASSED [ 56%]
+tests/test_self_repair.py::ResearchHookTests::test_unknown_diagnosis_triggers_research PASSED [ 58%]
+tests/test_self_repair.py::EvalRecorderTests::test_evallab_record_run_shape PASSED [ 60%]
+tests/test_self_repair.py::EvalRecorderTests::test_no_recorder_is_fine PASSED [ 62%]
+tests/test_self_repair.py::EvalRecorderTests::test_terminal_incident_records_once PASSED [ 64%]
+tests/test_self_repair.py::ScenarioB_BadPatchRejected::test_bad_patch_never_touches_stable PASSED [ 66%]
+tests/test_self_repair.py::ScenarioC_Rollback::test_rollback_manifest_escape_cannot_touch_repo_parent PASSED [ 68%]
+tests/test_self_repair.py::ScenarioC_Rollback::test_rollback_rejects_unsafe_paths_and_ids PASSED [ 70%]
+tests/test_self_repair.py::ScenarioC_Rollback::test_rollback_restores_stable PASSED [ 72%]
+tests/test_self_repair.py::ScenarioC_Rollback::test_rollback_snapshots_are_bounded PASSED [ 74%]
+tests/test_self_repair.py::ScenarioC_Rollback::test_rollback_verifies_snapshot_digest_before_restore PASSED [ 76%]
+tests/test_self_repair.py::AbandonTests::test_abandon_cleans_worktree PASSED [ 78%]
+tests/test_self_repair.py::WorktreeLossTests::test_missing_worktree_rewinds_and_recovers PASSED [ 80%]
+tests/test_self_repair.py::WorktreeLossTests::test_repeated_worktree_loss_eventually_escalates PASSED [ 82%]
+tests/test_self_repair.py::ScenarioD_OperationalRepair::test_port_collision_uses_fixer PASSED [ 84%]
+tests/test_self_repair.py::ScenarioE_RestartResumes::test_incident_survives_restart PASSED [ 86%]
+tests/test_self_repair.py::CoordinatorPolicyTests::test_async_mission_patch_path PASSED [ 88%]
+tests/test_self_repair.py::CoordinatorPolicyTests::test_auto_promote_off_leaves_verified_candidate_for_human PASSED [ 90%]
+tests/test_self_repair.py::CoordinatorPolicyTests::test_budget_caps_stop_runaway PASSED [ 92%]
+tests/test_self_repair.py::CoordinatorPolicyTests::test_no_generator_escalates_with_evidence PASSED [ 94%]
+tests/test_self_repair.py::CoordinatorPolicyTests::test_secrets_redacted_at_intake PASSED [ 96%]
+tests/test_self_repair.py::StaleIncidentTests::test_fresh_incident_still_advances_on_tick PASSED [ 98%]
+tests/test_self_repair.py::StaleIncidentTests::test_stale_open_incident_abandons_on_tick PASSED [100%]
+
+============================= 50 passed in 29.66s =============================
+· run_shell ok
+## perf qwen3-coder-30b 40.88 tok/s TTFT 8910ms
+$ run_shell git status
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   epistemic_step_diagnosis.py
+	modified:   tests/test_voice_polish.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	tests/test_epistemic_diagnosis.py
+
+no changes added to commit (use "git add" and/or "git commit -a")
+· run_shell ok
+## perf qwen3-coder-30b 37.33 tok/s TTFT 1545ms
+$ git_diff
+· git_diff ok
+## perf qwen3-coder-30b 37.64 tok/s TTFT 49184ms
+$ git_diff epistemic_step_diagnosis.py
+· git_diff failed
+## perf qwen3-coder-30b 37.32 tok/s
+$ run_shell git diff epistemic_step_diagnosis.py
+diff --git a/epistemic_step_diagnosis.py b/epistemic_step_diagnosis.py
+index 19f30cd8..5989320f 100644
+--- a/epistemic_step_diagnosis.py
++++ b/epistemic_step_diagnosis.py
+@@ -1,31 +1,50 @@
+ import traceback
+ import sys
+ 
++
+ def diagnose_test_error(error_trace):
+     """Diagnose a test error and return a structured analysis."""
+     # Parse the error trace
+     error_lines = error_trace.split('\n')
+     
+-    # Identify the root cause
++    # Identify the root cause - look for the last exception line
+     root_cause = None
+-    for line in error_lines:
++    error_message = None
++    
++    # Look for the last line that contains an exception
++    for line in reversed(error_lines):
+         if 'Traceback' in line:
+-            root_cause = line
++            continue  # Skip traceback header
++        elif 'Error:' in line or 'Exception:' in line or line.strip().endswith(':'):
++            root_cause = line.strip()
++            break
++        elif line.strip() and ('Error' in line or 'Exception' in line):
++            root_cause = line.strip()
+             break
+     
+-    # Extract the error message
+-    error_message = None
++    # If we didn't find a specific error, use the last line with content
++    if not root_cause:
++        for line in reversed(error_lines):
++            if line.strip():
++                root_cause = line.strip()
++                break
++    
++    # Extract the error message - look for the actual error type
+     for line in error_lines:
+-        if 'Error:' in line:
+-            error_message = line
++        if 'Error:' in line or 'Exception:' in line:
++            error_message = line.strip()
++            break
++        elif line.strip() and (line.strip().endswith(':') or line.strip().count(':') > 1):
++            # This might be an error line
++            error_message = line.strip()
+             break
+     
+-    # Extract the stack trace
+-    stack_trace = [line for line in error_lines if 'File' in line]
++    # Extract the stack trace - lines with 'File'
++    stack_trace = [line for line in error_lines if 'File' in line and 'Traceback' not in line]
+     
+     # Return the diagnosis
+     return {
+-        'root_cause': root_cause,
++        'root_cause': root_cause or 'No root cause identified',
+         'error_message': error_message,
+         'stack_trace': stack_trace
+-    }
+\ No newline at end of file
++    }
+· run_shell ok
+## perf qwen3-coder-30b 38.53 tok/s TTFT 4750ms
+$ run_shell ls -la tests/test_epistemic_diagnosis.py
+'ls' is not recognized as an internal or external command,
+operable program or batch file.
+· run_shell failed
+## perf qwen3-coder-30b 37.84 tok/s
+$ run_shell dir tests/test_epistemic_diagnosis.py
+Parameter format not correct - "est_epistemic_diagnosis.py".
+· run_shell failed
+## perf qwen3-coder-30b 37.19 tok/s
+$ run_shell type tests/test_epistemic_diagnosis.py
+The syntax of the command is incorrect.
+· run_shell failed
+## perf qwen3-coder-30b 36.49 tok/s TTFT 339ms
+$ run_shell python -c "
+· run_shell ok
+## perf qwen3-coder-30b 38.46 tok/s
+$ run_shell python -c "
+· run_shell ok
+## perf qwen3-coder-30b 38.59 tok/s
+$ run_shell python -m pytest tests/test_epistemic_diagnosis.py::EpistemicDiagnosisTests::test_diagnose_test_error_with_complex_traceback -v
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 1 item
+
+tests/test_epistemic_diagnosis.py::EpistemicDiagnosisTests::test_diagnose_test_error_with_complex_traceback PASSED [100%]
+
+============================== 1 passed in 0.03s ==============================
+· run_shell ok
+## perf qwen3-coder-30b 38.36 tok/s TTFT 1555ms
+$ run_shell git add epistemic_step_diagnosis.py tests/test_epistemic_diagnosis.py
+· run_shell ok
+## perf qwen3-coder-30b 36.78 tok/s
+$ run_shell git commit -m "Fix epistemic step diagnosis for self-repair incident ri-1348702036
+[main fe30fda] Fix epistemic step diagnosis for self-repair incident ri-1348702036
+ 2 files changed, 86 insertions(+), 11 deletions(-)
+ create mode 100644 tests/test_epistemic_diagnosis.py
+· run_shell ok
+## perf qwen3-coder-30b 37.81 tok/s TTFT 1465ms
+$ run_shell git log --oneline -1
+fe30fdaa Fix epistemic step diagnosis for self-repair incident ri-1348702036
+· run_shell ok
+## perf qwen3-coder-30b 43.13 tok/s
+$ run_shell git status
+On branch main
+Your branch is ahead of 'origin/main' by 1 commit.
+  (use "git push" to publish your local commits)
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   tests/test_voice_polish.py
+
+no changes added to commit (use "git add" and/or "git commit -a")
+· run_shell ok
+## perf qwen3-coder-30b 38.95 tok/s TTFT 1388ms
+## model parrot_retry qwen3-coder-30b
+## perf qwen3-coder-30b 38.36 tok/s TTFT 952ms
+## task verifying/verifying
+$ run_shell python -m pytest tests/test_epistemic_diagnosis.py -x -q
+...                                                                      [100%]
+3 passed in 0.02s
+· run_shell ok
+$ run_shell python -m compileall -q tests/test_epistemic_diagnosis.py epistemic_step_diagnosis.py
+· run_shell ok
+## task reviewing/reviewing
+## model switch qwen3-14b reviewer
+## task completed/done
+## result
+I've successfully completed the self-repair incident ri-1348702036. Here's what I accomplished:
+
+## Changes Made
+
+1. **Enhanced `epistemic_step_diagnosis.py`** - Improved the `diagnose_test_error` function to properly parse traceback information with better error handling, root cause extraction, and stack trace parsing.
+
+2. **Added Regression Test** - Created `tests/test_epistemic_diagnosis.py` with comprehensive tests covering:
+   - Complex tracebacks with ZeroDivisionError
+   - Tracebacks without clear errors  
+   - Empty tracebacks
+
+## Verification
+
+- ✅ All existing tests continue to pass (41 detector tests + 50 self-repair tests)
+- ✅ New regression tests all pass (3/3 tests)
+- ✅ The fix is minimal and focused on the specific diagnosis issue
+- ✅ The diagnosis system can now properly analyze test failures
+
+The changes are committed and ready for review. The mission objective has been completed successfully.
+## end result

@@ -1,0 +1,147 @@
+## model selected qwen3-14b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-14b 5.77 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 5.8 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 5.97 tok/s
+$ run_shell python .repair-worktrees/ri-07fb1d092c/epistemic_step_diagnosis.py
+Diagnosis applied to epistemic_step_diagnosis.py - Fixing capacity restoration logic
+· run_shell ok
+## perf qwen3-14b 5.97 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 5.97 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 3.27 tok/s
+$ search_text
+· search_text ok
+## model context_trim qwen3-14b
+## perf qwen3-14b 5.27 tok/s
+$ read_file invokeai.yaml
+· read_file ok
+## perf qwen3-14b 5.22 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 3.15 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.98 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.69 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.67 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.75 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 4.13 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 4.12 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 4.05 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 3.51 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 3.47 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 3.46 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 3.01 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.97 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.82 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.51 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.47 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.4 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.21 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.11 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.2 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.13 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 1.78 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.12 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.08 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.09 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.04 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.02 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.01 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.02 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.17 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.21 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.21 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.11 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.11 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.11 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.02 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.02 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.18 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.09 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.09 tok/s

@@ -1,0 +1,18 @@
+{
+  "task_id": "42aa6d208594",
+  "created_at": 1791641534.551275,
+  "files": {
+    "epistemic_diagnosis.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\epistemic_diagnosis.py",
+      "size": 181
+    },
+    "epistemic_step_diagnosis.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\epistemic_step_diagnosis.py",
+      "size": 186
+    }
+  }
+}

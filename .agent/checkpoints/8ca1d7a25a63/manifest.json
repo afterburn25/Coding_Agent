@@ -1,0 +1,24 @@
+{
+  "task_id": "8ca1d7a25a63",
+  "created_at": 1791574105.4180698,
+  "files": {
+    "web/missions.js": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\web\\missions.js",
+      "size": 1716
+    },
+    "web/missions.css": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\web\\missions.css",
+      "size": 6805
+    },
+    "docs/ARCHITECTURE.md": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\docs\\ARCHITECTURE.md",
+      "size": 1709
+    }
+  }
+}

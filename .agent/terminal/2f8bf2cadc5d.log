@@ -1,0 +1,153 @@
+## model selected qwen3-14b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-14b 16.61 tok/s
+$ git_status .
+· git_status ok
+## perf qwen3-14b 16.46 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 15.49 tok/s
+$ read_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 14.77 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 13.82 tok/s
+$ run_shell python .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+internal:epistemic_step refined
+· run_shell ok
+## perf qwen3-14b 13.42 tok/s
+$ write_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· write_file ok
+## perf qwen3-14b 13.12 tok/s
+$ git_status .
+· git_status ok
+## perf qwen3-14b 12.95 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 12.35 tok/s
+$ read_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 11.93 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 11.63 tok/s
+$ run_shell python .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+internal:epistemic_step refined
+· run_shell ok
+## perf qwen3-14b 11.42 tok/s
+$ write_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· write_file ok
+## perf qwen3-14b 11.17 tok/s
+$ git_status .
+· git_status ok
+## perf qwen3-14b 11.11 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 10.64 tok/s
+$ read_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 10.35 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 10.19 tok/s
+$ run_shell python .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+internal:epistemic_step refined
+· run_shell ok
+## perf qwen3-14b 10.01 tok/s
+$ write_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· write_file ok
+## perf qwen3-14b 1.26 tok/s
+$ git_status .
+· git_status ok
+## perf qwen3-14b 1.13 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 1.47 tok/s
+$ read_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 3.58 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 20.11 tok/s
+$ run_shell python .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+internal:epistemic_step refined
+· run_shell ok
+## perf qwen3-14b 19.08 tok/s
+$ write_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· write_file ok
+## perf qwen3-14b 20.6 tok/s
+$ git_status .
+· git_status ok
+## perf qwen3-14b 21.28 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 19.55 tok/s
+$ read_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 18.35 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 19.23 tok/s
+$ run_shell python .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+internal:epistemic_step refined
+· run_shell ok
+## perf qwen3-14b 17.76 tok/s
+$ write_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· write_file ok
+## perf qwen3-14b 19.79 tok/s
+$ git_status .
+· git_status ok
+## perf qwen3-14b 20.05 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 18.0 tok/s
+$ read_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 15.84 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 18.19 tok/s
+$ run_shell python .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+internal:epistemic_step refined
+· run_shell ok
+## perf qwen3-14b 15.78 tok/s
+$ write_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· write_file ok
+## perf qwen3-14b 18.75 tok/s
+$ git_status .
+· git_status ok
+## perf qwen3-14b 18.69 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 16.91 tok/s
+$ read_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 15.05 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 16.72 tok/s
+$ run_shell python .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+internal:epistemic_step refined
+· run_shell ok
+## perf qwen3-14b 14.87 tok/s
+$ write_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· write_file ok
+## perf qwen3-14b 17.72 tok/s
+$ git_status .
+· git_status ok
+## perf qwen3-14b 17.33 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 15.84 tok/s
+$ read_file .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 14.18 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 15.57 tok/s
+$ run_shell python .repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py
+internal:epistemic_step refined
+· run_shell ok
+## perf qwen3-14b 13.97 tok/s

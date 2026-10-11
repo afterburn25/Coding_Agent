@@ -1,0 +1,317 @@
+## model selected qwen3-coder-30b deep_reasoner
+## task running/planning
+## task running/working
+## perf qwen3-coder-30b 10.55 tok/s TTFT 46614ms
+$ git_status
+· git_status ok
+## perf qwen3-coder-30b 23.5 tok/s TTFT 1186ms
+$ git_diff
+· git_diff ok
+## perf qwen3-coder-30b 32.73 tok/s TTFT 43054ms
+$ search_text
+· search_text ok
+## perf qwen3-coder-30b 30.05 tok/s TTFT 15243ms
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-coder-30b 39.19 tok/s TTFT 185ms
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-coder-30b 37.67 tok/s TTFT 200ms
+$ list_files tests
+· list_files ok
+## perf qwen3-coder-30b 38.8 tok/s TTFT 6022ms
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-coder-30b 32.59 tok/s TTFT 210ms
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-coder-30b 34.64 tok/s TTFT 1626ms
+$ run_shell pwd && ls -la
+'pwd' is not recognized as an internal or external command,
+operable program or batch file.
+· run_shell failed
+## perf qwen3-coder-30b 40.86 tok/s
+$ run_shell dir
+ Volume in drive D is New Volume
+ Volume Serial Number is E225-6AE1
+
+ Directory of D:\Nexus_Core\Source
+
+10/10/2026  12:10 PM    <DIR>          .
+10/09/2026  08:22 PM    <DIR>          ..
+10/10/2026  01:12 PM    <DIR>          .agent
+10/09/2026  08:17 PM    <DIR>          .dogfood
+10/10/2026  09:13 AM    <DIR>          .dogfood2
+10/09/2026  08:17 PM    <DIR>          .github
+10/09/2026  08:17 PM             1,949 .gitignore
+10/09/2026  08:38 PM    <DIR>          .pytest_cache
+10/10/2026  01:12 PM    <DIR>          .repair-worktrees
+10/09/2026  08:17 PM            35,021 ARCHITECTURE.md
+10/10/2026  09:13 AM           217,837 CHANGELOG.md
+10/09/2026  08:17 PM            17,834 config.example.json
+10/08/2026  09:50 PM    <DIR>          data
+10/09/2026  08:17 PM    <DIR>          desktop
+10/09/2026  08:17 PM            32,760 DEVIN_START_HERE.md
+10/10/2026  10:43 AM    <DIR>          docs
+10/10/2026  09:12 AM               170 epistemic_diagnosis.py
+10/10/2026  12:10 PM             1,798 epistemic_step_diagnosis.py
+10/09/2026  08:41 PM    <DIR>          images
+10/09/2026  08:17 PM            30,659 importtime.txt
+10/09/2026  08:17 PM    <DIR>          installer
+10/10/2026  10:43 AM    <DIR>          localcodeagent
+10/09/2026  08:17 PM             4,101 MCP.md
+10/09/2026  08:17 PM             6,343 MODEL_ROUTING.md
+10/09/2026  08:17 PM    <DIR>          packaging
+10/09/2026  08:17 PM             8,144 PERMISSIONS.md
+10/09/2026  08:17 PM           114,496 PROJECT_STATUS.md
+10/09/2026  08:17 PM    <DIR>          prototypes
+10/09/2026  08:17 PM               913 pyproject.toml
+10/09/2026  08:17 PM            53,469 README.md
+10/09/2026  08:17 PM               266 report.txt
+10/10/2026  05:58 AM    <DIR>          scripts
+10/10/2026  10:08 AM           341,143 SESSION_HANDOFF.md
+10/09/2026  08:17 PM               368 start_windows.bat
+10/09/2026  08:17 PM               405 start_windows.ps1
+10/10/2026  12:10 PM    <DIR>          tests
+10/10/2026  12:45 AM             2,602 test_reproduction.py
+10/10/2026  12:46 AM             2,535 test_reproduction_fixed.py
+10/09/2026  10:52 AM    <DIR>          tools
+10/09/2026  08:17 PM            16,325 TOOLS.md
+10/09/2026  08:17 PM                 8 VERSION
+10/10/2026  09:13 AM    <DIR>          web
+10/09/2026  08:17 PM    <DIR>          workflows
+10/09/2026  08:17 PM    <DIR>          workspace
+10/10/2026  12:10 PM    <DIR>          __pycache__
+              22 File(s)        889,146 bytes
+              23 Dir(s)  10,303,340,191,744 bytes free
+· run_shell ok
+## perf qwen3-coder-30b 37.59 tok/s TTFT 8408ms
+$ run_shell find . -name "test_voice_polish.py" -type f
+Access denied - .
+File not found - -NAME
+File not found - -TYPE
+File not found - F
+· run_shell failed
+## perf qwen3-coder-30b 38.73 tok/s TTFT 1146ms
+$ run_shell type tests\\test_voice_polish.py
+import unittest
+
+from localcodeagent.agent.orchestrator import AgentOrchestrator
+from localcodeagent.agent.state import State
+from localcodeagent.agent.voice import Voice
+
+
+class TestVoicePolish(unittest.TestCase):
+    def setUp(self):
+        self.st = State()
+        self.st.voice = Voice()
+        self.st._on_worker_queue_event("worker_capacity_reduced", {"ceiling": 3})
+        self.st._on_worker_queue_event("worker_capacity_restored", {"ceiling": 4})
+        self.st._on_worker_queue_event("worker_capacity_reduced", {"ceiling": 3})
+
+    def test_capacity_restored_speaks(self):
+        self.assertEqual(len(self.st.voice.enqueued), 0)
+        self.assertIn("recovering", self.st.voice.enqueued[0][1])
+
+if __name__ == "__main__":
+    unittest.main()· run_shell ok
+## perf qwen3-coder-30b 37.48 tok/s TTFT 1722ms
+$ run_shell python -m pytest tests/test_voice_polish.py::TestVoicePolish::test_capacity_reduction_speaks_once_per_level -v
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:4: in <module>
+    from localcodeagent.agent.state import State
+E   ModuleNotFoundError: No module named 'localcodeagent.agent.state'
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+============================== 1 error in 0.28s ===============================
+ERROR: found no collectors for D:\Nexus_Core\Source\tests\test_voice_polish.py::TestVoicePolish::test_capacity_reduction_speaks_once_per_level
+
+· run_shell failed
+## perf qwen3-coder-30b 36.15 tok/s TTFT 3020ms
+$ search_repo_index
+· search_repo_index ok
+## model context_trim qwen3-coder-30b
+## perf qwen3-coder-30b 34.97 tok/s TTFT 47920ms
+$ read_file test_reproduction.py
+· read_file ok
+## perf qwen3-coder-30b 38.76 tok/s TTFT 6024ms
+$ read_file test_reproduction_fixed.py
+· read_file ok
+## perf qwen3-coder-30b 36.28 tok/s TTFT 5114ms
+$ search_text
+· search_text ok
+## perf qwen3-coder-30b 31.97 tok/s TTFT 100008ms
+$ read_file localcodeagent/server.py
+· read_file ok
+## perf qwen3-coder-30b 38.02 tok/s TTFT 94776ms
+$ search_text
+· search_text ok
+## perf qwen3-coder-30b 8.83 tok/s TTFT 58414ms
+$ read_file localcodeagent/server.py
+· read_file ok
+## perf qwen3-coder-30b 8.15 tok/s TTFT 7040ms
+$ run_shell python test_reproduction.py
+Testing capacity restoration logic...
+After first reduction: 1 enqueued
+After second reduction: 1 enqueued
+After restoration: 2 enqueued
+After third reduction: 2 enqueued
+Expected: 3 enqueued (one for each unique event)
+Actual: 2 enqueued
+· run_shell ok
+## perf qwen3-coder-30b 7.99 tok/s
+$ run_shell python test_reproduction_fixed.py
+Testing FIXED capacity restoration logic...
+After first reduction: 1 enqueued
+After second reduction: 1 enqueued
+After restoration: 2 enqueued
+After third reduction: 3 enqueued
+Expected: 3 enqueued (one for each unique event)
+Actual: 3 enqueued
+· run_shell ok
+## perf qwen3-coder-30b 7.79 tok/s TTFT 2235ms
+$ apply_patch
+· apply_patch failed
+## perf qwen3-coder-30b 7.62 tok/s TTFT 1847ms
+$ apply_patch
+· apply_patch ok
+## perf qwen3-coder-30b 7.58 tok/s TTFT 540ms
+$ read_file localcodeagent/server.py
+· read_file ok
+## perf qwen3-coder-30b 7.43 tok/s TTFT 3123ms
+$ run_shell python -c "
+· run_shell ok
+## perf qwen3-coder-30b 7.44 tok/s
+$ run_shell python -c "
+· run_shell ok
+## perf qwen3-coder-30b 13.2 tok/s TTFT 429ms
+$ run_shell python -c "
+· run_shell ok
+## perf qwen3-coder-30b 38.65 tok/s TTFT 259ms
+$ run_shell python -c "
+· run_shell ok
+## perf qwen3-coder-30b 37.24 tok/s TTFT 255ms
+$ run_shell type localcodeagent\\server.py | findstr /n "worker_capacity_restored"
+6165:        if event_type == "worker_capacity_restored":
+· run_shell ok
+## perf qwen3-coder-30b 39.47 tok/s
+$ run_shell type localcodeagent\\server.py | sed -n '6165,6175p'
+'sed' is not recognized as an internal or external command,
+operable program or batch file.
+· run_shell failed
+## perf qwen3-coder-30b 36.42 tok/s TTFT 1352ms
+$ run_shell findstr /n "worker_capacity_restored" localcodeagent/server.py
+FINDSTR: Cannot open server.py
+· run_shell failed
+## perf qwen3-coder-30b 38.59 tok/s TTFT 316ms
+$ run_shell dir localcodeagent\\server.py
+ Volume in drive D is New Volume
+ Volume Serial Number is E225-6AE1
+
+ Directory of D:\Nexus_Core\Source\localcodeagent
+
+10/10/2026  01:21 PM           704,687 server.py
+               1 File(s)        704,687 bytes
+               0 Dir(s)  10,303,272,521,728 bytes free
+· run_shell ok
+## perf qwen3-coder-30b 40.04 tok/s
+$ run_shell findstr /n "worker_capacity_reduced" localcodeagent/server.py
+FINDSTR: Cannot open server.py
+· run_shell failed
+## perf qwen3-coder-30b 40.13 tok/s TTFT 327ms
+$ run_shell type localcodeagent\server.py | find /n "worker_capacity_reduced"
+[6152]        if event_type == "worker_capacity_reduced":
+· run_shell ok
+## perf qwen3-coder-30b 41.77 tok/s
+$ run_shell type localcodeagent\server.py | find /n "worker_capacity_restored"
+[6165]        if event_type == "worker_capacity_restored":
+· run_shell ok
+## perf qwen3-coder-30b 41.78 tok/s TTFT 1084ms
+$ run_shell type localcodeagent\server.py | find /n "6165" | find /n "6175"
+· run_shell failed
+## perf qwen3-coder-30b 37.81 tok/s TTFT 261ms
+$ run_shell type localcodeagent\server.py | sed -n '6160,6180p'
+'sed' is not recognized as an internal or external command,
+operable program or batch file.
+· run_shell failed
+## perf qwen3-coder-30b 41.8 tok/s TTFT 1091ms
+$ read_file localcodeagent/server.py
+· read_file ok
+## perf qwen3-coder-30b 40.4 tok/s TTFT 1677ms
+$ git_diff
+· git_diff ok
+## perf qwen3-coder-30b 41.11 tok/s TTFT 77807ms
+$ run_shell python -m pytest tests/test_voice_polish.py::SpokenNotices::test_capacity_reduction_speaks_once_per_level -v
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:4: in <module>
+    from localcodeagent.agent.state import State
+E   ModuleNotFoundError: No module named 'localcodeagent.agent.state'
+=========================== shoERROR: found no collectors for D:\Nexus_Core\Source\tests\test_voice_polish.py::SpokenNotices::test_capacity_reduction_speaks_once_per_level
+
+rt test summary info ===========================
+ERROR tests/test_voice_polish.py
+============================== 1 error in 0.31s ===============================
+· run_shell failed
+## perf qwen3-coder-30b 38.18 tok/s TTFT 2765ms
+$ write_file test_fix_verification.py
+· write_file ok
+## perf qwen3-coder-30b 36.09 tok/s
+$ run_shell python test_fix_verification.py
+After first reduction: 1 enqueued
+After second reduction: 1 enqueued
+After restoration: 2 enqueued
+After third reduction: 3 enqueued
+Expected: 3 enqueued (one for each unique event)
+Actual: 3 enqueued
+Test PASSED
+· run_shell ok
+## perf qwen3-coder-30b 35.07 tok/s TTFT 1510ms
+$ read_file localcodeagent/server.py
+· read_file ok
+## perf qwen3-coder-30b 32.21 tok/s TTFT 1730ms
+$ read_file test_reproduction.py
+· read_file ok
+## perf qwen3-coder-30b 35.84 tok/s TTFT 6546ms
+$ run_shell python test_reproduction.py
+Testing capacity restoration logic...
+After first reduction: 1 enqueued
+After second reduction: 1 enqueued
+After restoration: 2 enqueued
+After third reduction: 2 enqueued
+Expected: 3 enqueued (one for each unique event)
+Actual: 2 enqueued
+· run_shell ok
+## perf qwen3-coder-30b 36.95 tok/s TTFT 1349ms
+$ read_file test_reproduction_fixed.py
+· read_file ok
+## perf qwen3-coder-30b 34.96 tok/s TTFT 45206ms

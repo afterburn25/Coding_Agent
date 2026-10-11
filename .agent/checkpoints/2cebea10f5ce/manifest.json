@@ -1,0 +1,18 @@
+{
+  "task_id": "2cebea10f5ce",
+  "created_at": 1791644742.9459274,
+  "files": {
+    "epistemic_step_diagnosis.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\epistemic_step_diagnosis.py",
+      "size": 175
+    },
+    ".repair-worktrees/ri-42b9d73683/epistemic_step_diagnosis.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\.repair-worktrees\\ri-42b9d73683\\epistemic_step_diagnosis.py",
+      "size": 7009
+    }
+  }
+}

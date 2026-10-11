@@ -1,0 +1,212 @@
+{
+  "cached_at": 1791537191.227411,
+  "provider": "github_api",
+  "query": "auto||Python Exception ModuleNotFoundError error exit code 1 github issue",
+  "version": "",
+  "value": [
+    {
+      "title": "GAME ROOM 2.0 Phase 1: modular TypeScript client + multiplayer-ready contracts",
+      "source_type": "github_pr",
+      "url": "https://github.com/hiroto1209-sketch/game-room/pull/1",
+      "excerpt": "## Summary\n- Save previous release in `backup/phase1-2026-10-09`\n- Isolate unchanged procedural party room to `PartyWorld` and port app/controller layer to TypeScript\n- Preserve iPhone dual-touch movement, free-look, title scene, menu, jump, sound and object interactions\n- Add typed player model, placeholder remote avatars, cryptographic room IDs and validated WebSocket transport interface (not connected)\n- Introduce Vite build, GitHub Pages workflow, tests and architecture/regression documentation\n\n## Important\nThis release remains **single-player/offline only**. Real-time server connectivity and two-device sync are deferred to Phase 2.\n\n## Deployment\nChange GitHub Settings → Pages → Source to **GitHub Actions** to deploy `dist/` to the existing `/game-room/` URL. Do **not** switch from branch publishing until the workflow checks pass.\n\n## Validation\n- CI: `npm run typecheck`, `npm test`, `npm run build`\n- Real iPhone Safari regression still required\n- Existing `main.js` retained and backup branch available.",
+      "provider": "github_api",
+      "id": "baf20dadd99d",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-09T09:13:09Z",
+      "retrieved_at": 1791537190.874748,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 7,
+          "reset": 1791537245,
+          "resource": "search"
+        },
+        "repository": "hiroto1209-sketch/game-room",
+        "number": 1,
+        "state": "open",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Bump next from 16.3.1-canary.13 to 16.3.3",
+      "source_type": "github_pr",
+      "url": "https://github.com/karlhorky/repro-next-js-typescript-plugin-diagnostics-no-cli/pull/1",
+      "excerpt": "Bumps [next](https://github.com/vercel/next.js) from 16.3.1-canary.13 to 16.3.3.\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/vercel/next.js/releases\">next's releases</a>.</em></p>\n<blockquote>\n<h2>v16.3.3</h2>\n<p>This release contains security fixes for the following advisories:</p>\n<p>Critical:</p>\n<ul>\n<li><a href=\"https://github.com/vercel/next.js/security/advisories/GHSA-p293-qw3h-jr36\">Unauthenticated Remote Code Execution on windows-hosted servers</a></li>\n<li><a href=\"https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4\">Unauthenticated Remote Code Execution in Image Optimization API when AVIF files are used</a></li>\n</ul>\n<h2>v16.3.2</h2>\n<blockquote>\n<p>[!NOTE]\nThis release is backporting bug fixes. It does <strong>not</strong> include all pending features/changes on canary.</p>\n</blockquote>\n<h3>Core Changes</h3>\n<ul>\n<li>[backport] Scope app-entry export validation to files inside the app directory (<a href=\"https://redirect.github.com/vercel/next.js/issues/97357\">#97357</a>)</li>\n<li>[backport] Fix catch-all index page being served for every other slug (<a href=\"https://redirect.github.com/vercel/next.js/issues/97416\">#97416</a>)</li>\n<li>[16.3] Turbopack: don't trace embedded WASM loader helpers (<a href=\"https://redirect.github.com/vercel/next.js/issues/97353\">#97353</a>) (<a href=\"https://redirect.github.com/vercel/next.js/issues/97463\">#97463</a>)</li>\n<li>[16.3] Turbopack: retain conditions when replacing resolve request keys (<a href=\"https://redirect.github.com/vercel/next.js/issues/97453\">#97453</a>)</li>\n<li>[16.3.x] Fix Turbopack worker chunk loading with asset prefix (<a href=\"https://redirect.github.com/vercel/next.js/issues/97419\">#97419</a>)</li>\n<li>[16.3.x] Authenticate Turborepo remote caching with OIDC instead of a static PAT (<a href=\"https://redirect.github.com/vercel/next.js/issues/97603\">#97603</a>)</li>\n</ul>\n<h3>Credits</h3>\n<p>Huge thanks to <a href=\"https://github.com/lubieowoce\"><code>@​lubieowoce</code></a>, <a href=\"https://github.com/unstubbable\"><code>@​unstubbable</code></a>, <a href=\"https://github.com/timneutkens\"><code>@​timneutkens</code></a>, <a href=\"https://github.com/mischnic\"><code>@​mischnic</code></a>, and <a href=\"https://github.com/eps1lon\"><code>@​eps1lon</code></a> for helping!</p>\n<h2>v16.3.1</h2>\n<h2>What's Changed</h2>\n<ul>\n<li>[16.x] Turbopack: don't strip async-module runtime from shared runtime chunks by <a href=\"https://github.com/lukesandberg\"><code>@​lukesandberg</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/96653\">vercel/next.js#96653</a></li>\n<li>[16.x] [turbopack] Add <code>turbopack_ecmascript</code> and <code>turbopack_wasm</code>'s embeded FS to <code>internal_assets_conditions</code> by <a href=\"https://github.com/lukesandberg\"><code>@​lukesandberg</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/96655\">vercel/next.js#96655</a></li>\n<li>[16.x] [turbopack] Collapse nested promises in the analyzer by <a href=\"https://github.com/sampoder\"><code>@​sampoder</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/96675\">vercel/next.js#96675</a></li>\n<li>[16.x] fix(next/image): preserve image response after optimization by <a href=\"https://github.com/styfle\"><code>@​styfle</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/96733\">vercel/next.js#96733</a></li>\n<li>[16.3.x] Default deploy e2e tests to the repo next version by <a href=\"https://github.com/eps1lon\"><code>@​eps1lon</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/96900\">vercel/next.js#96900</a></li>\n<li>[backport] Bump <code>@​swc/helpers</code> by <a href=\"https://github.com/mischnic\"><code>@​mischnic</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/96885\">vercel/next.js#96885</a></li>\n<li>[backport] [turbopack] Raise registration calls in hoisted modules to the top by <a href=\"https://github.com/lukesandberg\"><code>@​lukesandberg</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97308\">vercel/next.js#97308</a></li>\n<li>[backport] Fix missing styled-jsx styles in Pages Router SSR on adapter builds by <a href=\"https://github.com/lukesandberg\"><code>@​lukesandberg</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97302\">vercel/next.js#97302</a></li>\n<li>[backport] [turbopack] Fix HMR for dynamic imports evaluated from layouts by <a href=\"https://github.com/lukesandberg\"><code>@​lukesandberg</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97317\">vercel/next.js#97317</a></li>\n<li>[backport] Restore the live <code>headers()</code> view of the incoming request by <a href=\"https://github.com/unstubbable\"><code>@​unstubbable</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97311\">vercel/next.js#97311</a></li>\n<li>[backport] Allow literal exports in <code>'use cache'</code> files by <a href=\"https://github.com/unstubbable\"><code>@​unstubbable</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97312\">vercel/next.js#97312</a></li>\n<li>[backport] Keep the dev validation worker alive across HMR updates by <a href=\"https://github.com/unstubbable\"><code>@​unstubbable</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97315\">vercel/next.js#97315</a></li>\n<li>[backport] Discard only cache entries that predate a tag revalidation, and reuse completed entries by <a href=\"https://github.com/unstubbable\"><code>@​unstubbable</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97314\">vercel/next.js#97314</a></li>\n<li>[backport] Encode the cache item name built by <code>unstable_cache</code> by <a href=\"https://github.com/unstubbable\"><code>@​unstubbable</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97313\">vercel/next.js#97313</a></li>\n<li>[16.3] [ci] Use OIDC tokens to read private preview builds by <a href=\"https://github.com/eps1lon\"><code>@​eps1lon</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97258\">vercel/next.js#97258</a></li>\n<li>[backport] [test] Compile the middleware redirect routes up front in dev by <a href=\"https://github.com/lukesandberg\"><code>@​lukesandberg</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97328\">vercel/next.js#97328</a></li>\n<li>[backport] Fix Nav Inspector request loop on repeat captures by <a href=\"https://github.com/acdlite\"><code>@​acdlite</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97326\">vercel/next.js#97326</a></li>\n<li>[backport] Fix: Optimistic routing bugs leading to repeated prefetch loops by <a href=\"https://github.com/acdlite\"><code>@​acdlite</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97325\">vercel/next.js#97325</a></li>\n<li>[backport] Retain fewer stale cache versions and use a TTL, plus the mtime fallback by <a href=\"https://github.com/lukesandberg\"><code>@​lukesandberg</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97304\">vercel/next.js#97304</a></li>\n<li>[backport] Revert i18n localization change for dynamic Pages API routes (<a href=\"https://redirect.github.com/vercel/next.js/issues/94905\">#94905</a>) by <a href=\"https://github.com/gaojude\"><code>@​gaojude</code></a> in <a href=\"https://redirect.github.com/vercel/next.js/pull/97330\">vercel/next.js#97330</a></li>\n</ul>\n<p><strong>Full Changelog</strong>: <a href=\"https://github.com/vercel/next.js/compare/v16.3.0...v16.3.1\">https://github.com/vercel/next.js/compare/v16.3.0...v16.3.1</a></p>\n<!-- raw HTML omitted -->\n</blockquote>\n<p>... (truncated)</p>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/vercel/next.js/commit/a9a1cb7859f178f830ad3773b303130c21b19586\"><code>a9a1cb7</code></a> v16.3.3</li>\n<li><a href=\"https://github.com/vercel/next.js/commit/968b9fcb26bdeb8e0a861a9df05361474666d51b\"><code>968b9fc</code></a> [16.3.x] Fix ISR misses with backslashes in segments when deployed on Windows</li>\n<li><a href=\"https://github.com/vercel/next.js/commit/3a15b4ac6ac8e70b1a9b18ecc18e8434462899b3\"><code>3a15b4a</code></a> [16.3.x] [next/image]: disable avif image optimization</li>\n<li><a href=\"https://github.com/vercel/next.js/commit/7378b51ea05a6745d3676bee00cb4c63aac3dd16\"><code>7378b51</code></a> Backport/docs fixes 16.3 (<a href=\"https://redirect.github.com/vercel/next.js/issues/97649\">#97649</a>)</li>\n<li><a href=\"https://github.com/vercel/next.js/commit/528c1cdfc36bdf8051992febdafe45f17f042010\"><code>528c1cd</code></a> [16.3.x] Stop generating error codes (<a href=\"https://redirect.github.com/vercel/next.js/issues/97780\">#97780</a>)</li>\n<li><a href=\"https://github.com/vercel/next.js/commit/d0ac8828c2fe6026dd7d700488bfd8289711fde6\"><code>d0ac882</code></a> v16.3.2</li>\n<li><a href=\"https://github.com/vercel/next.js/commit/81deb92859e26f8435cc0f37e244573c6638a955\"><code>81deb92</code></a> [16.3.x] Authenticate Turborepo remote caching with OIDC instead of a static ...</li>\n<li><a href=\"https://github.com/vercel/next.js/commit/cd714d9fceae7aec9d467598792b0c844f710607\"><code>cd714d9</code></a> [16.3.x] Fix Turbopack worker chunk loading with asset prefix (<a href=\"https://redirect.github.com/vercel/next.js/issues/97419\">#97419</a>)</li>\n<li><a href=\"https://github.com/vercel/next.js/commit/5ac2327e62784eacdf6ab7db8629fd05c5f5fcdf\"><code>5ac2327</code></a> [16.3] Turbopack: retain conditions when replacing resolve request keys (<a href=\"https://redirect.github.com/vercel/next.js/issues/97453\">#97453</a>)</li>\n<li><a href=\"https://github.com/vercel/next.js/commit/0ccb3e7f5d6b55c5c9e215248b264a428aee7dcb\"><code>0ccb3e7</code></a> [16.3] Turbopack: don't trace embedded WASM loader helpers (<a href=\"https://redirect.github.com/vercel/next.js/issues/97353\">#97353</a>) (<a href=\"https://redirect.github.com/vercel/next.js/issues/97463\">#97463</a>)</li>\n<li>Additional commits viewable in <a href=\"https://github.com/vercel/next.js/compare/v16.3.1-canary.13...v16.3.3\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\n[![Dependabot compatibility score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=next&package-manager=npm_and_yarn&previous-version=16.3.1-canary.13&new-version=16.3.3)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\nYou can disable automated security fix PRs for this repo from the [Security Alerts page](https://github.com/karlhorky/repro-next-js-typescript-plugin-diagnostics-no-cli/network/alerts).\n\n</details>",
+      "provider": "github_api",
+      "id": "e15039823278",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-09T09:13:05Z",
+      "retrieved_at": 1791537190.8747587,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 7,
+          "reset": 1791537245,
+          "resource": "search"
+        },
+        "repository": "karlhorky/repro-next-js-typescript-plugin-diagnostics-no-cli",
+        "number": 1,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Add employee task attendance and completion sync",
+      "source_type": "github_pr",
+      "url": "https://github.com/BMCrazyl/TaskManager/pull/1",
+      "excerpt": "## Summary\n- Add an employee-only `/attendance` page listing assigned tasks.\n- Allow employees to confirm completion only for tasks assigned to their account name.\n- Update `Task.status` to `Hoàn thành` and insert an `AttendanceLog` row in one SQL transaction.\n- Add a non-destructive SQL migration for `AttendanceLog` and add an employee navigation link.\n\n## Setup\nRun `database/attendance_migration.sql` against `task_management_db` before deploying.\n\n## Notes\nThe existing schema does not link `Account` and `Employee` by ID, so this implementation matches `Account.fullname` to `Employee.name`; those values must match exactly. This feature treats attendance as task-completion confirmation, not shift check-in/check-out.\n\n## Validation\nFiles were checked from the feature branch; a full Maven/server/database integration test was not run in this environment.",
+      "provider": "github_api",
+      "id": "87fc17f3f992",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-09T09:13:10Z",
+      "retrieved_at": 1791537190.8747635,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 7,
+          "reset": 1791537245,
+          "resource": "search"
+        },
+        "repository": "BMCrazyl/TaskManager",
+        "number": 1,
+        "state": "open",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "fix(recording): make program registration portable",
+      "source_type": "github_pr",
+      "url": "https://github.com/wjueyao/libfaketime/pull/1",
+      "excerpt": "Make the optional program registration helper work on Linux and macOS without changing clock algorithms, locking, recording format or fail-open semantics.\n\nUse pipe + FD_CLOEXEC, resolve the real monotonic clock during early initialization, and remove loader injection from the helper environment to avoid recursive injection. Accept DYLD_INSERT_LIBRARIES in the helper response.\n\nValidation: Linux ARM64 native and amd64 emulation record/pack/replay; nine recording fail-open cases on each architecture; missing/nonzero/timeout helper cases; macOS ARM64 replay/thread/EOF. macOS helper first launch intermittently failed and unchanged retry passed, cause unresolved. macOS online recording is not enabled by the consumer. These exact source changes are already exercised by MindPowers PR #461.\n",
+      "provider": "github_api",
+      "id": "86203d2cec68",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-09T09:13:04Z",
+      "retrieved_at": 1791537190.8747668,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 7,
+          "reset": 1791537245,
+          "resource": "search"
+        },
+        "repository": "wjueyao/libfaketime",
+        "number": 1,
+        "state": "open",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Add product tags",
+      "source_type": "github_pr",
+      "url": "https://github.com/vadim-cebanu/baby-tools/pull/1",
+      "excerpt": "## Summary\r\nThis pull request adds product tags to the Baby Tools World shop.\r\n\r\n## Changes\r\n- Add `Tag` model with `name`, `created_at` and `updated_at`\r\n- Add optional ManyToMany `tags` field to `Product`\r\n- Register `Tag` in the Django admin and add a tag filter to `ProductAdmin`\r\n- Show product tags on the product detail page (\"Product-Tags\", or \"no tags available\" if empty)\r\n- Load `SECRET_KEY` from environment variables\r\n- Add flake8 configuration\r\n\r\n## Still to do\r\n- [x] Clear the review form after a successful submission\r\n- [x] Update README (Quickstart, Usage, Docker)\r\n- [x] Pin all package versions in `requirements.txt`\r\n\r\n## How to test\r\n1. Copy `example.env` to `.env` and set a `SECRET_KEY`\r\n2. Run `python manage.py migrate`\r\n3. Run `python manage.py runserver`\r\n4. Create tags in the admin panel and assign them to a product\r\n5. Open the product detail page and check the tags",
+      "provider": "github_api",
+      "id": "a28e2e75f3b0",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-09T09:13:04Z",
+      "retrieved_at": 1791537190.8747706,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 7,
+          "reset": 1791537245,
+          "resource": "search"
+        },
+        "repository": "vadim-cebanu/baby-tools",
+        "number": 1,
+        "state": "open",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Prepare Royal Hills Fest for Cloudflare Pages",
+      "source_type": "github_pr",
+      "url": "https://github.com/alicesunder/Royal-Hills-Fest-2026/pull/1",
+      "excerpt": "## Summary\n- Add `public/_redirects` so client-side React routes fall back to `index.html` on Cloudflare Pages.\n- Remove `bun.lock` from this branch so Pages resolves dependencies consistently from the existing `package-lock.json`.\n- Update `vite.config.ts` to resolve the project root from `import.meta.url` rather than relying on `__dirname` in ESM.\n\n## Verification\n- Reviewed the repository configuration and confirmed `npm run build` exists in `package.json`.\n- Could not run `npm ci && npm run build` in the tool environment because outbound access to GitHub is unavailable.\n- Do not switch the production domain or remove the existing Vercel deployment until the Pages preview deploy is verified.",
+      "provider": "github_api",
+      "id": "2518b9c2d910",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-09T09:13:05Z",
+      "retrieved_at": 1791537190.8747735,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 7,
+          "reset": 1791537245,
+          "resource": "search"
+        },
+        "repository": "alicesunder/Royal-Hills-Fest-2026",
+        "number": 1,
+        "state": "open",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    }
+  ]
+}

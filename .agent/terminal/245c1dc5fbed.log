@@ -1,0 +1,146 @@
+## model selected qwen3-14b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-14b 22.72 tok/s
+$ git_status .
+· git_status ok
+## perf qwen3-14b 23.12 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 23.94 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 23.67 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 21.54 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 20.0 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 21.41 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 20.26 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 17.86 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 18.62 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 15.61 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 15.02 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 13.99 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 13.54 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 11.37 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 11.05 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.11 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 10.12 tok/s
+$ search_text
+· search_text ok
+## model context_trim qwen3-14b
+## perf qwen3-14b 10.8 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 10.6 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.17 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 8.89 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.76 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 10.49 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.33 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 8.94 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.78 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 10.76 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.09 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.05 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.86 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 10.13 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 8.9 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 8.45 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.3 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.54 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 8.49 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 8.8 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.66 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.76 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.7 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.48 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.99 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.93 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.96 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.07 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.32 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.76 tok/s

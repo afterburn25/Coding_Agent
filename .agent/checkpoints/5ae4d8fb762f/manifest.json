@@ -1,0 +1,12 @@
+{
+  "task_id": "5ae4d8fb762f",
+  "created_at": 1791675203.4623072,
+  "files": {
+    "localcodeagent/server.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\localcodeagent\\server.py",
+      "size": 713827
+    }
+  }
+}

@@ -1,0 +1,366 @@
+## model selected qwen3-14b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-14b 22.29 tok/s
+$ git_status tests/
+· git_status ok
+## perf qwen3-14b 22.22 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 17.92 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 17.65 tok/s
+$ apply_patch
+· apply_patch failed
+## perf qwen3-14b 17.25 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.77 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 10.35 tok/s
+$ apply_patch
+· apply_patch failed
+## perf qwen3-14b 10.14 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 10.0 tok/s
+· apply_patch failed
+## perf qwen3-14b 9.88 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.82 tok/s
+· apply_patch failed
+## perf qwen3-14b 10.01 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.43 tok/s
+· apply_patch failed
+## perf qwen3-14b 8.65 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.1 tok/s
+· apply_patch failed
+## perf qwen3-14b 10.11 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.85 tok/s
+· apply_patch failed
+## perf qwen3-14b 9.91 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.38 tok/s
+· apply_patch failed
+## perf qwen3-14b 9.5 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.3 tok/s
+· apply_patch failed
+## perf qwen3-14b 9.36 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 8.9 tok/s
+· apply_patch failed
+## perf qwen3-14b 8.92 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 4.29 tok/s
+· apply_patch failed
+## perf qwen3-14b 3.95 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 5.28 tok/s
+· apply_patch failed
+## perf qwen3-14b 6.58 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 6.94 tok/s
+· apply_patch failed
+## perf qwen3-14b 7.33 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 7.52 tok/s
+· apply_patch failed
+## perf qwen3-14b 8.27 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## model context_trim qwen3-14b
+## perf qwen3-14b 17.99 tok/s
+$ write_file tests/test_voice_polish.py
+· write_file ok
+## perf qwen3-14b 17.46 tok/s
+$ run_shell pytest tests/test_voice_polish.py::test_capacity_restored_speaks
+'pytest' is not recognized as an internal or external command,
+operable program or batch file.
+· run_shell failed
+## perf qwen3-14b 17.43 tok/s
+$ run_shell pip install pytest
+Defaulting to user installation because normal site-packages is not writeable
+Requirement already satisfied: pytest in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (9.1.1)
+Requirement already satisfied: colorama>=0.4 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (0.4.6)
+Requirement already satisfied: iniconfig>=1.0.1 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (2.3.0)
+Requirement already satisfied: packaging>=22 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (26.3)
+Requirement already satisfied: pluggy<2,>=1.5 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (1.6.0)
+Requirement already satisfied: pygments>=2.7.2 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (2.21.0)
+· run_shell ok
+## perf qwen3-14b 17.03 tok/s
+$ run_shell pytest tests/test_voice_polish.py::test_capacity_restored_speaks
+'pytest' is not recognized as an internal or external command,
+operable program or batch file.
+· run_shell failed
+## perf qwen3-14b 17.86 tok/s
+$ run_shell where pytest
+INFO: Could not find files for the given pattern(s).
+· run_shell failed
+## perf qwen3-14b 17.14 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py::test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items
+
+============================ no tests ran in 0.01s ============================
+ERROR: file or directory not found: tests/test_voice_polish.py::test_capacity_restored_speaks
+
+· run_shell failed
+## perf qwen3-14b 17.46 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py
+ERROR: file or directory not found: tests/test_voice_polish.py
+
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items
+
+============================ no tests ran in 0.01s ============================
+· run_shell failed
+## perf qwen3-14b 15.9 tok/s
+$ run_shell python -m pytest
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 3596 items / 3 errors
+
+=================================== ERRORS ====================================
+__________________ ERROR collecting tests/test_action_ops.py __________________
+ImportError while importing test module 'D:\Nexus_Core\Source\tests\test_action_ops.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test_action_ops.py:17: in <module>
+    from localcodeagent.action_ledger import ActionLedger
+E   ModuleNotFoundError: No module named 'localcodeagent'
+___________________ ERROR collecting tests/test_activity.py ___________________
+ImportError while importing test module 'D:\Nexus_Core\Source\tests\test_activity.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test_activity.py:7: in <module>
+    from localcodeagent.agent.orchestrator import AgentOrchestrator
+E   ModuleNotFoundError: No module named 'localcodeagent'
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+C:\Users\after\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py:508: in importtestmodule
+    mod = import_path(
+C:\Users\after\AppData\Roaming\Python\Python314\site-packages\_pytest\pathlib.py:596: in import_path
+    importlib.import_module(module_name)
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1406: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1371: in _find_and_load
+    ???
+<frozen importlib._bootstrap>:1342: in _find_and_load_unlocked
+    ???
+<frozen importlib._bootstrap>:938: in _load_unlocked
+    ???
+C:\Users\after\AppData\Roaming\Python\Python314\site-packages\_pytest\assertion\rewrite.py:179: in exec_module
+    source_stat, co = _rewrite_test(fn, self.config)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\after\AppData\Roaming\Python\Python314\site-packages\_pytest\assertion\rewrite.py:348: in _rewrite_test
+    tree = ast.parse(source, filename=strfn)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\ast.py:46: in parse
+    return compile(source, filename, mode, flags,
+E     File "D:\Nexus_Core\Source\tests\test_voice_polish.py", line 1
+E       429:         self.assertEqual(len(st.voice.enqueued), 0)
+E       ^^^
+E   SyntaxError: illegal target for annotation
+=========================== short test summary info ===========================
+ERROR test_action_ops.py
+ERROR test_activity.py
+ERROR test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!
+============================== 3 errors in 2.22s ==============================
+· run_shell failed
+## perf qwen3-14b 15.63 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py::test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items
+
+============================ no tests ran in 0.01s ============================
+ERROR: file or directory not found: tests/test_voice_polish.py::test_capacity_restored_speaks
+
+· run_shell failed
+## perf qwen3-14b 15.87 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items
+
+============================ no tests ran in 0.01s ============================
+ERROR: file or directory not found: tests/test_voice_polish.py
+
+· run_shell failed
+## perf qwen3-14b 2.25 tok/s
+$ run_shell python -m pytest
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 3596 items / 3 errors
+
+=================================== ERRORS ====================================
+__________________ ERROR collecting tests/test_action_ops.py __________________
+ImportError while importing test module 'D:\Nexus_Core\Source\tests\test_action_ops.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test_action_ops.py:17: in <module>
+    from localcodeagent.action_ledger import ActionLedger
+E   ModuleNotFoundError: No module named 'localcodeagent'
+___________________ ERROR collecting tests/test_activity.py ___________________
+ImportError while importing test module 'D:\Nexus_Core\Source\tests\test_activity.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test_activity.py:7: in <module>
+    from localcodeagent.agent.orchestrator import AgentOrchestrator
+E   ModuleNotFoundError: No module named 'localcodeagent'
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+C:\Users\after\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py:508: in importtestmodule
+    mod = import_path(
+C:\Users\after\AppData\Roaming\Python\Python314\site-packages\_pytest\pathlib.py:596: in import_path
+    importlib.import_module(module_name)
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1406: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1371: in _find_and_load
+    ???
+<frozen importlib._bootstrap>:1342: in _find_and_load_unlocked
+    ???
+<frozen importlib._bootstrap>:938: in _load_unlocked
+    ???
+C:\Users\after\AppData\Roaming\Python\Python314\site-packages\_pytest\assertion\rewrite.py:179: in exec_module
+    source_stat, co = _rewrite_test(fn, self.config)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\after\AppData\Roaming\Python\Python314\site-packages\_pytest\assertion\rewrite.py:348: in _rewrite_test
+    tree = ast.parse(source, filename=strfn)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\ast.py:46: in parse
+    return compile(source, filename, mode, flags,
+E     File "D:\Nexus_Core\Source\tests\test_voice_polish.py", line 1
+E       429:         self.assertEqual(len(st.voice.enqueued), 0)
+E       ^^^
+E   SyntaxError: illegal target for annotation
+=========================== short test summary info ===========================
+ERROR test_action_ops.py
+ERROR test_activity.py
+ERROR test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!
+============================== 3 errors in 1.15s ==============================
+· run_shell failed
+## perf qwen3-14b 2.35 tok/s TTFT 3823ms
+## task verifying/verifying
+$ run_shell python -m pytest tests/test_voice_polish.py -x -q
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+C:\Users\after\AppData\Roaming\Python\Python314\site-packages\_pytest\python.py:508: in importtestmodule
+    mod = import_path(
+C:\Users\after\AppData\Roaming\Python\Python314\site-packages\_pytest\pathlib.py:596: in import_path
+    importlib.import_module(module_name)
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1406: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1371: in _find_and_load
+    ???
+<frozen importlib._bootstrap>:1342: in _find_and_load_unlocked
+    ???
+<frozen importlib._bootstrap>:938: in _load_unlocked
+    ???
+C:\Users\after\AppData\Roaming\Python\Python314\site-packages\_pytest\assertion\rewrite.py:179: in exec_module
+    source_stat, co = _rewrite_test(fn, self.config)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\after\AppData\Roaming\Python\Python314\site-packages\_pytest\assertion\rewrite.py:348: in _rewrite_test
+    tree = ast.parse(source, filename=strfn)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\ast.py:46: in parse
+    return compile(source, filename, mode, flags,
+E     File "D:\Nexus_Core\Source\tests\test_voice_polish.py", line 1
+E       429:         self.assertEqual(len(st.voice.enqueued), 0)
+E       ^^^
+E   SyntaxError: illegal target for annotation
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.13s
+· run_shell failed
+$ run_shell python -m compileall -q tests/test_voice_polish.py
+*** Error compiling 'tests/test_voice_polish.py'...
+  File "tests/test_voice_polish.py", line 1
+    429:         self.assertEqual(len(st.voice.enqueued), 0)
+    ^^^
+SyntaxError: illegal target for annotation
+
+· run_shell failed
+## model verification_repair
+## task running/researching_failure
+## perf qwen3-14b 8.05 tok/s
+$ read_file tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 10.41 tok/s
+$ write_file tests/test_voice_polish.py
+· write_file ok
+## perf qwen3-14b 13.24 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py::test_capacity_restored_speaks
+ERROR: file or directory not found: tests/test_voice_polish.py::test_capacity_restored_speaks
+
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items
+
+============================ no tests ran in 0.01s ============================
+· run_shell failed
+## perf qwen3-14b 14.14 tok/s

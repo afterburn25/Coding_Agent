@@ -1,0 +1,212 @@
+{
+  "cached_at": 1791509230.6268764,
+  "provider": "github_api",
+  "query": "auto||error ERENT Error python 1791506840.8304477",
+  "version": "",
+  "value": [
+    {
+      "title": "Install skill content from the recorded store commit",
+      "source_type": "github_pr",
+      "url": "https://github.com/madalinpopa/skills/pull/11",
+      "excerpt": "- **test(store): tie catalog and install bytes to the recorded revision**\n- **fix(store): read published skill content from one commit**\n- **docs: mark phase 7 done in the repair plan**\n",
+      "provider": "github_api",
+      "id": "0f9bfe03a546",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-09-12T23:09:52Z",
+      "retrieved_at": 1791509230.3566065,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791509289,
+          "resource": "search"
+        },
+        "repository": "madalinpopa/skills",
+        "number": 11,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Bump redis from 7.2 to 8.8",
+      "source_type": "github_pr",
+      "url": "https://github.com/Nithin-at-github/Django_Architecture/pull/4",
+      "excerpt": "Bumps redis from 7.2 to 8.8.\n\n\n[![Dependabot compatibility score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=redis&package-manager=docker_compose&previous-version=7.2&new-version=8.8)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\n\n\n</details>",
+      "provider": "github_api",
+      "id": "aa82e4f2b0e3",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-07-31T10:53:56Z",
+      "retrieved_at": 1791509230.3566167,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791509289,
+          "resource": "search"
+        },
+        "repository": "Nithin-at-github/Django_Architecture",
+        "number": 4,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Workflow annotations",
+      "source_type": "github_pr",
+      "url": "https://github.com/OpenFn/ai-analytics/pull/11",
+      "excerpt": "This PR adds 3 new jobs to the weekly-annotation-queues workflow that automatically build and populate a Langfuse annotation queue for human review of the Code quality judge.\r\n\r\nJobs added:\r\n\r\npullLangfuseTraces — Fetches all Code quality judge v5 scores from Langfuse for the past 7 days, deduplicating to one score per observation (keeping the most recent). Passes the results and window metadata through state.\r\n\r\nextractCandidates — Selects up to 20 observations for review: the 5 lowest-scoring, 5 highest-scoring, and 10 randomly sampled from the remainder. Each selected observation is tagged with a reason (e.g. low Code quality judge v5 (0.1)).\r\n\r\npostTraces — Creates a new named Langfuse annotation queue (with a random suffix to ensure uniqueness) configured with the 5 human review score configs, then adds each selected observation as a queue item.",
+      "provider": "github_api",
+      "id": "83c8491032bf",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-07-21T14:01:13Z",
+      "retrieved_at": 1791509230.3566213,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791509289,
+          "resource": "search"
+        },
+        "repository": "OpenFn/ai-analytics",
+        "number": 11,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "updated mesh masker",
+      "source_type": "github_pr",
+      "url": "https://github.com/Apolo-ADSK/XLB/pull/3",
+      "excerpt": "## Contributing Guidelines\r\n\r\n<!-- Please make sure you have read and understood our contributing guidelines before submitting this PR -->\r\n- [x] I have read and understood the [CONTRIBUTING.md](https://github.com/Autodesk/XLB/blob/main/CONTRIBUTING.md) guidelines\r\n\r\n\r\n## Description\r\n\r\n<!-- \r\nThank you for your contribution! Please include a summary of the changes and the related issue. Please also include relevant motivation and context. List any dependencies that are required for this change.\r\n-->\r\n\r\n\r\n## Type of change\r\n\r\n<!-- Please select the options that are relevant. -->\r\n- [x] Bug fix (non-breaking change which fixes an issue)\r\n- [ ] New feature (non-breaking change which adds functionality)\r\n- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)\r\n- [ ] Documentation update\r\n\r\n## How Has This Been Tested?\r\n\r\n<!-- Please describe the tests that you ran to verify your changes. Provide instructions so others can reproduce. Include details of your test environment, and the test cases you ran.\r\n\r\n- [ ] Test A\r\n- [ ] Test B\r\n-->\r\n- [x] All pytest tests pass\r\n\r\n<!-- To run the tests, execute the following command from the root of the repository:\r\n\r\n```bash\r\npytest\r\n```\r\n -->\r\n\r\n\r\n## Linting and Code Formatting\r\n\r\nMake sure the code follows the project's linting and formatting standards. This project uses **Ruff** for linting.\r\n\r\nTo run Ruff, execute the following command from the root of the repository:\r\n\r\n```bash\r\nruff check .\r\n```\r\n\r\n<!-- You can also fix some linting errors automatically using Ruff:\r\n\r\n```bash\r\nruff check . --fix\r\n```\r\n-->\r\n\r\n- [x] Ruff passes\r\n",
+      "provider": "github_api",
+      "id": "da8107b31a69",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2025-10-14T13:33:30Z",
+      "retrieved_at": 1791509230.3566244,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791509289,
+          "resource": "search"
+        },
+        "repository": "Apolo-ADSK/XLB",
+        "number": 3,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Hybrid bc",
+      "source_type": "github_pr",
+      "url": "https://github.com/Apolo-ADSK/XLB/pull/2",
+      "excerpt": "## Contributing Guidelines\r\n\r\n<!-- Please make sure you have read and understood our contributing guidelines before submitting this PR -->\r\n- [x] I have read and understood the [CONTRIBUTING.md](https://github.com/Autodesk/XLB/blob/main/CONTRIBUTING.md) guidelines\r\n\r\n\r\n## Description\r\n\r\n<!-- \r\nThank you for your contribution! Please include a summary of the changes and the related issue. Please also include relevant motivation and context. List any dependencies that are required for this change.\r\n-->\r\n\r\n\r\n## Type of change\r\n\r\n<!-- Please select the options that are relevant. -->\r\n- [ x] Bug fix (non-breaking change which fixes an issue)\r\n- [ ] New feature (non-breaking change which adds functionality)\r\n- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)\r\n- [ ] Documentation update\r\n\r\n## How Has This Been Tested?\r\n\r\n<!-- Please describe the tests that you ran to verify your changes. Provide instructions so others can reproduce. Include details of your test environment, and the test cases you ran.\r\n\r\n- [ ] Test A\r\n- [ ] Test B\r\n-->\r\n- [ ] All pytest tests pass\r\n\r\n<!-- To run the tests, execute the following command from the root of the repository:\r\n\r\n```bash\r\npytest\r\n```\r\n -->\r\n\r\n\r\n## Linting and Code Formatting\r\n\r\nMake sure the code follows the project's linting and formatting standards. This project uses **Ruff** for linting.\r\n\r\nTo run Ruff, execute the following command from the root of the repository:\r\n\r\n```bash\r\nruff check .\r\n```\r\n\r\n<!-- You can also fix some linting errors automatically using Ruff:\r\n\r\n```bash\r\nruff check . --fix\r\n```\r\n-->\r\n\r\n- [x] Ruff passes\r\n",
+      "provider": "github_api",
+      "id": "402036a19073",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2025-03-17T17:49:12Z",
+      "retrieved_at": 1791509230.3566272,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791509289,
+          "resource": "search"
+        },
+        "repository": "Apolo-ADSK/XLB",
+        "number": 2,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "statistics: revise loading unnecessary fmsketch",
+      "source_type": "github_pr",
+      "url": "https://github.com/pingcap/tidb/pull/37452",
+      "excerpt": "Signed-off-by: yisaer <disxiaofei@163.com>\r\n\r\n<!--\r\n\r\nThank you for contributing to TiDB!\r\n\r\nPR Title Format:\r\n1. pkg [, pkg2, pkg3]: what's changed\r\n2. *: what's changed\r\n\r\n-->\r\n\r\n### What problem does this PR solve?\r\n<!--\r\n\r\nPlease create an issue first to describe the problem.\r\n\r\nThere MUST be one line starting with \"Issue Number:  \" and \r\nlinking the relevant issues via the \"close\" or \"ref\".\r\n\r\nFor more info, check https://pingcap.github.io/tidb-dev-guide/contribute-to-tidb/contribute-code.html#referring-to-an-issue.\r\n\r\n-->\r\n\r\nIssue Number: close #xxx\r\n\r\nfmSketch is only needed to be loaded when merge partition, thus we only need to load fmsketch when `loadAll` is true\r\n\r\nProblem Summary:\r\n\r\n### What is changed and how it works?\r\n\r\n### Check List\r\n\r\nTests <!-- At least one of them must be included. -->\r\n\r\n- [ ] Unit test\r\n- [ ] Integration test\r\n- [ ] Manual test (add detailed scripts or steps below)\r\n- [x] No code\r\n\r\n\r\n### Release note\r\n\r\n<!-- compatibility change, improvement, bugfix, and new feature need a release note -->\r\n\r\nPlease refer to [Release Notes Language Style Guide](https://pingcap.github.io/tidb-dev-guide/contribute-to-tidb/release-notes-style-guide.html) to write a quality release note.\r\n\r\n```release-note\r\nNone\r\n```\r\n",
+      "provider": "github_api",
+      "id": "7d4f8b8d8731",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2022-08-31T07:28:15Z",
+      "retrieved_at": 1791509230.3566303,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791509289,
+          "resource": "search"
+        },
+        "repository": "pingcap/tidb",
+        "number": 37452,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    }
+  ]
+}

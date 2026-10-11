@@ -1,0 +1,16 @@
+{
+  "task_id": "a5d6cb32fa04",
+  "created_at": 1791672570.2937188,
+  "files": {
+    "repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py": {
+      "existed": false,
+      "is_dir": false
+    },
+    "localcodeagent/server.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\localcodeagent\\server.py",
+      "size": 707299
+    }
+  }
+}

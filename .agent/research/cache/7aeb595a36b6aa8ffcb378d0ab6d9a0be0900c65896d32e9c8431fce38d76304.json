@@ -1,0 +1,212 @@
+{
+  "cached_at": 1791544823.5545375,
+  "provider": "github_api",
+  "query": "auto||error ERENT Error",
+  "version": "",
+  "value": [
+    {
+      "title": "docs: correct overview page against firmware develop",
+      "source_type": "github_pr",
+      "url": "https://github.com/meshtastic/meshtastic/pull/2707",
+      "excerpt": "## Linked issue\n\nCloses #2706\n\n## What did you change\n\nOn [/docs/overview](https://meshtastic.org/docs/overview/):\n\n- Broadcasts are encrypted with the channel key and direct messages with the recipient's public key. The page previously said the channel key covers everything, which told a reader that a key they may have shared with a group protects their direct messages.\n- The retransmission budget is three attempts for a broadcast and five for a direct message, and the interval comes from the packet's airtime and how much radio traffic is already on the air, rather than a fixed timeout.\n- The buffer a node keeps for a disconnected client holds 8, 16, or 32 packets depending on hardware, rather than around 30. A text message, range test, or routing packet displaces the oldest entry.\n- Rebroadcast waits a delay weighted by received signal strength, and is cancelled when a neighbor relays first. Next-hop routing for direct messages is now mentioned, having been absent.\n- The byte-level header breakdown gives way to a summary that links to the mesh algorithm and encryption pages, so the wire format keeps one home instead of a second copy that drifts.\n- The MeshPacket example no longer carries a real position or real node numbers.\n- Terminology, product name casing, heading case, the missing code fence language, and the image alt text follow design standards section 11.\n- The word channel no longer carries two senses on the page. The retry sentence described radio activity as the channel being busy, eight lines before the page defines a channel as a named, encrypted group. Channel Utilization stays the name of the telemetry metric and the protobuf field, so this introduces no competing term for it.\n- What is a mesh? now comes before How it works, so the page defines a mesh before describing how one behaves, and it opens with the plain definition rather than with spreading factor and bandwidth. The remaining sections keep their order, already ascending from the radio to the wire format to what a client sees.\n\nOn [/docs/overview/mesh-algo](https://meshtastic.org/docs/overview/mesh-algo/):\n\n- The maximum payload changes from 237 to 239 bytes.\n- A reliable packet was described as resent a maximum of three times, which reads as four transmissions. It now gives three in total for a broadcast and five for a direct message, each counting the first send.\n- Layer 0 gave the preamble as 16 with no regional caveat. It now gives 16 below 1 GHz and 12 in the 2.4 GHz band.\n\n## Why did you change it\n\nEvery correction here comes from reading the firmware source on the `develop` branch at commit `0caf3a09f`, rather than from comparing one documentation page against another. The page's conceptual sections date from 2022 to 2024 and its packet-format sections from April 2026, and the firmware moved under both.\n\n| Claim | Firmware source |\n|---|---|\n| Public-key encryption for direct messages | `Router::wouldEncryptWithPKC()`, `src/mesh/Router.cpp` |\n| Three broadcast attempts, five for a direct message | `NUM_RELIABLE_RETX` and `NUM_RELIABLE_UNICAST_ATTEMPTS`, `src/mesh/ReliableRouter.cpp` |\n| Retransmission interval | `RadioInterface::getRetransmissionMsec()`, `src/mesh/RadioInterface.cpp` |\n| Buffer of 8, 16, or 32 packets | `MAX_RX_TOPHONE`, `src/mesh/mesh-pb-constants.h` |\n| Eviction by port number | `MeshService::sendToPhone()`, `src/mesh/MeshService.cpp` |\n| Rebroadcast delay weighted by signal strength | `RadioInterface::getTxDelayMsecWeighted()`, `src/mesh/RadioInterface.cpp` |\n| Next-hop routing for direct messages | `NextHopRouter::perhapsRebroadcast()`, `src/mesh/NextHopRouter.cpp` |\n| Payload ceiling of 239 bytes | `MAX_RADIO_PAYLOAD_LEN`, `src/mesh/RadioInterface.h` |\n| Preamble of 12 in the 2.4 GHz band | `wideLoraPreambleLengthDefault`, applied in `src/mesh/RadioInterface.cpp` |\n\nThe header layout, the flag bit widths, the sync word `0x2B`, the maximum of eight channels, the bitfield bit positions, and the default channel hash of 8 were checked the same way and are correct as written, so they stay.\n\nThe figure of roughly 200 bytes for a message also stays. It describes the limit the clients impose to keep an encoded packet under the wire ceiling, which is a different fact from the 239 byte ceiling itself.\n\n## Verification\n\n- `pnpm run lint:mdx` passes.\n- `pnpm run build` passes. Because `onBrokenLinks` is set to throw, this validates the new links to the mesh algorithm and encryption pages, including the anchor into the packet header table.\n\nBoth pages were read in a local development server. Playwright MCP was not available for this change, so per the contributor instructions the rendered result is offered for review rather than captured: the deployed preview shows the section order as What is a mesh?, How it works, Meshtastic LoRa chirp, A Meshtastic packet over the air, then The MeshPacket. Aside from that ordering the change is prose, with no component or layout change.\n\n## Not included\n\nAEAD for pre-shared key channels (#9749) landed on `develop` on September 14, 2026 and changes the channel hash for channels that enable it. Documenting that waits until it ships in a release, per section 11.14. Rebuilding the chirp image as SVG so its labels can be translated, and the wider use of radio where node is meant across other pages, are noted in #2706 and left for separate changes.\n\n\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n## Summary by CodeRabbit\n\n* **Documentation**\n  * Expanded the overview of managed flooding, including relay timing, duplicate handling, hop limits, retransmissions, and packet buffering.\n  * Documented direct-message routing with flooding fallback.\n  * Clarified LoRa mesh behavior, modem presets, regional preambles, packet structure, encryption, and the 239-byte packet data limit.\n  * Documented broadcast and direct-message retransmission limits.\n  * Updated MeshPacket examples.\n  * Removed detailed packet-layout and flag-bit descriptions.\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->\n",
+      "provider": "github_api",
+      "id": "96af7b5bc1f5",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-09T07:46:29Z",
+      "retrieved_at": 1791544823.2383416,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791544882,
+          "resource": "search"
+        },
+        "repository": "meshtastic/meshtastic",
+        "number": 2707,
+        "state": "open",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "docs: one template for every benchmark page, and a chart above every sweep",
+      "source_type": "github_pr",
+      "url": "https://github.com/prog893/mlx-asr/pull/10",
+      "excerpt": "Restructures every page in `docs/benchmarks/` to one template, and charts every sweep. All charts are drawn from the tables already published.\n\n## Template\n\nLever and engine pages:\n\n1. **Title**, prefixed `Lever:` or `Engine:`.\n2. **Conclusion**, then a `setting | default | why` table.\n3. **Setup:** one line that links [corpus.md](docs/benchmarks/corpus.md) instead of re-describing the corpus.\n4. **One section per experiment**, with the chart directly above its table.\n5. **Optional sections:** How it works, Superseded, Not settled.\n6. **Related.**\n\nReference pages (corpus, metrics, determinism, peak-memory) use a lighter layout.\n\n\"ships\" is gone everywhere, docs and charts alike. Every option is offered; the docs name the **default**.\n\n## Corpus described once\n\n`corpus.md` now carries stable anchors (`#the-20-file-corpus`, `#the-7-file-subset`, `#the-single-clip`, `#timed-references`). No page keeps its own Corpus section.\n\nIt also states what the timed set actually is, which two pages had wrong: the single clip plus six published videos that are part of the 20 files.\n\n## Charts\n\nThere are 29 charts now, up from 7, and every sweep table has one. Each chart is light/dark SVG, uses the validated palette, distinct markers, and direct end labels from four series up.\n\n- **Per-page data:** each page's chart data lives in `scripts/docs/sweeps/<page>.py`. The page owns it, so pages can be edited independently.\n- **Row matching:** `tests/test_sweeps.py` matches each chart row to its table row: row-wise, or column-wise for the config-by-threshold `min_cut` tables.\n- **Honest axes:** memory axes start at 0, and ties get a minimum y span so a difference inside noise does not draw as a slope.\n- **Links:** `tests/test_doc_links.py` checks that every relative link and `#anchor` in the docs resolves.\n- **Freshness:** the existing chart tests still compare the committed SVGs byte for byte against a fresh render.\n\n## Content fixes found while restructuring\n\nEach was checked against code or source:\n\n- qwen3-asr's window is 30s; one line said 60s (`models.py`).\n- Voxtral's 6.77GB peak was measured at the old 60s/B16 profile; the current Ultra profile is 30s/B32.\n- `--prompt` exits 2 on other engines. The page said it was \"reported as ignored\" (`cli.py`).\n- No-condition applies to Whisper `small` and up only.\n- Machine labels use nameplate GiB: 16GB and 128GB, not 17GB and 137GB.\n- determinism.md now lists every greedy engine.\n- The qwen3-asr precision ladder is described as measured everywhere, including the CLI help.\n\nRestructured by one agent per page in parallel, then integrated and checked centrally: full suite 1072 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n## Summary by CodeRabbit\n\n* **Documentation**\n  * Expanded benchmark guides with updated corpus results, model and setting recommendations, and comparisons of accuracy, speed, memory, and configuration trade-offs.\n  * Added responsive light- and dark-mode charts across benchmark documentation.\n  * Added detailed engine reports and reference material covering corpus composition, metrics, memory, and reproducibility.\n  * Clarified measured defaults, limitations, and model-specific findings, including quantization trade-offs.\n* **Bug Fixes**\n  * Corrected outdated links to benchmark reports and reference material.\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+      "provider": "github_api",
+      "id": "8f854262e69c",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-09T04:20:31Z",
+      "retrieved_at": 1791544823.238414,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791544882,
+          "resource": "search"
+        },
+        "repository": "prog893/mlx-asr",
+        "number": 10,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Spec set 13: implement deferred-debt items 01-07",
+      "source_type": "github_pr",
+      "url": "https://github.com/SamuelIVX/interleave/pull/42",
+      "excerpt": "## Summary\n\nImplement specs 13.01–13.07 from the [deferred-debt set](docs/specs/active/13-deferred-debt/README.md). The changes remove dead thread counters, derive configuration facts once, add explicit-counter test factories, complete DSL state encoding, generalize registry state arrays to the declared thread count, and detect drift in mutation figures.\n\n| Spec | Result |\n|---|---|\n| 13.01 | Close D1 with `Configuration.forTest`; remove reflective configuration fixtures |\n| 13.02 | Close A1 by deleting `ModelThread`'s unused counter and accessors |\n| 13.03 | Document B1/B2 key hazards and consolidate the CBS deadlock predicate; value-key closure remains open |\n| 13.04 | Close E4 by documenting why the old CBS guard was redundant; 13.03 removed its mutant's subject |\n| 13.05 | Close A2: `DynamicState.encodeTo` writes `decl` and `threadCount` at equality's granularity |\n| 13.06 | Close A3: `peterson`, `deadlock`, and `counter` arrays use the declared thread count |\n| 13.07 | Close D2/E1/E2 with a shared derivation convention and non-failing per-class drift notices |\n| 13.08 | Design note only; A4 remains open |\n\n## Review corrections\n\n- Scoped mutation runs suppress notices for intentionally omitted classes, while retaining measured mismatches. Full runs still report missing classes.\n- Mark pre-spec mutation figures as historical and distinguish the current `255/268` measurement from the frozen 94% floor.\n- Use one explicit pairwise definition in 13.08 and prove only `P_current ∪ source_pair = P_current`, including empty, singleton, and independent-thread fallbacks. Withdraw the unsupported claim about successor-state analysis or reverse reachability restoring all configurations.\n- Add an independent-write counterexample: POR without an invariant omits `[false, true]`, but the invariant guard finds the violation just as DFS does. Matching Javadoc is corrected.\n- Record A2/A3 closures and align the deferred register, set status, and spec 13.03 with the work actually implemented.\n\n## Verification\n\n- `./gradlew --max-workers=1 -PpitestThreads=1 clean build javadoc`: **482 tests, zero failures/errors/skips**, build and strict Javadoc pass.\n- New counterexample test passes with the guard and fails when the guard is temporarily removed; source restored byte-identical after the experiment.\n- Four isolated XML-population checks against the real `mutationRatchet` pass: scoped matching, scoped mismatch, full matching, and full missing class. The two scoped diagnostic assertions failed before the fix.\n- Actual scoped PIT (`CanonicalEncoder`): **6/7**, no false drift notice, scoped aggregate gates explicitly skipped.\n- Full-scope PIT (`state.*` + `cb.*`): **268 mutants, 255 KILLED, 13 SURVIVED, zero NO_COVERAGE/TIMED_OUT/MEMORY_ERROR/NON_VIABLE/RUN_ERROR**; ratchet passes at **95.15% ≥ 94%**, with no drift notices.\n- CodeRabbit CLI 0.8.1 completed two local follow-up reviews: the first returned zero findings; the final returned two minor documentation findings. Clarified that the ratchet checks XML against constants, not Markdown; the B1/B2 table status was already corrected and independently rechecked.\n\n## Tradeoffs and remaining debt\n\n- The mutation floor stays at **94%**. Spec 13.03 removed one killed mutant and one survivor (`270/256/14` → `268/255/13`); the score increase reflects removed redundant code, not added test coverage.\n- A4 remains deferred. Preserving arbitrary invariant callbacks needs a property-preservation argument; a pairwise source-set union provides none. The exhaustive invariant fallback remains in place.\n- E5 remains open: single-threaded local runs cannot establish repeated parallel-CI reliability. No timeout allowance was added.\n- B1/B2 remain open under the register's original value-rendering/value-key criteria. `Configuration` retains identity equality, and diagnostic rendering was not rewritten.\n- The built-in Peterson invariant remains two-thread-only even though registry state storage now supports more threads.\n- C1/E3 were already closed in set 12; E4 is closed by 13.04.\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nCo-Authored-By: Codex <noreply@openai.com>\n",
+      "provider": "github_api",
+      "id": "4d5853cfb64b",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-06T19:27:57Z",
+      "retrieved_at": 1791544823.2384603,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791544882,
+          "resource": "search"
+        },
+        "repository": "SamuelIVX/interleave",
+        "number": 42,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "feat: add Caresse and Werkmeister app profiles",
+      "source_type": "github_pr",
+      "url": "https://github.com/kristofferR/ha-adjustable-bed/pull/639",
+      "excerpt": "Caresse Remote and Werkmeister app behavior cannot be represented safely by the generic Vibradorm controller. Shared BLE transport does not identify their command layout, feature gates or onboarding behavior.\n\nAdd explicit app profiles with artifact-backed commands, held-control cleanup, floor and mood lighting, massage controls, metadata and native-bond onboarding. Preserve generic Vibradorm entries and expose the new controls through Home Assistant and the paired bed card.\n\nThe accepted two-package audit and cluster reconciliation cover 1,169 discoveries: 813 implemented, 0 already implemented, and 356 explicitly excluded. Every exclusion and its source reason is recorded in `docs/apk-analysis/row031-dispositions.md`; exclusions concern unreachable code, unrelated app/platform behavior, and unsafe callback/state behavior. Hardware operation remains unverified.\n\nValidation: 7,851 Python tests pass, Ruff and Pyright pass, and the frontend builds with all 69 tests passing. Artifact-vector, lifecycle, entity/service and paired-routing tests cover the new behavior. Independent convergence review verifies the implementation bindings and exclusions.\n\nRef #162, #403, #436, #443, #447.\n",
+      "provider": "github_api",
+      "id": "06bad780ce97",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-05T22:12:56Z",
+      "retrieved_at": 1791544823.2384844,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791544882,
+          "resource": "search"
+        },
+        "repository": "kristofferR/ha-adjustable-bed",
+        "number": 639,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "[MLS Dispatcher][DONE] MLS-GLOBAL-003361 r33-unified:MLS-R33-R44-UNIFIED-CONTINUATION:MLS-V04-1025:MLS-V04-1030:5",
+      "source_type": "github_issue",
+      "url": "https://github.com/dpidiaz/llmchatmls/issues/3361",
+      "excerpt": "## MLS Global Dispatcher assignment\n\n**Assignment:** `MLS-GLOBAL-003361`  \n**Work:** `r33-unified:MLS-R33-R44-UNIFIED-CONTINUATION:MLS-V04-1025:MLS-V04-1030:5` — R44→R33 Unified MLS-V04-1025..MLS-V04-1030  \n**Tipo:** `editorial_batch`  \n**Branch:** `worker/r33-unified/003361`  \n**Estado:** `done`  \n**ACK deadline:** 2026-10-03T09:37:59.815Z  \n**Lease expira:** 2026-10-03T09:48:21.490Z  \n\n\n### Instrucciones\n\nR4 EPHEMERAL WORKER / CONTINUE-UNTIL-PREEMPTED: procesa exclusivamente estas entradas R33. Persiste y valida CADA entrada por separado; ANTES de cada commit ejecuta node scripts/R4-evidence-preflight.cjs <ruta-evidence>; este preflight recalcula articleHash, claimId, linkId y evidenceSnapshotHash con las funciones canónicas y debe terminar ok. Solo entonces crea el commit/checkpoint durable y continúa. No uses un push fallido como mecanismo normal de validación. checkpointSizeMax=1. El Global Dispatcher es el único owner efectivo; no crees un lease R33 Evidence Farm anidado. Al emitir FINISH del microclaim, Worker Events crea automáticamente un claim encadenado (autoPull.requestId/issueNumber). Si la sesión sigue razonando, sigue ese claim, espera su lease y procesa el siguiente microclaim. Repite FINISH → autoPull → siguiente lease indefinidamente mientras exista trabajo. No termines voluntariamente por haber acabado un microclaim. La finalización involuntaria del razonamiento es preemption normal: no intentes evitarla ni dependas de memoria conversacional; el progreso ya checkpointed debe sobrevivir y cualquier claim/lease sembrado debe poder expirar y ser reapeado. UNIFIED R44→R33: estas entradas tienen handoff durable R44. Lee cada handoffPath antes de editar. Si outcome=CORRECTED, reconcilia correctedContent del handoff contra el artículo en contentPath y deja en contentPath la versión final que será certificada; no copies ciegamente un objeto parcial. Si outcome=PASS_NO_CHANGE, no alteres contentPath salvo que la validación R33 detecte un error real. Evidence debe calcularse contra el contenido final en la misma rama. El checkpoint puede incluir contentPath + evidenceArtifactPath y ambos quedan ligados al mismo commit. Contexto R44=[{\"code\":\"MLS-V04-1025\",\"contentPath\":\"content/frances/MLS-V04-1025.json\",\"handoffPath\":\"MLS R32 EDITORIAL/r44/r33-handoff/tickets/R43-EMERGENCY-0304.json\",\"outcome\":\"PASS_NO_CHANGE\",\"resultSha256\":\"024c5b3fb26209abbcec755d4e727c2c767d37bbc9766458cfdc4aa843fdc12a\",\"sourceSha256\":\"c322ae7b13e308d7a14cdce94870382be4a56fc08ba57b91a754183edae4a4ba\"},{\"code\":\"MLS-V04-1027\",\"contentPath\":\"content/frances/MLS-V04-1027.json\",\"handoffPath\":\"MLS R32 EDITORIAL/r44/r33-handoff/tickets/R43-EMERGENCY-0304.json\",\"outcome\":\"PASS_NO_CHANGE\",\"resultSha256\":\"024c5b3fb26209abbcec755d4e727c2c767d37bbc9766458cfdc4aa843fdc12a\",\"sourceSha256\":\"67a3b5b421b448455bd2d383691d7d868f2ee31ca79e2a03db0b386ea33b1fe7\"},{\"code\":\"MLS-V04-1028\",\"contentPath\":\"content/frances/MLS-V04-1028.json\",\"handoffPath\":\"MLS R32 EDITORIAL/r44/r33-handoff/tickets/R43-EMERGENCY-0304.json\",\"outcome\":\"PASS_NO_CHANGE\",\"resultSha256\":\"024c5b3fb26209abbcec755d4e727c2c767d37bbc9766458cfdc4aa843fdc12a\",\"sourceSha256\":\"4f0af38170ddc568745879abb12bede12d860b135808980243429b9963f636b0\"},{\"code\":\"MLS-V04-1029\",\"contentPath\":\"content/frances/MLS-V04-1029.json\",\"handoffPath\":\"MLS R32 EDITORIAL/r44/r33-handoff/tickets/R43-EMERGENCY-0304.json\",\"outcome\":\"PASS_NO_CHANGE\",\"resultSha256\":\"024c5b3fb26209abbcec755d4e727c2c767d37bbc9766458cfdc4aa843fdc12a\",\"sourceSha256\":\"41664a80b203e716f3edfc7af40d63b894d37485ccd7b5f56c874cd3c758940b\"},{\"code\":\"MLS-V04-1030\",\"contentPath\":\"content/frances/MLS-V04-1030.json\",\"handoffPath\":\"MLS R32 EDITORIAL/r44/r33-handoff/tickets/R43-EMERGENCY-0304.json\",\"outcome\":\"PASS_NO_CHANGE\",\"resultSha256\":\"024c5b3fb26209abbcec755d4e727c2c767d37bbc9766458cfdc4aa843fdc12a\",\"sourceSha256\":\"d302474ceb4cf3b948cb4ffd4d32250e30b59fb30b108acafb9f9f0ddc67ca11\"}]\n\n### Perímetro de escritura\n\n- `MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1025.json`\n- `MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1027.json`\n- `MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1028.json`\n- `MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1029.json`\n- `MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1030.json`\n- `content/frances/MLS-V04-1025.json`\n- `content/frances/MLS-V04-1027.json`\n- `content/frances/MLS-V04-1028.json`\n- `content/frances/MLS-V04-1029.json`\n- `content/frances/MLS-V04-1030.json`\n\n### Locks\n\n- `entry:MLS-V04-1025`\n- `path:MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1025.json`\n- `entry:MLS-V04-1027`\n- `path:MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1027.json`\n- `entry:MLS-V04-1028`\n- `path:MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1028.json`\n- `entry:MLS-V04-1029`\n- `path:MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1029.json`\n- `entry:MLS-V04-1030`\n- `path:MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1030.json`\n- `path:content/frances/MLS-V04-1025.json`\n- `path:content/frances/MLS-V04-1027.json`\n- `path:content/frances/MLS-V04-1028.json`\n- `path:content/frances/MLS-V04-1029.json`\n- `path:content/frances/MLS-V04-1030.json`\n\nRegla: commit → validate → checkpoint. No escribas directamente a `main`.\n\nNo edites manualmente el bloque de control.\n\n<!-- MLS_GLOBAL_DISPATCH_ASSIGNMENT\n{\n  \"kind\": \"mls_global_assignment\",\n  \"version\": \"1.0\",\n  \"assignmentId\": \"MLS-GLOBAL-003361\",\n  \"issueNumber\": 3361,\n  \"requestId\": \"autopull:MLS-GLOBAL-003332:371134196512\",\n  \"workerId\": \"chat-20261003T0310-0600-unified-sol-current\",\n  \"workerLogin\": \"dpidiaz\",\n  \"workId\": \"r33-unified:MLS-R33-R44-UNIFIED-CONTINUATION:MLS-V04-1025:MLS-V04-1030:5\",\n  \"workVersion\": 2,\n  \"workType\": \"editorial_batch\",\n  \"title\": \"R44→R33 Unified MLS-V04-1025..MLS-V04-1030\",\n  \"provider\": \"r33-farm\",\n  \"instructions\": \"R4 EPHEMERAL WORKER / CONTINUE-UNTIL-PREEMPTED: procesa exclusivamente estas entradas R33. Persiste y valida CADA entrada por separado; ANTES de cada commit ejecuta node scripts/R4-evidence-preflight.cjs <ruta-evidence>; este preflight recalcula articleHash, claimId, linkId y evidenceSnapshotHash con las funciones canónicas y debe terminar ok. Solo entonces crea el commit/checkpoint durable y continúa. No uses un push fallido como mecanismo normal de validación. checkpointSizeMax=1. El Global Dispatcher es el único owner efectivo; no crees un lease R33 Evidence Farm anidado. Al emitir FINISH del microclaim, Worker Events crea automáticamente un claim encadenado (autoPull.requestId/issueNumber). Si la sesión sigue razonando, sigue ese claim, espera su lease y procesa el siguiente microclaim. Repite FINISH → autoPull → siguiente lease indefinidamente mientras exista trabajo. No termines voluntariamente por haber acabado un microclaim. La finalización involuntaria del razonamiento es preemption normal: no intentes evitarla ni dependas de memoria conversacional; el progreso ya checkpointed debe sobrevivir y cualquier claim/lease sembrado debe poder expirar y ser reapeado. UNIFIED R44→R33: estas entradas tienen handoff durable R44. Lee cada handoffPath antes de editar. Si outcome=CORRECTED, reconcilia correctedContent del handoff contra el artículo en contentPath y deja en contentPath la versión final que será certificada; no copies ciegamente un objeto parcial. Si outcome=PASS_NO_CHANGE, no alteres contentPath salvo que la validación R33 detecte un error real. Evidence debe calcularse contra el contenido final en la misma rama. El checkpoint puede incluir contentPath + evidenceArtifactPath y ambos quedan ligados al mismo commit. Contexto R44=[{\\\"code\\\":\\\"MLS-V04-1025\\\",\\\"contentPath\\\":\\\"content/frances/MLS-V04-1025.json\\\",\\\"handoffPath\\\":\\\"MLS R32 EDITORIAL/r44/r33-handoff/tickets/R43-EMERGENCY-0304.json\\\",\\\"outcome\\\":\\\"PASS_NO_CHANGE\\\",\\\"resultSha256\\\":\\\"024c5b3fb26209abbcec755d4e727c2c767d37bbc9766458cfdc4aa843fdc12a\\\",\\\"sourceSha256\\\":\\\"c322ae7b13e308d7a14cdce94870382be4a56fc08ba57b91a754183edae4a4ba\\\"},{\\\"code\\\":\\\"MLS-V04-1027\\\",\\\"contentPath\\\":\\\"content/frances/MLS-V04-1027.json\\\",\\\"handoffPath\\\":\\\"MLS R32 EDITORIAL/r44/r33-handoff/tickets/R43-EMERGENCY-0304.json\\\",\\\"outcome\\\":\\\"PASS_NO_CHANGE\\\",\\\"resultSha256\\\":\\\"024c5b3fb26209abbcec755d4e727c2c767d37bbc9766458cfdc4aa843fdc12a\\\",\\\"sourceSha256\\\":\\\"67a3b5b421b448455bd2d383691d7d868f2ee31ca79e2a03db0b386ea33b1fe7\\\"},{\\\"code\\\":\\\"MLS-V04-1028\\\",\\\"contentPath\\\":\\\"content/frances/MLS-V04-1028.json\\\",\\\"handoffPath\\\":\\\"MLS R32 EDITORIAL/r44/r33-handoff/tickets/R43-EMERGENCY-0304.json\\\",\\\"outcome\\\":\\\"PASS_NO_CHANGE\\\",\\\"resultSha256\\\":\\\"024c5b3fb26209abbcec755d4e727c2c767d37bbc9766458cfdc4aa843fdc12a\\\",\\\"sourceSha256\\\":\\\"4f0af38170ddc568745879abb12bede12d860b135808980243429b9963f636b0\\\"},{\\\"code\\\":\\\"MLS-V04-1029\\\",\\\"contentPath\\\":\\\"content/frances/MLS-V04-1029.json\\\",\\\"handoffPath\\\":\\\"MLS R32 EDITORIAL/r44/r33-handoff/tickets/R43-EMERGENCY-0304.json\\\",\\\"outcome\\\":\\\"PASS_NO_CHANGE\\\",\\\"resultSha256\\\":\\\"024c5b3fb26209abbcec755d4e727c2c767d37bbc9766458cfdc4aa843fdc12a\\\",\\\"sourceSha256\\\":\\\"41664a80b203e716f3edfc7af40d63b894d37485ccd7b5f56c874cd3c758940b\\\"},{\\\"code\\\":\\\"MLS-V04-1030\\\",\\\"contentPath\\\":\\\"content/frances/MLS-V04-1030.json\\\",\\\"handoffPath\\\":\\\"MLS R32 EDITORIAL/r44/r33-handoff/tickets/R43-EMERGENCY-0304.json\\\",\\\"outcome\\\":\\\"PASS_NO_CHANGE\\\",\\\"resultSha256\\\":\\\"024c5b3fb26209abbcec755d4e727c2c767d37bbc9766458cfdc4aa843fdc12a\\\",\\\"sourceSha256\\\":\\\"d302474ceb4cf3b948cb4ffd4d32250e30b59fb30b108acafb9f9f0ddc67ca11\\\"}]\",\n  \"dependencies\": [],\n  \"resourceLocks\": [\n    \"entry:MLS-V04-1025\",\n    \"path:MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1025.json\",\n    \"entry:MLS-V04-1027\",\n    \"path:MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1027.json\",\n    \"entry:MLS-V04-1028\",\n    \"path:MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1028.json\",\n    \"entry:MLS-V04-1029\",\n    \"path:MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1029.json\",\n    \"entry:MLS-V04-1030\",\n    \"path:MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1030.json\",\n    \"path:content/frances/MLS-V04-1025.json\",\n    \"path:content/frances/MLS-V04-1027.json\",\n    \"path:content/frances/MLS-V04-1028.json\",\n    \"path:content/frances/MLS-V04-1029.json\",\n    \"path:content/frances/MLS-V04-1030.json\"\n  ],\n  \"allowedPaths\": [\n    \"MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1025.json\",\n    \"MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1027.json\",\n    \"MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1028.json\",\n    \"MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1029.json\",\n    \"MLS R32 EDITORIAL/evidence git/entries/frances/MLS-V04-1030.json\",\n    \"content/frances/MLS-V04-1025.json\",\n    \"content/frances/MLS-V04-1027.json\",\n    \"content/frances/MLS-V04-1028.json\",\n    \"content/frances/MLS-V04-1029.json\",\n    \"content/frances/MLS-V04-1030.json\"\n  ],\n  \"validationRequired\": [\n    \"R33 Editorial Batch Tests\"\n  ],\n  \"completion\": {\n    \"requiresCommit\": true,\n    \"requiresValidation\": true\n  },\n  \"integration\": null,\n  \"branch\": \"worker/r33-unified/003361\",\n  \"baseCommit\": \"50e85b6b1231c6e5be16e3dac70ccd8bf05daa55\",\n  \"leaseToken\": \"22f6537a321e3d88416fdddbddd4cda0c6b7a0b3caa75f49\",\n  \"leaseEpoch\": 3361,\n  \"status\": \"done\",\n  \"claimedAt\": \"2026-10-03T09:32:59.815Z\",\n  \"acknowledgedAt\": \"2026-10-03T09:34:56.904Z\",\n  \"ackDeadlineAt\": \"2026-10-03T09:37:59.815Z\",\n  \"lastHeartbeatAt\": \"2026-10-03T09:38:21.490Z\",\n  \"expiresAt\": \"2026-10-03T09:48:21.490Z\",\n  \"checkpoints\": [\n    {\n      \"commitSha\": \"77ceb4fb3331f3f7cb0ba0b2e7fde60899505585\",\n      \"validation\": {\n        \"status\": \"passed\",\n        \"workflow\": \"MLS Unified R33 Evidence Submit\",\n        \"runId\": 37113520039\n      },\n      \"completedUnits\": [\n        \"MLS-V04-1025\"\n      ],\n      \"pendingUnits\": [\n        \"MLS-V04-1027\",\n        \"MLS-V04-1028\",\n        \"MLS-V04-1029\",\n        \"MLS-V04-1030\"\n      ],\n      \"notes\": \"Unified inline auto-checkpoint after canonical preflight and R33 tests.\",\n      \"hash\": \"b97",
+      "provider": "github_api",
+      "id": "416c69835bc1",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-03T09:38:47Z",
+      "retrieved_at": 1791544823.2385182,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791544882,
+          "resource": "search"
+        },
+        "repository": "dpidiaz/llmchatmls",
+        "number": 3361,
+        "state": "closed",
+        "kind": "issue"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "feat(client): preview geometric drape on the ragged wrap",
+      "source_type": "github_pr",
+      "url": "https://github.com/devantler-tech/world-at-ruin/pull/951",
+      "excerpt": "> 🤖 Generated by the Agentic Engineer\n\n<!--\nWrite for the project manager deciding whether this change is needed — not for\na code reviewer (CodeRabbit and CI validate correctness). Keep it SHORT:\n1–3 plain-language sentences per section. No code detail — no file paths,\nsymbols, snippets, or test/lint output. The change type lives in the PR title\n(Conventional Commits), not here.\n-->\n\n## Why\n\nThe new-player ragged wrap still reads as rigid panels, leaving the character-art gate unfinished.\n\n## What\n\nAdds an optional preview with outward folds and a softer hanging outline, plus front, rear, profile and gameplay comparisons. Normal launches and saved characters keep their existing appearance; the garment remains below the agreed reference, with a dated accept-or-retire decision.\n\nFixes #949\nPart of #222\n\n<!--\nOnly if applicable — one line each, delete the rest:\n\n⚠️ Merge order: land #N first, or <what breaks>.\n💥 Breaking change: <what breaks, for whom>.\n📦 New dependency: <name> — <why>.\n👉 After merge/promotion: <action the maintainer must take>.\n-->\n",
+      "provider": "github_api",
+      "id": "9662bfbbfc68",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-10-01T23:11:57Z",
+      "retrieved_at": 1791544823.2385395,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791544882,
+          "resource": "search"
+        },
+        "repository": "devantler-tech/world-at-ruin",
+        "number": 951,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    }
+  ]
+}

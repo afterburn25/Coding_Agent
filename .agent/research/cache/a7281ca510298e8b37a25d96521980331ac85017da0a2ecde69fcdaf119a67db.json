@@ -1,0 +1,212 @@
+{
+  "cached_at": 1791511603.4490478,
+  "provider": "github_api",
+  "query": "auto||error ERENT Error 1791511587.4078686",
+  "version": "",
+  "value": [
+    {
+      "title": "feat(property-detail): Plan 4 — shell, Übersicht & Verlauf tabs",
+      "source_type": "github_pr",
+      "url": "https://github.com/maik18949/volta/pull/13",
+      "excerpt": "## Summary\n\nImplements Plan 4 (docs/superpowers/plans/2026-07-25-web-04-property-detail-shell.md): the Property Detail page shell plus two fully working tabs.\n\n- Tabbed shell at `/properties/[id]` (Übersicht/Cashflow/Steuer/Verlauf/Finanzierung/Immobiliendaten); the four not-yet-built tabs show a \"kommt in Plan 5/6\" placeholder.\n- **Übersicht tab**: fixed KPI bar (CF nach Steuern, Nettorendite, Cash-on-Cash, DSCR) + 4 cards (Aktueller Stand, Rendite & Investment, Finanzierung, Objekt), with per-KPI benchmark chips and an info sheet (formula/meaning/benchmark table).\n- **Verlauf tab**: a merged, chronologically sorted feed of status-history and one-off-cost entries, with full add/edit/delete (validated: no duplicate status date, no date before the economic transfer date).\n- New pure calculation functions (`ownershipAndVacancyDaysSinceTransfer`, `actualVacancyRate`, `benchmarkColor`, `annualCashflowBeforeTax`) and a `computeOverviewMetrics` data-composition module, all unit tested.\n- A reusable `Modal` primitive (focus trap, scroll lock, Escape/backdrop close) — the app's first dialog component.\n- Along the way, code review caught and fixed several real bugs: a date-math error in the financing countdown, a modal focus-trap escape, inconsistent number formatting, a CSS layout bug silently breaking the sticky KPI bar, and a `revalidatePath` gap that would have left the Verlauf feed stale after edits.\n\nBuilt task-by-task (22 tasks) with an implementer + spec-compliance review + code-quality review per task, plus a final whole-diff review.\n\n## Test Plan\n\n- [x] Full test suite passes (146/146 tests, 14 files)\n- [x] `tsc --noEmit` clean\n- [x] `eslint` clean (one pre-existing, unrelated warning)\n- [x] Dev server boots cleanly; unauthenticated requests correctly redirect to `/login`\n- [ ] Manual walkthrough with a real logged-in session (not possible in the sandbox — no Supabase service-role/seed credentials available there)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+      "provider": "github_api",
+      "id": "0c90d37626df",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-09-17T17:16:57Z",
+      "retrieved_at": 1791511602.9557188,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791511662,
+          "resource": "search"
+        },
+        "repository": "maik18949/volta",
+        "number": 13,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Merge to main for HTML and CSS activity",
+      "source_type": "github_pr",
+      "url": "https://github.com/COS420-Fall24/tasks/pull/136",
+      "excerpt": "",
+      "provider": "github_api",
+      "id": "02a6673cfa31",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2026-01-30T22:30:04Z",
+      "retrieved_at": 1791511602.9557257,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791511662,
+          "resource": "search"
+        },
+        "repository": "COS420-Fall24/tasks",
+        "number": 136,
+        "state": "open",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Only add feature flag to session storage if present in url",
+      "source_type": "github_pr",
+      "url": "https://github.com/Altinn/altinn-studio/pull/12796",
+      "excerpt": "## Description\r\nCheck if featureFlag is included in url before adding to sessionStorage to avoid all featureFlags that is checked with `shouldDisplayFeature()` during current render is added. \r\nAdd test that checks that a flag _not_ listed in the url is not added to sessionStorage and does not return true from `shouldDisplayFeature()`\r\n\r\n## Related Issue(s)\r\n\r\n- #{issue number}\r\n\r\n## Verification\r\n\r\n- [x] **Your** code builds clean without any errors or warnings\r\n- [x] Manual testing done (required)\r\n- [x] Relevant automated test added (if you find this hard, leave it and we'll help out)\r\n\r\n",
+      "provider": "github_api",
+      "id": "0957c0886e4e",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2024-05-14T11:10:18Z",
+      "retrieved_at": 1791511602.9557295,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791511662,
+          "resource": "search"
+        },
+        "repository": "Altinn/altinn-studio",
+        "number": 12796,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Instrumentation Testing",
+      "source_type": "github_pr",
+      "url": "https://github.com/mikegarcia8748/G_Sec/pull/14",
+      "excerpt": "Authentication Library Testing",
+      "provider": "github_api",
+      "id": "99430b1db845",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2023-08-01T02:40:44Z",
+      "retrieved_at": 1791511602.955732,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791511662,
+          "resource": "search"
+        },
+        "repository": "mikegarcia8748/G_Sec",
+        "number": 14,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Merge for release 0.0.11",
+      "source_type": "github_pr",
+      "url": "https://github.com/cdev-framework/cdev-sdk/pull/64",
+      "excerpt": " release 0.0.11",
+      "provider": "github_api",
+      "id": "b8339a9a274f",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2022-08-24T16:00:33Z",
+      "retrieved_at": 1791511602.955735,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791511662,
+          "resource": "search"
+        },
+        "repository": "cdev-framework/cdev-sdk",
+        "number": 64,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    },
+    {
+      "title": "Execption system",
+      "source_type": "github_pr",
+      "url": "https://github.com/cdev-framework/cdev-sdk/pull/35",
+      "excerpt": "refactor cdev cli to make it easer to wrap exceptions and be more explicit about global input objects",
+      "provider": "github_api",
+      "id": "43be6b3edc7a",
+      "authority": "technical_docs",
+      "software_version": "",
+      "version_relevance": "unknown",
+      "published_at": "2022-08-19T14:03:00Z",
+      "retrieved_at": 1791511602.955738,
+      "reliability": "Uncertain",
+      "score": 0.0,
+      "metadata": {
+        "api_rate": {
+          "limit": 10,
+          "remaining": 9,
+          "reset": 1791511662,
+          "resource": "search"
+        },
+        "repository": "cdev-framework/cdev-sdk",
+        "number": 35,
+        "state": "closed",
+        "kind": "pull_request"
+      },
+      "untrusted": true,
+      "source_class": "",
+      "independence_group": -1,
+      "corroboration_count": 0,
+      "badges": [],
+      "score_components": {},
+      "topics": []
+    }
+  ]
+}

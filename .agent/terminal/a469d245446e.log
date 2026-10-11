@@ -1,0 +1,150 @@
+## model selected qwen3-14b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-14b 23.84 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 23.46 tok/s
+$ read_file .repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 22.52 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 22.88 tok/s
+$ read_file .repair-worktrees/ri-0a4fc727af/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 22.1 tok/s
+$ read_file .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 21.98 tok/s
+$ write_file .repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· write_file ok
+## perf qwen3-14b 21.35 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 21.26 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 4.13 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 11.01 tok/s
+$ run_shell python .repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+Diagnosis applied to epistemic_step_diagnosis.py - Fixing capacity restoration logic
+· run_shell ok
+## perf qwen3-14b 11.02 tok/s
+$ run_shell python .repair-worktrees/ri-07fb1d092c/epistemic_step_diagnosis.py
+· run_shell timeout
+## perf qwen3-14b 3.41 tok/s
+$ run_shell python .repair-worktrees/ri-0a4fc727af/epistemic_step_diagnosis.py
+· run_shell timeout
+## perf qwen3-14b 5.87 tok/s
+$ run_shell python .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/epistemic_step_diagnosis.py
+· run_shell timeout
+## perf qwen3-14b 9.33 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 11.39 tok/s
+$ read_file .repair-worktrees/ri-41109fbe50/test_reproduction_fixed.py
+· read_file ok
+## perf qwen3-14b 11.77 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/test_reproduction_fixed.py
+· read_file ok
+## perf qwen3-14b 13.51 tok/s
+$ read_file .repair-worktrees/ri-0a4fc727af/test_reproduction_fixed.py
+· read_file ok
+## perf qwen3-14b 14.96 tok/s
+$ read_file .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/test_reproduction_fixed.py
+· read_file ok
+## perf qwen3-14b 5.37 tok/s
+$ write_file .repair-worktrees/ri-07fb1d092c/test_reproduction_fixed.py
+· write_file ok
+## perf qwen3-14b 8.01 tok/s
+$ write_file .repair-worktrees/ri-0a4fc727af/test_reproduction_fixed.py
+· write_file ok
+## perf qwen3-14b 12.1 tok/s
+$ write_file .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/test_reproduction_fixed.py
+· write_file ok
+## perf qwen3-14b 13.3 tok/s
+$ run_shell python .repair-worktrees/ri-07fb1d092c/test_reproduction_fixed.py
+· run_shell ok
+## perf qwen3-14b 12.35 tok/s
+$ run_shell python .repair-worktrees/ri-0a4fc727af/test_reproduction_fixed.py
+· run_shell ok
+## perf qwen3-14b 12.3 tok/s
+$ run_shell python .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/test_reproduction_fixed.py
+· run_shell ok
+## perf qwen3-14b 12.24 tok/s
+$ run_shell python .repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+Diagnosis applied to epistemic_step_diagnosis.py - Fixing capacity restoration logic
+· run_shell ok
+## perf qwen3-14b 12.28 tok/s
+$ run_shell python .repair-worktrees/ri-07fb1d092c/epistemic_step_diagnosis.py
+· run_shell timeout
+## perf qwen3-14b 3.0 tok/s
+$ run_shell python .repair-worktrees/ri-0a4fc727af/epistemic_step_diagnosis.py
+· run_shell timeout
+## perf qwen3-14b 4.14 tok/s
+$ run_shell python .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/epistemic_step_diagnosis.py
+· run_shell timeout
+## perf qwen3-14b 4.96 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 3.36 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 4.49 tok/s
+$ read_file .repair-worktrees/ri-0a4fc727af/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 5.75 tok/s
+$ read_file .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-14b 7.96 tok/s
+$ write_file .repair-worktrees/ri-07fb1d092c/epistemic_step_diagnosis.py
+· write_file ok
+## perf qwen3-14b 9.45 tok/s
+$ write_file .repair-worktrees/ri-0a4fc727af/epistemic_step_diagnosis.py
+· write_file ok
+## perf qwen3-14b 9.67 tok/s
+$ write_file .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/epistemic_step_diagnosis.py
+· write_file ok
+## perf qwen3-14b 9.9 tok/s
+$ run_shell python .repair-worktrees/ri-07fb1d092c/epistemic_step_diagnosis.py
+· run_shell ok
+## perf qwen3-14b 3.33 tok/s
+$ run_shell python .repair-worktrees/ri-0a4fc727af/epistemic_step_diagnosis.py
+· run_shell ok
+## perf qwen3-14b 3.56 tok/s
+$ run_shell python .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/epistemic_step_diagnosis.py
+· run_shell ok
+## perf qwen3-14b 4.37 tok/s
+$ run_shell python .repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+Diagnosis applied to epistemic_step_diagnosis.py - Fixing capacity restoration logic
+· run_shell ok
+## perf qwen3-14b 5.49 tok/s
+$ run_shell python .repair-worktrees/ri-07fb1d092c/test_reproduction_fixed.py
+· run_shell ok
+## perf qwen3-14b 6.59 tok/s
+$ run_shell python .repair-worktrees/ri-0a4fc727af/test_reproduction_fixed.py
+· run_shell ok
+## perf qwen3-14b 7.14 tok/s
+$ run_shell python .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/test_reproduction_fixed.py
+· run_shell ok
+## perf qwen3-14b 7.13 tok/s
+$ run_shell python .repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+Diagnosis applied to epistemic_step_diagnosis.py - Fixing capacity restoration logic
+· run_shell ok
+## perf qwen3-14b 7.31 tok/s
+$ run_shell python .repair-worktrees/ri-07fb1d092c/epistemic_step_diagnosis.py
+· run_shell ok
+## perf qwen3-14b 7.86 tok/s
+$ run_shell python .repair-worktrees/ri-0a4fc727af/epistemic_step_diagnosis.py
+· run_shell ok
+## perf qwen3-14b 8.33 tok/s
+$ run_shell python .repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/epistemic_step_diagnosis.py
+· run_shell ok
+## perf qwen3-14b 9.06 tok/s
+$ run_shell python .repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+Diagnosis applied to epistemic_step_diagnosis.py - Fixing capacity restoration logic
+· run_shell ok
+## perf qwen3-14b 8.89 tok/s

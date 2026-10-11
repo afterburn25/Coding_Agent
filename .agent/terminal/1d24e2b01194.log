@@ -1,0 +1,424 @@
+## model selected qwen3-14b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-14b 5.19 tok/s
+$ find_tools
+· find_tools ok
+## perf qwen3-14b 4.91 tok/s
+$ find_tools
+· find_tools ok
+## perf qwen3-14b 7.5 tok/s
+$ find_tools
+· find_tools ok
+## perf qwen3-14b 7.45 tok/s
+$ find_tools
+· find_tools ok
+## perf qwen3-14b 7.34 tok/s
+$ find_tools
+· find_tools ok
+## perf qwen3-14b 7.25 tok/s
+$ find_tools
+· find_tools ok
+## perf qwen3-14b 7.2 tok/s
+$ find_tools
+· find_tools ok
+## perf qwen3-14b 7.17 tok/s
+$ find_tools
+· find_tools ok
+## perf qwen3-14b 7.09 tok/s
+$ find_tools
+· find_tools ok
+## perf qwen3-14b 6.93 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 6.81 tok/s
+$ run_shell pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+'pytest' is not recognized as an internal or external command,
+operable program or batch file.
+· run_shell failed
+## perf qwen3-14b 6.75 tok/s
+$ run_shell pip install pytest
+Defaulting to user installation because normal site-packages is not writeable
+Requirement already satisfied: pytest in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (9.1.1)
+Requirement already satisfied: colorama>=0.4 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (0.4.6)
+Requirement already satisfied: iniconfig>=1.0.1 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (2.3.0)
+Requirement already satisfied: packaging>=22 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (26.3)
+Requirement already satisfied: pluggy<2,>=1.5 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (1.6.0)
+Requirement already satisfied: pygments>=2.7.2 in C:\Users\after\AppData\Roaming\Python\Python314\site-packages (from pytest) (2.21.0)
+· run_shell ok
+## perf qwen3-14b 6.54 tok/s
+$ run_shell pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+'pytest' is not recognized as an internal or external command,
+operable program or batch file.
+· run_shell failed
+## perf qwen3-14b 6.49 tok/s
+$ run_shell where pytest
+INFO: Could not find files for the given pattern(s).
+· run_shell failed
+## perf qwen3-14b 6.44 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:2: in <module>
+    from tests.test_voice_polish import _StubState
+tests\test_voice_polish.py:2: in <module>
+    from tests.test_voice_polish import _StubState
+E   ImportError: cannot import name '_StubState' from partially initialized module 'tests.test_voice_polish' (most likely due to a circular import) (D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py)
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.11s ===============================
+· run_shell failed
+## perf qwen3-14b 6.15 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 6.04 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:2: in <module>
+    from .test_voice_polish import _StubState
+E   ImportError: attempted relative import with no known parent package
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.09s ===============================
+· run_shell failed
+## perf qwen3-14b 5.85 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 5.74 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:2: in <module>
+    from test_voice_polish import _StubState
+E   ImportError: cannot import name '_StubState' from partially initialized module 'test_voice_polish' (most likely due to a circular import) (D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py)
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.10s ===============================
+· run_shell failed
+## perf qwen3-14b 5.54 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 5.45 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:2: in <module>
+    from . import _StubState
+E   ImportError: attempted relative import with no known parent package
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.10s ===============================
+· run_shell failed
+## perf qwen3-14b 5.29 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 5.2 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:2: in <module>
+    import _StubState
+E   ModuleNotFoundError: No module named '_StubState'
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.09s ===============================
+· run_shell failed
+## perf qwen3-14b 5.08 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 3.46 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 3.18 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.85 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:2: in <module>
+    from . import _StubState
+E   ImportError: attempted relative import with no known parent package
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.10s ===============================
+· run_shell failed
+## perf qwen3-14b 2.72 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 3.02 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:2: in <module>
+    import _StubState
+E   ModuleNotFoundError: No module named '_StubState'
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.09s ===============================
+· run_shell failed
+## perf qwen3-14b 2.73 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.76 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.69 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:2: in <module>
+    from localcodeagent.personality import _StubState
+E   ImportError: cannot import name '_StubState' from 'localcodeagent.personality' (D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\localcodeagent\personality\__init__.py)
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.28s ===============================
+· run_shell failed
+## perf qwen3-14b 2.66 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.69 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.68 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.68 tok/s
+$ search_text
+· search_text ok
+## model context_trim qwen3-14b
+## perf qwen3-14b 2.77 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.75 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 2.72 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:2: in <module>
+    from test_reproduction import _StubState
+E   ModuleNotFoundError: No module named 'test_reproduction'
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.10s ===============================
+· run_shell failed
+## perf qwen3-14b 2.67 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.63 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 1.74 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:2: in <module>
+    from test_reproduction_fixed import _StubState
+E   ModuleNotFoundError: No module named 'test_reproduction_fixed'
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.10s ===============================
+· run_shell failed
+## perf qwen3-14b 1.91 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 2.06 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 1.87 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:2: in <module>
+    from .test_reproduction_fixed import _StubState
+E   ImportError: attempted relative import with no known parent package
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.10s ===============================
+· run_shell failed
+## perf qwen3-14b 1.81 tok/s
+$ apply_patch
+· apply_patch ok
+## perf qwen3-14b 1.77 tok/s
+$ run_shell python -m pytest tests/test_voice_polish.py -k test_capacity_restored_speaks
+============================= test session starts =============================
+platform win32 -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_________________ ERROR collecting tests/test_voice_polish.py _________________
+ImportError while importing test module 'D:\Nexus_Core\Source\.repair-worktrees\ri-42aed9a069\.nexus\worktrees\ws-5738ed458c\tests\test_voice_polish.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_voice_polish.py:2: in <module>
+    import test_reproduction_fixed
+E   ModuleNotFoundError: No module named 'test_reproduction_fixed'
+=========================== short test summary info ===========================
+ERROR tests/test_voice_polish.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.10s ===============================
+· run_shell failed
+## perf qwen3-14b 1.77 tok/s

@@ -1,0 +1,26 @@
+{
+ "628ee4df512a3d2d:coding": {
+  "duration_s": 27.879246846584486,
+  "samples": 203
+ },
+ "628ee4df512a3d2d:reviewer": {
+  "duration_s": 187.0330011637053,
+  "samples": 13
+ },
+ "628ee4df512a3d2d:build_test": {
+  "duration_s": 254.55381693630886,
+  "samples": 226
+ },
+ "628ee4df512a3d2d:planning": {
+  "duration_s": 1.6799999999999997,
+  "samples": 2
+ },
+ "628ee4df512a3d2d:integrator": {
+  "duration_s": 0.6,
+  "samples": 1
+ },
+ "628ee4df512a3d2d:research": {
+  "duration_s": 150.90268859044923,
+  "samples": 96
+ }
+}

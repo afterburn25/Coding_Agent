@@ -1,0 +1,48 @@
+{
+  "task_id": "a469d245446e",
+  "created_at": 1791670138.2911031,
+  "files": {
+    ".repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\.repair-worktrees\\ri-41109fbe50\\epistemic_step_diagnosis.py",
+      "size": 211
+    },
+    ".repair-worktrees/ri-07fb1d092c/epistemic_step_diagnosis.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\.repair-worktrees\\ri-07fb1d092c\\epistemic_step_diagnosis.py",
+      "size": 831
+    },
+    ".repair-worktrees/ri-0a4fc727af/epistemic_step_diagnosis.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\.repair-worktrees\\ri-0a4fc727af\\epistemic_step_diagnosis.py",
+      "size": 831
+    },
+    ".repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/epistemic_step_diagnosis.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\.repair-worktrees\\ri-1268972786\\.nexus\\worktrees\\ws-59669748ce\\epistemic_step_diagnosis.py",
+      "size": 831
+    },
+    ".repair-worktrees/ri-07fb1d092c/test_reproduction_fixed.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\.repair-worktrees\\ri-07fb1d092c\\test_reproduction_fixed.py",
+      "size": 2535
+    },
+    ".repair-worktrees/ri-0a4fc727af/test_reproduction_fixed.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\.repair-worktrees\\ri-0a4fc727af\\test_reproduction_fixed.py",
+      "size": 2535
+    },
+    ".repair-worktrees/ri-1268972786/.nexus/worktrees/ws-59669748ce/test_reproduction_fixed.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\.repair-worktrees\\ri-1268972786\\.nexus\\worktrees\\ws-59669748ce\\test_reproduction_fixed.py",
+      "size": 2535
+    }
+  }
+}

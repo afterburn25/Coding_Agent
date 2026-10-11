@@ -1,0 +1,146 @@
+## model selected qwen3-14b primary_coder
+## task running/planning
+## task running/working
+## perf qwen3-14b 21.53 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-14b 21.68 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 22.36 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 22.04 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 21.91 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 21.44 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 21.06 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 19.64 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 18.02 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 18.01 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 17.71 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 17.61 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 17.3 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 15.09 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 14.23 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 13.5 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 12.85 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 12.63 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 12.84 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.62 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.56 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.46 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.71 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.74 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 10.3 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.82 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.13 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.38 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.35 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 9.19 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 8.79 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 8.78 tok/s
+$ search_text
+· search_text ok
+## model context_trim qwen3-14b
+## perf qwen3-14b 15.05 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 14.87 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 14.78 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 13.75 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 13.69 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 12.99 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 12.57 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 12.14 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 11.88 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 11.88 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.39 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.19 tok/s
+$ read_file .repair-worktrees/ri-07fb1d092c/tests/test_voice_polish.py
+· read_file ok
+## perf qwen3-14b 10.28 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 10.16 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 9.97 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-14b 8.84 tok/s

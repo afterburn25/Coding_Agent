@@ -1,0 +1,18 @@
+{
+  "task_id": "2809a24a3ffa",
+  "created_at": 1791674071.3914802,
+  "files": {
+    "repair-worktrees/ri-44704702b5/epistemic_step_diagnosis.py": {
+      "existed": false,
+      "is_dir": false
+    },
+    "repair-worktrees/ri-44704702b5/localcodeagent/selftest.py": {
+      "existed": false,
+      "is_dir": false
+    },
+    "repair-worktrees/ri-44704702b5/tests/test_selftest.py": {
+      "existed": false,
+      "is_dir": false
+    }
+  }
+}

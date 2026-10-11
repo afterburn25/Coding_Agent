@@ -1,0 +1,4 @@
+## model selected qwen3-14b primary_coder
+## error: task driver lost — marked failed by watchdog
+## model activation_fallback qwen3-coder-30b primary_coder
+## task error/done

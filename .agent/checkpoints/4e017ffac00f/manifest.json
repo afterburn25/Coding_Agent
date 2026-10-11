@@ -1,0 +1,24 @@
+{
+  "task_id": "4e017ffac00f",
+  "created_at": 1791698312.6088479,
+  "files": {
+    ".repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\.repair-worktrees\\ri-41109fbe50\\epistemic_step_diagnosis.py",
+      "size": 849
+    },
+    "invokeai.yaml": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\invokeai.yaml",
+      "size": 77
+    },
+    "tests/test_fix_verification.py": {
+      "existed": true,
+      "is_dir": false,
+      "backup": "files\\tests\\test_fix_verification.py",
+      "size": 906
+    }
+  }
+}

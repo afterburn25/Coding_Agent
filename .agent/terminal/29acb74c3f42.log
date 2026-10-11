@@ -1,0 +1,147 @@
+## model selected qwen3-14b primary_coder
+## model activation_fallback qwen3-8b light_coder
+## task running/planning
+## task running/working
+## perf qwen3-8b 45.63 tok/s
+$ list_files .
+· list_files ok
+## perf qwen3-8b 44.12 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 36.11 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 34.55 tok/s
+$ search_repo_index
+· search_repo_index ok
+## perf qwen3-8b 32.1 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 29.07 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 28.37 tok/s
+$ search_text
+· search_text ok
+## model context_trim qwen3-8b
+## perf qwen3-8b 31.6 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 30.62 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 25.95 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 25.75 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 24.04 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 23.37 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 20.78 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 20.62 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 18.59 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 18.12 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 16.55 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 16.62 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 16.33 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 16.22 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 16.27 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 16.19 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 16.13 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 16.01 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 15.94 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 15.83 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 15.75 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 15.67 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 15.59 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 15.48 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 15.43 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 15.37 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 15.29 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 15.21 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 15.12 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 15.03 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 14.99 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 14.87 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 14.84 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 14.71 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 14.69 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 14.58 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 14.51 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 14.42 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 14.37 tok/s
+$ read_file repair-worktrees/ri-41109fbe50/epistemic_step_diagnosis.py
+· read_file ok
+## perf qwen3-8b 14.28 tok/s
+$ search_text
+· search_text ok
+## perf qwen3-8b 14.22 tok/s
