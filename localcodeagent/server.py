@@ -2273,6 +2273,23 @@ class AppState:
         self._vdm_until = 0.0  # bust the delivery cache
         return val
 
+    def _record_persona_exchange(self, message: str, ack: str) -> None:
+        """Persona/voice command acks bypass the agent — record the turn
+        into both conversation stores so the visible exchange isn't a
+        gap in the record (recall lanes and history views read these).
+        Best-effort: a recording failure must not lose the reply."""
+        try:
+            self.conversation_manager.record_exchange(
+                message, ack, intent="conversation",
+                response_source="persona_command")
+            conv = self.conversation_manager.active() or {}
+            self.conversation_memory.record_exchange(
+                message, ack,
+                conversation_id=str(conv.get("id") or "") or None)
+            self.history = self.conversation_manager.history(limit=32)
+        except Exception:
+            pass
+
     def _persona_command(self, message: str) -> dict | None:
         """Deterministic persona style commands ("be less sarcastic",
         "serious mode for an hour", "reset personality"). Returns the
@@ -2361,6 +2378,10 @@ class AppState:
                     return {"applied": "voice_repeat",
                             "ack": f"{why} — last thing I said was: "
                                    f"\"{quoted}\""}
+                if muted:
+                    return {"applied": "voice_repeat",
+                            "ack": "Voice is muted — say \"speak "
+                                   "again\" first."}
                 return {"applied": "voice_repeat",
                         "ack": "Nothing to repeat yet."}
             prof = self.profiles.active()
@@ -13207,6 +13228,8 @@ class Handler(BaseHTTPRequestHandler):
                 # no model call needed for an ack.
                 persona_cmd = self.state._persona_command(message)
                 if persona_cmd is not None:
+                    self.state._record_persona_exchange(
+                        message, persona_cmd["ack"])
                     payload = self.state._mission_reply_result(
                         persona_cmd["ack"])
                     self._sse_begin()
@@ -13441,6 +13464,8 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 persona_cmd = self.state._persona_command(message)
                 if persona_cmd is not None:
+                    self.state._record_persona_exchange(
+                        message, persona_cmd["ack"])
                     self._json(self.state._mission_reply_result(
                         persona_cmd["ack"]))
                     return
