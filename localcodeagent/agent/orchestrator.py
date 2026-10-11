@@ -7428,8 +7428,20 @@ class AgentOrchestrator:
                 artifact_ids=self._artifact_ids_from_events(session.tool_events),
                 attachments=session.attachments_meta,
             )
+        _am_context_dependent = False
+        try:
+            from ..answer_memory import validation as _am_validation
+            _am_context_dependent = bool(
+                _am_validation.is_context_dependent(session.user_text))
+        except Exception:
+            pass
         if (self.answer_memory is not None and not session.unverified_claims
                 and not mission_attributed
+                # Context-dependent asks ("you already told me the
+                # answer — what was it?") resolve against live
+                # history; their replies banked as reusable answers
+                # replay stale confabulation to unrelated questions.
+                and not _am_context_dependent
                 # Deterministic lane replies — recall acks, honest-empty
                 # memory probes, clock/status answers, training acks —
                 # encode session state, not reusable knowledge. Banking

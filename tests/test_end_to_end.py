@@ -851,6 +851,38 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertNotIn(UNVERIFIED_CLAIMS_MARKER,
                              result.content or "")
 
+    def test_context_dependent_reply_not_learned(self):
+        # Live: "you already told me the answer earlier — what was it?"
+        # produced a confabulated recall that was then BANKED into
+        # Answer Memory and replayable on unrelated asks. The reply
+        # only resolves against live history — it must never persist.
+        from localcodeagent.answer_memory.normalization import (
+            normalize_question)
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            am = state.agent.answer_memory
+            if am is None or not getattr(am, "available", False):
+                self.skipTest("answer memory unavailable")
+
+            def _stored(q: str):
+                return am.store.query_one(
+                    "SELECT id FROM answers WHERE normalized_question=? "
+                    "AND invalidated=0 LIMIT 1",
+                    (normalize_question(q),))
+
+            fake.static_reply = "The headphones are Fermion."
+            state.agent.run(
+                "you already told me the answer earlier — what was it?")
+            self.assertIsNone(_stored(
+                "you already told me the answer earlier"))
+            # A normal grounded question still learns.
+            fake.static_reply = "The capital of France is Paris."
+            state.agent.run("what is the capital of france?")
+            self.assertIsNotNone(_stored(
+                "what is the capital of france?"))
+
     def test_pending_approval_survives_restart(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)

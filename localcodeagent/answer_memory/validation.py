@@ -66,9 +66,11 @@ _DISCOURSE_REF_RE = re.compile(
     # assistant said in THIS conversation: "what did you just say",
     # "you said a port earlier", "your last suggestion". No stored
     # answer can resolve a reference into live history.
-    r"\b(?:did|do|would|could)\s+you\s+(?:just\s+)?(?:say|mean|tell|"
+    r"\b(?:did|do|would|could)\s+you\s+"
+    r"(?:(?:just|already|earlier)\s+)?(?:say|mean|tell|"
     r"mention|show|explain|claim|promise|suggest|recommend)\b|"
-    r"\byou\s+(?:just\s+)?(?:said|mentioned|told|meant|suggested)\b|"
+    r"\byou\s+(?:(?:just|already|earlier)\s+)?"
+    r"(?:said|mentioned|told|meant|suggested)\b|"
     r"\bwhat\s+you\s+(?:just\s+)?(?:said|meant|told|promised|"
     r"suggested)\b|"
     r"\b(?:your|the)\s+(?:last|previous|earlier)\s+(?:answer|reply|"
