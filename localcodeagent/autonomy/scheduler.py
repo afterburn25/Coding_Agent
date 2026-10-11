@@ -126,6 +126,16 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         return None
     t = re.sub(r"\bat\s+noon\b", "at 12:00 pm", t)
     t = re.sub(r"\bat\s+midnight\b", "at 12:00 am", t)
+    # 'at 6 in the morning' — the daypart phrase is the meridiem.
+    # Only when it follows a clock — 'in the morning' alone stays
+    # a vague time the caller asks about honestly.
+    t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+in\s+the\s+morning\b",
+               r"\1 am", t)
+    t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+in\s+the\s+afternoon\b",
+               r"\1 pm", t)
+    t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+in\s+the\s+evening\b",
+               r"\1 pm", t)
+    t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+at\s+night\b", r"\1 pm", t)
     t = _worded_clock(t)
     lt = time.localtime(now)
 
@@ -315,6 +325,14 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         return None
     t = re.sub(r"\bat\s+noon\b", "at 12:00 pm", t)
     t = re.sub(r"\bat\s+midnight\b", "at 12:00 am", t)
+    # 'at 6 in the morning' — daypart phrase is the meridiem.
+    t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+in\s+the\s+morning\b",
+               r"\1 am", t)
+    t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+in\s+the\s+afternoon\b",
+               r"\1 pm", t)
+    t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+in\s+the\s+evening\b",
+               r"\1 pm", t)
+    t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+at\s+night\b", r"\1 pm", t)
     t = _worded_clock(t)
 
     def _meridian(hour: int, mer: str | None) -> int:
@@ -424,7 +442,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 "minute": int(mn or 0)}
     # 'every weekday/weekend [at T]' — multi-day weekly cadence.
     m = re.fullmatch(
-        r"(?:every\s+|on\s+)?(weekdays?|weekends?)" + clock_tail, t)
+        r"(?:every\s+|on\s+(?:the\s+)?)?(weekdays?|weekends?)"
+        + clock_tail, t)
     if m:
         days = ([0, 1, 2, 3, 4] if m.group(1).startswith("weekday")
                 else [5, 6])
@@ -452,6 +471,31 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
             return {"kind": "weekly", "weekday": wd,
                     "hour": _meridian(int(hr), mer) if hr else 9,
                     "minute": int(mn or 0)}
+    # 'saturday mornings' / 'every friday night' / 'weekday
+    # mornings' — the daypart phrase supplies the hour.
+    m = re.fullmatch(
+        r"(?:every|on|each)?\s*(weekdays?|weekends?|\w+?day)s?\s+"
+        r"(morning|afternoon|evening|night)s?" + clock_tail, t)
+    if m:
+        tok, part = m.group(1), m.group(2)
+        wd = ([0, 1, 2, 3, 4] if tok.startswith("weekday")
+              else [5, 6] if tok.startswith("weekend")
+              else _WEEKDAY_NAMES.get(tok.rstrip("s")))
+        if wd is not None:
+            hr, mn, mer = m.group(3), m.group(4), m.group(5)
+            if hr:
+                # 'every friday evening at 7' — the daypart implies
+                # the meridiem for a bare hour.
+                hour = (_meridian(int(hr), mer) if mer else
+                        (int(hr) + 12
+                         if part != "morning" and int(hr) < 12
+                         else int(hr)))
+            else:
+                hour = (9 if part == "morning" else
+                        15 if part == "afternoon" else
+                        19 if part == "evening" else 20)
+            return {"kind": "weekly", "weekday": wd,
+                    "hour": hour, "minute": int(mn or 0)}
     # 'every monday and friday' / 'every mon, wed and fri' —
     # explicit multi-day list, comma- or 'and'-joined.
     m = re.fullmatch(

@@ -2534,6 +2534,41 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("No reminder", result.content)
             sup.scheduler.rows.clear()
 
+            # 'at 6 in the morning' — the daypart phrase is the
+            # meridiem. The server splitter used to pick 'in the
+            # morning' as the when and bank 'at 6' as the task.
+            result = agent.run(
+                "remind me at 6 in the morning to stretch",
+                mode="auto")
+            self.assertIn("stretch", result.content)
+            self.assertTrue(sup.scheduler.rows)
+            row = sup.scheduler.rows[-1]
+            self.assertIn("stretch", row["name"])
+            self.assertNotEqual(row["name"], "reminder: at 6")
+            self.assertEqual(
+                time.localtime(row["at"]).tm_hour, 6)
+            result = agent.run(
+                "remind me at 6 in the morning", mode="auto")
+            self.assertIn("do what", result.content)
+            # 'saturday mornings' / 'on the weekend' — day+daypart
+            # and article-led pool cadences are real schedules.
+            sup.scheduler.rows.clear()
+            result = agent.run(
+                "saturday mornings remind me to mow", mode="auto")
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(row["kind"], "weekly")
+            self.assertEqual(row["weekday"], 5)
+            self.assertEqual(row["hour"], 9)
+            result = agent.run(
+                "on the weekend remind me to relax", mode="auto")
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(row["kind"], "weekly")
+            self.assertEqual(row["weekday"], [5, 6])
+            result = agent.run("saturday mornings remind me",
+                               mode="auto")
+            self.assertIn("do what", result.content)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

@@ -3752,7 +3752,7 @@ class AgentOrchestrator:
         r"weekends?|workdays?|morning|afternoon|evening|night|"
         r"tomorrow|tonight|biweekly|bimonthly|fortnightly|"
         r"semi-?weekly|semi-?monthly|urgent|important|critical|"
-        r"quick|fast)\s+"
+        r"quick|fast|midnight|noon)\s+"
         r"(?P<noun>reminders?|alarms?|timers?)\b"
         r"(?:\s+(?P<tail>.+?))?" + _REMINDER_TRAIL,
         re.IGNORECASE)
