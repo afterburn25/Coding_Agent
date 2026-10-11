@@ -358,7 +358,8 @@ class AutonomousGitGuardTests(unittest.TestCase):
     primary tree — a repair mission pushed a CHANGELOG gutting and a
     merge resolution to origin/main unprompted (aa2454c8/abe582ce)."""
 
-    def _reg(self, mission_id="m-auto", source="self_repair"):
+    def _reg(self, mission_id="m-auto", source="self_repair",
+             mission_workspace=""):
         import threading
         from types import SimpleNamespace
         tls = threading.local()
@@ -366,6 +367,8 @@ class AutonomousGitGuardTests(unittest.TestCase):
         return SimpleNamespace(context={
             "task_tls": tls,
             "mission_source": (lambda mid: source) if source else None,
+            "mission_workspace": (lambda mid: mission_workspace)
+                                 if mission_workspace else None,
         })
 
     def test_autonomous_git_mutations_blocked(self):
@@ -567,6 +570,49 @@ class AutonomousGitGuardTests(unittest.TestCase):
             reg3 = self._reg(mission_id="m-x", source="")
             self.assertIsNotNone(
                 autonomous_git_block(reg3, "git push", ws, ws))
+
+    def test_autonomous_fs_writes_confined_to_mission_workspace(self):
+        """The git guard stops publishing, but write_file/apply_patch
+        could still edit primary files directly — aa2454c8's gutted
+        CHANGELOG would land as uncommitted damage. Autonomous missions
+        write only inside their own mission workspace."""
+        from localcodeagent.tools.gitguard import mission_fs_write_block
+        with tempfile.TemporaryDirectory() as td:
+            primary = Path(td) / "repo"
+            wt = primary / ".repair-worktrees" / "ri-x"
+            wt.mkdir(parents=True)
+            (primary / ".git").mkdir()
+            (wt / ".git").write_text("gitdir: " + str(primary / ".git")
+                                     + "/worktrees/ri-x")
+            reg = self._reg(mission_workspace=str(wt))
+            # Inside the mission workspace → allowed.
+            self.assertIsNone(
+                mission_fs_write_block(reg, wt / "fix.py"))
+            self.assertIsNone(
+                mission_fs_write_block(
+                    reg, wt / "sub" / "dir" / "fix.py"))
+            # Anywhere outside — primary checkout, siblings — blocked.
+            self.assertIsNotNone(
+                mission_fs_write_block(reg, primary / "CHANGELOG.md"))
+            self.assertIsNotNone(
+                mission_fs_write_block(
+                    reg, primary / "localcodeagent" / "server.py"))
+            self.assertIsNotNone(
+                mission_fs_write_block(reg, Path(td) / "elsewhere.txt"))
+            # Interactive runs and user-initiated missions exempt.
+            self.assertIsNone(mission_fs_write_block(
+                self._reg(mission_id="", mission_workspace=str(wt)),
+                primary / "CHANGELOG.md"))
+            self.assertIsNone(mission_fs_write_block(
+                self._reg(source="chat", mission_workspace=str(wt)),
+                primary / "CHANGELOG.md"))
+            # A mission whose workspace IS the primary root still writes
+            # anywhere in it — the boundary follows the mission record.
+            reg2 = self._reg(mission_workspace=str(primary))
+            self.assertIsNone(
+                mission_fs_write_block(reg2, primary / "CHANGELOG.md"))
+            self.assertIsNotNone(
+                mission_fs_write_block(reg2, Path(td) / "elsewhere.txt"))
 
 
 if __name__ == "__main__":

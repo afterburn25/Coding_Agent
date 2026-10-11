@@ -315,6 +315,53 @@ def autonomous_git_block(registry, command: str, cwd: Path,
     return None
 
 
+_FS_BLOCK = (
+    "blocked: autonomous missions may only write inside their own "
+    "workspace ({scope}) — changes to other roots belong in the "
+    "governed promotion path. Reads are unaffected."
+)
+
+
+def _mission_workspace(registry) -> Path | None:
+    """The mission record's own workspace root — where its writes are
+    confined. Falls back to the server's primary root (the same default
+    the supervisor uses for `m.get("workspace") or self.workspace`)."""
+    ctx = getattr(registry, "context", None) or {}
+    tls = ctx.get("task_tls")
+    mission_id = str(getattr(tls, "mission_id", "") or "")
+    ws_fn = ctx.get("mission_workspace")
+    try:
+        ws = str(ws_fn(mission_id) or "") if callable(ws_fn) else ""
+    except Exception:
+        ws = ""
+    if not ws:
+        return None
+    try:
+        return Path(ws).resolve()
+    except Exception:
+        return None
+
+
+def mission_fs_write_block(registry, path: Path) -> str | None:
+    """Gate for filesystem write tools — an autonomous mission's writes
+    must stay inside the mission record's workspace (the repair
+    worktree, the project root it was spawned for, …). ``path`` must
+    already be resolved through the workspace allowlist; this only adds
+    the mission boundary on top."""
+    if not _mission_attributed(registry):
+        return None
+    root = _mission_workspace(registry)
+    if root is None:
+        return None
+    try:
+        target = Path(path).resolve()
+    except Exception:
+        return None
+    if target == root or root in target.parents:
+        return None
+    return _FS_BLOCK.format(scope=root)
+
+
 def mission_python_block(registry, code: str) -> str | None:
     """Gate for `python_exec` bodies — the sandbox runs inside the
     workspace repo and argv-form targets can't be resolved, so any

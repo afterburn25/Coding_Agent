@@ -3434,6 +3434,20 @@ class AppState:
             except Exception:
                 return False
         self.tools.context["autonomy_grant"] = _autonomy_grant
+
+        def _mission_workspace_by_id(mission_id: str) -> str:
+            """The mission record's workspace root — filesystem write
+            tools confine autonomous-mission writes inside it (repair
+            worktree etc.). Falls back to the primary root, matching the
+            supervisor's `m.get("workspace") or self.workspace`."""
+            try:
+                m = self.autonomy.missions.get(str(mission_id))
+            except Exception:
+                m = None
+            if not isinstance(m, dict):
+                return ""
+            return str(m.get("workspace") or self.workspace)
+        self.tools.context["mission_workspace"] = _mission_workspace_by_id
         # Peer-intelligence hook — stuck missions may open peer
         # consults; external_wait nodes poll consult state through it.
         sup.social = self.social
