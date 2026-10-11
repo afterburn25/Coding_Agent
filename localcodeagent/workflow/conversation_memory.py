@@ -847,6 +847,41 @@ class ConversationMemory:
             return f"{subj}:is"
         return s
 
+    _RULE_DURATION_RE = re.compile(
+        r"\bfor\s+(?:the\s+next\s+)?"
+        r"(?:(a|an|one|two|three|four|five|"
+        r"six|seven|eight|nine|ten|\d+)\s+)?"
+        r"(minute|hour|day|week)s?\b",
+        re.IGNORECASE)
+    _RULE_DURATION_WORDS = {
+        "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4,
+        "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+        "ten": 10}
+    _RULE_DURATION_UNITS = {
+        "minute": 60.0, "hour": 3600.0, "day": 86400.0,
+        "week": 604800.0}
+
+    @classmethod
+    def _rule_expiry(cls, text: str) -> float | None:
+        """Bounded-duration qualifier on a rule — 'don't summarize
+        anything for the next hour' — yields the epoch at which the
+        rule self-retires, so a one-hour prohibition doesn't silently
+        become permanent. Unbounded rules return None."""
+        m = cls._RULE_DURATION_RE.search(str(text or ""))
+        if not m:
+            return None
+        raw_count = (m.group(1) or "one").lower()
+        count = cls._RULE_DURATION_WORDS.get(raw_count) or int(raw_count)
+        seconds = count * cls._RULE_DURATION_UNITS[m.group(2).lower()]
+        return time.time() + seconds
+
+    @staticmethod
+    def _row_expired(row: dict[str, Any], now: float | None = None) -> bool:
+        exp = row.get("expires_at")
+        if exp is None:
+            return False
+        return (time.time() if now is None else now) >= float(exp)
+
     def _append_unique(
         self,
         key: str,
@@ -857,6 +892,7 @@ class ConversationMemory:
         scope_id: str = "",
         slot: str = "",
         superseded_out: list | None = None,
+        expires_at: float | None = None,
     ) -> bool:
         clean = self._clean(text)
         if not clean:
@@ -891,7 +927,7 @@ class ConversationMemory:
                     row["updated_at"] = now
                     if superseded_out is not None:
                         superseded_out.append(str(row.get("text") or ""))
-        rows.append({
+        row: dict[str, Any] = {
             "id": row_id,
             "text": clean,
             "created_at": now,
@@ -899,7 +935,10 @@ class ConversationMemory:
             "scope": scope,
             "scope_id": scope_id,
             "slot": slot,
-        })
+        }
+        if expires_at is not None:
+            row["expires_at"] = float(expires_at)
+        rows.append(row)
         self._data[key] = rows[-limit:]
         return True
 
@@ -2590,7 +2629,8 @@ class ConversationMemory:
                             locked_refusal(topic))
                     elif self._append_unique(
                             "behavior_rules", rule, self.rule_limit,
-                            scope=scope, scope_id=scope_id):
+                            scope=scope, scope_id=scope_id,
+                            expires_at=self._rule_expiry(rule)):
                         result["behavior_rules"].append(rule)
                 if any(result.values()):
                     self._save()
@@ -2640,7 +2680,7 @@ class ConversationMemory:
                 result.setdefault("locked", []).append(
                     locked_refusal(locked_topic(rule)))
                 rule = None
-            if rule and self._append_unique("behavior_rules", rule, self.rule_limit, scope=scope, scope_id=scope_id):
+            if rule and self._append_unique("behavior_rules", rule, self.rule_limit, scope=scope, scope_id=scope_id, expires_at=self._rule_expiry(rule)):
                 result["behavior_rules"].append(rule)
 
             correction = bool(re.match(
@@ -2774,7 +2814,9 @@ class ConversationMemory:
         normed = {self._stem_norm(t) for t in terms}
         revoked: list[dict[str, Any]] = []
         for row in self._data.get("behavior_rules", []):
-            if not isinstance(row, dict) or not row.get("active", True):
+            if (not isinstance(row, dict)
+                    or not row.get("active", True)
+                    or self._row_expired(row)):
                 continue
             text = str(row.get("text", ""))
             # A rule that already *prohibits* the action agrees with the
@@ -2819,7 +2861,9 @@ class ConversationMemory:
         with self._lock:
             for key in ("facts", "behavior_rules"):
                 for row in self._data.get(key, []):
-                    if not isinstance(row, dict) or not row.get("active", True):
+                    if (not isinstance(row, dict)
+                            or not row.get("active", True)
+                            or self._row_expired(row)):
                         continue
                     text = str(row.get("text", ""))
                     folded = text.casefold()
@@ -2861,7 +2905,7 @@ class ConversationMemory:
             return ""
 
         def applies(row: dict[str, Any]) -> bool:
-            if not row.get("active", True):
+            if not row.get("active", True) or self._row_expired(row):
                 return False
             scope = str(row.get("scope") or "global")
             scope_id = str(row.get("scope_id") or "")
@@ -3103,7 +3147,9 @@ class ConversationMemory:
         with self._lock:
             out = []
             for row in self._data.get("behavior_rules", []):
-                if not isinstance(row, dict) or not row.get("active", True):
+                if (not isinstance(row, dict)
+                        or not row.get("active", True)
+                        or self._row_expired(row)):
                     continue
                 scope = str(row.get("scope") or "global")
                 scope_id = str(row.get("scope_id") or "")

@@ -16,6 +16,7 @@ Scope contract under test:
 """
 from __future__ import annotations
 
+import time
 import unittest
 from datetime import date
 
@@ -955,6 +956,46 @@ class TestCorrectionChains(unittest.TestCase):
         # 'my:'-slot facts echo second-person — repeating 'my X' would
         # claim the user's fact as Nexus's own.
         self.assertIn("your favorite color is blue", ack)
+
+    def test_bounded_rule_expires(self):
+        # Live: "don't summarize anything for the next hour" banked a
+        # PERMANENT "Never …" rule — the duration qualifier was kept in
+        # the text but the row was active forever, and the ack promised
+        # 'going forward'. Bounded prohibitions carry expires_at and
+        # self-retire from every consumer.
+        cm = self._mem()
+        learned = cm.learn_from_user(
+            "don't summarize anything for the next hour")
+        self.assertIn("Never summarize anything for the next hour",
+                      learned["behavior_rules"])
+        rows = [r for r in cm.snapshot()["behavior_rules"]
+                if "summarize" in str(r.get("text"))]
+        self.assertEqual(len(rows), 1)
+        exp = rows[0].get("expires_at")
+        self.assertIsNotNone(exp)
+        self.assertGreater(float(exp), time.time())
+        self.assertIn("Never summarize anything for the next hour",
+                      cm.active_rules())
+        # Past the window the rule drops from prompt injection, the
+        # inspection lane, and revocation/forget matching.
+        rows[0]["expires_at"] = time.time() - 10
+        self.assertNotIn("Never summarize anything for the next hour",
+                         cm.active_rules())
+        self.assertNotIn("summarize", cm.prompt_context())
+
+    def test_bounded_rule_ack_marks_window(self):
+        from localcodeagent.agent.orchestrator import AgentOrchestrator
+        ack = AgentOrchestrator.training_acknowledgement(
+            {"facts": [],
+             "behavior_rules":
+                 ["Never summarize anything for the next hour"],
+             "training_examples": [], "forgotten": [], "superseded": []})
+        self.assertIn("for that window", ack)
+        self.assertNotIn("going forward", ack)
+        ack = AgentOrchestrator.training_acknowledgement(
+            {"facts": [], "behavior_rules": ["Never join communities"],
+             "training_examples": [], "forgotten": [], "superseded": []})
+        self.assertIn("going forward", ack)
 
 
 class TestFactsRecallLane(unittest.TestCase):

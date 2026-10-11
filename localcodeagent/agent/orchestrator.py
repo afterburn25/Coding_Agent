@@ -4416,8 +4416,15 @@ class AgentOrchestrator:
         elif not parts and not miss:
             parts.append("Got it.")
         if rules:
-            parts.append("I'll apply that as an operating rule going "
-                         "forward.")
+            # A bounded prohibition ("don't summarize for the next
+            # hour") carries an expiry — the ack must not promise
+            # permanence it won't deliver.
+            bounded = any(
+                ConversationMemory._rule_expiry(str(r)) is not None
+                for r in rules)
+            parts.append(
+                "I'll apply that as an operating rule "
+                + ("for that window." if bounded else "going forward."))
         if examples:
             parts.append("Saved your correction for review.")
         if forgotten:
