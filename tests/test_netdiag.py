@@ -2170,6 +2170,28 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("change the timer to 30 minutes",
                                mode="auto")
             self.assertIn("Rescheduled", result.content)
+            # Negation tasks, wake-creates, ordinal scope — 'remind
+            # me not to forget' got a model 'scheduled for now';
+            # 'wake me up in an hour' is self-tasking like an alarm;
+            # 'cancel the next reminder' picks the soonest fire.
+            result = agent.run("remind me not to forget",
+                               mode="auto")
+            self.assertIn("not to forget", result.content)
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("wake me up in an hour", mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            sup.scheduler.rows.clear()
+            sup.scheduler.add(
+                "reminder: far", "once", at=time.time() + 86400,
+                action={"kind": "notify", "detail": "far"})
+            sup.scheduler.add(
+                "reminder: soon", "once", at=time.time() + 600,
+                action={"kind": "notify", "detail": "soon"})
+            result = agent.run("cancel the next reminder",
+                               mode="auto")
+            self.assertIn("soon", result.content)
+            self.assertEqual(len(sup.scheduler.rows), 1)
             sup.scheduler.rows.clear()
 
             # Possessive scopes — 'cancel tomorrow's reminder' left

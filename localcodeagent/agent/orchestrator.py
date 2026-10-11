@@ -3661,7 +3661,7 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_NOTASK_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:remind|alert|notify|ping|wake)\s+"
+        r"(?P<verb>remind|alert|notify|ping|wake)\s+"
         r"me\s+(?:up\s+)?(?P<when>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_CANCEL_RE = re.compile(
@@ -4325,14 +4325,26 @@ class AgentOrchestrator:
                 return True
             return topic_terms <= self._reminder_hay(s)
 
+        # 'cancel the next reminder' — 'next' is ordinal scope, not
+        # a topic term; it picks the soonest-firing hit.
+        want_next = "next" in topic_terms
+        topic_terms.discard("next")
         hits = [s for s in rows if _matches(s)]
+        if want_next and hits:
+            def _fire(s):
+                try:
+                    return float(
+                        s.get("next_run") or s.get("at") or 1e18)
+                except (TypeError, ValueError):
+                    return 1e18
+            hits = [min(hits, key=_fire)]
         if not rows:
             text = "You don't have any reminders set."
-        elif topic_terms and not hits:
+        elif not hits:
             names = "; ".join(
                 f"“{self._reminder_label(s)}”" for s in rows[:3])
             text = (f"I don't see a reminder matching "
-                    f"“{' '.join(sorted(topic_terms))}” — "
+                    f"“{' '.join(sorted(topic_terms)) or 'next'}” — "
                     f"you have: {names}.")
         elif (len(hits) > 1 and not all_flag
                 and not self._reminder_identical(hits)):
@@ -4667,8 +4679,44 @@ class AgentOrchestrator:
                 mnt = self._REMINDER_NOTASK_RE.match(plan_text)
                 if mnt is not None:
                     wtxt = str(mnt.group("when") or "")
-                    if (self._reminder_spec(wtxt, time.time())
-                            is not None
+                    spec_nt = self._reminder_spec(wtxt, time.time())
+                    if (spec_nt is not None
+                            and str(mnt.group("verb") or "").lower()
+                                == "wake"):
+                        # 'wake me up in an hour' — waking is the
+                        # task; schedule it like an alarm instead of
+                        # asking 'do what'.
+                        sup = (self._autonomy() if callable(
+                            self._autonomy) else self._autonomy)
+                        sched = getattr(sup, "scheduler", None)
+                        if sched is None:
+                            return self._reminder_finish(
+                                "I can't set reminders — the "
+                                "scheduler isn't running in this "
+                                "session.",
+                                user_text, task_id, event_callback)
+                        try:
+                            fields = {k: v for k, v in
+                                      spec_nt.items()
+                                      if k != "kind"}
+                            sched.add(
+                                "reminder: wake you",
+                                spec_nt["kind"],
+                                action={"kind": "notify",
+                                        "title": "Reminder",
+                                        "detail": "wake you"},
+                                created_by="user", **fields)
+                        except Exception as exc:
+                            return self._reminder_finish(
+                                f"I couldn't set the reminder "
+                                f"({exc}).",
+                                user_text, task_id, event_callback)
+                        return self._reminder_finish(
+                            "Reminder set "
+                            + self._reminder_spec_text(
+                                spec_nt, "wake you"),
+                            user_text, task_id, event_callback)
+                    if (spec_nt is not None
                             and self._REMINDER_TIMEISH_RE.search(wtxt)):
                         return self._reminder_finish(
                             f"Sure — remind you to do what {wtxt}?",
@@ -4708,6 +4756,15 @@ class AgentOrchestrator:
                         when_raw = str(mg.group("when") or "").strip(
                             " ,;—-")
                         spec = gspec
+            if spec is None and when_raw.lower() == "not":
+                # 'remind me not to forget' — the negation is the
+                # task, not a when. Ask for the time rather than
+                # letting the model invent a 'scheduled for now'.
+                return self._reminder_finish(
+                    f"When should I remind you not to "
+                    f"{task_lazy}? — e.g. “in 10 minutes”, "
+                    "“at 3pm”, “tomorrow at 9”.",
+                    user_text, task_id, event_callback)
             if spec is None:
                 if self._REMINDER_EVENTISH_RE.search(when_raw):
                     return self._reminder_finish(
