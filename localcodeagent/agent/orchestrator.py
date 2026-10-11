@@ -2536,6 +2536,11 @@ class AgentOrchestrator:
         r"do|does|did|will)\s+|"
         r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
         r"do\s+i\s+(?:use|have|like|prefer|run|need)\s+|"
+        # Verification with an explicit subject — "does the metrics
+        # api run on 9100" asks recall to confirm/deny against the
+        # banked fact; the interrogative verb is filler the gate
+        # drops below.
+        r"(?:do|does|did)\s+(?:the|a|an|my|our|your)\s+|"
         # Elliptical verification — "is it still sam", "is the prod
         # api still on 443" asks recall to confirm against the banked
         # fact; the anaphor is resolved by the fact itself.
@@ -2683,6 +2688,15 @@ class AgentOrchestrator:
                     for t in terms)
             pre_gate = rows
             rows = [r for r in rows if _terms_hit(q_terms, r)]
+            _PROBE_VERBS = {
+                "run", "runs", "lift", "lifts", "start", "starts",
+                "end", "ends", "expire", "expires", "ship", "ships",
+                "land", "lands", "hold", "holds", "begin", "begins",
+                "resume", "resumes", "pass", "passes", "fail", "fails",
+                "happen", "happens", "occur", "occurs", "cost", "costs",
+                "last", "lasts", "serve", "serves", "fire", "fires",
+                "kick", "use", "uses", "work", "works", "take",
+                "takes", "need", "needs", "listen", "listens"}
             if not rows and len(q_terms) > 1:
                 # The probe's own verb isn't a fact term — "when do the
                 # backups run" asks about 'backups', so a strict subset
@@ -2692,15 +2706,7 @@ class AgentOrchestrator:
                 # the sky" → {color}) would widen the match onto
                 # unrelated facts.
                 tail = re.search(r"([a-z0-9]+)\s*$", body.strip())
-                if tail and tail.group(1) in {
-                        "run", "runs", "lift", "lifts", "start",
-                        "starts", "end", "ends", "expire", "expires",
-                        "ship", "ships", "land", "lands", "hold",
-                        "holds", "begin", "begins", "resume", "resumes",
-                        "pass", "passes", "fail", "fails", "happen",
-                        "happens", "occur", "occurs", "cost", "costs",
-                        "last", "lasts", "serve", "serves", "fire",
-                        "fires", "kick"}:
+                if tail and tail.group(1) in _PROBE_VERBS:
                     trimmed = re.sub(r"\s+\S+\s*$", "", body.strip())
                     t_terms = (self.conversation_memory
                                ._content_terms(trimmed)
@@ -2708,6 +2714,15 @@ class AgentOrchestrator:
                     if t_terms and t_terms != q_terms:
                         rows = [r for r in pre_gate
                                 if _terms_hit(t_terms, r)]
+            if not rows and len(q_terms) > 1:
+                # Verification questions carry the verb mid-question —
+                # "does the metrics api RUN on 9100" leaves 'run' as a
+                # term the fact never contains. Same verb set, dropped
+                # anywhere in the term list.
+                t_terms = q_terms - _PROBE_VERBS
+                if t_terms and t_terms != q_terms:
+                    rows = [r for r in pre_gate
+                            if _terms_hit(t_terms, r)]
             if not rows:
                 # Orthographic compounds — English writes them both
                 # ways ("on call"/oncall, "log in"/login, "set

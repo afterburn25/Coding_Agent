@@ -778,6 +778,31 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(reply)
             self.assertIn("443", reply.text)
 
+    def test_does_the_x_verification_recalls_fact(self):
+        # "does the metrics api run on 9100" — a yes/no verification
+        # with an explicit subject. The interrogative verb ('run') is
+        # filler the fact never carries; recall restates the fact
+        # rather than stalling the model lane (live-observed 180s
+        # stall on the shared GPU).
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "the metrics api is on 9100")
+            reply = agent._single_fact_recall_reply(
+                "does the metrics api run on 9100", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("9100", reply.text)
+            # A wrong value in the question doesn't confirm — recall
+            # still surfaces the stored fact verbatim.
+            reply = agent._single_fact_recall_reply(
+                "does the metrics api use port 8080", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("9100", reply.text)
+
     def test_when_does_probe_drops_trailing_verb(self):
         # "when does the freeze lift" — the probe's own verb isn't a
         # fact term; after the strict subset fails, retry on the noun
