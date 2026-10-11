@@ -331,7 +331,10 @@ class ComputerUse:
                 return self._fail(record, "launch argument is too long")
             clean_args.append(arg)
         try:
-            proc = subprocess.Popen([path, *clean_args], close_fds=True)
+            # Explicit 0 — a user-requested app launch keeps its
+            # window/console visible.
+            proc = subprocess.Popen([path, *clean_args], close_fds=True,
+                                    creationflags=0)
         except Exception as exc:
             return self._fail(record, f"launch failed: {exc}")
         return self._finish(record, {"ok": True, "pid": int(proc.pid), "path": path})
