@@ -2986,6 +2986,14 @@ class AgentOrchestrator:
                 return RenderedReply(
                     text=f"Here it is again: \"{quoted}\"",
                     speech_act="answer")
+        # Action-shaped reminders ('remind me in 5 minutes to check
+        # the build', 'remind me to take out the trash') are schedule
+        # asks owned by the reminder lane — the 'remind me' recall
+        # lead would otherwise term-match the task's topic against
+        # stored facts and answer a scheduling request with trivia.
+        if (self._REMINDER_RE.match(match_text)
+                or self._REMINDER_CLARIFY_RE.match(match_text)):
+            return None
         if frame is not None and not frame.allows("memory_recall"):
             return None
         if (self.conversation_memory is None
