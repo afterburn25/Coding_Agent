@@ -1649,6 +1649,10 @@ class CrossChatMemoryTests(unittest.TestCase):
                 ("the timeout is 30 — explain why", "timeout is 30"),
                 ("the cache ttl is 300, and tell me the port",
                  "cache ttl is 300"),
+                # The comma-splice bound must also strip the comma
+                # itself — 'standup is at 9am,' banked verbatim once.
+                ("the standup is at 9am, and what port is prod on",
+                 "standup is at 9am"),
             ):
                 memory = ConversationMemory(
                     Path(td) / f"m{abs(hash(utterance))}.json")

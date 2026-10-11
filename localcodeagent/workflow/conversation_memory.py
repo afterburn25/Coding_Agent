@@ -242,7 +242,9 @@ class ConversationMemory:
             if (_INTERROGATIVE_LEAD_RE.match(tail)
                     or _ACTION_LEAD_RE.match(tail)):
                 return t[:m.start()].strip().rstrip(".!?")
-        return t.strip().rstrip(".!?")
+        # A trailing comma/semicolon is clause-punctuation the split
+        # left behind ('the standup is at 9am,') — never value content.
+        return t.strip().rstrip(".!?,;:—-")
 
     @classmethod
     def _clean_subject(cls, raw: str) -> str:
