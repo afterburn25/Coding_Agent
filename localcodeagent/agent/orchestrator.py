@@ -2668,45 +2668,9 @@ class AgentOrchestrator:
         # no topic terms. Restate the most recent assistant utterance
         # verbatim from the record instead of term-matching "answer"
         # against unrelated turns.
-        head = re.search(
-            r"\b(?:the\s+|your\s+)?(?:answer|reply|response|thing|"
-            r"result|outcome|decision|verdict)\b",
-            prop, re.IGNORECASE)
-        if head is not None:
-            rest = (prop[:head.start()] + " " + prop[head.end():])
-            rest_terms = (memory._content_terms(rest)
-                          - {"earlier", "again", "before",
-                             "previously", "just"})
-            if not rest_terms:
-                for row in reversed(history):
-                    if str(row.get("role")) != "assistant":
-                        continue
-                    content = re.sub(
-                        r"\s+", " ",
-                        str(row.get("content", ""))).strip()
-                    # Skip this lane's own recall outputs — replaying a
-                    # replay nests "Earlier I said: Earlier I said:" and
-                    # never reaches the underlying utterance.
-                    if content.startswith(self._RECALL_REPLY_PREFIXES):
-                        continue
-                    if content:
-                        # Keep a trailing truth-gate marker verbatim —
-                        # truncating it off would re-present a flagged
-                        # utterance as if it had been confirmed clean.
-                        marker_at = content.find(UNVERIFIED_CLAIMS_MARKER)
-                        if marker_at > 0:
-                            # Split at the ⚠ glyph so the notice stays
-                            # byte-verbatim ("⚠ **Unverified …** — …").
-                            warn_at = content.rfind("⚠", 0, marker_at)
-                            if warn_at < 0:
-                                warn_at = marker_at
-                            quoted = (content[:warn_at].rstrip()[:200]
-                                      + " " + content[warn_at:])
-                        else:
-                            quoted = content[:200]
-                        return (f"Earlier I said: "
-                                f"\"{quoted}\"")
-                return "I don't have an earlier answer on record."
+        replay = self._anaphoric_replay(prop, history)
+        if replay is not None:
+            return replay
         terms = memory._content_terms(prop)
         if not terms:
             return None
@@ -2726,6 +2690,84 @@ class AgentOrchestrator:
                     f"\"{snippet}\"")
         return ("I don't have that on record — as far as I can see, "
                 "I didn't say that.")
+
+    # Residue verbs describe HOW the referent was produced ("the answer
+    # you gave me", "the thing you mentioned") — they point at the
+    # record, never at a topic. Temporal fillers likewise carry no
+    # discriminating content.
+    _ANAPHORA_FILLER_TERMS = frozenset({
+        "earlier", "again", "before", "previously", "just",
+        "gave", "give", "say", "says", "ask", "asked", "reply",
+        "replied", "respond", "responded", "answered", "mention",
+        "mentioned", "made"})
+
+    def _anaphoric_replay(self, prop: str, history: list) -> str | None:
+        """'the answer / the reply / what was it' — a discourse-role
+        referent with no topic terms resolves by recency, not term
+        match: quote the most recent non-meta assistant turn verbatim
+        (truth-gate markers preserved)."""
+        memory = self.conversation_memory
+        if memory is None:
+            return None
+        head = re.search(
+            r"\b(?:the\s+|your\s+)?(?:answer|reply|response|thing|"
+            r"result|outcome|decision|verdict)\b|\b(?:it|that)\b",
+            prop, re.IGNORECASE)
+        if head is None:
+            return None
+        rest = prop[:head.start()] + " " + prop[head.end():]
+        rest_terms = (memory._content_terms(rest)
+                      - self._ANAPHORA_FILLER_TERMS)
+        if rest_terms:
+            return None
+        for row in reversed(history):
+            if str(row.get("role")) != "assistant":
+                continue
+            content = re.sub(
+                r"\s+", " ", str(row.get("content", ""))).strip()
+            # Skip this lane's own recall outputs — replaying a replay
+            # nests "Earlier I said: Earlier I said:" and never reaches
+            # the underlying utterance.
+            if content.startswith(self._RECALL_REPLY_PREFIXES):
+                continue
+            if content:
+                # Keep a trailing truth-gate marker verbatim —
+                # truncating it off would re-present a flagged
+                # utterance as if it had been confirmed clean.
+                marker_at = content.find(UNVERIFIED_CLAIMS_MARKER)
+                if marker_at > 0:
+                    # Split at the ⚠ glyph so the notice stays
+                    # byte-verbatim ("⚠ **Unverified …** — …").
+                    warn_at = content.rfind("⚠", 0, marker_at)
+                    if warn_at < 0:
+                        warn_at = marker_at
+                    quoted = (content[:warn_at].rstrip()[:200]
+                              + " " + content[warn_at:])
+                else:
+                    quoted = content[:200]
+                return f"Earlier I said: \"{quoted}\""
+        return "I don't have an earlier answer on record."
+
+    def _bare_anaphora_reply(self, match_text: str):
+        """'what was it — the answer you gave me?' — no reported-speech
+        lead, but the referent is still discourse-role: replay the
+        record the same way instead of letting the model improvise a
+        prior answer."""
+        memory = self.conversation_memory
+        if memory is None:
+            return None
+        prop = self._FACT_RECALL_RE.sub("", match_text)
+        prop = prop.rstrip("?.!").strip() or \
+            str(match_text).rstrip("?.!").strip()
+        try:
+            history = memory.history(limit=40)
+        except Exception:
+            return None
+        verdict = self._anaphoric_replay(prop, history)
+        if verdict is None:
+            return None
+        from ..context.realize import RenderedReply
+        return RenderedReply(text=verdict, speech_act="answer")
 
     @staticmethod
     def _recalled_fact_sentence(row: dict) -> str:
@@ -2826,6 +2868,10 @@ class AgentOrchestrator:
                     from ..context.realize import RenderedReply
                     return RenderedReply(text=verdict,
                                          speech_act="answer")
+            else:
+                reply = self._bare_anaphora_reply(match_text)
+                if reply is not None:
+                    return reply
             # Possessive probes ("what's my editor", "did I tell you my
             # port") can only be answered by taught facts — an empty
             # store is itself the honest answer; don't fall to the
@@ -2969,6 +3015,10 @@ class AgentOrchestrator:
                         from ..context.realize import RenderedReply
                         return RenderedReply(text=verdict,
                                              speech_act="answer")
+                else:
+                    reply = self._bare_anaphora_reply(match_text)
+                    if reply is not None:
+                        return reply
                 return None
             # Subject anchoring: the question asks ABOUT an entity, so a
             # fact whose subject carries the query terms ('prod api is

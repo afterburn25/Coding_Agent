@@ -999,6 +999,34 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("deadline is friday", r.text.lower())
             self.assertNotIn("headphones are boson", r.text.lower())
 
+    def test_bare_wh_anaphora_replays_record(self):
+        # Live: "what was it — the answer you gave me?" carries no
+        # reported-speech lead, so the attribution branch never ran and
+        # the model improvised. The referent is still discourse-role —
+        # the empty-store path must replay the same recorded turn.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            cm = agent.conversation_memory
+            cm.record_exchange("what are my headphones",
+                               "Your headphones are Boson.")
+            for q in ("what was it — the answer you gave me?",
+                      "what was it again?",
+                      "what was the answer?"):
+                r = agent._single_fact_recall_reply(q, "conv", "proj")
+                self.assertIsNotNone(r, q)
+                self.assertIn("headphones are boson",
+                              r.text.lower(), q)
+            # A real topic term stays on the fact path — an empty
+            # store means the lane declines, not a stale replay.
+            r = agent._single_fact_recall_reply(
+                "what was the deadline for the launch?",
+                "conv", "proj")
+            self.assertIsNone(r)
+
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of
         # 10 active rules with no indication the set was truncated —
