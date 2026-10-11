@@ -787,6 +787,26 @@ class ConversationMemory:
                 pred = "port"
             if subj and subj not in {"i", "we", "you", "they", "he", "she", "it"}:
                 return f"{subj}:{pred}"
+        # Cadence facts — 'api keys rotate monthly', 'db backups run
+        # nightly' — name one attribute (how often), so a restated
+        # cadence supersedes rather than coexisting contradictory
+        # frequencies on the same subject.
+        m = re.match(
+            r"^(?:the\s+|a\s+|an\s+|our\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)"
+            r"\s+[a-z]+\s+"
+            r"(?:every\s+(?:day|night|hour|week|month|year|"
+            r"monday|tuesday|wednesday|thursday|friday|saturday|"
+            r"sunday|morning|evening|weekend|weekday)|"
+            r"(?:daily|nightly|weekly|hourly|monthly|annually|"
+            r"weekdays|weekends|mondays|tuesdays|wednesdays|"
+            r"thursdays|fridays|saturdays|sundays|overnight|"
+            r"each\s+(?:day|night|hour|week|month)))\b",
+            t)
+        if m:
+            subj = re.sub(r"\s+", " ", m.group(1)).strip()
+            if subj and subj not in {"i", "we", "you", "they", "he",
+                                     "she", "it"}:
+                return f"{subj}:cadence"
         return ""
 
     @staticmethod
@@ -1198,6 +1218,12 @@ class ConversationMemory:
             r"no|wait|sorry|nm|never\s*mind|scratch\s+that|"
             r"on\s+second\s+thought|i\s+mean(?:t)?)[,:\s]+)+",
             "", raw, flags=re.IGNORECASE)
+        # Confirmation tags — "the api keys rotate monthly, right?" —
+        # ask for agreement; they aren't part of the stated value.
+        body = re.sub(
+            r"[,;]\s*(?:right|correct|yeah|ok(?:ay)?|huh|eh|yes|no|"
+            r"isn'?t\s+it|don'?t\s+you\s+think|you\s+know)\s*[?!.]?\s*$",
+            "", body, flags=re.IGNORECASE)
 
         # Credentials are never persisted — "remember my passcode is X"
         # must not bank the secret into facts/rules, sync it to the
@@ -1324,7 +1350,7 @@ class ConversationMemory:
         # of "secondhand".
         def _hedged(text: str) -> bool:
             m = re.match(
-                r"^(?:i\s+(?:don'?t\s+|do\s+not\s+)?"
+                r"^(i\s+(?:don'?t\s+|do\s+not\s+)?"
                 r"(?:think|believe|guess|suppose|reckon|figure|"
                 r"feel\s+like|suspect)|i'?m\s+(?:(?:pretty|fairly|"
                 r"quite|really|not)\s+)?(?:sure|certain)|"
@@ -1360,14 +1386,38 @@ class ConversationMemory:
                     m = None
             if not m:
                 return False
-            claim = m.group(1).strip()
+            inner = (m.group(2) if m.lastindex and m.lastindex >= 2
+                     else m.group(1)).strip()
             # "i think so" / "i'm sure" alone carry no claim — and a
             # hedged refusal ("i don't think we should") is still a
             # claim worth noting, so only the length guard applies.
-            if len(claim.split()) >= 2:
-                result["hedged"] = [claim]
-                return True
-            return False
+            # The guard counts the embedded claim, never the lead.
+            if len(inner.split()) < 2:
+                return False
+            if m.lastindex and m.lastindex >= 2:
+                # First-person hedges keep their lead in second person
+                # — 'i don't think the build is broken' must read back
+                # "you don't think the build is broken", never the
+                # negation-stripped claim.
+                lead = re.sub(
+                    r"^i\b", "you", m.group(1).strip().lower())
+                lead = re.sub(
+                    r"^(you|my|in my)\b", lambda mm: {
+                        "you": "you", "my": "your",
+                        "in my": "in your"}[mm.group(1)], lead)
+                lead = lead.replace("'m ", "'re ").replace(
+                    "’m ", "’re ")
+                lead = {"imo": "in your opinion",
+                        "imho": "in your humble opinion"}.get(
+                            lead, lead)
+                if re.match(r"^(?:pretty|fairly|quite|reasonably)\s+sure$",
+                            lead):
+                    lead = f"you're {lead}"
+                claim = f"{lead} {inner}"
+            else:
+                claim = inner
+            result["hedged"] = [claim]
+            return True
 
         if _hedged(raw):
             return result
