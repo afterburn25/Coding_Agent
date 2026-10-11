@@ -723,6 +723,35 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(reply)
             self.assertIn("titan", reply.text)
 
+    def test_recall_through_discourse_preambles(self):
+        # Discourse preambles ("sorry,", "i forgot", "wait —") framed
+        # the turn as assertion and bounced it off the recall lane.
+        # The analyzer strips punctuation-separated markers, and a
+        # wh-complement under a forgetting verb is itself the ask.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my shell is zsh")
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            for q in (
+                    "sorry, what's my shell",
+                    "i forgot what my shell is",
+                    "i forgot — what is my shell",
+                    "i can't remember what my shell is",
+                    "wait — is the prod api on 443",
+                    "i don't remember what port the prod api uses"):
+                reply = agent._single_fact_recall_reply(
+                    q, "conv", "proj")
+                self.assertIsNotNone(reply, q)
+            # An admission with no wh stays out of recall.
+            self.assertIsNone(agent._single_fact_recall_reply(
+                "i forgot the deadline", "conv", "proj"))
+
     def test_port_probe_is_answer_type_slot(self):
         # "which port is prod on" — 'port' names the answer's type, not
         # the entity; the stored fact is 'prod api is on 443' and never

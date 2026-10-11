@@ -449,6 +449,17 @@ _WANT_TO_KNOW_RE = re.compile(
     r"(?:that|this|it)\s+mean\b",
     re.IGNORECASE)
 
+# "i forgot what my shell is" / "i can't remember when the deploy is"
+# — a wh-complement under a forgetting/recall verb is an information
+# ask. Bare "i forgot the deadline" (no wh) stays an assertion.
+_FORGOT_Q_RE = re.compile(
+    r"^(?:i\s+forgot(?:ten)?|i\s+keep\s+forgetting|"
+    r"i\s+(?:can'?t|cannot|couldn'?t|don'?t|do\s+not|didn'?t|"
+    r"did\s+not)\s+(?:remember|recall))\s+"
+    r"(?:(?:the|that|about|of)\s+)?"
+    r"(?:what|when|where|which|who|whose|whom|why|how|whether|if)\b",
+    re.IGNORECASE)
+
 # A negated imperative anywhere in the message vetoes action lanes even
 # when it isn't the main clause — "he said X, don't do that" must never
 # produce an execution.
@@ -640,7 +651,7 @@ _DISCOURSE_FREE_RE = re.compile(
 # Imperative-adjacent markers ('wait a second' is a command, 'wait,'
 # is discourse) — only strip when punctuation separates them.
 _DISCOURSE_COMMA_RE = re.compile(
-    r"^(?:(?:wait|look|listen|yo|see)\b\s*[,—–\-]\s*)+",
+    r"^(?:(?:wait|look|listen|yo|see|sorry)\b\s*[,—–\-]\s*)+",
     re.IGNORECASE)
 
 
@@ -959,6 +970,11 @@ def _speech_act(clause: str, *, raw_norm: str) -> str:
             return REQUEST
         return QUESTION
     if _INTERROGATIVE_LEAD_RE.match(low) or clause.rstrip().endswith("?"):
+        return QUESTION
+    # Embedded interrogative under a memory verb — "i forgot what my
+    # shell is", "i can't remember when the deploy is": the wh-clause
+    # IS the ask; the forgetting lead is why it's being asked.
+    if _FORGOT_Q_RE.match(low):
         return QUESTION
     if _WANT_TO_KNOW_RE.search(low):
         return QUESTION

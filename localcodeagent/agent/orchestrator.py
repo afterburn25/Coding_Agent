@@ -2535,6 +2535,12 @@ class AgentOrchestrator:
         r"who\s+all\s+(?:(?:is|are|was|were)\s+)?|who'?s?\s+|"
         r"who\s+(?:is|are|was|were)\s+|when\s+(?:is|are|was|were|"
         r"do|does|did|will)\s+|"
+        # "i forgot what my shell is" — the embedded interrogative IS
+        # the recall request; the self-deprecating lead is filler.
+        r"(?:i\s+forgot(?:ten)?|i\s+keep\s+forgetting|"
+        r"i\s+(?:can'?t|cannot|couldn'?t|don'?t|do\s+not|didn'?t|"
+        r"did\s+not)\s+(?:remember|recall))\s+"
+        r"(?:(?:what|when|where|which|who|whose|how)\s+)?|"
         r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
         r"do\s+i\s+(?:use|have|like|prefer|run|need)\s+|"
         # Verification with an explicit subject — "does the metrics
@@ -2603,8 +2609,19 @@ class AgentOrchestrator:
             # the recall-shaped clause itself may claim the lane (an
             # earlier action clause keeps the turn on its own path).
             clause_match = None
-            for clause in re.split(r"[.!?\n]+", match_text):
+            # Discourse preambles end on commas/em-dashes too — "sorry,
+            # what's my shell", "wait — what's the port" carry the ask
+            # after a marker clause. Split on those as well, and drop a
+            # leading connector ("and/but/so what's X") left by the
+            # split.
+            for clause in re.split(r"[.!?\n]+|—|;|,\s+", match_text):
                 clause = clause.strip()
+                if not clause:
+                    continue
+                clause = re.sub(
+                    r"^(?:and|but|so|or|anyway|anyways|also|"
+                    r"by\s+the\s+way)\b[\s,]*", "", clause,
+                    flags=re.IGNORECASE).strip()
                 if not clause:
                     continue
                 if self._FACT_RECALL_RE.match(clause):
