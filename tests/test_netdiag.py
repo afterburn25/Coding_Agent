@@ -1345,6 +1345,23 @@ class TruthGateTests(RecoveryLoopTests):
                 time.localtime(spec["at"]).tm_hour, 15)
             self.assertEqual(
                 time.localtime(spec["at"]).tm_min, 30)
+            # Bare/odd cadence words — 'weekly'/'fortnightly'/'every
+            # N weeks' used to return None → 'couldn't pin a time'
+            # for a real cadence.
+            self.assertEqual(
+                parse_reminder_schedule(
+                    "weekly", time.time())["kind"], "weekly")
+            self.assertEqual(
+                parse_reminder_schedule(
+                    "every week", time.time())["kind"], "weekly")
+            self.assertEqual(
+                parse_reminder_schedule(
+                    "fortnightly", time.time())["interval_s"],
+                1209600.0)
+            self.assertEqual(
+                parse_reminder_schedule(
+                    "every 3 weeks", time.time())["interval_s"],
+                1814400.0)
 
             # Snooze re-anchors 'at' via scheduler.update — a real
             # reschedule, not a narrated postponement.
@@ -1918,6 +1935,38 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("wake me up early tomorrow",
                                mode="auto")
             self.assertIn("couldn't pin a time", result.content)
+
+            # Leading-cadence creates — 'every hour remind me to
+            # stretch' got a model refusal claiming the system
+            # 'doesn't allow recurring alerts' while the scheduler
+            # supports intervals natively.
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("every hour remind me to stretch",
+                               mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            self.assertEqual(
+                sup.scheduler.rows[-1]["interval_s"], 3600.0)
+            result = agent.run("weekly remind me to water plants",
+                               mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(sup.scheduler.rows[-1]["kind"], "weekly")
+            sup.scheduler.rows.pop()
+            sup.scheduler.rows.pop()
+            # 'row' was removed by the 'skip the 3pm reminder' scope
+            # above — re-attach it so 'block' has a live target.
+            row["enabled"] = True
+            sup.scheduler.rows.append(row)
+            result = agent.run("block my reminders", mode="auto")
+            self.assertFalse(row["enabled"])
+            self.assertIn("Turned off", result.content)
+            row["enabled"] = True
+            # The re-attached 'standup' row also fires at 15:00 —
+            # leave it out of the '3pm' scope below. 'block' also
+            # disabled the oven row — the snooze lane only sees
+            # enabled rows, so re-enable it.
+            sup.scheduler.remove(str(row["id"]))
+            oven_row["enabled"] = True
             result = agent.run("push the 3pm reminder to 10pm",
                                mode="auto")
             self.assertIn("Snoozed", result.content)

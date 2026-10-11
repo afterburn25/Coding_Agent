@@ -3612,6 +3612,20 @@ class AgentOrchestrator:
         r"(?:remind|alert|notify|ping|wake)\s+"
         r"me\s+(?:up\s+)?to\s+(?P<task>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # 'every morning remind me to stretch' — the cadence leads the
+    # clause instead of sitting inside the remind-verb's when-slot.
+    _REMINDER_LEAD_CADENCE_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?P<when>every\s+(?:\d+\s+|a\s+couple\s+of\s+|other\s+)?"
+        r"(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?|"
+        r"months?|morning|afternoon|evening|night|weekdays?|"
+        r"weekends?|monday|tuesday|wednesday|thursday|friday|"
+        r"saturday|sunday)|hourly|daily|weekly|monthly|nightly|"
+        r"fortnightly)\s+"
+        r"(?:remind|alert|notify|ping|wake)\s+me\s+(?:up\s+)?"
+        r"(?:to|about|of|that)\s+"
+        r"(?P<task>.+?)" + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _REMINDER_NOTASK_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:remind|alert|notify|ping|wake)\s+"
@@ -3648,7 +3662,7 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?P<verb>turn|switch|disable|enable|re-?enable|pause|"
         r"resume|unpause|unmute|unsilence|stop|mute|silence|"
-        r"hold|freeze|suspend|quiet)\s+(?P<body>.+?)?"
+        r"hold|freeze|suspend|quiet|block)\s+(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?)\b"
         + _REMINDER_ECHO +
         r"\s*(?P<dir>back\s+on|off|on)?" + _REMINDER_TRAIL,
@@ -4364,6 +4378,8 @@ class AgentOrchestrator:
             return self._reminder_finish(
                 text, user_text, task_id, event_callback)
         m = self._REMINDER_RE.match(plan_text)
+        if m is None:
+            m = self._REMINDER_LEAD_CADENCE_RE.match(plan_text)
         clarify = None
         if m is None:
             m2 = self._REMINDER_CLARIFY_RE.match(plan_text)
@@ -4529,7 +4545,9 @@ class AgentOrchestrator:
                          or self._REMINDER_TOGGLE_RE.match(plan_text)
                          or self._REMINDER_STOP_RE.match(plan_text)
                          or self._REMINDER_RESCHEDULE_RE.match(plan_text)
-                         or self._REMINDER_NOTASK_RE.match(plan_text))):
+                         or self._REMINDER_NOTASK_RE.match(plan_text)
+                         or self._REMINDER_LEAD_CADENCE_RE.match(
+                             plan_text))):
             return None
         # Checked before parse_local_action, which has no temporal
         # grammar — without this the ask fell to the model and it

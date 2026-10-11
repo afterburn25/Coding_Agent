@@ -281,6 +281,21 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 "hour": _meridian(int(hr), mer) if hr else 9,
                 "minute": int(mn or 0)}
 
+    # 'weekly' / 'every week [at T]' — an unspecified day defaults
+    # to today's weekday, mirroring 'monthly' → today's day-of-month.
+    m = re.fullmatch(
+        r"(?:weekly|every\s+week|once\s+a\s+week|each\s+week)"
+        + clock_tail, t)
+    if m:
+        hr, mn, mer = m.group(1), m.group(2), m.group(3)
+        lt = time.localtime(now)
+        return {"kind": "weekly", "weekday": lt.tm_wday,
+                "hour": _meridian(int(hr), mer) if hr else 9,
+                "minute": int(mn or 0)}
+    # 'fortnightly' / 'every other week' — a fixed 14-day interval.
+    if re.fullmatch(r"fortnightly|every\s+(?:other|second|two|2)\s+"
+                    r"weeks?", t):
+        return {"kind": "interval", "interval_s": 1209600.0}
     # 'twice a day' / 'every other day' — fixed-span intervals.
     if re.fullmatch(r"twice\s+a\s+day|two\s+times\s+a\s+day", t):
         return {"kind": "interval", "interval_s": 43200.0}
@@ -306,7 +321,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     # 'every N units' / 'every hour' / 'hourly' — interval cadence.
     m = re.fullmatch(
         r"(?:every\s+(\d+(?:\.\d+)?)\s*"
-        r"(minutes?|mins?|hours?|hrs?|days?)|every\s+hour|hourly)", t)
+        r"(minutes?|mins?|hours?|hrs?|days?|weeks?)"
+        r"|every\s+hour|hourly)", t)
     if m:
         if m.group(1) is None:
             interval = 3600.0
@@ -314,7 +330,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
             unit = m.group(2)
             interval = float(m.group(1)) * (
                 60 if unit.startswith(("m", "min")) else
-                3600 if unit.startswith("h") else 86400)
+                3600 if unit.startswith("h") else
+                86400 if unit.startswith("d") else 604800)
         return {"kind": "interval", "interval_s": max(60.0, interval)}
     # 'every day/morning/evening/night [at T]' — daily cadence.
     m = re.fullmatch(
