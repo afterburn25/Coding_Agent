@@ -2554,7 +2554,8 @@ class AgentOrchestrator:
         # contradict, not the model. Untagged 'you said X' stays
         # assertion-framed and never reaches this lane.
         r"(?:didn'?t|did\s+not|did)\s+you\s+(?:say|tell)(?:\s+me)?\s*|"
-        r"you\s+(?:said|told\s+me)\s+|i\s+thought\s+you\s+"
+        r"you\s+(?:(?:just|already|earlier|before)\s+)?"
+        r"(?:said|told\s+me)\s+|i\s+thought\s+you\s+"
         r"(?:said|told\s+me)\s+|"
         # Hedged recall asks — "do you happen to know my editor",
         # "any chance you remember the retry limit" — the politeness
@@ -2609,10 +2610,12 @@ class AgentOrchestrator:
     def _attribution_probe(raw_text: str, match_text: str) -> bool:
         mt = str(match_text or "").strip().lower()
         if re.match(
-                r"^(?:didn'?t|did\s+not|did)\s+you\s+(?:say|tell)\b|"
+                r"^(?:didn'?t|did\s+not|did)\s+you\s+"
+                r"(?:(?:just|already|earlier|before)\s+)?(?:say|tell)\b|"
                 r"^i\s+thought\s+you\s+(?:said|told\s+me)\b", mt):
             return True
-        if re.match(r"^you\s+(?:said|told\s+me)\b", mt):
+        if re.match(r"^you\s+(?:(?:just|already|earlier|before)\s+)?"
+                    r"(?:said|told\s+me)\b", mt):
             # The tag was stripped from match_text before this lane
             # ran — check the raw text for the verification marker.
             raw = str(raw_text or "").strip().lower()
@@ -2649,6 +2652,31 @@ class AgentOrchestrator:
                       r"don'?t\s+you\s+think|you\s+know)\s*[?!.]?\s*$",
                       "", prop, flags=re.IGNORECASE).strip()
         prop = prop.rstrip("?.!").strip()
+        # Anaphoric replay — "you already told me the answer … what
+        # was it?" names the referent by discourse role and carries
+        # no topic terms. Restate the most recent assistant utterance
+        # verbatim from the record instead of term-matching "answer"
+        # against unrelated turns.
+        head = re.search(
+            r"\b(?:the\s+|your\s+)?(?:answer|reply|response|thing|"
+            r"result|outcome|decision|verdict)\b",
+            prop, re.IGNORECASE)
+        if head is not None:
+            rest = (prop[:head.start()] + " " + prop[head.end():])
+            rest_terms = (memory._content_terms(rest)
+                          - {"earlier", "again", "before",
+                             "previously", "just"})
+            if not rest_terms:
+                for row in reversed(history):
+                    if str(row.get("role")) != "assistant":
+                        continue
+                    content = re.sub(
+                        r"\s+", " ",
+                        str(row.get("content", ""))).strip()
+                    if content:
+                        return (f"Earlier I said: "
+                                f"\"{content[:200]}\"")
+                return "I don't have an earlier answer on record."
         terms = memory._content_terms(prop)
         if not terms:
             return None

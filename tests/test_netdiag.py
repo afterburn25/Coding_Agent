@@ -961,6 +961,44 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("deadline is friday", r.text.lower())
 
+    def test_anaphoric_replay_quotes_last_assistant_turn(self):
+        # Live: "you already told me the answer earlier — what was
+        # it?" missed the recall lane entirely (the 'already' filler
+        # wasn't in the reported-speech lead) and the model
+        # confabulated a fresh answer with invented provenance. An
+        # anaphoric referent resolves by recency — quote the actual
+        # prior utterance, never generate a new one.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            cm = agent.conversation_memory
+            cm.record_exchange("what are my headphones",
+                               "Your headphones are Boson.")
+            r = agent._single_fact_recall_reply(
+                "you already told me the answer earlier — "
+                "what was it?", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("headphones are boson", r.text.lower())
+            # Same anaphora, different filler shapes.
+            r = agent._single_fact_recall_reply(
+                "you already said it — what was the answer?",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("headphones are boson", r.text.lower())
+            # A real topic term still verifies against the record —
+            # anaphora only fires when the tail is content-free.
+            cm.record_exchange("when is the launch",
+                               "the deadline is friday, per the board.")
+            r = agent._single_fact_recall_reply(
+                "you already told me the answer about the deadline "
+                "— was it friday?", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("deadline is friday", r.text.lower())
+            self.assertNotIn("headphones are boson", r.text.lower())
+
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of
         # 10 active rules with no indication the set was truncated —
