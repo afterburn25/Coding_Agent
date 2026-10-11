@@ -957,6 +957,16 @@ class PrivacyControlPrecedenceTests(unittest.TestCase):
             self.assertNotIn("nothing to forget", res.content.lower())
             self.assertFalse(store["conversation_memory_enabled"])
 
+    def test_negated_privacy_ask_applies_the_setting(self):
+        with tempfile.TemporaryDirectory() as td:
+            agent, provider, _ = _make(Path(td))
+            _, store = self._wire_sk(agent)
+            res = agent.run("don't remember what i say anymore")
+            self.assertIn("memory", res.content.lower())
+            self.assertIn("off", res.content.lower())
+            self.assertNotIn("nothing to forget", res.content.lower())
+            self.assertFalse(store["conversation_memory_enabled"])
+
     def test_real_forget_still_reports_deletion(self):
         with tempfile.TemporaryDirectory() as td:
             agent, provider, _ = _make(Path(td))

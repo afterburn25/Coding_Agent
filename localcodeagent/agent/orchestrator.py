@@ -9797,6 +9797,30 @@ class AgentOrchestrator:
             else None
         )
         training_response = self.training_acknowledgement(learned) if mode == "auto" else None
+        if learned.get("memory_off"):
+            # Universal-scope privacy asks ("stop remembering things I
+            # tell you", "don't remember what I say") target the whole
+            # memory — apply the conversation-memory setting through
+            # the same registry so the reply is mechanically true.
+            svc = self._self_knowledge_service()
+            applied = False
+            if svc is not None:
+                try:
+                    if svc.settings.current(
+                            "conversation_memory_enabled") is False:
+                        applied = True  # already off — reply stays true
+                    else:
+                        applied = bool(svc.settings.set(
+                            "conversation_memory_enabled",
+                            False).get("ok"))
+                except Exception:
+                    applied = False
+            training_response = (
+                "Conversation memory is now off — I won't store new "
+                "things you tell me."
+                if applied else
+                "I couldn't switch conversation memory off from here "
+                "— the toggle is under Settings → memory.")
         if (training_response is not None
                 and builtin_response is not None
                 and learned.get("forgotten_miss")

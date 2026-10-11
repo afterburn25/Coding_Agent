@@ -1237,7 +1237,11 @@ class ConversationMemory:
         forget_match = re.match(
             r"^(?:forget(?:\s+(?:that|about))?|never\s*mind(?:\s+about)?|"
             r"nm(?:\s+about)?|"
-            r"stop\s+remembering|delete\s+(?:the\s+)?facts?"
+            r"stop\s+(?:remembering|storing|recording|keeping|saving)|"
+            r"quit\s+(?:remembering|storing|recording|keeping|saving)|"
+            r"don'?t\s+remember|do\s+not\s+remember|"
+            r"never\s+(?:remember|store|record|keep|save)|"
+            r"delete\s+(?:the\s+)?facts?"
             r"(?:\s+about)?)[,:]?\s*(.+)$",
             raw, flags=re.IGNORECASE)
         if forget_match:
@@ -1263,6 +1267,30 @@ class ConversationMemory:
                     "that", "it", "this", "those", "them"}:
                 result.setdefault("clarify", []).append(
                     "Forget what, exactly?")
+                return result
+            # A universal disclosure referent — 'stop remembering
+            # things I tell you' / "don't remember what I say" /
+            # 'never store anything we discuss' — targets the whole
+            # memory, not a fact. That's the conversation-memory
+            # setting, not a topic search; flag it for the control
+            # lane instead of manufacturing a miss.
+            _scope_words = {
+                "what", "things", "thing", "everything", "anything",
+                "all", "stuff", "i", "we", "you", "u", "said", "told",
+                "tell", "say", "shared", "share", "mentioned",
+                "mention", "discuss", "discussed", "talk", "talked",
+                "talking", "typed", "sent", "earlier", "before",
+                "today", "so", "far", "in", "this", "these", "chat",
+                "chats", "conversation", "conversations", "here",
+                "anymore", "from", "now", "on", "going", "forward",
+                "the", "that", "those", "it", "about", "of", "ve",
+                "have", "has", "to", "with", "me", "my", "our", "us"}
+            _body_terms = [w for w in re.findall(
+                r"[a-z']+", forget_body.lower()) if w not in _scope_words]
+            if (not _body_terms and re.search(
+                    r"\b(?:i|we|you|u|chats?|conversations?|everything|"
+                    r"anything|all)\b", forget_body, flags=re.IGNORECASE)):
+                result["memory_off"] = [True]
                 return result
             # "nm, my editor is vim" — an abortive marker followed by a
             # fresh statement is a correction, not a forget: the tail

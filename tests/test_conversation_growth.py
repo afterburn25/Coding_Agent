@@ -191,6 +191,38 @@ class ConversationManagerTests(unittest.TestCase):
             self.assertNotIn("locked", learned)
             self.assertTrue(learned["forgotten"])
 
+    def test_universal_scope_forget_marks_memory_off(self):
+        """'stop remembering things I tell you' / "don't remember what
+        I say" target the whole memory — the forget lane must flag it
+        for the control path, never run a literal topic search."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "cm.json")
+            for t in (
+                    "stop remembering things I tell you",
+                    "don't remember what i say anymore",
+                    "quit storing what i tell you",
+                    "never store anything we discuss",
+                    "stop remembering our chats"):
+                learned = memory.learn_from_user(t)
+                self.assertTrue(
+                    learned.get("memory_off"), t)
+                self.assertFalse(
+                    learned.get("forgotten_miss"), t)
+
+    def test_scoped_forget_still_searches_the_topic(self):
+        """A named referent is a fact delete, not a privacy switch —
+        'don't remember the wifi password' forgets that fact."""
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "cm.json")
+            memory._data["facts"].append({
+                "id": "f1", "text": "my wifi password is s3cret",
+                "created_at": 1.0, "active": True, "scope": "global",
+            })
+            learned = memory.learn_from_user(
+                "don't remember the wifi password")
+            self.assertNotIn("memory_off", learned)
+            self.assertTrue(learned["forgotten"])
+
     def test_history_survives_truncated_or_missing_main_file(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "conversations.json"
