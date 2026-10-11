@@ -676,6 +676,33 @@ class TruthGateTests(RecoveryLoopTests):
             ):
                 self.assertFalse(det(text), text)
 
+    def test_detector_catches_witnessed_event_claims(self):
+        # Live: "tell me something you're not sure about" produced
+        # "I've seen it trigger twice in the last 48 hours" — invented
+        # telemetry, unbadged because the detector only knew DO-verbs.
+        # Witnessing system events is the same fabrication class as
+        # claiming the check ran.
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            det = agent._executed_action_claims
+            for claim in (
+                "I've seen it trigger twice in the last 48 hours.",
+                "I noticed the failure pattern again.",
+                "I saw it crash yesterday.",
+                "I observed the retries climbing.",
+                "I've detected the drift since Tuesday.",
+                "I noticed the service restart last night.",
+            ):
+                self.assertTrue(det(claim), claim)
+            for text in (
+                "I've seen worse.",
+                "I've seen this movie before.",
+                "I think it restarted.",
+                "I haven't seen the logs yet.",
+                "I'm watching.",
+            ):
+                self.assertFalse(det(text), text)
+
     def test_my_probe_empty_store_answers_honestly(self):
         # BUG-051: "what is my editor" with nothing taught must answer
         # "you haven't told me" — possessive probes can only be

@@ -3762,6 +3762,19 @@ class AgentOrchestrator:
         r"modified|edited|deleted|removed|saved|added|renamed|moved|"
         r"copied|implemented|refactored|reverted|migrated|configured|"
         r"enabled|disabled|stopped|cleaned|wiped|reworked|rewrote)\b)"
+        # Witnessed-event claims — "I've seen it trigger twice",
+        # "I noticed the service restart" — assert telemetry that only
+        # exists if a log/tool actually surfaced it; same fabrication
+        # class as claiming the check itself ran.
+        + r"|\b(?:i['’]ve|i have|i['’]d|i)\s+" + _CLAIM_ADVERBS +
+        r"(?:seen|saw|noticed|observed|spotted|detected|recorded|"
+        r"watched|witnessed)\s+"
+        r"(?:(?:it|them|those|these)\b|(?:a|an|the|this|that|my|your|its)\s+"
+        r"(?:issues?|errors?|failures?|crashes?|restarts?|deploys?|"
+        r"builds?|jobs?|missions?|services?|process(?:es)?|requests?|"
+        r"events?|incidents?|alerts?|patterns?|behaviou?rs?|timeouts?|"
+        r"loops?|repeats?|resets?|retries?|outages?|regressions?|drift|"
+        r"churn|thrash(?:ing)?|spikes?)\b)"
         # Simple-past execution claims — "I updated the file", "I ran
         # the tests". Phrasal-verb guards keep "I ran into an error",
         # "I checked out a movie", "I started up" from flagging, and
