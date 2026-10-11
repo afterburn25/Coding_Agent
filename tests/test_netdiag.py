@@ -1378,6 +1378,30 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertTrue(all(
                 s["enabled"] for s in sup.scheduler.rows))
 
+            # Scoped inventory answers the topic, not the dump; a
+            # when-ask over one hit answers the time directly.
+            inv = agent._reminder_inventory_reply(
+                "when is my build reminder", "when is my build reminder")
+            self.assertIsNotNone(inv)
+            self.assertIn("check the build", inv.text)
+            self.assertNotIn("timesheets", inv.text)
+            inv = agent._reminder_inventory_reply(
+                "do i have a reminder about the plumber",
+                "do i have a reminder about the plumber")
+            self.assertIsNotNone(inv)
+            self.assertIn("plumber", inv.text)
+            self.assertIn("No reminder", inv.text)
+            # A parseable time with no task clarifies, never guesses.
+            r = agent._reminder_reply(
+                "remind me in 5 minutes",
+                "remind me in 5 minutes", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("do what", r.content)
+            # Recall-shaped 'remind me X' still falls through.
+            self.assertIsNone(agent._reminder_reply(
+                "remind me my editor",
+                "remind me my editor", task.id))
+
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of
         # 10 active rules with no indication the set was truncated —

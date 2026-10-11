@@ -4002,7 +4002,56 @@ class AgentOrchestrator:
         if sched is None:
             return None
         now = time.time()
-        if not rows:
+        # Scoped asks — 'do i have a reminder about the dentist',
+        # 'when is my dentist reminder' — filter to the named topic;
+        # a 'when'-ask over one hit answers the time directly.
+        scope_terms = set()
+        sm = re.search(
+            r"\b(?:about|regarding|for|on|of)\s+(.+?)\s*[.!?]?\s*$",
+            plan_text, re.IGNORECASE)
+        if sm is not None:
+            scope_terms = set(re.findall(
+                r"[a-z0-9']+",
+                re.sub(r"\b(?:reminders?|alarms?|the|a|an|my|that)\b",
+                       " ", sm.group(1), flags=re.IGNORECASE).lower()))
+        if not scope_terms:
+            tm = re.search(
+                r"\b(?:the\s+|my\s+)?([a-z0-9][a-z0-9'\s]{0,40}?)\s+"
+                r"reminders?\b", plan_text, re.IGNORECASE)
+            if tm is not None:
+                scope_terms = set(re.findall(
+                    r"[a-z0-9']+",
+                    re.sub(r"\b(?:what|which|when|does|do|is|are|have|"
+                           r"has|any|go|goes|going|off|fire|fires|"
+                           r"firing|set|the|a|an|my|that|next)\b", " ",
+                           tm.group(1), flags=re.IGNORECASE).lower()))
+        when_ask = bool(re.match(
+            r"\s*when\b", plan_text, re.IGNORECASE))
+        if scope_terms:
+            hits = [s for s in rows if scope_terms <= set(re.findall(
+                r"[a-z0-9']+",
+                (f"{s.get('name', '')} "
+                 f"{(s.get('action') or {}).get('detail', '')}")
+                .lower()))]
+            if not hits:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”" for s in rows[:3])
+                text = (f"No reminder about "
+                        f"“{' '.join(sorted(scope_terms))}”"
+                        + (f" — you've got: {names}." if rows else "."))
+            elif when_ask and len(hits) == 1:
+                text = (f"Your “{self._reminder_label(hits[0])}” "
+                        f"reminder fires "
+                        f"{self._reminder_when_text(hits[0], now)}.")
+            else:
+                bits = "; ".join(
+                    f"“{self._reminder_label(s)}” "
+                    f"({self._reminder_when_text(s, now)})"
+                    for s in hits[:5])
+                text = (f"{len(hits)} reminder"
+                        f"{'s' if len(hits) != 1 else ''} about "
+                        f"“{' '.join(sorted(scope_terms))}”: {bits}.")
+        elif not rows:
             text = ("No reminders set — say “remind me in 10 minutes "
                     "to …” and I'll schedule it.")
         else:
@@ -4042,6 +4091,22 @@ class AgentOrchestrator:
         if m is None:
             m2 = self._REMINDER_CLARIFY_RE.match(plan_text)
             if m2 is None:
+                # 'remind me in 5 minutes' — a parseable time with no
+                # task. Ask for the task rather than improvise one;
+                # non-temporal tails ('remind me the tag') fall
+                # through to recall lanes untouched.
+                mnt = re.match(
+                    r"^\s*(?:please\s+)?(?:remind|alert|notify|ping|"
+                    r"wake)\s+me\s+(?:up\s+)?(?P<when>.+?)"
+                    r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
+                if mnt is not None:
+                    wtxt = str(mnt.group("when") or "")
+                    if (self._reminder_spec(wtxt, time.time())
+                            is not None
+                            and self._REMINDER_TIMEISH_RE.search(wtxt)):
+                        return self._reminder_finish(
+                            f"Sure — remind you to do what {wtxt}?",
+                            user_text, task_id, event_callback)
                 return None
             # 'remind me to X' with no time — claim and ask rather
             # than let the model improvise a commitment.
