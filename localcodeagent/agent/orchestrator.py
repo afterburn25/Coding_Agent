@@ -2774,6 +2774,14 @@ class AgentOrchestrator:
                 if subj_rows:
                     rows = subj_rows
         items = [self._recalled_fact_sentence(r) for r in rows[:4]]
+        # Mid-list sentences join with commas/'and' — their renderer-
+        # added capitalization ("The", "We") reads wrong mid-sentence.
+        # Lowercase continuation items' grammatical leads only, so
+        # proper nouns ('API', 'SQL') survive.
+        items[1:] = [
+            re.sub(r"^(The|A|An|We|You|Your|My|It)\b",
+                   lambda mm: mm.group(1).lower(), it)
+            for it in items[1:]]
         my_rows = [r for r in rows[:4]
                    if str(r.get("slot") or "").startswith("my:")]
         if len(items) == 1:
