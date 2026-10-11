@@ -3005,7 +3005,8 @@ class AgentOrchestrator:
                 and re.search(
                     r"\b(?:what|which|any|how\s+many|list|show|"
                     r"do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
-                    r"are\s+there|got|active|pending|upcoming)\b",
+                    r"are\s+there|got|active|pending|upcoming|"
+                    r"when)\b",
                     match_text, re.IGNORECASE)
                 and not re.match(
                     r"\s*(?:please\s+)?(?:remind|cancel|delete|"
@@ -3595,6 +3596,10 @@ class AgentOrchestrator:
         r"^\s*(?:please\s+)?(?:remind|alert|notify|ping|wake)\s+"
         r"me\s+(?:up\s+)?to\s+(?P<task>.+?)\s*[.!?]?\s*$",
         re.IGNORECASE)
+    _REMINDER_NOTASK_RE = re.compile(
+        r"^\s*(?:please\s+)?(?:remind|alert|notify|ping|wake)\s+"
+        r"me\s+(?:up\s+)?(?P<when>.+?)\s*[.!?]?\s*$",
+        re.IGNORECASE)
     _REMINDER_CANCEL_RE = re.compile(
         r"^\s*(?:please\s+)?(?:cancel|delete|remove|drop|clear)\s+"
         r"(?P<body>.+?)?\breminders?\b"
@@ -4095,10 +4100,7 @@ class AgentOrchestrator:
                 # task. Ask for the task rather than improvise one;
                 # non-temporal tails ('remind me the tag') fall
                 # through to recall lanes untouched.
-                mnt = re.match(
-                    r"^\s*(?:please\s+)?(?:remind|alert|notify|ping|"
-                    r"wake)\s+me\s+(?:up\s+)?(?P<when>.+?)"
-                    r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
+                mnt = self._REMINDER_NOTASK_RE.match(plan_text)
                 if mnt is not None:
                     wtxt = str(mnt.group("when") or "")
                     if (self._reminder_spec(wtxt, time.time())
@@ -4244,7 +4246,8 @@ class AgentOrchestrator:
                          or self._REMINDER_CANCEL_RE.match(plan_text)
                          or self._REMINDER_SNOOZE_RE.match(plan_text)
                          or self._REMINDER_TOGGLE_RE.match(plan_text)
-                         or self._REMINDER_RESCHEDULE_RE.match(plan_text))):
+                         or self._REMINDER_RESCHEDULE_RE.match(plan_text)
+                         or self._REMINDER_NOTASK_RE.match(plan_text))):
             return None
         # Checked before parse_local_action, which has no temporal
         # grammar — without this the ask fell to the model and it
