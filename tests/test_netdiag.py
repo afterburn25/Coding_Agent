@@ -39,6 +39,21 @@ from localcodeagent.workflow.tasks import TaskStore
 import io
 
 
+class _RetriedTemporaryDirectory(tempfile.TemporaryDirectory):
+    """Windows-safe teardown: a just-closing sqlite `-shm`/`-wal` handle
+    lingers tens of ms after the server thread exits, and deleting an
+    open file is a hard PermissionError (ignore_cleanup_errors does not
+    cover the _resetperms chmod path on 3.14)."""
+
+    def cleanup(self) -> None:
+        for _ in range(40):
+            try:
+                return super().cleanup()
+            except PermissionError:
+                time.sleep(0.05)
+        return super().cleanup()
+
+
 def _profile(**overrides) -> ModelProfile:
     values = dict(
         id="local", endpoint="http://127.0.0.1:9999/v1", model="test-model",
@@ -943,6 +958,13 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("10 operating rules", r.text.lower())
             self.assertIn("2 more", r.text.lower())
+            # "how many rules" counts the STORE, not the last list —
+            # the model lane once answered "eight" off the truncated
+            # rendering while ten were active.
+            r = agent._facts_recall_reply(
+                "how many rules are active", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("10 rules are active", r.text.lower())
 
     def test_scoped_recall_and_inventory_asks(self):
         # Live: "do you have anything on the backup schedule" dumped
@@ -1536,7 +1558,7 @@ class PortCollisionTests(unittest.TestCase):
         stop = threading.Event()
         t: threading.Thread | None = None
         try:
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
                 ws = Path(td)
                 (ws / "web").mkdir()
                 t = threading.Thread(

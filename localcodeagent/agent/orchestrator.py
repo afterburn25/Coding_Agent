@@ -2987,6 +2987,9 @@ class AgentOrchestrator:
                  if frame is not None and frame.masked_case
                  else user_text) or ""
         rules_q = bool(self._RULES_RECALL_RE.search(probe))
+        rules_count_q = bool(re.search(
+            r"\bhow\s+many\s+(?:operating\s+|active\s+|standing\s+)?"
+            r"rules?\b", probe, re.IGNORECASE))
         # 'things'/'items' deliberately excluded — "how many things are
         # running" is an autonomy-inventory ask, not a fact count.
         count_q = bool(re.search(
@@ -2994,14 +2997,26 @@ class AgentOrchestrator:
             r"\bhow\s+much\s+(?:do\s+you\s+remember|"
             r"(?:have\s+you\s+)?(?:learned|remembered|stored))\b",
             probe, re.IGNORECASE))
-        if not rules_q and not count_q \
+        if not rules_q and not rules_count_q and not count_q \
                 and not self._FACTS_RECALL_RE.search(probe):
             return None
         if self.conversation_memory is None:
             return None
-        if rules_q:
+        if rules_q or rules_count_q:
             rules = self.conversation_memory.active_rules(
                 project_id=project_id, conversation_id=conversation_id)
+            if rules_count_q and not rules_q:
+                # Ground the count in the store — a model answer would
+                # count whatever list happened to be rendered last.
+                n = len(rules)
+                canonical = (
+                    "No standing rules yet — nothing you've told me "
+                    "to always or never do."
+                    if n == 0 else
+                    f"{n} rule{'s' if n != 1 else ''} "
+                    f"{'are' if n != 1 else 'is'} active.")
+                from ..context.realize import RenderedReply
+                return RenderedReply(text=canonical, speech_act="answer")
             if not rules:
                 canonical = ("No standing rules yet — nothing you've "
                              "told me to always or never do.")
