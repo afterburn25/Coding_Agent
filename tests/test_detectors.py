@@ -45,7 +45,7 @@ def make_sup(td: str, **kw) -> AutonomousSupervisor:
         workspace=root,
         store_root=root / "data" / "autonomy",
         executor=lambda m, n, cb: {"ok": True, "output": "done"},
-        lane_free=lambda: True,
+        lane_free=lambda *a: True,
         worker_manager=AdaptiveWorkerManager(
             root, monitor=mon, on_queue_event=lambda t, p: None),
     )
@@ -518,7 +518,7 @@ class SchedulingTests(unittest.TestCase):
     def test_lane_busy_blocks_normal_not_urgent(self):
         """Interactive lane busy → normal missions wait, urgent proceed."""
         with tempfile.TemporaryDirectory() as td:
-            sup = make_sup(td, lane_free=lambda: False)
+            sup = make_sup(td, lane_free=lambda *a: False)
             # build a mission whose graph has a runnable agent node
             for prio in ("normal", "urgent"):
                 m = sup.missions.create(

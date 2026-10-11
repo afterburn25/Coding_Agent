@@ -147,6 +147,16 @@ _FOREGROUND_STALL_SECONDS = 660.0
 
 
 class AppState:
+    # Mission sources that count as USER demand — the user asked for
+    # the work explicitly (chat command, API, manual trigger), so it
+    # and its subtasks are foreground intent and only yield to an
+    # occupied lane. Everything else (schedule/trigger/goal/
+    # self_repair/detector/social/internal…) is autonomous background
+    # work, held behind the chat-idle gate.
+    _USER_MISSION_SOURCES = frozenset({
+        "chat", "api", "user", "manual", "manual_research",
+        "queue", "prompt", "cli"})
+
     def __init__(self, config: AgentConfig, workspace: Path, runtime_root: Path, config_path: Path | None = None, boot: Callable[[float, str, str], None] | None = None) -> None:
         self.config = config
         self.workspace = workspace.resolve()
@@ -458,8 +468,15 @@ class AppState:
             prompt = str(payload.get("prompt") or "")
             if prompt:
                 try:
+                    # Preserve mission attribution — a worker-queue entry
+                    # from a mission is scheduled work, gated on chat
+                    # idle and sorted behind interactive prompts.
+                    mission_id = str(
+                        payload.get("mission_id")
+                        or getattr(worker, "mission_id", "") or "")
                     self.queue.enqueue(prompt,
-                                       mode=str(payload.get("mode") or "auto"))
+                                       mode=str(payload.get("mode") or "auto"),
+                                       mission_id=mission_id)
                     self._dequeue_next()
                 except Exception:
                     pass
@@ -869,6 +886,10 @@ class AppState:
         # Operational state — last user interaction drives the "away"
         # briefing and the idle/away signal in /api/nexus/state.
         self._last_interaction_at = time.time()
+        # Separate clock for the scheduled-work gate — boot is not a
+        # chat interaction (a fresh process is fully idle, so scheduled
+        # work may start without waiting out the window).
+        self._last_chat_at = 0.0
         manifests_dir = Path(getattr(config, "tool_manifests_dir", "tools/manifests")).expanduser()
         if not manifests_dir.is_absolute():
             manifests_dir = runtime_root / manifests_dir
@@ -3279,9 +3300,21 @@ class AppState:
                     pass
             return out
 
-        def lane_free() -> bool:
-            """Interactive chat/queued work outranks background missions."""
-            return not self._agent_lane_active(include_waiting_approval=True)
+        def lane_free(mission=None) -> bool:
+            """Interactive chat/queued work outranks background missions.
+
+            Autonomous/scheduled work also holds until the chat lane has
+            been quiet for the configured idle window — a mission
+            starting mid-conversation queues the user's next message
+            behind it. User-initiated missions are foreground demand and
+            skip the idle wait (they still yield to an occupied lane)."""
+            if self._agent_lane_active(include_waiting_approval=True):
+                return False
+            if mission is not None:
+                src = str(mission.get("source") or "").split(":", 1)[0]
+                if src not in self._USER_MISSION_SOURCES:
+                    return self._chat_idle_enough()
+            return True
 
         def _restore_latest_backup() -> dict:
             """DATABASE_CORRUPT remedy: restore the newest backup whose
@@ -6830,6 +6863,40 @@ class AppState:
 
     def note_interaction(self) -> None:
         self._last_interaction_at = time.time()
+        self._last_chat_at = time.time()
+
+    def _chat_idle_enough(self) -> bool:
+        """True when no interactive chat has arrived within the
+        configured idle window (``autonomy_chat_idle_seconds``,
+        default 10 min). Scheduled/autonomy work only starts after a
+        real lull so it can never queue the user's next message behind
+        a mid-conversation mission. Never having chatted counts as
+        idle — a fresh boot isn't a conversation."""
+        idle_s = float(getattr(
+            self.config, "autonomy_chat_idle_seconds", 600.0) or 0.0)
+        if idle_s <= 0:
+            return True
+        last = getattr(self, "_last_chat_at", 0.0) or 0.0
+        return not last or (time.time() - last) >= idle_s
+
+    def _mission_is_user_initiated(self, queue_item: dict | None) -> bool:
+        """True when a queue item's owning mission was user-initiated
+        (source chat/api/manual…) — its subtasks are foreground demand.
+        Unknown sources default to autonomous (conservative: scheduled
+        work waits rather than surprising an active chat)."""
+        mission_id = str((queue_item or {}).get("mission_id") or "")
+        if not mission_id:
+            return False
+        try:
+            sup = getattr(self, "autonomy", None)
+            if sup is not None:
+                for m in sup.missions.list():
+                    if str(m.get("id") or "") == mission_id:
+                        src = str(m.get("source") or "").split(":", 1)[0]
+                        return src in self._USER_MISSION_SOURCES
+        except Exception:
+            pass
+        return False
 
     def operational_state(self) -> dict:
         """Structured snapshot of what Nexus is doing — focus, load,
@@ -7080,6 +7147,14 @@ class AppState:
                 if not self.queue.remove(str(item["id"])):
                     return  # raced — another dequeue took it
             else:
+                # Only mission-submitted items remain — autonomous
+                # missions wait for the chat-idle window, same gate as
+                # supervisor dispatch; a user-requested mission's
+                # subtasks are foreground demand.
+                if not self._chat_idle_enough() and \
+                        not self._mission_is_user_initiated(
+                            self.queue.peek()):
+                    return
                 item = self.queue.pop()
             if item is None:
                 return
@@ -13273,6 +13348,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not message and not chat_attachments:
                     self._json({"error": "message is required"}, 400)
                     return
+                self.state.note_interaction()
                 if not message:
                     message = "Please look at the attached file(s)."
                 current = self.state.tasks.current()

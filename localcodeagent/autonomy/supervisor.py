@@ -155,7 +155,11 @@ class AutonomousSupervisor:
         self._internal_runner = internal_runner or self._default_internal
         self._job_runner = job_runner or self._default_job
         self._research_runner = research_runner or self._default_internal
-        self._lane_free = lane_free or (lambda: True)
+        # lane_free(mission|None) → bool: the callable may accept the
+        # mission being considered so per-source policy (e.g. chat-idle
+        # gating only autonomous work) can differ from the plain
+        # interactive-busy probe.
+        self._lane_free = lane_free or (lambda *a: True)
         self.activities = activities
         self._node_rows: dict[str, str] = {}  # node_id -> activity row id
         self._hooks = dict(runtime_hooks or {})
@@ -1214,7 +1218,7 @@ class AutonomousSupervisor:
                 # The agent lane is exclusive and interactive work outranks
                 # background missions — except urgent (critical recovery)
                 # work, which may interleave between user turns.
-                if not self._lane_free() and \
+                if not self._lane_free(m) and \
                         str(m.get("priority")) != "urgent":
                     node["queue_reason"] = "waiting_for_worker"
                     node["queue_detail"] = "interactive lane is busy"

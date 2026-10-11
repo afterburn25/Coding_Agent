@@ -464,6 +464,58 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertTrue(state.agent._task_cancelled(
                 SimpleNamespace(task_id=mission_task.id)))
 
+    def test_scheduled_work_waits_for_chat_idle(self):
+        # Chat is the priority lane: supervisor dispatch AND
+        # mission-attributed queue items hold until the chat lane has
+        # been quiet for autonomy_chat_idle_seconds (default 10 min).
+        # Interactive items are never gated; a fresh boot (never
+        # chatted) counts as idle.
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, "http://127.0.0.1:9")
+            # Fresh boot → fully idle → lane free.
+            self.assertTrue(state._chat_idle_enough())
+            self.assertTrue(
+                state.autonomy._lane_free({"source": "self_repair"}))
+            # A chat turn stamps the clock → scheduled work holds; an
+            # explicitly user-initiated mission is foreground demand
+            # and skips the idle wait (it still yields to a busy lane).
+            state.note_interaction()
+            self.assertFalse(state._chat_idle_enough())
+            self.assertFalse(
+                state.autonomy._lane_free({"source": "self_repair"}))
+            self.assertFalse(
+                state.autonomy._lane_free({"source": "schedule:x"}))
+            self.assertTrue(
+                state.autonomy._lane_free({"source": "chat"}))
+            # Mission-attributed queue items stay queued while chat is
+            # recent; interactive items still drain immediately.
+            state.autonomy._lane.mission_id = "m-test"
+            try:
+                state.queue.enqueue("mission subtask prompt")
+            finally:
+                state.autonomy._lane.mission_id = None
+            state._dequeue_next()
+            self.assertEqual(len(state.queue), 1)
+            state.queue.enqueue("interactive prompt")
+            state._dequeue_next()
+            self.assertEqual(len(state.queue), 1)
+            self.assertEqual(
+                state.queue.list()[0].get("mission_id"), "m-test")
+            # Let the interactive worker finish (dead endpoint → fast
+            # error) — single-flight blocks any drain while it runs.
+            deadline = time.time() + 15
+            while time.time() < deadline:
+                workers = [t for t in threading.enumerate()
+                           if t.name.startswith("queue-") and t.is_alive()]
+                if not workers:
+                    break
+                time.sleep(0.05)
+            # Backdate past the idle window → the mission item drains.
+            state._last_chat_at = time.time() - 700
+            state._dequeue_next()
+            self.assertEqual(len(state.queue), 0)
+            self.assertTrue(state._chat_idle_enough())
+
     def test_request_cancel_signals_inflight_command(self):
         # The per-command kill flag must be SET (not popped) so a running
         # subprocess aborts instead of running to completion.

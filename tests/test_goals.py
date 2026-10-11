@@ -17,7 +17,7 @@ def make_sup(td: str, metrics=None, **kw):
         workspace=root,
         store_root=root / "data" / "autonomy",
         executor=lambda m, n, cb: {"ok": True, "output": "done"},
-        lane_free=lambda: True,
+        lane_free=lambda *a: True,
         metrics=metrics,
     )
     defaults.update(kw)

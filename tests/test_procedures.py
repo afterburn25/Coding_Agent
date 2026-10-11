@@ -27,7 +27,7 @@ def make_sup(td: str, **kw) -> AutonomousSupervisor:
         workspace=root,
         store_root=root / "data" / "autonomy",
         executor=lambda m, n, cb: {"ok": True, "output": "done"},
-        lane_free=lambda: True,
+        lane_free=lambda *a: True,
     )
     defaults.update(kw)
     return AutonomousSupervisor(**defaults)

@@ -47,7 +47,7 @@ def make_sup(td: str, **kw):
         workspace=root,
         store_root=root / "data" / "autonomy",
         executor=lambda m, n, cb: {"ok": True, "output": "done"},
-        lane_free=lambda: True,
+        lane_free=lambda *a: True,
         worker_manager=_AnyFitWorkers(),
     )
     defaults.update(kw)
@@ -370,7 +370,7 @@ class JobNodeTests(unittest.TestCase):
             seen = []
             sup = make_sup(
                 td,
-                lane_free=lambda: False,  # interactive lane is busy
+                lane_free=lambda *a: False,  # interactive lane is busy
                 job_runner=lambda m, n: (seen.append(n["id"]) or
                                          {"ok": True, "output": "x"}))
             sup.policy.set_resource_mode("conservative")
@@ -390,7 +390,7 @@ class JobNodeTests(unittest.TestCase):
             # Balanced/performance no longer yield to the busy lane.
             tb = Path(td) / "b"
             tb.mkdir()
-            sup2 = make_sup(str(tb), lane_free=lambda: True,
+            sup2 = make_sup(str(tb), lane_free=lambda *a: True,
                             job_runner=lambda m, n: (seen.append(n["id"]) or
                                                      {"ok": True, "output": "x"}))
             m2 = sup2.create_mission(
@@ -2606,7 +2606,7 @@ class SupervisorLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             ran = []
             sup = make_sup(
-                td, lane_free=lambda: False,
+                td, lane_free=lambda *a: False,
                 executor=lambda m, n, cb: ran.append(n["id"]) or {"ok": True})
             m = sup.create_mission(objective="x")
             sup.start_mission(m["id"])
