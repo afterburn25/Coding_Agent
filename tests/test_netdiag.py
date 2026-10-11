@@ -1213,6 +1213,13 @@ class TruthGateTests(RecoveryLoopTests):
                         return dict(r)
                 return None
 
+            def set_enabled(self, sid, enabled):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r["enabled"] = bool(enabled)
+                        return True
+                return False
+
         class _Sup:
             def __init__(self):
                 self.scheduler = _Sched()
@@ -1343,6 +1350,33 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("Moved", r.content)
             self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+
+            # Snooze synonyms and the reversible toggle lane flip real
+            # enabled flags — never a narrated mute.
+            build_row = next(
+                s for s in sup.scheduler.rows if "build" in s["name"])
+            r = agent._reminder_reply(
+                "postpone the build reminder by 20 minutes",
+                "postpone the build reminder by 20 minutes", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Snoozed", r.content)
+            r = agent._reminder_reply(
+                "turn off the build reminder",
+                "turn off the build reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("off", r.content)
+            self.assertFalse(build_row["enabled"])
+            r = agent._reminder_reply(
+                "turn the build reminder off",
+                "turn the build reminder off", task.id)
+            self.assertIn("already", r.content)
+            r = agent._reminder_reply(
+                "turn reminders back on",
+                "turn reminders back on", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("on", r.content)
+            self.assertTrue(all(
+                s["enabled"] for s in sup.scheduler.rows))
 
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of

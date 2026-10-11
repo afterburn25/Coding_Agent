@@ -2995,6 +2995,7 @@ class AgentOrchestrator:
                 or self._REMINDER_CLARIFY_RE.match(match_text)
                 or self._REMINDER_CANCEL_RE.match(match_text)
                 or self._REMINDER_SNOOZE_RE.match(match_text)
+                or self._REMINDER_TOGGLE_RE.match(match_text)
                 or self._REMINDER_RESCHEDULE_RE.match(match_text)):
             return None
         # Reminder inventory — "what reminders do i have" asks the
@@ -3601,8 +3602,14 @@ class AgentOrchestrator:
         r"\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_SNOOZE_RE = re.compile(
-        r"^\s*(?:please\s+)?snooze\s+(?P<body>.+?)?\breminders?\b"
-        r"(?:\s+(?:for|until|till|to)\s+(?P<dur>.+?))?\s*[.!?]?\s*$",
+        r"^\s*(?:please\s+)?(?:snooze|postpone|delay|push\s+back)\s+"
+        r"(?P<body>.+?)?\breminders?\b"
+        r"(?:\s+(?:for|until|till|to|by)\s+(?P<dur>.+?))?\s*[.!?]?\s*$",
+        re.IGNORECASE)
+    _REMINDER_TOGGLE_RE = re.compile(
+        r"^\s*(?:please\s+)?(?P<verb>turn|switch|disable|enable|"
+        r"re-?enable|pause|resume|unpause)\s+(?P<body>.+?)?"
+        r"\breminders?\b\s*(?P<dir>back\s+on|off|on)?\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_RESCHEDULE_RE = re.compile(
         r"^\s*(?:please\s+)?(?:reschedule|move|change)\s+"
@@ -3689,7 +3696,8 @@ class AgentOrchestrator:
                     dm.group(2)[0]]
                 when = now + float(dm.group(1)) * scale
             else:
-                when = self._reminder_at_when(dur, now)
+                when = (self._reminder_at_when(dur, now)
+                        or self._reminder_at_when(f"in {dur}", now))
             if when is None:
                 return self._reminder_finish(
                     f"Snooze until when? — e.g. “for 20 minutes” "
@@ -3798,15 +3806,16 @@ class AgentOrchestrator:
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
-    def _reminder_rows(self):
-        """Enabled reminder schedules (chat-set notify rows)."""
+    def _reminder_rows(self, *, include_disabled: bool = False):
+        """Reminder schedules (chat-set notify rows); enabled only
+        unless include_disabled — re-enable asks need those."""
         sup = (self._autonomy() if callable(self._autonomy)
                else self._autonomy)
         sched = getattr(sup, "scheduler", None)
         if sched is None:
             return None, []
         rows = [s for s in (sched.list() or [])
-                if s.get("enabled", True)
+                if (include_disabled or s.get("enabled", True))
                 and (str(s.get("name") or "").lower()
                      .startswith("reminder")
                      or (s.get("action") or {}).get("kind") == "notify")]
@@ -3839,6 +3848,87 @@ class AgentOrchestrator:
             s.get("kind"), s.get("at"), s.get("interval_s"),
             s.get("hour"), s.get("minute"), s.get("weekday"))
         return len({key(s) for s in hits}) == 1
+
+    def _reminder_toggle_reply(self, user_text: str, mt: re.Match,
+                               task_id: str, event_callback):
+        """'turn off the dentist reminder' / 'pause my reminders' —
+        a real set_enabled flip; reversible, never a narrated mute."""
+        verb = str(mt.group("verb") or "").lower()
+        dirw = str(mt.group("dir") or "").lower()
+        body = str(mt.group("body") or "").strip(" ,;—-")
+        if verb in ("turn", "switch"):
+            dm = re.match(r"(off|on|back\s+on)\b", body, re.IGNORECASE)
+            if dirw:
+                want_on = dirw != "off"
+            elif dm:
+                want_on = dm.group(1).lower() != "off"
+                body = body[dm.end():].strip(" ,;—-")
+            else:
+                want_on = None
+        else:
+            want_on = bool(re.fullmatch(
+                r"enable|re-?enable|resume|unpause", verb))
+        if want_on is None:
+            return self._reminder_finish(
+                "Turn them on or off? — e.g. “turn off "
+                "my reminders”.",
+                user_text, task_id, event_callback)
+        sched, rows = self._reminder_rows(include_disabled=True)
+        if sched is None:
+            return self._reminder_finish(
+                "I can't manage reminders — the scheduler isn't "
+                "running in this session.",
+                user_text, task_id, event_callback)
+        pool = [s for s in rows if s.get("enabled", True) != want_on]
+        topic_terms = set(re.findall(
+            r"[a-z0-9']+",
+            re.sub(r"\b(?:the|my|that|all|every|each|any|of|to|for|"
+                   r"about)\b", " ", body, flags=re.IGNORECASE).lower()))
+        _hay = lambda s: set(re.findall(
+            r"[a-z0-9']+",
+            (f"{s.get('name', '')} "
+             f"{(s.get('action') or {}).get('detail', '')}").lower()))
+        hits = [s for s in pool
+                if not topic_terms or topic_terms <= _hay(s)]
+        state = "on" if want_on else "off"
+        if not rows:
+            text = "You don't have any reminders set."
+        elif (topic_terms and not hits
+                and any(topic_terms <= _hay(s) for s in rows)):
+            text = (f"That reminder is already {state}.")
+        elif topic_terms and not hits:
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rows[:3])
+            text = (f"I don't see a reminder matching "
+                    f"“{' '.join(sorted(topic_terms))}” — "
+                    f"you have: {names}.")
+        elif not topic_terms and not hits:
+            text = (f"All your reminders are already {state}."
+                    if want_on else
+                    "There are no active reminders to turn off.")
+        elif (topic_terms and len(hits) > 1
+                and not self._reminder_identical(hits)):
+            now = time.time()
+            names = "; ".join(
+                f"“{self._reminder_label(s)}” "
+                f"({self._reminder_when_text(s, now)})"
+                for s in hits[:5])
+            text = (f"That matches {len(hits)} reminders: {names} — "
+                    "say which.")
+        else:
+            try:
+                n = sum(bool(sched.set_enabled(str(s["id"]), want_on))
+                        for s in hits)
+            except Exception as exc:
+                text = f"I couldn't update the reminder ({exc})."
+            else:
+                label = self._reminder_label(hits[0])
+                text = (f"Turned {state} the reminder "
+                        f"“{label}”."
+                        if n == 1 else
+                        f"Turned {state} {n} reminders.")
+        return self._reminder_finish(text, user_text, task_id,
+                                     event_callback)
 
     def _reminder_cancel_reply(self, user_text: str, mc: re.Match,
                                task_id: str, event_callback):
@@ -3939,6 +4029,10 @@ class AgentOrchestrator:
         if ms is not None:
             return self._reminder_snooze_reply(
                 user_text, ms, task_id, event_callback)
+        mt = self._REMINDER_TOGGLE_RE.match(plan_text)
+        if mt is not None:
+            return self._reminder_toggle_reply(
+                user_text, mt, task_id, event_callback)
         mr = self._REMINDER_RESCHEDULE_RE.match(plan_text)
         if mr is not None:
             return self._reminder_reschedule_reply(
@@ -4084,6 +4178,7 @@ class AgentOrchestrator:
                          or self._REMINDER_CLARIFY_RE.match(plan_text)
                          or self._REMINDER_CANCEL_RE.match(plan_text)
                          or self._REMINDER_SNOOZE_RE.match(plan_text)
+                         or self._REMINDER_TOGGLE_RE.match(plan_text)
                          or self._REMINDER_RESCHEDULE_RE.match(plan_text))):
             return None
         # Checked before parse_local_action, which has no temporal
