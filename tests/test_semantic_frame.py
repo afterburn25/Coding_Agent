@@ -451,6 +451,10 @@ MULTI_SENTENCE = [
     # context then question
     ("My laptop has been slow all week. The fan runs constantly. "
      "What could cause that?", ("question",), None),
+    # spaced ASCII hyphen is informal dash punctuation — the trailing
+    # interrogative carries the act, not the declarative preamble
+    ("you already told me the answer earlier - what was it?",
+     ("question",), None),
     # assertion then offer
     ("The new model dropped yesterday. I could install it for you. "
      "Interested?", ("offer", "preference_question"), "offer_response"),

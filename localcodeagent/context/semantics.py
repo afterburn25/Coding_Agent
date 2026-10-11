@@ -284,7 +284,7 @@ def _strip_quotes(t: str) -> tuple[str, list[str]]:
 # sequencing conjunctions. Commas split only before discourse pivots;
 # "fix the build, it keeps failing" keeps both clauses distinct.
 _CLAUSE_SPLIT_RE = re.compile(
-    r"[.!?;]+|\s*[—–]{1,2}\s*|\n+|,\s+(?=but\b|and\s+then\b)|"
+    r"[.!?;]+|\s*[—–]{1,2}\s*|\s+-\s+|\n+|,\s+(?=but\b|and\s+then\b)|"
     r"\s+but\s+|\s+and\s+then\s+|\s+then\s+", re.IGNORECASE)
 
 # An "if/when/unless" condition wrapping an action clause — the ACTION
