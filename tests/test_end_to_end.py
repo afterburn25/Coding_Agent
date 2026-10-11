@@ -1685,7 +1685,7 @@ class AutonomyApiTests(unittest.TestCase):
                 self.assertFalse(
                     sup.standing_goals()[0].get("enabled", True))
                 out = state._mission_command(
-                    "resume the smoke tests goal")
+                    "resume the smoke tests goal, please")
                 self.assertIn("Re-enabled", out["content"])
                 # Unknown topic lists what exists; unrelated stop
                 # verbs ('stop the music') don't claim.

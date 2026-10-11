@@ -1636,6 +1636,31 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("off", r.content)
             self.assertFalse(row["enabled"])
 
+            # Trailing courtesy must not break the anchored end —
+            # 'cancel the cat reminder please' fell to the model live,
+            # which narrated 'Canceled' over a row that still existed.
+            # 'kill'/'dismiss' are delete verbs on the cancel lane.
+            agent._reminder_reply(
+                "remind me at 8pm to feed the cat",
+                "remind me at 8pm to feed the cat", task.id)
+            cat_row = sup.scheduler.rows[-1]
+            r = agent._reminder_reply(
+                "kill the cat reminder",
+                "kill the cat reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancel", r.content)
+            self.assertNotIn(cat_row, sup.scheduler.rows)
+            agent._reminder_reply(
+                "remind me at 8pm to feed the cat",
+                "remind me at 8pm to feed the cat", task.id)
+            cat_row = sup.scheduler.rows[-1]
+            r = agent._reminder_reply(
+                "cancel the cat reminder please",
+                "cancel the cat reminder please", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancel", r.content)
+            self.assertNotIn(cat_row, sup.scheduler.rows)
+
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of
         # 10 active rules with no indication the set was truncated —

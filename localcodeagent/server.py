@@ -4992,7 +4992,8 @@ class AppState:
             r"(?:please\s+)?(remind\s+me(?:\s+to)?|"
             r"(?:set|create|add|schedule)\s+(?:a\s+|an\s+|me\s+a\s+)?"
             r"(?:reminder|alarm|timer)(?:\s+(?:for|to|about|that))?|"
-            r"remember\s+to)\s+(.+?)[.!?]?$",
+            r"remember\s+to)\s+(.+?)(?:\s*,?\s*(?:please|thanks|"
+            r"thank\s+you|ty|pls|plz))*[.!?]?$",
             low)
         # "remember to X weekly" is a recurring-work request — the
         # standing-goal lane below owns cadence phrasing.
@@ -5031,6 +5032,7 @@ class AppState:
             r"(?P<body>.*?)"
             r"\b(?P<goal>standing\s+goals?|goals?)\b"
             r"(?:\s*(?:for|about|on|of)\s+(?P<tail>.+?))?"
+            r"(?:\s*,?\s*(?:please|thanks|thank\s+you|ty|pls|plz))*"
             r"\s*[.!?]?\s*$",
             low)
         if gm:

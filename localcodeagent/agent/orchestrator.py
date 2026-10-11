@@ -3590,42 +3590,48 @@ class AgentOrchestrator:
     _REMINDER_POLITE = (r"^\s*(?:please\s+)?"
                         r"(?:(?:can|could|would|will)\s+you\s+)?"
                         r"(?:please\s+)?")
+    # Trailing courtesy — 'cancel the cat reminder please' carries the
+    # politeness AFTER the command; without a tail it fails the
+    # anchored end and the model invents the ack.
+    _REMINDER_TRAIL = (r"(?:\s*,?\s*(?:please|thanks|thank\s+you|"
+                       r"ty|pls|plz))*\s*[.!?]?\s*$")
     _REMINDER_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:remind|alert|notify|ping|wake)\s+"
         r"me\s+(?:up\s+)?"
         r"(?P<when>.+?)\s+(?:to|about|of|that)\s+"
-        r"(?P<task>.+?)\s*[.!?]?\s*$",
+        r"(?P<task>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:remind|alert|notify|ping|wake)\s+"
-        r"me\s+(?:up\s+)?to\s+(?P<task>.+?)\s*[.!?]?\s*$",
+        r"me\s+(?:up\s+)?to\s+(?P<task>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_NOTASK_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:remind|alert|notify|ping|wake)\s+"
-        r"me\s+(?:up\s+)?(?P<when>.+?)\s*[.!?]?\s*$",
+        r"me\s+(?:up\s+)?(?P<when>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_CANCEL_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:cancel|delete|remove|drop|clear)\s+"
+        r"(?:cancel|delete|remove|drop|clear|kill|dismiss|end)\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
         r"(?:\s*(?:for|about|on|of|to)\s+(?P<tail>.+?))?"
-        r"\s*[.!?]?\s*$",
+        + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_SNOOZE_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:snooze|postpone|delay|push\s+back)\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
-        r"(?:\s+(?:for|until|till|to|by)\s+(?P<dur>.+?))?\s*[.!?]?\s*$",
+        r"(?:\s+(?:for|until|till|to|by)\s+(?P<dur>.+?))?"
+        + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_TOGGLE_RE = re.compile(
         _REMINDER_POLITE +
         r"(?P<verb>turn|switch|disable|enable|re-?enable|pause|"
         r"resume|unpause|stop|mute|silence)\s+(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?)\b"
-        r"\s*(?P<dir>back\s+on|off|on)?\s*[.!?]?\s*$",
+        r"\s*(?P<dir>back\s+on|off|on)?" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_STOP_RE = re.compile(
         _REMINDER_POLITE +
@@ -3634,16 +3640,17 @@ class AgentOrchestrator:
         r"ping(?:ing)?|wak(?:e|ing))\s+me\b(?:\s+up\b)?"
         r"(?:\s+(?:to|about)\s+(?P<topic>.+?))?"
         r"(?:\s+(?:anymore|again|any\s+more|any\s+longer))?"
-        r"\s*[.!?]?\s*$"
+        + _REMINDER_TRAIL +
         r"|^\s*(?:no\s+more|enough\s+(?:of|with))\s+"
-        r"(?:the\s+)?reminders?\s*[.!?]?\s*$",
+        r"(?:the\s+)?reminders?" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_RESCHEDULE_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:reschedule|move|change)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?)\b"
-        r"\s+(?:to|until|till|for)\s+(?P<when>.+?)\s*[.!?]?\s*$",
+        r"\s+(?:to|until|till|for)\s+(?P<when>.+?)"
+        + _REMINDER_TRAIL,
         re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(
         r"\breminders?\b|\balarms?\b|\btimers?\b", re.IGNORECASE)
