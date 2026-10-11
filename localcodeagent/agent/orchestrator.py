@@ -4083,8 +4083,9 @@ class AgentOrchestrator:
         hearsay = learned.get("hearsay") or []
         hedged = learned.get("hedged") or []
         clarify = learned.get("clarify") or []
+        ack = learned.get("ack") or []
         if not (facts or rules or examples or forgotten or locked or restated
-                or miss or hearsay or hedged or clarify):
+                or miss or hearsay or hedged or clarify or ack):
             return None
         parts = []
         if locked:
@@ -4115,6 +4116,11 @@ class AgentOrchestrator:
                 "so I'll treat it as unverified.")
         elif clarify:
             parts.append(str(clarify[0]))
+        elif ack:
+            # A pure acknowledgement ('no problem', 'no worries') —
+            # the honest reply is an ack, not a model riff that might
+            # fabricate a correction that never ran.
+            parts.append("Got it — nothing to change.")
         elif not parts and not miss:
             parts.append("Got it.")
         if rules:

@@ -701,6 +701,97 @@ class TestCorrectionChains(unittest.TestCase):
         self.assertIn("metrics api is on 9100", active2)
         self.assertNotIn("metrics api listens on 9090", active2)
 
+    def test_bare_denial_asks_never_guesses(self):
+        # "nope" / "that's wrong" signal a correction but carry no
+        # replacement value — a model riff once fabricated agreement
+        # AND an invented value ("prod is on 8443") plus a fake
+        # record-update claim. The deterministic lane asks for the
+        # value and touches nothing.
+        cm = self._mem()
+        cm.learn_from_user("prod api is on 443")
+        for utterance in ("nope", "that's wrong", "not quite",
+                          "nope that's wrong", "that isn't right",
+                          "no it is not"):
+            learned = cm.learn_from_user(utterance)
+            self.assertFalse(learned["facts"], utterance)
+            self.assertTrue(learned.get("clarify"), utterance)
+        self.assertEqual(self._active(cm), ["prod api is on 443"])
+
+    def test_no_noun_idioms_never_retarget(self):
+        # "no problem"/"no worries" are acknowledgements — the bare
+        # correction lane must not read 'no' as a correction marker
+        # and land 'problem' in a fact's value slot.
+        cm = self._mem()
+        cm.learn_from_user("prod api is on 443")
+        for utterance in ("no problem", "no worries", "no way",
+                          "no clue", "no biggie"):
+            learned = cm.learn_from_user(utterance)
+            self.assertFalse(learned["facts"], utterance)
+        self.assertEqual(self._active(cm), ["prod api is on 443"])
+
+    def test_no_its_correction_preserves_preposition(self):
+        # "no it's 8443" corrects the referent fact — the digit value
+        # keeps the stored preposition ('on 8443', not 'is 8443') and
+        # walks past word-shaped values a digit can't replace.
+        cm = self._mem()
+        cm.learn_from_user("prod api is on 443")
+        cm.learn_from_user("my favorite color is teal")
+        learned = cm.learn_from_user("no it's 8443")
+        active = self._active(cm)
+        self.assertIn("prod api is on 8443", active)
+        self.assertIn("my favorite color is teal", active)
+        self.assertNotIn("prod api is on 443", active)
+        self.assertNotIn("my favorite color is 8443", active)
+
+    def test_ambiguous_bare_correction_asks_never_guesses(self):
+        # Two digit-shaped facts and no conversational focus — "no
+        # it's 8443" could mean either; guessing once rewrote
+        # 'queue depth is 50' to 'queue depth is 8443' live. Ambiguity
+        # clarifies; the fact just discussed still resolves.
+        cm = self._mem()
+        cm.learn_from_user("prod api is on 443")
+        cm.learn_from_user("queue depth is 50")
+        learned = cm.learn_from_user("no it's 8443")
+        self.assertFalse(learned["facts"])
+        self.assertTrue(learned.get("clarify"))
+        self.assertEqual(self._active(cm),
+                         ["prod api is on 443", "queue depth is 50"])
+        # Focus anchors the referent: the fact just discussed wins.
+        cm._data["messages"] = [
+            {"role": "user", "content": "what port is prod on"},
+            {"role": "assistant",
+             "content": "The prod api is on 443."}]
+        learned = cm.learn_from_user("no it's 8443")
+        active = self._active(cm)
+        self.assertIn("prod api is on 8443", active)
+        self.assertIn("queue depth is 50", active)
+
+    def test_correction_value_already_banked_restates(self):
+        # "no it's 8443" while discussing a fact that already reads
+        # 8443 — nothing to change; the deterministic answer is a
+        # restate, never a model riff and never a rewrite of an
+        # uninvolved fact.
+        cm = self._mem()
+        cm.learn_from_user("the staging api uses port 8443")
+        cm.learn_from_user("prod api is on 443")
+        cm._data["messages"] = [
+            {"role": "user", "content": "what port is staging on"},
+            {"role": "assistant",
+             "content": "The staging api uses port 8443."}]
+        learned = cm.learn_from_user("no it's 8443")
+        self.assertFalse(learned["facts"])
+        self.assertEqual(learned["restated"],
+                         ["staging api uses port 8443"])
+        self.assertIn("prod api is on 443", self._active(cm))
+        # Focused on a different fact, the same value is a real
+        # correction — the already-stated row doesn't block it.
+        cm._data["messages"] = [
+            {"role": "user", "content": "which port is prod on"},
+            {"role": "assistant",
+             "content": "The prod api is on 443."}]
+        learned = cm.learn_from_user("no it's 8443")
+        self.assertIn("prod api is on 8443", learned["facts"])
+
     def test_temporal_verb_predicates_bank(self):
         # "the code freeze lifts on monday" — schedule-shaped verbs
         # (lifts/holds/begins/resumes) are declarative facts, not prose

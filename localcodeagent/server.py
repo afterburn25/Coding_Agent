@@ -4714,6 +4714,32 @@ class AppState:
                     r"the\s+(?:scheduled|regular|recurring)\s+\w+)\b"
                     r".{0,40}\bruns?\b",
                     low)):
+            # A definite 'the <thing> schedule' names a world entity —
+            # "what's the backup schedule" asks about the banked fact
+            # 'backup schedule is every day at 3am', not the autonomy
+            # inventory. Defer to fact recall when the qualified noun
+            # is a stored fact's subject; bare 'the schedule'/'any
+            # schedules' still list the inventory.
+            cm = getattr(self, "conversation_memory", None)
+            dqm = re.match(
+                r"what(?:'s|\s+is)\s+(?:the\s+|my\s+|our\s+)?"
+                r"(.+?)[?!.\s]*$", low)
+            if cm is not None and dqm:
+                et = cm._content_terms(dqm.group(1)) - {
+                    "schedule", "schedules", "goal", "goals",
+                    "mission", "missions", "trigger", "triggers",
+                    "standing"}
+                if et:
+                    for row in cm.recall_facts(low):
+                        slot = str(row.get("slot") or "")
+                        if slot.startswith("my:"):
+                            ssubj = slot[3:]
+                        elif ":" in slot:
+                            ssubj = slot.rpartition(":")[0]
+                        else:
+                            ssubj = slot
+                        if et <= cm._content_terms(ssubj):
+                            return None
             goals = [g for g in (sup.standing_goals() or [])
                      if g.get("enabled", True)]
             scheds = [s for s in (sup.scheduler.list() or [])

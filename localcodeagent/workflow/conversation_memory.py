@@ -358,6 +358,7 @@ class ConversationMemory:
         self, new_value: str, superseded_out: list | None = None,
         *, preference_only: bool = False,
         subject_hint: str = "",
+        allow_latest_fallback: bool = True,
     ) -> str | None:
         """'make that X' / 'set it to X' — a bare re-set of the most
         recently stated value. The referent's subject+predicate is kept
@@ -372,6 +373,8 @@ class ConversationMemory:
         in the same class; otherwise exactly one preference fact must
         exist. Returns None when the referent is genuinely ambiguous —
         a bare correction must never guess."""
+        self._last_retarget_ambiguous = False
+        self._last_retarget_already = ""
         new = self._clean_value(new_value)
         if (not new or len(new.split()) > 4
                 or new.lower() in self._RESET_MODIFIERS
@@ -388,11 +391,16 @@ class ConversationMemory:
             target = None
             m = None
             if preference_only:
+                # Value-shape compatibility applies to preference
+                # retargets too — "no it's 8443" can't land on 'my
+                # favorite color is teal'.
                 cands = [
                     row for row in reversed(rows)
                     if self._PREFERENCE_FACT_RE.search(
                         str(row.get("text") or ""))
-                    and pred.match(str(row.get("text") or ""))
+                    and (m3 := pred.match(str(row.get("text") or "")))
+                    and (bool(re.search(r"\d", m3.group(2)))
+                         == bool(re.search(r"\d", new)))
                 ]
                 cls = next((c for c in self._VALUE_CLASSES
                             if new.lower() in c), None)
@@ -457,14 +465,69 @@ class ConversationMemory:
                     if not hits:
                         return None
                     candidates = hits[:1]
+                # Collect every value-shape-compatible candidate, then
+                # resolve the referent by conversational focus — the
+                # fact just *stated* in the previous exchange is what
+                # "no it's X" contradicts, not whatever banked most
+                # recently. Explicit referent commands ('call it X')
+                # keep latest-wins; bare corrections refuse ambiguity
+                # rather than rewriting an uninvolved fact.
+                compat = []
+                already_rows = []
                 for row in reversed(candidates):
-                    m = pred.match(str(row.get("text") or ""))
-                    if m:
-                        if (str(row.get("text") or "").strip().lower()
-                                .endswith(new.lower())):
-                            return None  # already the stated value
-                        target = row
-                        break
+                    m2 = pred.match(str(row.get("text") or ""))
+                    if not m2:
+                        continue
+                    if (str(row.get("text") or "").strip().lower()
+                            .endswith(new.lower())):
+                        already_rows.append((row, m2))
+                        continue
+                    if (bool(re.search(r"\d", m2.group(2)))
+                            != bool(re.search(r"\d", new))):
+                        continue
+                    compat.append((row, m2))
+                if not hint and (len(compat) > 1 or already_rows):
+                    prev_q, prev_a = self._previous_exchange()
+                    focus_terms = self._content_terms(
+                        f"{prev_q} {prev_a}")
+                    # A focused already-stated row answers the turn —
+                    # "no it's 8443" about the staging api that already
+                    # reads 8443 is a restate, not a correction target.
+                    # A bare pronoun refers to the subject under
+                    # discussion, so it beats even a focused live
+                    # candidate.
+                    already_focused = [
+                        c for c in already_rows
+                        if (st := self._content_terms(c[1].group(1)))
+                        and st <= focus_terms]
+                    scored = [
+                        (len(self._content_terms(c[1].group(1))
+                             & focus_terms), c)
+                        for c in compat]
+                    scored = [s for s in scored if s[0]]
+                    top = max((s[0] for s in scored), default=0)
+                    focused = [c for s, c in scored if s == top]
+                    if len(already_focused) == 1:
+                        compat = []
+                        self._last_retarget_already = str(
+                            already_focused[0][0].get("text") or "")
+                    elif len(focused) == 1:
+                        compat = focused
+                    elif not allow_latest_fallback and not compat:
+                        self._last_retarget_already = str(
+                            already_rows[0][0].get("text") or "")
+                    elif not allow_latest_fallback:
+                        compat = []
+                        self._last_retarget_ambiguous = True
+                if (not compat and already_rows
+                        and not self._last_retarget_already
+                        and not self._last_retarget_ambiguous):
+                    # Nothing to correct but the value is already
+                    # recorded — restate the fact that holds it.
+                    self._last_retarget_already = str(
+                        already_rows[0][0].get("text") or "")
+                if compat:
+                    target, m = compat[0]
             if target is None or m is None:
                 return None
             now = time.time()
@@ -475,6 +538,25 @@ class ConversationMemory:
             target["updated_at"] = now
             if superseded_out is not None:
                 superseded_out.append(old_text)
+        # Preserve a connective preposition on the replaced value —
+        # "no it's 8443" retargeting 'prod api is on 443' yields 'on
+        # 8443', not 'is 8443'. Only for concrete replacements
+        # (digits/caps/versions) — a word value keeps the plain copula
+        # ("is sam", never "is on sam").
+        old_v = m.group(2).strip()
+        pm = re.match(
+            r"(on|at|in|to|for|from|by|via|per|under|over|after|"
+            r"before|until|through|around|about|like|as|near|off|"
+            r"into|onto|upon|within|without|against|between|among|"
+            r"during|since|with)\s+\S+$", old_v, re.IGNORECASE)
+        if (pm and re.search(r"[\dA-Z]|^v\d", new)
+                and not re.match(
+                    r"(?:on|at|in|to|for|from|by|via|per|under|over|"
+                    r"after|before|until|through|around|about|like|as|"
+                    r"near|off|into|onto|upon|within|without|against|"
+                    r"between|among|during|since|with)\b",
+                    new, re.IGNORECASE)):
+            new = pm.group(1) + " " + new
         return f"{m.group(1)}{new}"
 
     def _correct_fact_value(self, old_value: str, new_value: str) -> str | None:
@@ -890,6 +972,14 @@ class ConversationMemory:
         "thank you", "great", "good", "fine", "nice", "cool", "true",
         "right", "exactly", "agreed", "maybe", "correct", "perfect",
         "sounds good", "that works", "nothing", "never mind",
+        # 'no <noun>' politeness/dismissal idioms are acknowledgements,
+        # never corrections — "no problem" must not retarget a fact to
+        # 'X is problem'.
+        "no", "no problem", "no problems", "no worries", "no worry",
+        "no thanks", "no thank you", "no rush", "no hurry", "no need",
+        "no sweat", "no biggie", "no bother", "no trouble",
+        "no issue", "no issues", "no idea", "no clue", "no way",
+        "no doubt", "not at all", "no one", "none",
     })
 
     # Referent-relative modifiers — "make that bigger" adjusts a
@@ -1285,6 +1375,53 @@ class ConversationMemory:
                 result.setdefault("clarify", []).append(
                     f"Same what for {same_for.group(1).strip()}? "
                     "Tell me the value and I'll note it.")
+                return result
+            # Bare disagreement — "nope", "that's wrong", "not quite" —
+            # is a correction signal with no replacement value. A model
+            # riff fabricates agreement and invents the "correct" value
+            # (live: "you're right, prod is on 8443" — contradicting
+            # the banked 443 — plus a fake record-update claim). Ask
+            # for the value deterministically. Only bare denials land
+            # here; "no it's 8443" carries a value and takes the
+            # correction path.
+            if re.match(
+                    r"^(?:(?:no|nope|nah|wrong|incorrect|not\s+quite|"
+                    r"not\s+exactly|not\s+right)[\s.!?,]*|"
+                    r"(?:(?:no|nope|nah)[,!\s]+)?"
+                    r"that'?s\s+(?:wrong|incorrect|not\s+(?:right|"
+                    r"correct|true|it|what\s+i\s+meant))|"
+                    r"(?:(?:no|nope|nah)[,!\s]+)?"
+                    r"that\s+(?:isn'?t|ain'?t|is\s+not)\s+"
+                    r"(?:right|correct|true)[\s.!?,]*|"
+                    r"(?:(?:no|nope|nah)[,!\s]+)?"
+                    r"(?:it|that|this|they)\s+"
+                    r"(?:(?:is|are|was|were)\s+not|isn'?t|ain'?t|"
+                    r"aren'?t|wasn'?t|weren'?t)[\s.!?,]*)$",
+                    body, flags=re.IGNORECASE):
+                result.setdefault("clarify", []).append(
+                    "What's the right value? Tell me and I'll "
+                    "correct it.")
+                return result
+            # 'no <noun>' politeness idioms ("no problem", "no
+            # worries") are pure acknowledgements — the marker strip
+            # already consumed the 'no', leaving the bare noun. Without
+            # a deterministic ack the turn falls to a model that once
+            # invented a correction ("the backup runs at 2am, not 3 —
+            # I'll keep that in mind").
+            if (re.match(
+                    r"^(?:(?:good|real|much)\s+)?"
+                    r"(?:problems?|worries|worry|thanks|"
+                    r"thank\s+you|rush|hurry|need|sweat|biggie|"
+                    r"bother|trouble|issues?|idea|clue|way|doubt|"
+                    r"harm|offense|offence|big\s+deal|one|"
+                    r"good|reason|point|sense|use|chance|luck|"
+                    r"dice|kidding|question|comment|"
+                    r"pressure|stress|offense taken)[\s.!?,]*$",
+                    body, flags=re.IGNORECASE)
+                    and re.match(
+                        r"^(?:(?:actually|so|well|ok|okay)\s+)?"
+                        r"no[,]?\s", raw, flags=re.IGNORECASE)):
+                result.setdefault("ack", []).append("no-idiom")
                 return result
             for pattern in (
                 r"^remember\s+that\s+(.+)$",
@@ -2034,7 +2171,20 @@ class ConversationMemory:
                         if (its and re.search(
                                 r"[\d_+./\\#-]", its.group(1))):
                             fact = self._retarget_latest_fact(
-                                its.group(1), result["superseded"])
+                                its.group(1), result["superseded"],
+                                allow_latest_fallback=False)
+                            if (fact is None
+                                    and self._last_retarget_ambiguous):
+                                result.setdefault(
+                                    "clarify", []).append(
+                                    f"Correct what to "
+                                    f"{its.group(1).strip()}? Name "
+                                    "the thing and I'll fix it.")
+                            elif (fact is None
+                                    and self._last_retarget_already):
+                                result.setdefault(
+                                    "restated", []).append(
+                                    self._last_retarget_already)
                         if fact is None:
                             # Referential renames — "the name changed —
                             # it's now called vector", "the label is now
@@ -2151,12 +2301,31 @@ class ConversationMemory:
                     # unrelated facts.
                     bare = re.match(
                         r"^(?:actually|no|wait|instead|sorry)[,]?\s+"
-                        r"(?:no[,]?\s+|i\s+meant?\s+|that\s+is[,]?\s+)?"
+                        r"(?:no[,]?\s+|i\s+meant?\s+|that\s+is[,]?\s+|"
+                        r"it'?s\s+|that'?s\s+|they'?re\s+|it\s+is\s+|"
+                        r"they\s+are\s+)?"
                         r"(?:i\s+(?:prefer|like|love)\s+)?"
                         r"([a-z0-9][a-z0-9 ._-]{0,20}?)"
                         r"(?:\s+(?:now|instead|today|this\s+time))?[.!?]?$",
                         raw, flags=re.IGNORECASE)
                     if (bare
+                            and fact is None
+                            and not result.get("clarify")
+                            and not result.get("restated")
+                            # 'no <noun>' idioms are acknowledgements —
+                            # "no problem" must never retarget a fact
+                            # to 'X is problem'.
+                            and not re.match(
+                                r"^no[,]?\s+(?:problems?|worries|worry|"
+                                r"thanks|thank\s+you|rush|hurry|need|"
+                                r"sweat|biggie|bother|trouble|issues?|"
+                                r"idea|clue|way|doubt|one|harm|"
+                                r"good|reason|point|sense|use|chance|"
+                                r"luck|dice|kidding|question|comment|"
+                                r"pressure|stress|"
+                                r"offense|offence|big\s+deal)\b"
+                                r"[\s.!?,]*$",
+                                raw, flags=re.IGNORECASE)
                             and bare.group(1).strip().lower() not in (
                                 self._BARE_CORRECTION_STOPWORDS)
                             and not re.search(
@@ -2171,12 +2340,30 @@ class ConversationMemory:
                             preference_only=True)
                         if fact is None and not pref:
                             fact = self._retarget_latest_fact(
-                                val, result["superseded"])
+                                val, result["superseded"],
+                                allow_latest_fallback=False)
                         if fact is None and pref:
                             # Genuinely ambiguous referent — bank the
                             # restated preference itself instead of
                             # corrupting an unrelated fact.
                             fact = f"i {pref.group(1).lower()} {val}"
+                        if (fact is None and not pref
+                                and self._last_retarget_ambiguous
+                                and not result.get("clarify")):
+                            # The bare value names no subject and more
+                            # than one compatible fact exists — a guess
+                            # would corrupt an uninvolved fact. Ask.
+                            result.setdefault("clarify", []).append(
+                                f"Correct what to {val}? Name the "
+                                "thing and I'll fix it.")
+                        elif (fact is None and not pref
+                                and self._last_retarget_already
+                                and not result.get("restated")):
+                            # The corrected value is already recorded —
+                            # restate the fact that holds it rather than
+                            # dropping the turn to the model.
+                            result.setdefault("restated", []).append(
+                                self._last_retarget_already)
                 if fact is None and corr_body:
                     fact = corr_body
             if fact:
