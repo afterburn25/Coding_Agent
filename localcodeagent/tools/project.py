@@ -97,12 +97,21 @@ def register_project_tools(registry: ToolRegistry, manager) -> None:
                 "available": [t["id"] for t in catalog()],
             })
         root = Path(raw).expanduser()
-        try:
-            # Adopt first — registration is what makes writes into the
-            # (possibly brand-new) directory legal for other tools.
-            manager.open(root, create=True)
-        except Exception as exc:
-            return f"ERROR: cannot adopt workspace: {exc}"
+        from . import gitguard
+        autonomous = gitguard.autonomous_mission(registry)
+        if autonomous:
+            # No adoption/activation (shared session state), and the
+            # scaffold tree must land inside the mission workspace.
+            block = gitguard.mission_fs_write_block(registry, root)
+            if block:
+                return f"ERROR: {block}"
+        else:
+            try:
+                # Adopt first — registration is what makes writes into
+                # the (possibly brand-new) directory legal for tools.
+                manager.open(root, create=True)
+            except Exception as exc:
+                return f"ERROR: cannot adopt workspace: {exc}"
         try:
             result = scaffold(
                 root, template_id, name=str(args.get("name") or ""),
@@ -110,10 +119,11 @@ def register_project_tools(registry: ToolRegistry, manager) -> None:
                 force=bool(args.get("force", False)))
         except (KeyError, ValueError) as exc:
             return f"ERROR: {exc}"
-        try:
-            result["workspace"] = manager.open(root)
-        except Exception:
-            pass
+        if not autonomous:
+            try:
+                result["workspace"] = manager.open(root)
+            except Exception:
+                pass
         return json.dumps({"ok": True, "scaffold": result},
                           ensure_ascii=False, default=str)
 

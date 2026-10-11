@@ -117,6 +117,11 @@ _USER_SOURCES = {
 }
 
 
+def autonomous_mission(registry) -> bool:
+    """True when the running task is an autonomous (non-user) mission."""
+    return _mission_attributed(registry)
+
+
 def _mission_attributed(registry) -> bool:
     """True when the running task is mission-attributed and the mission
     is autonomous (not user-initiated)."""
