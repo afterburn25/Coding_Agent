@@ -1320,20 +1320,30 @@ class TruthGateTests(RecoveryLoopTests):
             # reschedule, not a narrated postponement.
             build_row = next(
                 s for s in sup.scheduler.rows if "build" in s["name"])
+            orig_at = build_row["at"]
             r = agent._reminder_reply(
                 "snooze the build reminder for 20 minutes",
                 "snooze the build reminder for 20 minutes", task.id)
             self.assertIsNotNone(r)
             self.assertIn("Snoozed", r.content)
-            # Snooze re-anchors from now — at ≈ now + 20 minutes.
+            # A duration snooze delays the row's own fire time —
+            # at ≈ original at + 20 minutes, never earlier.
             self.assertGreaterEqual(
-                build_row["at"], time.time() + 19 * 60)
+                build_row["at"], orig_at + 19 * 60)
             self.assertLessEqual(
-                build_row["at"], time.time() + 21 * 60)
+                build_row["at"], orig_at + 21 * 60)
             r = agent._reminder_reply(
                 "snooze the nonexistent reminder",
                 "snooze the nonexistent reminder", task.id)
             self.assertIn("don't see a reminder", r.content)
+
+            # Snoozing a RECURRING row can't set 'at' — the lane
+            # declines honestly instead of acking a no-op.
+            r = agent._reminder_reply(
+                "snooze the timesheets reminder for an hour",
+                "snooze the timesheets reminder for an hour",
+                task.id)
+            self.assertIn("recurring", r.content)
 
             # Reschedule updates the row in place — 'to friday at
             # 3pm' lands as a real spec, not a new schedule.

@@ -3698,6 +3698,7 @@ class AgentOrchestrator:
                    r"about)\b", " ", body, flags=re.IGNORECASE).lower()))
         dur = str(ms.group("dur") or "").strip(" ,;—-")
         when = None
+        delta = None
         now = time.time()
         if dur:
             dm = re.fullmatch(
@@ -3707,17 +3708,20 @@ class AgentOrchestrator:
             if dm:
                 scale = {"s": 1, "m": 60, "h": 3600, "d": 86400}[
                     dm.group(2)[0]]
-                when = now + float(dm.group(1)) * scale
+                delta = float(dm.group(1)) * scale
             else:
-                when = (self._reminder_at_when(dur, now)
-                        or self._reminder_at_when(f"in {dur}", now))
-            if when is None:
+                when = self._reminder_at_when(dur, now)
+                if when is None:
+                    rel = self._reminder_at_when(f"in {dur}", now)
+                    if rel is not None:
+                        delta = rel - now
+            if when is None and delta is None:
                 return self._reminder_finish(
                     f"Snooze until when? — e.g. “for 20 minutes” "
                     f"or “until 3pm”.",
                     user_text, task_id, event_callback)
         else:
-            when = now + 600  # bare 'snooze' — a default ten minutes.
+            delta = 600.0  # bare 'snooze' — a default ten minutes.
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
         if not rows:
@@ -3737,22 +3741,42 @@ class AgentOrchestrator:
             text = (f"That matches {len(hits)} reminders: {names} — "
                     "say which.")
         else:
-            try:
-                sched.update(str(hits[0]["id"]), at=when)
-                merged = sum(bool(sched.remove(str(s["id"])))
-                             for s in hits[1:])
-            except Exception as exc:
-                text = f"I couldn't snooze the reminder ({exc})."
+            kind = hits[0].get("kind")
+            if kind in ("daily", "weekly", "interval"):
+                # A snooze sets 'at', which recurring kinds ignore —
+                # the ack would describe a change that never lands.
+                # Point at the truthful verbs instead.
+                text = (
+                    f"“{self._reminder_label(hits[0])}” is a "
+                    f"recurring reminder — snoozing only shifts a "
+                    f"one-shot. Say “reschedule the "
+                    f"{self._reminder_label(hits[0])} reminder to "
+                    f"every morning” to change its cadence, or "
+                    f"“turn it off” to pause it.")
             else:
-                stamp = time.strftime(
-                    "%a %H:%M" if when - now > 20 * 3600 else "%H:%M",
-                    time.localtime(when))
-                text = (f"Snoozed "
-                        f"“{self._reminder_label(hits[0])}” "
-                        f"until {stamp}."
-                        + (f" (merged {merged} duplicate"
-                           + ("s.)" if merged != 1 else ".)")
-                           if merged else ""))
+                # A duration snooze delays the row's own fire time —
+                # 'snooze the friday reminder an hour' lands friday
+                # +1h, never earlier than scheduled.
+                if when is None:
+                    when = max(now, float(
+                        hits[0].get("at") or now)) + delta
+                try:
+                    sched.update(str(hits[0]["id"]), at=when)
+                    merged = sum(bool(sched.remove(str(s["id"])))
+                                 for s in hits[1:])
+                except Exception as exc:
+                    text = f"I couldn't snooze the reminder ({exc})."
+                else:
+                    stamp = time.strftime(
+                        "%a %H:%M"
+                        if when - now > 20 * 3600 else "%H:%M",
+                        time.localtime(when))
+                    text = (f"Snoozed "
+                            f"“{self._reminder_label(hits[0])}” "
+                            f"until {stamp}."
+                            + (f" (merged {merged} duplicate"
+                               + ("s.)" if merged != 1 else ".)")
+                               if merged else ""))
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
