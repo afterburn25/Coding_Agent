@@ -58,8 +58,22 @@ class RepoIndex:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._db = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        try:
+            # WAL + a second read-only connection: update() holds the
+            # write lock for the whole index build, but readers then
+            # answer from the last committed snapshot instead of
+            # queueing behind it — a mid-refresh index used to hang
+            # /api/rag probes for tens of seconds.
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA busy_timeout=5000")
+        except sqlite3.Error:
+            pass
         self._db.executescript(SCHEMA)
         self._db.commit()
+        self._ro_lock = threading.Lock()
+        self._ro = sqlite3.connect(str(self.db_path),
+                                   check_same_thread=False)
+        self._ro.execute("PRAGMA busy_timeout=2000")
 
     def _iter_files(self) -> list[Path]:
         out = []
@@ -155,14 +169,14 @@ class RepoIndex:
         if not q:
             return []
         hits: list[dict] = []
-        with self._lock:
-            for r in self._db.execute(
+        with self._ro_lock:
+            for r in self._ro.execute(
                     "SELECT file,kind,name,line FROM symbols WHERE name LIKE ?"
                     " ORDER BY file LIMIT ?", (f"%{q}%", limit)).fetchall():
                 hits.append({"type": "symbol", "file": r[0], "kind": r[1],
                              "name": r[2], "line": r[3]})
             if len(hits) < limit:
-                for r in self._db.execute(
+                for r in self._ro.execute(
                         "SELECT file,ord,substr(text,1,400) FROM chunks"
                         " WHERE text LIKE ? LIMIT ?",
                         (f"%{q}%", limit - len(hits))).fetchall():
@@ -171,11 +185,12 @@ class RepoIndex:
         return hits
 
     def stats(self) -> dict[str, int]:
-        with self._lock:
-            f = self._db.execute("SELECT COUNT(*) FROM files").fetchone()[0]
-            s = self._db.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]
-            c = self._db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+        with self._ro_lock:
+            f = self._ro.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+            s = self._ro.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]
+            c = self._ro.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
         return {"files": f, "symbols": s, "chunks": c}
 
     def close(self) -> None:
         self._db.close()
+        self._ro.close()
