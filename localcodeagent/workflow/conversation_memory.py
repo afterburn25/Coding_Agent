@@ -667,13 +667,25 @@ class ConversationMemory:
             r"^(?:project\s+)?([a-z0-9][a-z0-9 ._-]{0,38}?)\s+"
             r"(uses?|runs on|is built on|is written in|depends on|prefers?|"
             r"should stay|should be|must be|will be|shall be|stays?|remains?|"
-            r"is|are)\b",
+            r"listens? on|is|are)\b",
             t,
         )
         if m:
             subj = re.sub(r"\s+", " ", m.group(1)).strip()
             subj = re.sub(r"^(?:the|our|a|an)\s+", "", subj)
             pred = re.sub(r"\s+", " ", m.group(2)).strip()
+            tail = t[m.end():].strip()
+            # 'prod api is on 443', 'prod api uses port 443', and 'the
+            # api listens on 9090' fill the same semantic slot — unify
+            # so a newer port fact retires the older phrasing instead
+            # of coexisting as a contradiction.
+            if ((pred in {"is", "are"}
+                    and re.match(r"on\s+\d+\b", tail))
+                    or (pred in {"use", "uses"}
+                        and re.match(r"port\b", tail))
+                    or pred.startswith("listens on")
+                    or pred.startswith("listen on")):
+                pred = "port"
             if subj and subj not in {"i", "we", "you", "they", "he", "she", "it"}:
                 return f"{subj}:{pred}"
         return ""
@@ -1948,6 +1960,17 @@ class ConversationMemory:
                                 fact = self._retarget_latest_fact(
                                     new_v, result["superseded"],
                                     subject_hint=hint)
+                            if (fact is None and new_v
+                                    and utb.group(1)):
+                                # No prior fact to supersede — the
+                                # 'now' value is still a current fact:
+                                # "the oncall used to be priya, now
+                                # it's sam" banks 'oncall is sam'
+                                # even when 'priya' was never taught.
+                                hint = self._clean_subject(
+                                    utb.group(1))
+                                if self._fact_subject_ok(hint):
+                                    fact = f"{hint} is {new_v}"
                     if not reset and fact is None:
                         # "i thought the port was 8080 but it was
                         # 8081" — a corrected belief. The 'but it was'
@@ -2631,6 +2654,12 @@ class ConversationMemory:
         q_terms = self._content_terms(query)
         if not q_terms:
             return []
+        # Orthographic compounds — 'on call' queries a banked 'oncall',
+        # 'log in' a banked 'login'. Joined bigrams are extra overlap
+        # candidates only (never required): they widen what surfaces
+        # here while the caller's precision gate decides relevance.
+        toks = re.findall(r"[a-z0-9]+", str(query or "").lower())
+        q_terms |= {toks[i] + toks[i + 1] for i in range(len(toks) - 1)}
 
         def applies(row: dict[str, Any]) -> bool:
             if not row.get("active", True):

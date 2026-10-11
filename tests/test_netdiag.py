@@ -752,6 +752,32 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(reply)
             self.assertEqual("The prod api is on 443.", reply.text)
 
+    def test_compound_spelling_and_verification_recall(self):
+        # 'on call' queries a banked 'oncall' — English writes compounds
+        # both ways, and a strict token gate starves the split spelling.
+        # 'is it still X' is a verification probe — recall restates the
+        # fact instead of falling to the model.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "the oncall used to be priya, now it's sam")
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            for probe in ("who is on call", "who's on call",
+                          "is it still sam"):
+                reply = agent._single_fact_recall_reply(
+                    probe, "conv", "proj")
+                self.assertIsNotNone(reply, probe)
+                self.assertIn("sam", reply.text)
+            reply = agent._single_fact_recall_reply(
+                "is the prod api still on 443", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("443", reply.text)
+
     def test_when_does_probe_drops_trailing_verb(self):
         # "when does the freeze lift" — the probe's own verb isn't a
         # fact term; after the strict subset fails, retry on the noun

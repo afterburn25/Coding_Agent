@@ -673,6 +673,34 @@ class TestCorrectionChains(unittest.TestCase):
         learned = cm2.learn_from_user("the label used to be blue")
         self.assertFalse(learned["facts"])
 
+    def test_used_to_be_without_prior_banks_now_value(self):
+        # "the oncall used to be priya, now it's sam" with NO prior
+        # oncall fact — the 'now' value is still a current fact, not a
+        # turn that silently banks nothing.
+        cm = self._mem()
+        learned = cm.learn_from_user(
+            "the oncall used to be priya, now it's sam")
+        self.assertEqual(self._active(cm), ["oncall is sam"])
+        self.assertTrue(learned["facts"])
+
+    def test_port_phrasings_share_supersession_slot(self):
+        # 'X is on 443', 'X uses port 8443', and 'X listens on 9090'
+        # fill the same semantic slot — a newer port statement retires
+        # the older phrasing rather than coexisting as contradictory
+        # port claims.
+        cm = self._mem()
+        cm.learn_from_user("staging api is on 443")
+        cm.learn_from_user("staging api uses port 8443")
+        active = self._active(cm)
+        self.assertIn("staging api uses port 8443", active)
+        self.assertNotIn("staging api is on 443", active)
+        cm2 = self._mem()
+        cm2.learn_from_user("metrics api listens on 9090")
+        cm2.learn_from_user("metrics api is on 9100")
+        active2 = self._active(cm2)
+        self.assertIn("metrics api is on 9100", active2)
+        self.assertNotIn("metrics api listens on 9090", active2)
+
     def test_temporal_verb_predicates_bank(self):
         # "the code freeze lifts on monday" — schedule-shaped verbs
         # (lifts/holds/begins/resumes) are declarative facts, not prose

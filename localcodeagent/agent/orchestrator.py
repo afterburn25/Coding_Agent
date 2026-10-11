@@ -2536,6 +2536,11 @@ class AgentOrchestrator:
         r"do|does|did|will)\s+|"
         r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
         r"do\s+i\s+(?:use|have|like|prefer|run|need)\s+|"
+        # Elliptical verification — "is it still sam", "is the prod
+        # api still on 443" asks recall to confirm against the banked
+        # fact; the anaphor is resolved by the fact itself.
+        r"(?:is|are|was|were)\s+(?:it|that|this|they|he|she|the)\s+"
+        r"(?:(?:still|really|actually|currently)\s+)?|"
         r"(?:did|have|had)\s+i\s+(?:tell|told|mention)\w*\s+you\s+"
         r"(?:about\s+)?)",
         re.IGNORECASE)
@@ -2658,7 +2663,11 @@ class AgentOrchestrator:
                         # answer, not the entity — "which port is prod
                         # on" is answered by 'prod api is on 443', a
                         # fact that never contains the word 'port'.
-                        "port", "version", "number"}
+                        "port", "version", "number",
+                        # 'still'/'yet' mark verification mode ("is the
+                        # api still on 443") — they ask whether a fact
+                        # holds, and no stored fact carries them.
+                        "still", "yet"}
             if not q_terms:
                 return None
             def _terms_hit(terms: set, row) -> bool:
@@ -2699,6 +2708,22 @@ class AgentOrchestrator:
                     if t_terms and t_terms != q_terms:
                         rows = [r for r in pre_gate
                                 if _terms_hit(t_terms, r)]
+            if not rows:
+                # Orthographic compounds — English writes them both
+                # ways ("on call"/oncall, "log in"/login, "set
+                # up"/setup). When the strict terms starve, join each
+                # adjacent body-token pair (pre-stopword, so 'on' can
+                # reach 'call') and retry with the joined variant.
+                toks = re.findall(r"[a-z0-9]+", body.lower())
+                for i in range(len(toks) - 1):
+                    joined = toks[i] + toks[i + 1]
+                    if joined in q_terms:
+                        continue
+                    cand = (q_terms - {toks[i], toks[i + 1]}) | {joined}
+                    hit = [r for r in pre_gate if _terms_hit(cand, r)]
+                    if hit:
+                        rows = hit
+                        break
             if not rows:
                 return None
             # Subject anchoring: the question asks ABOUT an entity, so a
