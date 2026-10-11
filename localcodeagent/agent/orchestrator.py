@@ -2580,8 +2580,8 @@ class AgentOrchestrator:
         # fact; the anaphor is resolved by the fact itself.
         r"(?:is|are|was|were)\s+(?:it|that|this|they|he|she|the)\s+"
         r"(?:(?:still|really|actually|currently)\s+)?|"
-        r"(?:did|have|had)\s+i\s+(?:tell|told|mention)\w*\s+you\s+"
-        r"(?:about\s+)?)",
+        r"(?:did|have|had)\s+i\s+(?:ever\s+|already\s+|really\s+)?"
+        r"(?:tell|told|mention)\w*\s+you\s+(?:about\s+)?)",
         re.IGNORECASE)
     _FACT_RECALL_SKIP_RE = re.compile(
         r"^\s*what\s+(?:do\s+you(?!\s+(?:have|got|know|remember|"
@@ -2896,7 +2896,15 @@ class AgentOrchestrator:
                  if frame is not None and frame.masked_case
                  else user_text) or ""
         rules_q = bool(self._RULES_RECALL_RE.search(probe))
-        if not rules_q and not self._FACTS_RECALL_RE.search(probe):
+        # 'things'/'items' deliberately excluded — "how many things are
+        # running" is an autonomy-inventory ask, not a fact count.
+        count_q = bool(re.search(
+            r"\bhow\s+many\s+facts?\b|"
+            r"\bhow\s+much\s+(?:do\s+you\s+remember|"
+            r"(?:have\s+you\s+)?(?:learned|remembered|stored))\b",
+            probe, re.IGNORECASE))
+        if not rules_q and not count_q \
+                and not self._FACTS_RECALL_RE.search(probe):
             return None
         if self.conversation_memory is None:
             return None
@@ -2921,6 +2929,15 @@ class AgentOrchestrator:
                 canonical=canonical)
         facts = self.conversation_memory.active_facts(
             project_id=project_id, conversation_id=conversation_id)
+        if count_q:
+            n = len(facts)
+            canonical = (
+                "Nothing yet — you haven't taught me anything to keep."
+                if n == 0 else
+                f"I've kept {n} fact{'s' if n != 1 else ''} "
+                "you've told me.")
+            from ..context.realize import RenderedReply
+            return RenderedReply(text=canonical, speech_act="answer")
         # Scoped recall — "what do you remember about my shell" asks
         # for the shell fact, not the whole store. The dump is only for
         # unscoped/about-me introspection; a named topic filters the
@@ -4220,13 +4237,29 @@ class AgentOrchestrator:
             # Echo the landed value — "Got it — 8090." both confirms the
             # correction and proves the new value superseded; narrating
             # the storage mechanism ("I saved that to persistent
-            # memory") is internals the user didn't ask for.
+            # memory") is internals the user didn't ask for. User-owned
+            # facts ("my birthday is march 3") echo second-person — an
+            # ack repeating 'my X' would claim the user's fact as hers.
             if len(facts) == 1:
-                parts.append(f"Got it — {facts[0]}.")
+                echo = facts[0]
+                try:
+                    slot = self.conversation_memory._fact_slot(echo)
+                    if str(slot or "").startswith("my:"):
+                        echo = self._second_person_fact(echo)
+                except Exception:
+                    pass
+                parts.append(f"Got it — {echo}.")
             else:
                 parts.append(f"Got it — noted {len(facts)} things.")
         elif restated:
-            parts.append(f"Already noted — {restated[0]}.")
+            echo = restated[0]
+            try:
+                slot = self.conversation_memory._fact_slot(echo)
+                if str(slot or "").startswith("my:"):
+                    echo = self._second_person_fact(echo)
+            except Exception:
+                pass
+            parts.append(f"Already noted — {echo}.")
         elif hearsay:
             # Secondhand claims are acknowledged but never banked —
             # the ack says so plainly instead of pretending either a

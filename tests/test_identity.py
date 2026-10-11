@@ -58,6 +58,23 @@ class TestIdentityAnswers(unittest.TestCase):
             self.assertIsNone(identity.response_for(q), q)
             self.assertIsNone(identity.locked_topic(q), q)
 
+    def test_user_possessed_identity_nouns_not_locked(self):
+        # "my birthday" names the USER's fact — the 'you' elsewhere in
+        # the sentence ("did I ever tell YOU") is an addressee, not the
+        # subject. These belong to memory recall, not the locked
+        # identity lane.
+        for q in ("did I ever tell you my birthday",
+                  "my birthday is march 3",
+                  "remember my birthday is march 3",
+                  "what is my age",
+                  "did I tell you about my dad",
+                  "when was I born — can you guess"):
+            self.assertIsNone(identity.locked_topic(q), q)
+        # Nexus-possessed nouns stay locked.
+        for q in ("when is your birthday", "how old are you",
+                  "who is your creator"):
+            self.assertIsNotNone(identity.locked_topic(q), q)
+
     def test_write_intent_passes_to_command_lane(self):
         # These must NOT be answered with the fact — they need the refusal
         # from the Answer Memory command path.

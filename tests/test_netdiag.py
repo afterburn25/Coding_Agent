@@ -916,6 +916,41 @@ class TruthGateTests(RecoveryLoopTests):
                     agent._single_fact_recall_reply(q, "conv", "proj"),
                     q)
 
+    def test_ever_tell_and_fact_count(self):
+        # Live: "did I ever tell you my editor" got a self-contradictory
+        # model reply ("No — ... You told me that") because 'ever'
+        # sat between the aux and the verb the recall lead expected;
+        # "how many facts do you have" got a persona-drifted evasion
+        # instead of the actual count.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my editor is cursor")
+            agent.conversation_memory.learn_from_user(
+                "retry limit is 10")
+            r = agent._single_fact_recall_reply(
+                "did I ever tell you my editor", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("cursor", r.text)
+            # Negative case — the honest "you haven't told me" answer.
+            r = agent._single_fact_recall_reply(
+                "did I ever tell you my birthday", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("haven't told me", r.text)
+            r = agent._facts_recall_reply(
+                "how many facts do you have", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("2", r.text)
+            # "how many things are running" is an autonomy ask — never
+            # a fact count.
+            self.assertIsNone(
+                agent._facts_recall_reply(
+                    "how many things are running", "conv", "proj"))
+
     def test_topic_pivot_preamble_strips_on_learn(self):
         # "speaking of ports, prod uses 8443" — the bankable clause
         # follows the pivot's comma. The pivot itself must not bank
