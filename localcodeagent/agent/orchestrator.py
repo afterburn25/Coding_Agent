@@ -3602,27 +3602,29 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_CANCEL_RE = re.compile(
         r"^\s*(?:please\s+)?(?:cancel|delete|remove|drop|clear)\s+"
-        r"(?P<body>.+?)?\breminders?\b"
+        r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
         r"(?:\s*(?:for|about|on|of|to)\s+(?P<tail>.+?))?"
         r"\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_SNOOZE_RE = re.compile(
         r"^\s*(?:please\s+)?(?:snooze|postpone|delay|push\s+back)\s+"
-        r"(?P<body>.+?)?\breminders?\b"
+        r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
         r"(?:\s+(?:for|until|till|to|by)\s+(?P<dur>.+?))?\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_TOGGLE_RE = re.compile(
         r"^\s*(?:please\s+)?(?P<verb>turn|switch|disable|enable|"
         r"re-?enable|pause|resume|unpause)\s+(?P<body>.+?)?"
-        r"\breminders?\b\s*(?P<dir>back\s+on|off|on)?\s*[.!?]?\s*$",
+        r"\b(?P<noun>reminders?|alarms?|timers?)\b"
+        r"\s*(?P<dir>back\s+on|off|on)?\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_RESCHEDULE_RE = re.compile(
         r"^\s*(?:please\s+)?(?:reschedule|move|change)\s+"
-        r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?\breminders?\b"
+        r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?"
+        r"\b(?P<noun>reminders?|alarms?|timers?)\b"
         r"\s+(?:to|until|till|for)\s+(?P<when>.+?)\s*[.!?]?\s*$",
         re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(
-        r"\breminders?\b|\balarms?\b", re.IGNORECASE)
+        r"\breminders?\b|\balarms?\b|\btimers?\b", re.IGNORECASE)
     # Temporal tokens in a failed when-clause → ask when, don't claim.
     _REMINDER_TIMEISH_RE = re.compile(
         r"\d|morning|afternoon|evening|night|noon|midnight|tomorrow|"
@@ -3685,7 +3687,7 @@ class AgentOrchestrator:
                                task_id: str, event_callback):
         """'snooze the X reminder [for 20m|until 3pm]' — a real `at`
         update via scheduler.update, never a narrated postponement."""
-        sched, rows = self._reminder_rows()
+        sched, rows = self._reminder_rows(noun=ms.group("noun"))
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
@@ -3784,7 +3786,7 @@ class AgentOrchestrator:
                                    task_id: str, event_callback):
         """'reschedule the deploy reminder to friday at 3' — a real
         scheduler.update of at/kind fields."""
-        sched, rows = self._reminder_rows()
+        sched, rows = self._reminder_rows(noun=mr.group("noun"))
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
@@ -3837,9 +3839,11 @@ class AgentOrchestrator:
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
-    def _reminder_rows(self, *, include_disabled: bool = False):
+    def _reminder_rows(self, *, include_disabled: bool = False,
+                       noun: str | None = None):
         """Reminder schedules (chat-set notify rows); enabled only
-        unless include_disabled — re-enable asks need those."""
+        unless include_disabled — re-enable asks need those. A
+        singular alarm/timer noun scopes to rows named for it."""
         sup = (self._autonomy() if callable(self._autonomy)
                else self._autonomy)
         sched = getattr(sup, "scheduler", None)
@@ -3851,6 +3855,11 @@ class AgentOrchestrator:
                      .startswith("reminder")
                      or (isinstance(s.get("action"), dict)
                          and s["action"].get("kind") == "notify"))]
+        if noun and noun not in ("reminder", "reminders"):
+            stem = noun.rstrip("s").lower()
+            rows = [s for s in rows
+                    if str(s.get("name") or "").lower()
+                       .startswith(stem)]
         return sched, rows
 
     def _reminder_label(self, s: dict) -> str:
@@ -3964,7 +3973,8 @@ class AgentOrchestrator:
                 "Turn them on or off? — e.g. “turn off "
                 "my reminders”.",
                 user_text, task_id, event_callback)
-        sched, rows = self._reminder_rows(include_disabled=True)
+        sched, rows = self._reminder_rows(
+            include_disabled=True, noun=mt.group("noun"))
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
@@ -4022,7 +4032,7 @@ class AgentOrchestrator:
                                task_id: str, event_callback):
         """'cancel the deploy reminder' — a real scheduler removal by
         topic match, with ambiguity listed rather than guessed."""
-        sched, rows = self._reminder_rows()
+        sched, rows = self._reminder_rows(noun=mc.group("noun"))
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
@@ -4037,7 +4047,8 @@ class AgentOrchestrator:
         topic_terms = set(
             re.findall(r"[a-z0-9']+", str(topic_src or "").lower()))
         if not topic_terms and re.search(
-                r"\breminders\b", mc.group(0), re.IGNORECASE):
+                r"\b(?:reminders|alarms|timers)\b", mc.group(0),
+                re.IGNORECASE):
             # 'cancel my reminders' (plural, no topic) is a wipe-all.
             all_flag = True
         now = time.time()
@@ -4101,7 +4112,8 @@ class AgentOrchestrator:
         if not scope_terms:
             tm = re.search(
                 r"\b(?:the\s+|my\s+)?([a-z0-9][a-z0-9'\s]{0,40}?)\s+"
-                r"reminders?\b", plan_text, re.IGNORECASE)
+                r"(?:reminders?|alarms?|timers?)\b", plan_text,
+                re.IGNORECASE)
             if tm is not None:
                 scope_terms = set(re.findall(
                     r"[a-z0-9']+",
