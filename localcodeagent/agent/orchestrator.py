@@ -3950,6 +3950,11 @@ class AgentOrchestrator:
         spec = self._reminder_spec(
             str(mr.group("when") or ""), time.time())
         if spec is None:
+            # 'change the timer to 30 minutes' — a duration target,
+            # not a clock.
+            spec = self._reminder_spec(
+                "in " + str(mr.group("when") or ""), time.time())
+        if spec is None:
             return self._reminder_finish(
                 "Reschedule to when? — e.g. “to friday at 3pm” "
                 "or “to every morning”.",

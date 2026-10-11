@@ -2161,6 +2161,15 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Snoozed", result.content)
             self.assertAlmostEqual(
                 sup.scheduler.rows[-1]["at"], t0 + 600, 0)
+            # 'change the timer to 30 minutes' — a duration target
+            # got 'Reschedule to when?'; the in-prefix reads it.
+            sup.scheduler.rows.clear()
+            sup.scheduler.add(
+                "timer: terse", "once", at=time.time() + 600,
+                action={"kind": "notify", "detail": "terse"})
+            result = agent.run("change the timer to 30 minutes",
+                               mode="auto")
+            self.assertIn("Rescheduled", result.content)
             sup.scheduler.rows.clear()
 
             # Possessive scopes — 'cancel tomorrow's reminder' left
