@@ -67,6 +67,7 @@ class LkgStore:
         self.root = Path(store_dir)
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._last_snap_ms = 0
 
     @property
     def rollback_flag(self) -> Path:
@@ -247,11 +248,18 @@ class LkgStore:
     def snapshot(self, *, label: str = "") -> dict:
         """Copy backend/ + config.json + VERSION into a timestamped snap."""
         with self._lock:
-            snap = self.root / f"snap-{int(time.time() * 1000)}"
-            n = 0
+            # Monotonic names — wall-clock ms can repeat (two snaps in
+            # the same millisecond) and re-reading the clock inside a
+            # collision retry made sorted() diverge from creation
+            # order. Bumping a counter keeps names unique AND keeps
+            # lexicographic order equal to creation order.
+            ms = int(time.time() * 1000)
+            ms = max(ms, self._last_snap_ms + 1)
+            snap = self.root / f"snap-{ms}"
             while snap.exists():
-                n += 1
-                snap = self.root / f"snap-{int(time.time() * 1000)}-{n}"
+                ms += 1
+                snap = self.root / f"snap-{ms}"
+            self._last_snap_ms = ms
             snap.mkdir(parents=True, exist_ok=True)
             copied = []
             total_bytes = 0
