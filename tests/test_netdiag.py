@@ -2656,6 +2656,22 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(len(sup.scheduler.rows), n0)
             sup.scheduler.rows.clear()
 
+            # A banked answer must never outrank the reminder
+            # lane — live, 'remind me in a few minutes' was
+            # answered 'The timer is 30 minutes' from answer
+            # memory via has_memory_answer, before the lane ran.
+            class _AMHit:
+                hit = True
+            class _AM:
+                available = True
+                def lookup(self, *a, **kw):
+                    return _AMHit()
+            agent.answer_memory = _AM()
+            self.assertFalse(
+                agent.has_memory_answer(
+                    "remind me in a few minutes"))
+            agent.answer_memory = None
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

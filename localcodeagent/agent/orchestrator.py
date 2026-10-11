@@ -6590,6 +6590,11 @@ class AgentOrchestrator:
             # "do it" / "yes" resolve against live conversation, never a
             # stored answer.
             return False
+        if self._reminder_shaped(user_text):
+            # A scheduler command must reach the reminder lane — a
+            # banked 'the timer is 30 minutes' answer outranked the
+            # honest pin-fail for 'remind me in a few minutes'.
+            return False
         am = self.answer_memory
         if am is None or not getattr(am, "available", False):
             return False
