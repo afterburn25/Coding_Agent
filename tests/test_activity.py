@@ -388,7 +388,17 @@ class AutonomousGitGuardTests(unittest.TestCase):
                         "echo hi && git push",
                         "echo hi; git merge x",
                         "git status | git push",
-                        "git checkout `git rev-parse main`"):
+                        "git checkout `git rev-parse main`",
+                        # gh CLI publishes without `git` verbs
+                        "gh pr create --fill", "gh release create v1",
+                        "gh api -X POST repos/o/r/issues",
+                        "gh issue comment 3 --body x",
+                        "gh repo delete o/r --yes",
+                        "gh workflow run ci.yml",
+                        "gh auth login",
+                        "gh run rerun 123",
+                        "gh pr checkout 4",
+                        "echo ok && gh pr merge 4"):
                 out = autonomous_git_block(reg, cmd, ws, ws)
                 self.assertIsNotNone(out, cmd)
 
@@ -452,7 +462,11 @@ class AutonomousGitGuardTests(unittest.TestCase):
                         "git config --list", "git config --get user.name",
                         "git config user.name",
                         "git symbolic-ref HEAD",
-                        "git reflog", "git notes", "git notes list"):
+                        "git reflog", "git notes", "git notes list",
+                        # gh read-only forms stay open
+                        "gh pr list", "gh pr view 4", "gh issue status",
+                        "gh api repos/o/r", "gh release list",
+                        "gh repo view", "gh auth status"):
                 self.assertIsNone(
                     autonomous_git_block(reg, cmd, ws, ws), cmd)
 

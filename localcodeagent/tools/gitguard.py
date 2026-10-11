@@ -65,6 +65,27 @@ _GIT_SHARED_RE = re.compile(
     r"replace\b|filter-branch|filter-repo)",
     re.IGNORECASE)
 
+# GitHub CLI — `gh` publishes without touching `git` verbs at all.
+_GH = (
+    r"(?:^|&&|\|\||;|\||`|\$\(|[\"']|\n)"
+    r"\s*(?:(?:cmd|powershell|pwsh|bash|sh|zsh|fish|start|call|xargs|"
+    r"env|time|nice|sudo)(?:\.exe)?[\s/\"'\-\w=.]*)?"
+    r"(?:[\w.\\/:~-]*[\\/])?gh(?:\.exe)?[\"']?\s+"
+    r"(?:-[a-zA-Z]\s+\S+\s+|--\S+(?:=\S+)?\s+)*")
+_GH_REMOTE_RE = re.compile(
+    _GH + r"(?:api\b[^;&|]*?(?:-X\s*[\"']?(?:POST|PUT|PATCH|DELETE)\b|"
+    r"--method\s+[\"']?(?:post|put|patch|delete)\b|\s-[fF]\s)|"
+    r"(?:pr|issue|release|repo|workflow|run|gist|secret|variable|"
+    r"label|ruleset|project|org|milestone)\s+[^;&|]*?\b(?:create|merge|"
+    r"close|reopen|delete|edit|comment|review|lock|unlock|pin|unpin|"
+    r"transfer|rename|archive|unarchive|fork|upload|rerun|cancel|"
+    r"enable|disable|run|set|add|remove|ready|revert|resolve|develop|"
+    r"adopt|publish)\b|"
+    r"auth\s+(?:login|logout|refresh)\b)",
+    re.IGNORECASE)
+_GH_MUTATE_RE = re.compile(
+    _GH + r"(?:pr\s+checkout|repo\s+sync)\b", re.IGNORECASE)
+
 # Local checkout/index mutations — the worktree sandbox tolerates them.
 _GIT_MUTATE_RE = re.compile(
     _GIT + r"(?:commit|merge|rebase|pull|checkout|switch|reset|"
@@ -264,7 +285,7 @@ def autonomous_git_block(registry, command: str, cwd: Path,
     scope = str(_repo_root(cwd) or cwd)
     text = _expand_scripts(command, cwd)
 
-    if _GIT_REMOTE_RE.search(text):
+    if _GIT_REMOTE_RE.search(text) or _GH_REMOTE_RE.search(text):
         if not _has_grant(registry, "git_push", scope):
             return _BLOCK.format(sub="git push / remote changes",
                                  action="git_push")
@@ -272,7 +293,7 @@ def autonomous_git_block(registry, command: str, cwd: Path,
         if not _has_grant(registry, "git_commit", scope):
             return _BLOCK.format(sub="git branch/tag/ref/config changes",
                                  action="git_commit")
-    elif _GIT_MUTATE_RE.search(text):
+    elif _GIT_MUTATE_RE.search(text) or _GH_MUTATE_RE.search(text):
         # `-C`/`--work-tree`/`cd` overrides: primary iff ANY targeted dir
         # is a primary checkout (.git is a dir, not a worktree pointer
         # file). Non-repo targets are left to git's own failure.
