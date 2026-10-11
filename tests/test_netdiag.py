@@ -1047,6 +1047,32 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("port is 9090", r.text.lower())
 
+    def test_first_ordinal_scans_the_record_forward(self):
+        # Live: "what was the first thing I asked you?" replayed the
+        # LAST user turn — 'first' was in the ordinal set but the
+        # replay only scanned backwards. Ordinals carry direction.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            cm = agent.conversation_memory
+            cm.record_exchange("hello nexus", "Hi there.")
+            cm.record_exchange("what port should the api use",
+                               "Use port 8080.")
+            cm.record_exchange("sounds good", "Cool.")
+            r = agent._single_fact_recall_reply(
+                "what was the first thing i asked you?",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("port should the api use", r.text.lower())
+            r = agent._single_fact_recall_reply(
+                "what was the first thing you said to me?",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("hi there", r.text.lower())
+
     def test_repeat_ask_replays_last_reply(self):
         # Live: "repeat what you just said" reached the model, which
         # paraphrased instead of quoting — and "say that again" fell

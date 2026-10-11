@@ -2734,7 +2734,8 @@ class AgentOrchestrator:
         "mentioned", "made"})
 
     def _discourse_referent(self, prop: str) -> str | None:
-        """'user' | 'user_q' | 'assistant' | None — the prop names a
+        """'user' | 'user_q' | 'assistant' (+ '_first' variants) | None —
+        the prop names a
         discourse-role referent (an answer I gave / a question or
         statement you gave me) and carries no topic terms. A pure
         referent resolves against the recorded turns, never against
@@ -2751,10 +2752,10 @@ class AgentOrchestrator:
         # 'asked' referent prefers actual questions; a 'thing I told
         # you' referent takes the latest user turn either way.
         user_head = re.search(
-            r"\b(?:my|the)\s+(?:last|previous|first|earlier|recent)\s+"
-            r"(?:question|query|thing\s+i\s+(?:asked|told|said|"
-            r"mentioned|shared))\b|"
-            r"\b(?:last|previous|first|recent)\s+thing\s+i\s+"
+            r"\b(?:my|the)\s+(?P<ord>last|previous|first|earlier|"
+            r"recent)\s+(?:question|query|thing\s+i\s+(?:asked|told|"
+            r"said|mentioned|shared))\b|"
+            r"\b(?P<ord2>last|previous|first|recent)\s+thing\s+i\s+"
             r"(?:asked|told|said|mentioned|shared)\b|"
             r"\b(?:did\s+)?i\s+(?:just\s+)?ask(?:ed)?\b",
             prop, re.IGNORECASE)
@@ -2766,12 +2767,16 @@ class AgentOrchestrator:
                 prefer_q = not re.search(
                     r"thing\s+i\s+(?:told|said|mentioned|shared)",
                     user_head.group(0), re.IGNORECASE)
-                return ("user_q" if prefer_q else "user")
+                first = (user_head.group("ord")
+                         or user_head.group("ord2") or "").lower()
+                kind = "user_q" if prefer_q else "user"
+                return kind + ("_first" if first == "first" else "")
         # A bare noun is not anaphoric — "do the thing" strips to
         # prop="thing", which must not read as a discourse referent.
         # Definite reference needs the article/possessive or a pronoun.
         head = re.search(
-            r"\b(?:the\s+|your\s+)(?:answer|reply|response|thing|"
+            r"\b(?:the\s+|your\s+)(?:(?P<ord3>last|first|previous|"
+            r"earlier|recent)\s+)?(?:answer|reply|response|thing|"
             r"result|outcome|decision|verdict)\b|\b(?:it|that)\b",
             prop, re.IGNORECASE)
         if head is None:
@@ -2779,6 +2784,8 @@ class AgentOrchestrator:
         rest = prop[:head.start()] + " " + prop[head.end():]
         if memory._content_terms(rest) - self._ANAPHORA_FILLER_TERMS:
             return None
+        if (head.group("ord3") or "").lower() == "first":
+            return "assistant_first"
         return "assistant"
 
     def _anaphoric_replay(self, prop: str, history: list) -> str | None:
@@ -2790,21 +2797,28 @@ class AgentOrchestrator:
         if memory is None:
             return None
         referent = self._discourse_referent(prop)
-        if referent in ("user", "user_q"):
-            return self._user_recall_replay(
-                history, prefer_question=(referent == "user_q"))
-        if referent != "assistant":
+        if referent is None:
             return None
-        quoted = self._last_assistant_quote(history)
+        first = referent.endswith("_first")
+        if referent.startswith("user"):
+            return self._user_recall_replay(
+                history, prefer_question=referent.startswith("user_q"),
+                from_start=first)
+        if not referent.startswith("assistant"):
+            return None
+        quoted = self._assistant_quote(history, first=first)
         if quoted is not None:
             return f"Earlier I said: \"{quoted}\""
         return "I don't have an earlier answer on record."
 
-    def _last_assistant_quote(self, history: list) -> str | None:
-        """Most recent non-meta assistant utterance, normalized to one
-        line, truth-gate marker preserved verbatim — the quoted
-        substance for replays and repeats."""
-        for row in reversed(history):
+    def _assistant_quote(self, history: list,
+                         first: bool = False) -> str | None:
+        """Most recent (or, for 'the first thing you said', earliest)
+        non-meta assistant utterance, normalized to one line,
+        truth-gate marker preserved verbatim — the quoted substance
+        for replays and repeats."""
+        rows = history if first else reversed(history)
+        for row in rows:
             if str(row.get("role")) != "assistant":
                 continue
             content = re.sub(
@@ -2842,20 +2856,22 @@ class AgentOrchestrator:
             history = memory.history(limit=40)
         except Exception:
             return None
-        return self._last_assistant_quote(history)
+        return self._assistant_quote(history)
 
     def _user_recall_replay(self, history: list,
-                            prefer_question: bool = True) -> str | None:
+                            prefer_question: bool = True,
+                            from_start: bool = False) -> str | None:
         """'my last question / what did I just ask / the last thing I
-        told you' — resolve to the last user turn on record. A
-        'question' referent prefers actual questions over interleaved
-        statements; 'the last thing I told you' takes the latest user
-        turn either way."""
+        told you' — resolve to a user turn on record, latest by
+        default or earliest for 'first'. A 'question' referent
+        prefers actual questions over interleaved statements; 'the
+        last thing I told you' takes the user turn either way."""
         memory = self.conversation_memory
         if memory is None:
             return None
         fallback = None
-        for row in reversed(history):
+        rows = history if from_start else reversed(history)
+        for row in rows:
             if str(row.get("role")) != "user":
                 continue
             content = re.sub(
@@ -3013,8 +3029,10 @@ class AgentOrchestrator:
                 history = []
             verdict = (
                 self._user_recall_replay(
-                    history, prefer_question=(referent == "user_q"))
-                if referent in ("user", "user_q")
+                    history,
+                    prefer_question=referent.startswith("user_q"),
+                    from_start=referent.endswith("_first"))
+                if referent.startswith("user")
                 else self._anaphoric_replay(prop, history))
             if verdict is not None:
                 from ..context.realize import RenderedReply
