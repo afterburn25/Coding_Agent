@@ -3607,6 +3607,30 @@ class AgentOrchestrator:
         r"(?P<when>.+?)\s+(?:to|about|of|that)\s+"
         r"(?P<task>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # Greedy-when variant — 'at quarter to 5 to leave' lazy-splits at
+    # the 'to' inside 'quarter to'; when the lazy spec fails, binding
+    # the connector to the LAST one recovers 'at 4:45'/'leave'.
+    _REMINDER_RE_GREEDY = re.compile(
+        _REMINDER_POLITE +
+        r"(?:remind|alert|notify|ping|wake)\s+"
+        r"me\s+(?:up\s+)?"
+        r"(?P<when>.+)\s+(?:to|about|of|that)\s+"
+        r"(?P<task>.+?)" + _REMINDER_TRAIL,
+        re.IGNORECASE)
+    # Declarative/imperative noun-first asks — 'i want a reminder for
+    # 5pm', 'give me a 10 minute timer'. The model narrated fake
+    # 'reminder set for 5:00 PM' replies over zero rows.
+    _REMINDER_DECL_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:i\s+(?:want|need|wanna|'?d\s+like|would\s+like|could\s+use)"
+        r"|(?:give|get|make|set\s+up)\s+me|gimme)\s+"
+        r"(?:a\s+|an\s+|me\s+a\s+)?"
+        r"(?:(?P<dur>\d[\w\s]*?(?:seconds?|secs?|minutes?|mins?|"
+        r"hours?|hrs?|days?|weeks?))\s+)?"
+        r"(?P<noun>reminders?|alarms?|timers?)\b"
+        r"(?:\s+(?:for|at|in|on|to)\s+(?P<when>.+?))?"
+        + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:remind|alert|notify|ping|wake)\s+"
@@ -4419,6 +4443,66 @@ class AgentOrchestrator:
                         "Say “turn reminders back on” to resume them.")
             return self._reminder_finish(
                 text, user_text, task_id, event_callback)
+        md = self._REMINDER_DECL_RE.match(plan_text)
+        if md is not None:
+            # 'i want a reminder for 5pm' / 'give me a 10 minute
+            # timer' — the time carries the whole ask; alarm/timer
+            # nouns are their own task, a bare 'reminder' asks what.
+            sched, _rows = self._reminder_rows(noun=md.group("noun"))
+            noun = str(md.group("noun") or "").lower().rstrip("s")
+            dur = str(md.group("dur") or "").strip(" ,;—-")
+            when_d = str(md.group("when") or "").strip(" ,;—-")
+            cand = dur or when_d
+            spec = (self._reminder_spec(cand, time.time())
+                    if cand else None)
+            if spec is None and dur:
+                spec = self._reminder_spec("in " + dur, time.time())
+            if spec is None and when_d:
+                spec = self._reminder_spec("at " + when_d,
+                                           time.time())
+            if spec is None and when_d:
+                # 'a timer for 5 minutes' — the 'for' leads a
+                # duration, not a clock.
+                spec = self._reminder_spec("in " + when_d,
+                                           time.time())
+            if sched is None:
+                return self._reminder_finish(
+                    "I can't set reminders — the scheduler isn't "
+                    "running in this session.",
+                    user_text, task_id, event_callback)
+            if spec is None:
+                if not cand:
+                    return self._reminder_finish(
+                        f"When should the {noun} fire? — e.g. "
+                        "“in 10 minutes”, “at 3pm”, "
+                        "“tomorrow at 9”.",
+                        user_text, task_id, event_callback)
+                if not self._REMINDER_TIMEISH_RE.search(cand):
+                    return None
+                return self._reminder_finish(
+                    f"I couldn't pin a time from “{cand}” — say "
+                    "“at 3pm”, “in 30 minutes”, or “tomorrow at 9”.",
+                    user_text, task_id, event_callback)
+            task_d = noun if noun in ("alarm", "timer") else ""
+            if task_d:
+                kind = spec["kind"]
+                fields = {k: v for k, v in spec.items()
+                          if k != "kind"}
+                sched.add(
+                    f"{noun}: {noun.capitalize()}", kind,
+                    action={"kind": "notify", "title": "Reminder",
+                            "detail": task_d},
+                    created_by="user", **fields)
+                return self._reminder_finish(
+                    f"{noun.capitalize()} set "
+                    + self._reminder_spec_text(spec, task_d),
+                    user_text, task_id, event_callback)
+            lead = ("in " if dur else
+                    "at " if re.match(r"\d|noon|midnight", cand,
+                                      re.IGNORECASE) else "")
+            return self._reminder_finish(
+                f"Sure — remind you to do what {lead}{cand}?",
+                user_text, task_id, event_callback)
         m = self._REMINDER_RE.match(plan_text)
         if m is None:
             m = self._REMINDER_LEAD_CADENCE_RE.match(plan_text)
@@ -4474,6 +4558,19 @@ class AgentOrchestrator:
         else:
             when_raw = str(m.group("when") or "").strip(" ,;—-")
             spec = self._reminder_spec(when_raw, time.time())
+            if spec is None:
+                # The lazy when may have split inside a clock phrase
+                # ('at quarter to 5' → 'at quarter'); retry with the
+                # connector bound to the LAST one.
+                mg = self._REMINDER_RE_GREEDY.match(plan_text)
+                if mg is not None:
+                    gspec = self._reminder_spec(
+                        str(mg.group("when") or ""), time.time())
+                    if gspec is not None:
+                        m = mg
+                        when_raw = str(mg.group("when") or "").strip(
+                            " ,;—-")
+                        spec = gspec
             if spec is None:
                 if self._REMINDER_EVENTISH_RE.search(when_raw):
                     return self._reminder_finish(
@@ -4609,7 +4706,8 @@ class AgentOrchestrator:
                          or self._REMINDER_RESCHEDULE_RE.match(plan_text)
                          or self._REMINDER_NOTASK_RE.match(plan_text)
                          or self._REMINDER_LEAD_CADENCE_RE.match(
-                             plan_text))):
+                             plan_text)
+                         or self._REMINDER_DECL_RE.match(plan_text))):
             return None
         # Checked before parse_local_action, which has no temporal
         # grammar — without this the ask fell to the model and it

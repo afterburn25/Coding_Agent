@@ -2054,6 +2054,29 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Cancel", result.content)
             self.assertFalse(sup.scheduler.rows)
 
+            # Declarative/noun-first creates — 'i want a reminder
+            # for 5pm'/'give me a 10 minute timer' got model-narrated
+            # 'reminder set for 5:00 PM' over zero rows; 'remind me
+            # at quarter to 5 to leave' lazy-split inside 'quarter
+            # to' and the model narrated a 4:45 that never landed.
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("remind me at quarter to 5 to leave",
+                               mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            q_row = sup.scheduler.rows[-1]
+            self.assertEqual(
+                (time.localtime(q_row["at"]).tm_hour,
+                 time.localtime(q_row["at"]).tm_min), (16, 45))
+            result = agent.run("i want a reminder for 5pm",
+                               mode="auto")
+            self.assertIn("do what", result.content)
+            result = agent.run("give me a 10 minute timer",
+                               mode="auto")
+            self.assertIn("Timer set", result.content)
+            sup.scheduler.rows.pop()
+            sup.scheduler.rows.pop()
+
             # Possessive scopes — 'cancel tomorrow's reminder' left
             # 'tomorrow's' as one token that never matched hay
             # 'tomorrow'; "what's my next reminder" echoed scope 's.

@@ -5227,6 +5227,8 @@ class AppState:
         orchestrator's clarify/recall lanes."""
         body = str(body or "")
         spec, desc = self._parse_reminder_time(body, time.time())
+        desc = re.sub(r"^(?:about|of|that|to)\s+", "",
+                      desc.strip())
         if spec is None and noun != "reminder":
             # 'set a timer for 5 minutes' — the duration is the
             # whole ask; 'in <dur>' reads it as a countdown, 'at T'
