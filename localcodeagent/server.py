@@ -3301,10 +3301,12 @@ class AppState:
             "evict_idle_models": lambda: self.runtime.evict_idle(),
             "release_vram": lambda gb: self.runtime.release_managed_models_for_vram(
                 required_vram_gb=float(gb),
-                busy_models=self._busy_model_ids()),
+                busy_models=self._busy_model_ids(),
+                include_baseline=False),
             "release_ram": lambda gb: self.runtime.release_managed_models_for_ram(
                 required_ram_gb=float(gb),
-                busy_models=self._busy_model_ids()),
+                busy_models=self._busy_model_ids(),
+                include_baseline=False),
             "stop_models": lambda: self.runtime.stop_all(),
             "restart_model": lambda: self.runtime.restart_unhealthy_managed(),
             # Marker — the executor's per-request auto-fallback already

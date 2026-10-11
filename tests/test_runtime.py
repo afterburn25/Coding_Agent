@@ -356,6 +356,7 @@ class RuntimeManagerTests(unittest.TestCase):
                 id="victim", model_path="models/victim.gguf",
                 executable=str(root / "llama-server"),
                 estimated_vram_gb=8.0, estimated_ram_gb=6.0,
+                gpu_layers="40",
                 keep_loaded=False)
             _write_fake_exe(root / "llama-server")
             cfg = AgentConfig(models=[victim])
@@ -554,6 +555,130 @@ class RuntimeManagerTests(unittest.TestCase):
             stopped = manager.release_managed_models_for_ram(required_ram_gb=20.0)
             self.assertEqual(stopped, [])
             self.assertEqual(calls, [])
+
+    def test_pressure_eviction_skips_futile_release(self):
+        # Regression (live): a queued node demanding VRAM evicted the sole
+        # resident every supervisor tick even though the model was fully
+        # CPU-offloaded (~0 VRAM held) — the eviction could never satisfy
+        # the request, so it was pure churn. When measured releasable VRAM
+        # cannot reach the target, nothing is stopped.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "resident.gguf").write_bytes(b"GGUF")
+            resident = self._profile(
+                id="resident", model_path="models/resident.gguf",
+                executable=str(root / "llama-server"), port=8081)
+            _write_fake_exe(root / "llama-server")
+            manager = RuntimeManager(AgentConfig(models=[resident]), base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=320, used_vram_mb=11968)])
+            proc = _attach_fake_managed(manager, resident)
+            # The resident is CPU-offloaded — nvidia-smi reports ~300 MB.
+            manager.measure_resident = lambda mid: {"vram_used_mb": 320.0}
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(stopped, [])
+            self.assertFalse(proc.terminated)
+
+            # But when the resident genuinely holds enough, eviction proceeds.
+            manager.measure_resident = lambda mid: {"vram_used_mb": 8000.0}
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(stopped, ["resident"])
+            self.assertTrue(proc.terminated)
+
+    def test_pressure_eviction_skips_mid_launch_model(self):
+        # Regression (live): _stop_managed mid-load is the "exited with
+        # code 1" spawn-death signature — a model in _starting is serving
+        # an admitted demand and must not be evicted.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "loading.gguf").write_bytes(b"GGUF")
+            loading = self._profile(
+                id="loading", model_path="models/loading.gguf",
+                executable=str(root / "llama-server"), port=8081,
+                estimated_vram_gb=8.0)
+            _write_fake_exe(root / "llama-server")
+            manager = RuntimeManager(AgentConfig(models=[loading]), base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=1024, used_vram_mb=11264)])
+            proc = _attach_fake_managed(manager, loading)
+            manager._starting.add("loading")
+            stopped = manager.release_managed_models_for_vram(required_vram_gb=8.0)
+            self.assertEqual(stopped, [])
+            self.assertFalse(proc.terminated)
+
+    def test_offloadable_model_not_deferred_on_vram_shortfall(self):
+        # gpu_layers=auto can CPU-offload — a VRAM-only shortfall must not
+        # defer its relaunch after a demand eviction (the card may stay
+        # saturated by another process for hours while the model could
+        # still serve on CPU).
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "victim.gguf").write_bytes(b"GGUF")
+            victim = self._profile(
+                id="victim", model_path="models/victim.gguf",
+                executable=str(root / "llama-server"),
+                estimated_vram_gb=8.0, estimated_ram_gb=6.0,
+                gpu_layers="auto", keep_loaded=False)
+            _write_fake_exe(root / "llama-server")
+            cfg = AgentConfig(models=[victim])
+            manager = RuntimeManager(cfg, base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=2048, used_vram_mb=10240)])
+            launches: list[str] = []
+            manager._start_llama_cpp = (
+                lambda p, ctx_override=None: launches.append(p.id) or "http://x/v1")
+            manager._demand_evicted["victim"] = (time.time(), "vram")
+            manager.ensure_ready(victim)
+            self.assertEqual(launches, ["victim"])
+
+    def test_mission_shortfall_release_spares_keep_loaded_baseline(self):
+        # Regression (live): the supervisor's admission-shortfall hook
+        # evicted the keep_loaded interactive model for a queued repair
+        # node every tick — user chat then cold-loaded the same weights
+        # the node would have reused. Mission-grade releases never touch
+        # the baseline; image jobs (include_baseline=True) still can.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "models").mkdir()
+            (root / "models" / "base.gguf").write_bytes(b"GGUF")
+            baseline_model = self._profile(
+                id="base", model_path="models/base.gguf",
+                executable=str(root / "llama-server"), port=8081,
+                keep_loaded=True, estimated_vram_gb=8.0)
+            _write_fake_exe(root / "llama-server")
+            manager = RuntimeManager(
+                AgentConfig(models=[baseline_model]), base_dir=root)
+            manager.refresh_hardware = lambda: manager.hardware
+            manager.hardware = HardwareSnapshot(
+                platform="test", total_ram_gb=64.0, available_ram_gb=60.0,
+                cpu_logical_cores=8,
+                gpus=[GPUInfo(index=0, name="GPU", total_vram_mb=12288,
+                              free_vram_mb=1024, used_vram_mb=11264)])
+            proc = _attach_fake_managed(manager, baseline_model)
+            stopped = manager.release_managed_models_for_vram(
+                required_vram_gb=4.0, include_baseline=False)
+            self.assertEqual(stopped, [])
+            self.assertFalse(proc.terminated)
+            # An image job still gets the stronger claim on the baseline.
+            stopped = manager.release_managed_models_for_vram(
+                required_vram_gb=4.0, include_baseline=True)
+            self.assertEqual(stopped, ["base"])
+            self.assertTrue(proc.terminated)
 
     def test_fresh_hardware_reprobes_stale_snapshot(self):
         # Regression: budget auto-resume read runtime.hardware — a cached

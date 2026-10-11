@@ -1219,6 +1219,8 @@ class RuntimeManager:
         stopped: list[str] = []
         with self._lock:
             for model_id, item in list(self._managed.items()):
+                if model_id in self._starting:
+                    continue  # mid-launch is not "unhealthy" — loading ≠ failed
                 status = self._status.get(model_id)
                 dead = item.process.poll() is not None
                 if dead or not (status and status.healthy):
@@ -1318,6 +1320,30 @@ class RuntimeManager:
             pass
         return out
 
+    def _held_vram_mb(self, model_id: str, profile: Any) -> tuple[float, bool]:
+        """(VRAM held, was_measured). A fully CPU-offloaded model reports
+        ~0 so pressure eviction can see that killing it frees nothing.
+        Falls back to the profile estimate when measurement fails."""
+        try:
+            measured = self.measure_resident(model_id).get("vram_used_mb")
+        except Exception:
+            measured = None
+        if measured is not None:
+            return max(0.0, float(measured)), True
+        return (max(0.0, float(getattr(profile, "estimated_vram_gb", 0.0) or 0.0) * 1024.0),
+                False)
+
+    def _held_ram_gb(self, model_id: str, profile: Any) -> tuple[float, bool]:
+        """(RAM held in GB, was_measured). Measured RSS first, profile
+        estimate when unmeasurable."""
+        try:
+            measured = self.measure_resident(model_id).get("ram_used_gb")
+        except Exception:
+            measured = None
+        if measured is not None:
+            return max(0.0, float(measured)), True
+        return max(0.0, float(getattr(profile, "estimated_ram_gb", 0.0) or 0.0)), False
+
     def _emit_residency(self, action: str, model_id: str, reason: str = "") -> None:
         hook = self.on_residency_event
         if hook is None:
@@ -1359,11 +1385,15 @@ class RuntimeManager:
                 pass
 
     def release_managed_models_for_vram(self, *, required_vram_gb: float, mode: str = "balanced",
-                                        busy_models: set[str] | None = None) -> list[str]:
+                                        busy_models: set[str] | None = None,
+                                        include_baseline: bool = True) -> list[str]:
         """Stop managed LLM runtimes when an image job needs GPU memory.
 
         External runtimes are never terminated. The returned ids may be restored later.
         Models in ``busy_models`` are serving in-flight work and are never touched.
+        ``include_baseline=False`` keeps keep_loaded residents resident —
+        the supervisor passes this for mission-grade shortfalls so queued
+        background work can never churn the interactive model.
         """
         busy = set(busy_models or ())
         with self._lock:
@@ -1377,7 +1407,12 @@ class RuntimeManager:
             if self.hardware.free_vram_gb >= required_vram_gb:
                 return []
             profiles = {m.id: m for m in self.config.models}
-            resident = [mid for mid in self.resident_model_ids() if mid not in busy]
+            # _starting residents are mid-launch for a demand that was
+            # already admitted — killing the load in flight is pure loss
+            # (observed: spawn dying ~100 ms in with "exited with code 1"
+            # = terminate() from this very path).
+            resident = [mid for mid in self.resident_model_ids()
+                        if mid not in busy and mid not in self._starting]
             active = [mid for mid in resident if not profiles.get(mid, self.config.models[0]).keep_loaded]
             # keep_loaded models are a last resort: still evictable when an
             # image job genuinely cannot fit — otherwise the generation crawls
@@ -1385,9 +1420,31 @@ class RuntimeManager:
             baseline = [mid for mid in resident if mid not in active]
             key = lambda mid: self._last_used.get(mid, 0.0)
             active.sort(key=key); baseline.sort(key=key)
+            # A mission-grade shortfall (supervisor hook) must not evict the
+            # keep_loaded interactive baseline: background demand yields to
+            # the model the user is actually chatting with — and it is often
+            # the same model the queued node would reuse anyway.
+            evictable = active + (baseline if include_baseline else [])
+            if not evictable:
+                return []
+            # Futility guard: if freeing every evictable resident still can't
+            # reach the target, evicting is pure churn — a CPU-offloaded
+            # resident holds ~0 VRAM, so killing it only costs a reload while
+            # the shortfall remains (observed: a queued node demanding VRAM
+            # evicted the sole resident on every supervisor tick forever).
+            need_mb = (required_vram_gb - self.hardware.free_vram_gb) * 1024.0
+            if need_mb > 0:
+                any_measured = False
+                releasable_mb = 0.0
+                for mid in evictable:
+                    held, measured = self._held_vram_mb(mid, profiles.get(mid))
+                    any_measured = any_measured or measured
+                    releasable_mb += held
+                if any_measured and releasable_mb < need_mb - 64:
+                    return []
             aggressive = str(mode).lower() in {"prefer image model", "prefer_image_model", "aggressive vram cleanup", "aggressive_vram_cleanup"}
             stopped: list[str] = []
-            for mid in active + baseline:
+            for mid in evictable:
                 if not aggressive and self.hardware.free_vram_gb >= required_vram_gb:
                     break
                 self._stop_managed(mid)
@@ -1398,7 +1455,8 @@ class RuntimeManager:
             return stopped
 
     def release_managed_models_for_ram(self, *, required_ram_gb: float,
-                                       busy_models: set[str] | None = None) -> list[str]:
+                                       busy_models: set[str] | None = None,
+                                       include_baseline: bool = True) -> list[str]:
         """Stop managed LLM runtimes when an image job needs system RAM.
 
         ``ullAvailPhys`` only counts *free* pages — a resident LLM holding
@@ -1419,7 +1477,8 @@ class RuntimeManager:
             if self.hardware.available_ram_gb >= required_ram_gb:
                 return []
             profiles = {m.id: m for m in self.config.models}
-            resident = [mid for mid in self.resident_model_ids() if mid not in busy]
+            resident = [mid for mid in self.resident_model_ids()
+                        if mid not in busy and mid not in self._starting]
             if not resident:
                 return []
             key = lambda mid: self._last_used.get(mid, 0.0)
@@ -1431,8 +1490,23 @@ class RuntimeManager:
                 (mid for mid in resident
                  if profiles.get(mid, self.config.models[0]).keep_loaded),
                 key=key)
+            evictable = optional + (baseline if include_baseline else [])
+            if not evictable:
+                return []
+            # Same futility guard as the VRAM path — a resident whose
+            # measured RSS can't move the needle must not be evicted.
+            need_gb = required_ram_gb - self.hardware.available_ram_gb
+            if need_gb > 0:
+                any_measured = False
+                releasable_gb = 0.0
+                for mid in evictable:
+                    held, measured = self._held_ram_gb(mid, profiles.get(mid))
+                    any_measured = any_measured or measured
+                    releasable_gb += held
+                if any_measured and releasable_gb < need_gb - 0.25:
+                    return []
             stopped: list[str] = []
-            for mid in optional + baseline:
+            for mid in evictable:
                 if self.hardware.available_ram_gb >= required_ram_gb:
                     break
                 self._stop_managed(mid)
@@ -1462,7 +1536,8 @@ class RuntimeManager:
             if idle_seconds > 0:
                 now = time.time()
                 for mid, item in list(self._managed.items()):
-                    if mid in busy or item.process.poll() is not None:
+                    if mid in busy or mid in self._starting \
+                            or item.process.poll() is not None:
                         continue
                     profile = profiles.get(mid)
                     if profile is None or profile.keep_loaded:
@@ -1483,6 +1558,7 @@ class RuntimeManager:
                 candidates = [
                     mid for mid, item in self._managed.items()
                     if mid not in busy
+                    and mid not in self._starting
                     and item.process.poll() is None
                     and mid in profiles
                     and not profiles[mid].keep_loaded
@@ -1608,7 +1684,10 @@ class RuntimeManager:
 
     def _enforce_residency(self, target: ModelProfile) -> None:
         max_resident = max(1, int(self.config.max_resident_models))
-        active = [mid for mid, p in self._managed.items() if p.process.poll() is None and mid != target.id]
+        active = [mid for mid, p in self._managed.items()
+                  if p.process.poll() is None
+                  and mid != target.id
+                  and mid not in self._starting]
         profiles = {m.id: m for m in self.config.models}
         if len(active) >= max_resident:
             stoppable = [mid for mid in active if not profiles.get(mid, target).keep_loaded]
@@ -2024,11 +2103,18 @@ class RuntimeManager:
                     self.config, "demand_eviction_cooldown_s", 120.0))
                 if time.time() - evicted_at < cooldown:
                     self.refresh_hardware()
-                    short = (
-                        self.hardware.free_vram_gb < float(profile.estimated_vram_gb)
-                        if resource == "vram"
-                        else self.hardware.available_ram_gb < float(profile.estimated_ram_gb)
-                    )
+                    # gpu_layers=auto/0 can offload to CPU — a VRAM shortfall
+                    # must not defer its relaunch (it would never run again
+                    # while another process holds the card).
+                    layers = str(getattr(profile, "gpu_layers", "") or "").lower()
+                    offloadable = layers in {"auto", "0", "-1"}
+                    if resource == "vram":
+                        short = (not offloadable
+                                 and self.hardware.free_vram_gb
+                                 < float(profile.estimated_vram_gb))
+                    else:
+                        short = (self.hardware.available_ram_gb
+                                 < float(profile.estimated_ram_gb))
                     if short:
                         raise RuntimeError(
                             f"model '{profile.id}' was evicted to free {resource.upper()} "
