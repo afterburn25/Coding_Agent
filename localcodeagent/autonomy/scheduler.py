@@ -183,10 +183,11 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 60 if unit.startswith(("m", "min")) else
                 3600 if unit.startswith("h") else 86400)
         return {"kind": "interval", "interval_s": max(60.0, interval)}
-    # 'every day/morning/evening [at T]' — daily cadence.
+    # 'every day/morning/evening/night [at T]' — daily cadence.
     m = re.fullmatch(
         r"(?:every\s+day|daily|every\s+morning|every\s+afternoon|"
-        r"every\s+evening|each\s+(?:morning|evening|day))"
+        r"every\s+evening|every\s+night|nightly|each\s+night|"
+        r"each\s+(?:morning|evening|day))"
         + clock_tail, t)
     if m:
         hr, mn, mer = m.group(1), m.group(2), m.group(3)
@@ -195,6 +196,7 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         else:
             hour = (9 if "morning" in t else
                     15 if "afternoon" in t else
+                    20 if "night" in t else
                     19 if "evening" in t else 9)
         return {"kind": "daily", "hour": hour,
                 "minute": int(mn or 0)}
@@ -228,6 +230,29 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
             return {"kind": "weekly", "weekday": wd,
                     "hour": _meridian(int(hr), mer) if hr else 9,
                     "minute": int(mn or 0)}
+    # 'every tuesday and thursday [at T]' — explicit two-day cadence.
+    m = re.fullmatch(
+        r"(?:every|on)\s+(\w+?)\s+and\s+(\w+?)" + clock_tail, t)
+    if m:
+        days = [_WEEKDAY_NAMES.get(m.group(1)),
+                _WEEKDAY_NAMES.get(m.group(2))]
+        if all(d is not None for d in days):
+            hr, mn, mer = m.group(3), m.group(4), m.group(5)
+            return {"kind": "weekly", "weekday": sorted(days),
+                    "hour": _meridian(int(hr), mer) if hr else 9,
+                    "minute": int(mn or 0)}
+    # Clock-before-cadence — 'at 3pm every day', 'at 8am on weekdays'.
+    cm = re.match(
+        r"at\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?"
+        r"\s+(.+)$", t)
+    if cm:
+        rest_spec = parse_reminder_schedule(cm.group(4), now)
+        if (rest_spec is not None
+                and rest_spec["kind"] in ("daily", "weekly")):
+            rest_spec["hour"] = _meridian(int(cm.group(1)),
+                                          cm.group(3))
+            rest_spec["minute"] = int(cm.group(2) or 0)
+            return rest_spec
     at = parse_reminder_when(t, now)
     if at is not None:
         return {"kind": "once", "at": at}
