@@ -1405,7 +1405,10 @@ class ConversationMemory:
                     r"^((?!(?:what|when|where|which|who|whom|whose|"
                     r"why|how|is|are|was|were|do|does|did|can|could|"
                     r"would|shall|may|might|should)\b)[a-z0-9]"
-                    r".{1,90}?\bshould(?:n'?t|\s+not)?\b.+?)[.!?]?$",
+                    # `you should X` is an imperative (correction/rule
+                    # lane), not a hedged claim about the world.
+                    r".{1,90}?\b(?<!you\s)should(?:n'?t|\s+not)?\b"
+                    r".+?)[.!?]?$",
                     text, flags=re.IGNORECASE)
                 # "we agreed the API should stay REST" is a decision
                 # (assertive), not a proposal — the decision lane
