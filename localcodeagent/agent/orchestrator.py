@@ -3002,7 +3002,20 @@ class AgentOrchestrator:
                 or self._REMINDER_BARE_RE.match(match_text)
                 or self._REMINDER_HELP_RE.match(match_text)
                 or self._REMINDER_WHENONLY_RE.match(match_text)
-                or self._REMINDER_NOUNADJ_RE.match(match_text)):
+                or self._REMINDER_NOUNADJ_RE.match(match_text)
+                or self._REMINDER_LEAD_CADENCE_RE.match(match_text)
+                or self._REMINDER_DECL_RE.match(match_text)
+                or self._REMINDER_NOUNFIRST_RE.match(match_text)
+                or self._REMINDER_REFER_RE.match(match_text)):
+            return None
+        # Trigger-when NOTASK shapes ('remind me before the
+        # meeting') are scheduler answers, not fact recalls — the
+        # topic word would otherwise term-match trivia. Plain
+        # 'remind me about X' stays a recall ask by design.
+        mnt = self._REMINDER_NOTASK_RE.match(match_text)
+        if (mnt is not None
+                and self._REMINDER_EVENTISH_RE.search(
+                    str(mnt.group("when") or ""))):
             return None
         # Reminder inventory — "what reminders do i have" asks the
         # scheduler, not conversational facts; a memory recall can only
