@@ -837,9 +837,13 @@ class AbandonTests(unittest.TestCase):
             coord._last_wt_sweep = 0.0
             coord.tick()
             self.assertFalse(wt.exists())
-            # The record survives — the sandbox, not the evidence.
-            self.assertEqual(coord.get(inc["id"])["state"], "needs_human")
-            self.assertFalse(coord.get(inc["id"]).get("worktree"))
+            # Untriaged past the window, the incident is abandoned —
+            # terminal and auditable, evidence preserved on the row.
+            stale = coord.get(inc["id"])
+            self.assertEqual(stale["state"], "abandoned")
+            self.assertFalse(stale.get("worktree"))
+            self.assertIn("needs_human stale", json.dumps(
+                stale.get("history") or []))
 
 
 class WorktreeLossTests(unittest.TestCase):

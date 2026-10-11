@@ -909,6 +909,21 @@ class SelfRepairCoordinator:
                     inc["attempts"].get("replans") or 0) + 1
                 self._budget_check(inc)
                 self._save()
+        # A needs_human candidate nobody triaged past the inspection
+        # window is abandoned — terminal and auditable, the row keeps
+        # its evidence. The worktree sweep above already reclaimed the
+        # candidate at the same threshold.
+        with self._lock:
+            stale_review = [r["id"] for r in self._rows()
+                            if r.get("state") == "needs_human"
+                            and (now - float(r.get("updated_at") or 0.0))
+                            > self.STALE_INCIDENT_S]
+        for inc_id in stale_review:
+            inc = self.get(inc_id)
+            if inc is not None and inc.get("state") == "needs_human":
+                self._set(inc, "abandoned",
+                          "needs_human stale — no review in "
+                          f"{int(self.STALE_INCIDENT_S // 86400)}d")
 
     def process_incident(self, incident_id: str,
                          max_steps: int = 40) -> dict | None:
