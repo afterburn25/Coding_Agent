@@ -935,7 +935,9 @@ class TestCorrectionChains(unittest.TestCase):
              "forgotten": [], "superseded": [],
              "restated": ["my favorite color is blue"]})
         self.assertIsNotNone(ack)
-        self.assertIn("my favorite color is blue", ack)
+        # 'my:'-slot facts echo second-person — repeating 'my X' would
+        # claim the user's fact as Nexus's own.
+        self.assertIn("your favorite color is blue", ack)
 
 
 class TestFactsRecallLane(unittest.TestCase):

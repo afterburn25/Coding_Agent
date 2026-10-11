@@ -4244,23 +4244,17 @@ class AgentOrchestrator:
             # ack repeating 'my X' would claim the user's fact as hers.
             if len(facts) == 1:
                 echo = facts[0]
-                try:
-                    slot = self.conversation_memory._fact_slot(echo)
-                    if str(slot or "").startswith("my:"):
-                        echo = self._second_person_fact(echo)
-                except Exception:
-                    pass
+                if str(ConversationMemory._fact_slot(echo)
+                       or "").startswith("my:"):
+                    echo = AgentOrchestrator._second_person_fact(echo)
                 parts.append(f"Got it — {echo}.")
             else:
                 parts.append(f"Got it — noted {len(facts)} things.")
         elif restated:
             echo = restated[0]
-            try:
-                slot = self.conversation_memory._fact_slot(echo)
-                if str(slot or "").startswith("my:"):
-                    echo = self._second_person_fact(echo)
-            except Exception:
-                pass
+            if str(ConversationMemory._fact_slot(echo)
+                   or "").startswith("my:"):
+                echo = AgentOrchestrator._second_person_fact(echo)
             parts.append(f"Already noted — {echo}.")
         elif hearsay:
             # Secondhand claims are acknowledged but never banked —
