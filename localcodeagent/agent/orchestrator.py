@@ -3002,21 +3002,7 @@ class AgentOrchestrator:
         # Reminder inventory — "what reminders do i have" asks the
         # scheduler, not conversational facts; a memory recall can only
         # term-match the word 'reminders' against trivia.
-        if (self._SCHEDULE_INVENTORY_RE.search(match_text)
-                and re.search(
-                    r"\b(?:what|which|any|anything|how\s+many|list|"
-                    r"show|do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
-                    r"are\s+there|got|active|pending|upcoming|when|"
-                    r"tell\s+me|run\s+through|go\s+through|"
-                    r"walk\s+me\s+through|read\s+(?:out|through))\b",
-                    match_text, re.IGNORECASE)
-                and not re.match(
-                    r"\s*(?:please\s+)?(?:remind|cancel|delete|"
-                    r"remove|drop|clear|set|create|add|schedule)\b",
-                    match_text, re.IGNORECASE)
-                and not re.search(
-                    r"\babout\b.{0,40}\breminders?\b|\btold\b",
-                    match_text, re.IGNORECASE)):
+        if self._reminder_inventory_shaped(match_text):
             out = self._reminder_inventory_reply(user_text, match_text)
             if out is not None:
                 return out
@@ -4397,6 +4383,29 @@ class AgentOrchestrator:
                         f"Cancelled {gone} reminders.")
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
+
+    def _reminder_inventory_shaped(self, text: str) -> bool:
+        """Inventory-shaped asks — 'what reminders do i have',
+        'anything scheduled for tonight'. Shared by the recall gate
+        and the learn-site skip: banking 'anything scheduled for
+        tonight' as a fact let the restate-ack outrank the real
+        schedule answer."""
+        return bool(
+            self._SCHEDULE_INVENTORY_RE.search(text)
+            and re.search(
+                r"\b(?:what|which|any|anything|how\s+many|list|"
+                r"show|do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
+                r"are\s+there|got|active|pending|upcoming|when|"
+                r"tell\s+me|run\s+through|go\s+through|"
+                r"walk\s+me\s+through|read\s+(?:out|through))\b",
+                text, re.IGNORECASE)
+            and not re.match(
+                r"\s*(?:please\s+)?(?:remind|cancel|delete|"
+                r"remove|drop|clear|set|create|add|schedule)\b",
+                text, re.IGNORECASE)
+            and not re.search(
+                r"\babout\b.{0,40}\breminders?\b|\btold\b",
+                text, re.IGNORECASE))
 
     def _reminder_inventory_reply(self, user_text: str,
                                   plan_text: str):
@@ -10816,6 +10825,11 @@ class AgentOrchestrator:
             and self._brain_subroutine_enabled("long_term_memory", True)
             and self._brain_subroutine_enabled("self_learning", True)
             and self._brain_subroutine_enabled("conversation_learning", True)
+            # Inventory asks are questions about the scheduler, not
+            # facts to bank — 'anything scheduled for tonight' stored
+            # as a fact and the restate-ack then outranked the real
+            # schedule answer.
+            and not self._reminder_inventory_shaped(user_text)
         ):
             learned = self.conversation_memory.learn_from_user(
                 user_text,

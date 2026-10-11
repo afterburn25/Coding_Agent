@@ -2277,6 +2277,14 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("what comes up next", mode="auto")
             self.assertIn("soonest", result.content)
             self.assertNotIn("later", result.content)
+            # 'anything scheduled for tonight' is a question about the
+            # scheduler, not a fact — the learn lane banked it live and
+            # the restate-ack then outranked the real schedule answer.
+            result = agent.run("anything scheduled for tonight",
+                               mode="auto")
+            self.assertIn("soonest", result.content)
+            self.assertFalse(
+                agent.conversation_memory.recall_facts("scheduled"))
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —
