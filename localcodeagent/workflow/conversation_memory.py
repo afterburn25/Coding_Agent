@@ -755,9 +755,18 @@ class ConversationMemory:
         # one token earlier — "hmm what was my editor" parses subj
         # 'hmm what' + 'was' and would bank the question verbatim.
         # Mid-subject names ('the who concert') stay legal.
-        last = subj.strip().split()[-1].casefold()
-        if last in {"what", "which", "who", "whom", "whose", "why",
-                    "when", "where", "how"}:
+        toks = subj.strip().split()
+        wh_words = {"what", "which", "who", "whom", "whose", "why",
+                    "when", "where", "how"}
+        if toks[-1].casefold() in wh_words:
+            return False
+        # An interrogative determiner as the FIRST token is question word
+        # order — "and what port was prod on" (connector-stripped) parses
+        # subj 'what port' + 'was'. 'who'/'whom' stay legal: names like
+        # 'the who concert' arrive article-stripped, and a bare 'who'
+        # subject is still caught by the last-token guard above.
+        if toks[0].casefold() in {"what", "which", "whose", "why",
+                                  "when", "where", "how"}:
             return False
         return True
 
@@ -1229,6 +1238,7 @@ class ConversationMemory:
             r"for\s+the\s+record|just\s+so\s+you\s+know|"
             r"no|wait|sorry|nm|never\s*mind|scratch\s+that|"
             r"on\s+second\s+thought|i\s+mean(?:t)?|"
+            r"and|but|then|or|plus|"
             r"hmm+|hm+|um+|uh+|er+|erm+|ah+|oh)[,:\s]+)+",
             "", raw, flags=re.IGNORECASE)
         # Confirmation tags — "the api keys rotate monthly, right?" —

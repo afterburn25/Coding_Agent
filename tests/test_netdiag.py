@@ -770,6 +770,46 @@ class TruthGateTests(RecoveryLoopTests):
                       "hmm what was my editor again"):
                 self.assertEqual(cm.learn_from_user(q)["facts"], [], q)
 
+    def test_connector_led_wh_question_recalls_fact(self):
+        # Companion to never-banking: "oh and what port was prod on" must
+        # still reach recall once it classifies as a question — the
+        # connector strip feeds the same text to the recall anchor.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            for q in ("oh and what port was prod on",
+                      "and what port is the prod api on"):
+                reply = agent._single_fact_recall_reply(q, "conv", "proj")
+                self.assertIsNotNone(reply, q)
+                self.assertIn("443", reply.text, q)
+
+    def test_connector_led_wh_question_never_banks(self):
+        # Live: "oh and what port was prod on" banked 'and what port was
+        # prod on' as a fact — 'oh' was stripped but 'and' survived, so
+        # subj 'and what port' + pred 'was' slipped past the wh guards.
+        # Leading coordinators strip like other discourse markers, and a
+        # subject whose FIRST token is an interrogative determiner is
+        # question-shaped, never a fact.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            for q in ("oh and what port was prod on",
+                      "and what port is prod on",
+                      "but when is the standup",
+                      "so where is the config"):
+                self.assertEqual(cm.learn_from_user(q)["facts"], [], q)
+            # Coordinators before real declaratives still bank.
+            r = cm.learn_from_user("and the deadline is friday")
+            self.assertEqual(r["facts"], ["deadline is friday"])
+            r = cm.learn_from_user("but the build is green")
+            self.assertEqual(r["facts"], ["build is green"])
+
     def test_port_probe_is_answer_type_slot(self):
         # "which port is prod on" — 'port' names the answer's type, not
         # the entity; the stored fact is 'prod api is on 443' and never
