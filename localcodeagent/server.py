@@ -6627,7 +6627,10 @@ class AppState:
             return
         if family and cooldown_s > 0:
             last = float(self._notice_last.get(family) or 0.0)
-            if time.monotonic() - last < cooldown_s:
+            # `last == 0` means never-spoken — monotonic() is boot-
+            # relative so uptime < cooldown would otherwise swallow the
+            # family's very first notice on a fresh boot.
+            if last and time.monotonic() - last < cooldown_s:
                 return
             self._notice_last[family] = time.monotonic()
         if len(self._queue_announced) > 512:
