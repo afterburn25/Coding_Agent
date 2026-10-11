@@ -2009,6 +2009,11 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Snoozed", result.content)
             lt2 = time.localtime(oven_row["at"])
             self.assertEqual((lt2.tm_hour, lt2.tm_min), (22, 0))
+            # 'earlier' clamps at max(now, base-delta) — a 22:00-today
+            # base clamps whenever the suite runs at/after 21:30
+            # local, which CI hit. Pin far-future so the direction
+            # probe stays deterministic regardless of wall clock.
+            oven_row["at"] = time.time() + 90000
             before = oven_row["at"]
             result = agent.run("shift the oven reminder earlier "
                                "by 30 minutes", mode="auto")
