@@ -3659,8 +3659,16 @@ class AgentOrchestrator:
                     f"{int(spec['minute']):02d} — I'll ping you "
                     f"to {task}.")
         if kind == "weekly":
-            day = ("Monday", "Tuesday", "Wednesday", "Thursday",
-                   "Friday", "Saturday", "Sunday")[int(spec["weekday"])]
+            wd = spec["weekday"]
+            if isinstance(wd, list):
+                day = ("weekday" if wd == [0, 1, 2, 3, 4]
+                       else "weekend" if wd == [5, 6]
+                       else "/".join(
+                           ("Mon", "Tue", "Wed", "Thu", "Fri",
+                            "Sat", "Sun")[d] for d in wd))
+            else:
+                day = ("Monday", "Tuesday", "Wednesday", "Thursday",
+                       "Friday", "Saturday", "Sunday")[int(wd)]
             return (f"every {day} at {int(spec['hour']):02d}:"
                     f"{int(spec['minute']):02d} — I'll ping you "
                     f"to {task}.")

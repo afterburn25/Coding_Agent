@@ -163,6 +163,11 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     clock_tail = (r"(?:\s+at\s+(\d{1,2})(?::(\d{2}))?"
                   r"\s*(a\.?m\.?|p\.?m\.?|am|pm)?)?")
 
+    # 'twice a day' / 'every other day' — fixed-span intervals.
+    if re.fullmatch(r"twice\s+a\s+day|two\s+times\s+a\s+day", t):
+        return {"kind": "interval", "interval_s": 43200.0}
+    if re.fullmatch(r"every\s+other\s+day|every\s+second\s+day", t):
+        return {"kind": "interval", "interval_s": 172800.0}
     # 'every N units' / 'every hour' / 'hourly' — interval cadence.
     m = re.fullmatch(
         r"(?:every\s+(\d+(?:\.\d+)?)\s*"
@@ -191,6 +196,16 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                     19 if "evening" in t else 9)
         return {"kind": "daily", "hour": hour,
                 "minute": int(mn or 0)}
+    # 'every weekday/weekend [at T]' — multi-day weekly cadence.
+    m = re.fullmatch(
+        r"every\s+(weekdays?|weekends?)" + clock_tail, t)
+    if m:
+        days = ([0, 1, 2, 3, 4] if m.group(1).startswith("weekday")
+                else [5, 6])
+        hr, mn, mer = m.group(2), m.group(3), m.group(4)
+        return {"kind": "weekly", "weekday": days,
+                "hour": _meridian(int(hr), mer) if hr else 9,
+                "minute": int(mn or 0)}
     # 'every <weekday> [at T]' — weekly cadence.
     m = re.fullmatch(
         r"every\s+(\w+?)" + clock_tail, t)
@@ -207,17 +222,31 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     return None
 
 
-def _next_daily(hour: int, minute: int, *, weekday: int | None = None,
+def _norm_weekday(weekday):
+    """Normalize a weekday spec → int, sorted list of ints, or None.
+    'every weekday' stores [0..4]; a single day stays an int."""
+    if isinstance(weekday, (list, tuple, set)):
+        days = sorted({int(d) for d in weekday if int(d) in range(7)})
+        return days or None
+    return int(weekday) if weekday in range(7) else None
+
+
+def _next_daily(hour: int, minute: int, *, weekday=None,
                 after: float | None = None) -> float:
-    """Next local wall-clock occurrence of hour:minute (optionally only on a
-    specific weekday, Mon=0). DST-safe because it anchors on local date."""
+    """Next local wall-clock occurrence of hour:minute (optionally only on
+    specific weekdays, Mon=0; a list means 'first matching day').
+    DST-safe because it anchors on local date."""
+    if isinstance(weekday, (list, tuple, set)):
+        wd_set = set(weekday) or None
+    else:
+        wd_set = {weekday} if weekday is not None else None
     base = time.localtime(after or time.time())
     for day_offset in range(0, 8):
         cand = time.mktime((
             base.tm_year, base.tm_mon, base.tm_mday + day_offset,
             hour, minute, 0, 0, 0, -1))
         cand_lt = time.localtime(cand)
-        if weekday is not None and cand_lt.tm_wday != weekday:
+        if wd_set is not None and cand_lt.tm_wday not in wd_set:
             continue
         if cand > (after or time.time()):
             return cand
@@ -247,7 +276,7 @@ class Scheduler:
             "interval_s": max(60.0, float(interval_s)) if interval_s else 0,
             "hour": max(0, min(23, int(hour))),
             "minute": max(0, min(59, int(minute))),
-            "weekday": weekday if weekday in range(7) else None,
+            "weekday": _norm_weekday(weekday),
             "action": dict(action or {}),
             "enabled": bool(enabled),
             "created_by": created_by,
@@ -329,8 +358,10 @@ class Scheduler:
             return _next_daily(int(row.get("hour", 3)), int(row.get("minute", 0)),
                                after=now)
         if kind == "weekly":
-            return _next_daily(int(row.get("hour", 3)), int(row.get("minute", 0)),
-                               weekday=int(row.get("weekday") or 6), after=now)
+            wd = row.get("weekday")
+            return _next_daily(
+                int(row.get("hour", 3)), int(row.get("minute", 0)),
+                weekday=wd if wd is not None else 6, after=now)
         return None
 
     def tick(self) -> list[dict]:

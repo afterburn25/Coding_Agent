@@ -1299,6 +1299,23 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(
                 sup.scheduler.rows[-1]["interval_s"], 7200.0)
 
+            # Multi-day weekly cadences store a weekday list —
+            # 'every weekday' fires Mon–Fri, not a single day.
+            r = agent._reminder_reply(
+                "remind me every weekday at 8am to check email",
+                "remind me every weekday at 8am to check email",
+                task.id)
+            self.assertIsNotNone(r)
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(row["kind"], "weekly")
+            self.assertEqual(row["weekday"], [0, 1, 2, 3, 4])
+            self.assertEqual(row["hour"], 8)
+            r = agent._reminder_reply(
+                "remind me twice a day to stretch",
+                "remind me twice a day to stretch", task.id)
+            self.assertEqual(
+                sup.scheduler.rows[-1]["interval_s"], 43200.0)
+
             # Snooze re-anchors 'at' via scheduler.update — a real
             # reschedule, not a narrated postponement.
             build_row = next(

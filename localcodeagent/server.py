@@ -5137,8 +5137,16 @@ class AppState:
             return (f"every day at {int(spec.get('hour') or 0):02d}"
                     f":{int(spec.get('minute') or 0):02d}")
         if kind == "weekly":
-            day = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][
-                int(spec.get("weekday") or 0)]
+            wd = spec.get("weekday")
+            if isinstance(wd, list):
+                day = ("weekday" if wd == [0, 1, 2, 3, 4]
+                       else "weekend" if wd == [5, 6]
+                       else "/".join(
+                           ["Mon", "Tue", "Wed", "Thu", "Fri",
+                            "Sat", "Sun"][d] for d in wd))
+            else:
+                day = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][
+                    int(wd or 0)]
             return (f"every {day} at {int(spec.get('hour') or 0):02d}"
                     f":{int(spec.get('minute') or 0):02d}")
         stamp = time.strftime("%a %I:%M %p",
