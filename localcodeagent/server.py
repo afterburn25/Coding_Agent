@@ -4822,6 +4822,28 @@ class AppState:
                         f"{int(float(w.get('progress') or 0) * 100)}%")
                 return {"content": "\n".join(lines)}
 
+        # Reminders — "remind me to check the deploy tomorrow", "set a
+        # reminder for the meeting at 3". A real once-schedule whose
+        # action fires a notification — never a model narrating "I've
+        # set a reminder" with nothing behind it. "remind me about/of"
+        # stays a recall probe; "remember to" only diverts here when it
+        # carries a parseable time (a bare "remember to X" remains
+        # eligible for the standing-goal lane below).
+        rem = re.match(
+            r"^(?:please\s+)?(remind\s+me\s+to|"
+            r"(?:set|create|add|schedule)\s+(?:a\s+|me\s+a\s+)?"
+            r"reminder(?:\s+(?:for|to|about|that))?|"
+            r"remember\s+to)\s+(.+?)[.!?]?$",
+            low)
+        # "remember to X weekly" is a recurring-work request — the
+        # standing-goal lane below owns cadence phrasing.
+        if rem and not (rem.group(1).startswith("remember")
+                        and any(p in low
+                                for p in self._MISSION_STANDING_PHRASES)):
+            out = self._set_reminder(sup, rem.group(2))
+            if out is not None:
+                return out
+
         # Autonomy triggers must come from the user's own words, in a
         # request — not from quoted text ('the doc says "keep working
         # until done"') and not from statements that merely mention a
@@ -4918,6 +4940,110 @@ class AppState:
             "The supervisor is planning it now — watch live progress on the "
             "Missions page. It runs under the Local Autonomous profile; "
             "sensitive actions still ask for approval.")}
+
+    _REMINDER_WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3,
+                          "fri": 4, "sat": 5, "sun": 6}
+
+    def _parse_reminder_time(self, body: str, now: float):
+        """Split a trailing time phrase → (timestamp, description).
+
+        Returns (None, body) when nothing parseable is present — the
+        caller decides whether that's an honest "need a time" reply or
+        a fallthrough to other lanes.
+        """
+        import time as _t
+        from .autonomy.scheduler import _next_daily
+
+        def _clock(hour: int, minute: int, mer: str | None,
+                   *, days: int = 0) -> float:
+            if mer:
+                mer = mer.lower()
+                if mer == "pm" and hour < 12:
+                    hour += 12
+                elif mer == "am" and hour == 12:
+                    hour = 0
+            elif hour <= 6:
+                # Bare "at 3" in reminder speech is afternoon, not 3am.
+                hour += 12
+            lt = _t.localtime(now)
+            cand = _t.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + days,
+                              hour, minute, 0, 0, 0, -1))
+            if cand <= now:
+                cand = _t.mktime((lt.tm_year, lt.tm_mon,
+                                  lt.tm_mday + days + 1,
+                                  hour, minute, 0, 0, 0, -1))
+            return cand
+
+        m = re.search(
+            r"\s+in\s+(\d+)\s+(minutes?|mins?|hours?|hrs?|days?)\s*$",
+            body, flags=re.IGNORECASE)
+        if m:
+            n, unit = int(m.group(1)), m.group(2).lower()
+            scale = 60 if unit.startswith(("min", "m")) else \
+                3600 if unit.startswith("h") else 86400
+            return now + n * scale, body[:m.start()].strip(" ,;—-")
+        m = re.search(
+            r"\s+tomorrow(?:\s+at\s+(\d{1,2})(?::(\d{2}))?"
+            r"\s*(am|pm)?)?\s*$",
+            body, flags=re.IGNORECASE)
+        if m:
+            desc = body[:m.start()].strip(" ,;—-")
+            if m.group(1):
+                return (_clock(int(m.group(1)), int(m.group(2) or 0),
+                               m.group(3), days=1), desc)
+            lt = _t.localtime(now)
+            return (_t.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + 1,
+                              9, 0, 0, 0, 0, -1)), desc)
+        m = re.search(r"\s+(tonight|today)\s*$", body,
+                      flags=re.IGNORECASE)
+        if m:
+            desc = body[:m.start()].strip(" ,;—-")
+            word = m.group(1).lower()
+            if word == "tonight":
+                return _clock(20, 0, None), desc
+            # "today" — next top of the hour, same day.
+            return now - (now % 3600) + 3600, desc
+        m = re.search(
+            r"\s+(?:on\s+)?(mon|tue|wed|thu|fri|sat|sun)"
+            r"(?:day|sday|rsday|urday)?\s*$",
+            body, flags=re.IGNORECASE)
+        if m:
+            return (_next_daily(9, 0,
+                                weekday=self._REMINDER_WEEKDAYS[
+                                    m.group(1)[:3].lower()],
+                                after=now),
+                    body[:m.start()].strip(" ,;—-"))
+        m = re.search(
+            r"\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*$",
+            body, flags=re.IGNORECASE)
+        if m:
+            return (_clock(int(m.group(1)), int(m.group(2) or 0),
+                           m.group(3)),
+                    body[:m.start()].strip(" ,;—-"))
+        return None, body.strip()
+
+    def _set_reminder(self, sup, body: str) -> dict | None:
+        """'check the deploy tomorrow at 3' → real once-schedule whose
+        fire emits a notification. Never fabricates a reminder — no
+        parseable time gets an honest ask-for-the-time ack."""
+        when, desc = self._parse_reminder_time(str(body or ""), time.time())
+        if not desc:
+            return {"content": "Remind you to do what?"}
+        if when is None:
+            return {"content": (
+                f"Noted — “{desc}”. I can't pin a reminder without a "
+                "time — say when, like “at 3pm”, “tomorrow”, or "
+                "“in 30 minutes”.")}
+        sup.scheduler.add(
+            f"Reminder: {desc[:80]}", "once", at=when,
+            action={"kind": "notify", "title": "Reminder",
+                    "detail": desc[:300], "level": "important"},
+            created_by="chat")
+        stamp = time.strftime("%a %I:%M %p", time.localtime(when))
+        return {"content": (
+            f"Reminder set for {stamp} — {desc}. "
+            "It'll surface as a notification; cancel it from the "
+            "Missions page if plans change.")}
 
     def _mission_reply_result(self, text: str) -> dict:
         """Synthesize an agent-result-shaped payload for command replies."""

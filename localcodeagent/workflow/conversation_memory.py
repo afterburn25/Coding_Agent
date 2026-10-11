@@ -1065,6 +1065,21 @@ class ConversationMemory:
                 return result
             raw = forget_body
 
+        # Discourse/correction marker prefixes ride the front of a
+        # statement ("actually no, my editor is neovim") — strip the
+        # STACK of them once so every matcher below sees the clause
+        # that carries the content. Hoisted ahead of the secret gate:
+        # a marker-prefixed credential ("fyi the wifi password is
+        # hunter2") banks its tail through the same paths as the bare
+        # statement, so the gate must see through the marker too.
+        body = re.sub(
+            r"^(?:(?:actually|by\s+the\s+way|btw|also|so|fyi|"
+            r"note\s+(?:that|this)|note|quick\s+note|"
+            r"for\s+the\s+record|just\s+so\s+you\s+know|"
+            r"no|wait|sorry|nm|never\s*mind|scratch\s+that|"
+            r"on\s+second\s+thought|i\s+mean(?:t)?)[,:\s]+)+",
+            "", raw, flags=re.IGNORECASE)
+
         # Credentials are never persisted — "remember my passcode is X"
         # must not bank the secret into facts/rules, sync it to the
         # Brain, or echo it back through prompt_context. Scoped to
@@ -1073,19 +1088,26 @@ class ConversationMemory:
         # it?") must still reach the normal answer lanes. The refusal
         # reuses the `locked` slot so the reply still surfaces.
         from ..answer_memory.validation import contains_secret
+        _learn_lead = (
+            r"^(?:remember|learn|fact\s*:|teach\s*:|training\s*:|"
+            r"note\s*(?::|that\b|this\b)|always\b|never\b|"
+            r"from\s+now\s+on|"
+            r"i\s+want\s+you\s+to|you\s+should|instead\b|no\b|"
+            r"correction\b|actually\b|stop\b|don't\b|do\s+not\b|"
+            r"we\s+(?:decided|chose|switched|moved|migrated|changed|"
+            r"agreed)|let'?s\b|the\s+plan\s+is)")
+        _bare_decl = r"^(?:my|the|our)\s+.{1,40}\s+is\s+.+$"
         is_learning_write = bool(
-            re.match(
-                r"^(?:remember|learn|fact\s*:|teach\s*:|training\s*:|"
-                r"note\s*:|always\b|never\b|from\s+now\s+on|"
-                r"i\s+want\s+you\s+to|you\s+should|instead\b|no\b|"
-                r"correction\b|actually\b|stop\b|don't\b|do\s+not\b|"
-                r"we\s+(?:decided|chose|switched|moved|migrated|changed|"
-                r"agreed)|let'?s\b|the\s+plan\s+is)",
-                raw, flags=re.IGNORECASE)
+            re.match(_learn_lead, raw, flags=re.IGNORECASE)
             or ("?" not in raw
-                and re.match(r"^(?:my|the|our)\s+.{1,40}\s+is\s+.+$",
-                             raw, flags=re.IGNORECASE)))
-        if is_learning_write and contains_secret(raw):
+                and re.match(_bare_decl, raw, flags=re.IGNORECASE))
+            or (body != raw
+                and (re.match(_learn_lead, body, flags=re.IGNORECASE)
+                     or ("?" not in body
+                         and re.match(_bare_decl, body,
+                                      flags=re.IGNORECASE)))))
+        if is_learning_write and (contains_secret(raw)
+                                  or contains_secret(body)):
             result.setdefault("locked", []).append(
                 "I won't store credentials or secrets in memory — "
                 "Brain unlock lives in the Trainer page instead.")
@@ -1225,19 +1247,9 @@ class ConversationMemory:
 
         with self._lock:
             fact: str | None = None
-            # Discourse/correction marker prefixes ride the front of a
-            # statement ("actually no, my editor is neovim") — strip the
-            # STACK of them once so every matcher below sees the clause
-            # that carries the content.
-            body = re.sub(
-                r"^(?:(?:actually|by\s+the\s+way|btw|also|so|fyi|note|"
-                r"quick\s+note|for\s+the\s+record|just\s+so\s+you\s+know|"
-                r"no|wait|sorry|nm|never\s*mind|scratch\s+that|"
-                r"on\s+second\s+thought|i\s+mean(?:t)?)[,:\s]+)+",
-                "", raw, flags=re.IGNORECASE)
             # Marker-prefixed hedges — "actually, i think the port is
-            # 9090" — strip the discourse marker first, then the same
-            # hedged-claim rule applies.
+            # 9090" — the hoisted `body` is already marker-stripped, so
+            # the same hedged-claim rule applies.
             if body != raw and _hedged(body):
                 return result
             for pattern in (

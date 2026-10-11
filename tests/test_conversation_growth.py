@@ -144,6 +144,13 @@ class ConversationManagerTests(unittest.TestCase):
                 "the api key is abc123xyz",
                 "our ssh key is AAAAB3NzaCfakekey",
                 "the access token is xyz1234567",
+                # Marker-prefixed secrets bank their tail through the
+                # same lane — the gate must see through the marker.
+                "fyi the wifi password is hunter2",
+                "btw the api key is abc123xyz",
+                "note that the wifi password is hunter2",
+                "the secret token is tok_999",
+                "the session token is abc123xyz",
             ):
                 learned = memory.learn_from_user(q)
                 self.assertIn("locked", learned, q)
@@ -152,6 +159,11 @@ class ConversationManagerTests(unittest.TestCase):
             # Policy statements mentioning credentials still bank.
             out = memory.learn_from_user("the password policy is 90 days")
             self.assertEqual(out["facts"], ["password policy is 90 days"])
+            # "note that <declarative>" is a learning lead — the tail
+            # banks like the bare statement.
+            out = memory.learn_from_user(
+                "note that the build server is falcon")
+            self.assertEqual(out["facts"], ["build server is falcon"])
 
     def test_credential_questions_are_not_hijacked(self):
         """A question merely mentioning a credential must still reach the

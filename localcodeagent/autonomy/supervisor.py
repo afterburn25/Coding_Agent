@@ -643,6 +643,17 @@ class AutonomousSupervisor:
             if goal is not None and goal.get("enabled"):
                 self._spawn_goal_mission(goal, origin=origin)
             return
+        if kind == "notify":
+            # A reminder fires a notification — real delivery through the
+            # notifications surface, never a mission for "ping me".
+            try:
+                self.notifications.notify(
+                    str(action.get("title") or "Reminder"),
+                    level=str(action.get("level") or "important"),
+                    detail=str(action.get("detail") or ""))
+            except Exception:
+                pass
+            return
         if kind == "mission":
             objective = str(action.get("objective") or "").strip()
             if not objective:

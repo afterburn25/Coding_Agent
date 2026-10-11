@@ -1386,6 +1386,63 @@ class AutonomyApiTests(unittest.TestCase):
                 if getattr(state, "autonomy", None) is not None:
                     state.autonomy.stop()
 
+    def test_reminder_creates_a_real_schedule(self):
+        # "remind me to X" / "set a reminder" produce an actual
+        # once-schedule firing a notification — never a model riff of
+        # "I've set a reminder" with nothing behind it. Cadence-bearing
+        # "remember to …" still routes to the standing-goal lane, and
+        # "remind me about" stays recall vocabulary.
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import AppState
+            ws = Path(td)
+            cfg = AgentConfig(profiles_onboarding_gate=False,
+                models=[ModelProfile(
+                    id="fake", endpoint="http://127.0.0.1:1/v1",
+                    model="fake-model", roles=["primary_coder"],
+                    runtime="external")],
+                process_watchdog=False, research_enabled=False,
+            )
+            state = AppState(cfg, ws, ws / ".runtime")
+            try:
+                def _reminders():
+                    return [s for s in state.autonomy.scheduler.list()
+                            if s.get("created_by") == "chat"]
+
+                out = state._mission_command(
+                    "remind me to check the deploy tomorrow")
+                self.assertIsNotNone(out)
+                self.assertIn("Reminder set", out["content"])
+                scheds = _reminders()
+                self.assertEqual(len(scheds), 1)
+                self.assertEqual(scheds[0]["kind"], "once")
+                self.assertEqual(
+                    scheds[0]["action"].get("kind"), "notify")
+                self.assertIn("check the deploy",
+                              scheds[0]["action"]["detail"])
+                out = state._mission_command(
+                    "set a reminder for the meeting at 3pm")
+                self.assertIsNotNone(out)
+                self.assertIn("Reminder set", out["content"])
+                self.assertEqual(len(_reminders()), 2)
+                # No parseable time — honest ask, no phantom schedule.
+                out = state._mission_command(
+                    "remind me to water the plants")
+                self.assertIsNotNone(out)
+                self.assertIn("can't pin", out["content"])
+                self.assertEqual(len(_reminders()), 2)
+                # "remember to … weekly" still mints a standing goal.
+                out = state._mission_command(
+                    "remember to check the deploys weekly")
+                self.assertIsNotNone(out)
+                self.assertIn("Standing goal", out["content"])
+                # Recall vocabulary never reaches the reminder lane.
+                self.assertIsNone(
+                    state._mission_command("remind me about the standup"))
+            finally:
+                if getattr(state, "autonomy", None) is not None:
+                    state.autonomy.stop()
+
 
 class ChatAttachmentTests(unittest.TestCase):
     """Chat '+' attachments: text files inline into the model's user
