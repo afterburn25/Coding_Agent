@@ -2723,8 +2723,11 @@ class AgentOrchestrator:
         memory = self.conversation_memory
         if memory is None:
             return None
+        # A bare noun is not anaphoric — "do the thing" strips to
+        # prop="thing", which must not read as a discourse referent.
+        # Definite reference needs the article/possessive or a pronoun.
         head = re.search(
-            r"\b(?:the\s+|your\s+)?(?:answer|reply|response|thing|"
+            r"\b(?:the\s+|your\s+)(?:answer|reply|response|thing|"
             r"result|outcome|decision|verdict)\b|\b(?:it|that)\b",
             prop, re.IGNORECASE)
         if head is None:
