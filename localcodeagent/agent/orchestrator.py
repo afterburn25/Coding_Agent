@@ -2695,10 +2695,13 @@ class AgentOrchestrator:
                         # utterance as if it had been confirmed clean.
                         marker_at = content.find(UNVERIFIED_CLAIMS_MARKER)
                         if marker_at > 0:
-                            head_text = content[:marker_at].rstrip(" ⚠")
-                            tail = content[marker_at:].lstrip(" ⚠")
-                            notice = f" ⚠ {tail}"
-                            quoted = head_text[:200] + notice
+                            # Split at the ⚠ glyph so the notice stays
+                            # byte-verbatim ("⚠ **Unverified …** — …").
+                            warn_at = content.rfind("⚠", 0, marker_at)
+                            if warn_at < 0:
+                                warn_at = marker_at
+                            quoted = (content[:warn_at].rstrip()[:200]
+                                      + " " + content[warn_at:])
                         else:
                             quoted = content[:200]
                         return (f"Earlier I said: "
