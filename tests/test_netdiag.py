@@ -1803,7 +1803,14 @@ class TruthGateTests(RecoveryLoopTests):
                     ("hold my reminders", False),
                     ("freeze my reminders", False),
                     ("suspend my reminders", False),
-                    ("quiet the reminders", False)):
+                    ("quiet the reminders", False),
+                    # Echo nouns ride the reminder noun — 'turn off
+                    # reminder notifications' got a model-composed
+                    # 'Notifications are now off.' over a live row.
+                    ("mute the reminder notifications", False),
+                    ("unmute the reminder alerts", True),
+                    ("turn off reminder notifications", False),
+                    ("turn the reminder pings back on", True)):
                 row["enabled"] = not want_on
                 result = agent.run(text, mode="auto")
                 self.assertEqual(row["enabled"], want_on, text)

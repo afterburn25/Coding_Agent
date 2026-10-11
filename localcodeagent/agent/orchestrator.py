@@ -3595,6 +3595,11 @@ class AgentOrchestrator:
     # anchored end and the model invents the ack.
     _REMINDER_TRAIL = (r"(?:\s*,?\s*(?:please|thanks|thank\s+you|"
                        r"ty|pls|plz))*\s*[.!?]?\s*$")
+    # Echo noun — 'turn off reminder notifications' tacks a generic
+    # noun after the scoped one; bare 'notifications' belongs to the
+    # provisioning lane, so the echo only rides a reminder noun.
+    _REMINDER_ECHO = (r"(?:\s+(?:notifications?|alerts?|pings?|"
+                      r"beeps?|chimes?))?")
     _REMINDER_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:remind|alert|notify|ping|wake)\s+"
@@ -3617,6 +3622,7 @@ class AgentOrchestrator:
         r"(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch)\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
+        + _REMINDER_ECHO +
         r"(?:\s*(?:for|about|on|of|to|at)\s+(?P<tail>.+?))?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -3624,6 +3630,7 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:snooze|postpone|delay|push\s+back|push|bump|shift)\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
+        + _REMINDER_ECHO +
         r"(?:\s+(?:(?P<way>for|until|till|to|by|back|up|forward|"
         r"later|earlier|sooner)\s+"
         r"|(?=\d|a\s|an\s|one\s))(?P<dur>.+?))?"
@@ -3635,6 +3642,7 @@ class AgentOrchestrator:
         r"resume|unpause|unmute|unsilence|stop|mute|silence|"
         r"hold|freeze|suspend|quiet)\s+(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?)\b"
+        + _REMINDER_ECHO +
         r"\s*(?P<dir>back\s+on|off|on)?" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_STOP_RE = re.compile(
@@ -3647,13 +3655,14 @@ class AgentOrchestrator:
         r"(?:\s+(?:anymore|again|any\s+more|any\s+longer))?"
         + _REMINDER_TRAIL +
         r"|^\s*(?:no\s+more|enough\s+(?:of|with))\s+"
-        r"(?:the\s+)?reminders?" + _REMINDER_TRAIL,
+        r"(?:the\s+)?reminders?" + _REMINDER_ECHO + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_RESCHEDULE_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:reschedule|move|change)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?)\b"
+        + _REMINDER_ECHO +
         r"\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?)"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
