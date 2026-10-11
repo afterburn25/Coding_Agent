@@ -1831,7 +1831,13 @@ class TruthGateTests(RecoveryLoopTests):
             # permission' — false refusals over live rows.
             for idiom in ("get rid of the standup reminder",
                           "trash the standup reminder",
-                          "nuke the standup reminder"):
+                          "nuke the standup reminder",
+                          # 'forget the X reminder' hit the
+                          # conversation-memory forget lane — a
+                          # 'nothing to forget' ack while the row
+                          # stayed live. The miss-ack demotes when
+                          # the turn is a reminder-control shape.
+                          "forget the standup reminder"):
                 n0 = len(sup.scheduler.rows)
                 sup.scheduler.add(
                     "reminder: standup", "once",

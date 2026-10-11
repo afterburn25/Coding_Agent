@@ -3621,7 +3621,7 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
-        r"axe?|ditch)\s+"
+        r"axe?|ditch|forget)\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
         + _REMINDER_ECHO +
         r"(?:\s*(?:for|about|on|of|to|at)\s+(?P<tail>.+?))?"
@@ -10620,16 +10620,23 @@ class AgentOrchestrator:
                 "I couldn't switch conversation memory off from here "
                 "— the toggle is under Settings → memory.")
         if (training_response is not None
-                and builtin_response is not None
                 and learned.get("forgotten_miss")
                 and not any(learned.get(k) for k in (
                     "facts", "behavior_rules", "training_examples",
                     "forgotten", "locked", "restated", "hearsay",
-                    "hedged", "superseded"))):
+                    "hedged", "superseded"))
+                and (builtin_response is not None
+                     or self._REMINDER_CANCEL_RE.match(user_text)
+                     or self._REMINDER_SNOOZE_RE.match(user_text)
+                     or self._REMINDER_TOGGLE_RE.match(user_text)
+                     or self._REMINDER_STOP_RE.match(user_text)
+                     or self._REMINDER_RESCHEDULE_RE.match(user_text))):
             # A bare forget-miss ack must not outrank a real lane —
             # 'stop remembering things I tell you' is a memory-setting
             # command (self_knowledge already mutated it), and replying
             # 'nothing to forget' would be both wrong and dishonest.
+            # Same for 'forget the X reminder' — the target is a
+            # schedule row, not a memory fact; the cancel lane owns it.
             # Deletion acks survive: the forget mutation already ran.
             training_response = None
         if training_response is not None:
