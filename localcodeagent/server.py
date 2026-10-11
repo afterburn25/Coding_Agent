@@ -4988,7 +4988,8 @@ class AppState:
         # carries a parseable time (a bare "remember to X" remains
         # eligible for the standing-goal lane below).
         rem = re.match(
-            r"^(?:please\s+)?(remind\s+me(?:\s+to)?|"
+            r"^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?"
+            r"(?:please\s+)?(remind\s+me(?:\s+to)?|"
             r"(?:set|create|add|schedule)\s+(?:a\s+|an\s+|me\s+a\s+)?"
             r"(?:reminder|alarm|timer)(?:\s+(?:for|to|about|that))?|"
             r"remember\s+to)\s+(.+?)[.!?]?$",
@@ -5021,7 +5022,8 @@ class AppState:
         # 'pause my goals' / 're-enable the review goal' flip a real
         # enabled flag (reversible), never a banked rule.
         gm = re.match(
-            r"^(?:please\s+)?(stop|pause|disable|cancel|remove|"
+            r"^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?"
+            r"(?:please\s+)?(stop|pause|disable|cancel|remove|"
             r"delete|end|kill|turn\s+off|switch\s+off|shut\s+off|"
             r"start|enable|re-?enable|resume|unpause|turn\s+on|"
             r"turn\s+back\s+on|switch\s+on|restart|bring\s+back)"

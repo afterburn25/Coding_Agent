@@ -1606,6 +1606,21 @@ class AutonomyApiTests(unittest.TestCase):
                                  "alarm")
                 self.assertEqual(lt.tm_min, 30)
                 self.assertGreater(scheds[-1]["at"], time.time())
+                # Polite-wrapped asks reach the same lane — the
+                # courtesy prefix is not a different intent.
+                out = state._mission_command(
+                    "can you remind me to call the dentist tomorrow")
+                self.assertIsNotNone(out)
+                self.assertIn("Reminder set", out["content"])
+                scheds = _reminders()
+                self.assertEqual(len(scheds), 7)
+                self.assertIn("call the dentist",
+                              scheds[-1]["action"]["detail"])
+                # A wrapped ask with no time still defers honestly —
+                # no phantom row.
+                self.assertIsNone(state._mission_command(
+                    "could you please remind me to water the plants"))
+                self.assertEqual(len(_reminders()), 7)
             finally:
                 if getattr(state, "autonomy", None) is not None:
                     state.autonomy.stop()
@@ -1662,6 +1677,16 @@ class AutonomyApiTests(unittest.TestCase):
                 self.assertIn("Re-enabled", out["content"])
                 self.assertTrue(
                     sup.standing_goals()[0].get("enabled", True))
+                # Polite-wrapped goal verbs flip the same real flag.
+                out = state._mission_command(
+                    "could you please stop the smoke tests goal")
+                self.assertIsNotNone(out)
+                self.assertIn("Stopped", out["content"])
+                self.assertFalse(
+                    sup.standing_goals()[0].get("enabled", True))
+                out = state._mission_command(
+                    "resume the smoke tests goal")
+                self.assertIn("Re-enabled", out["content"])
                 # Unknown topic lists what exists; unrelated stop
                 # verbs ('stop the music') don't claim.
                 out = state._mission_command(

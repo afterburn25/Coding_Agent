@@ -3587,46 +3587,59 @@ class AgentOrchestrator:
         low = str(masked_text or "").lower()
         return any(re.search(rf"\b{re.escape(v)}\b", low) for v in verbs)
 
+    _REMINDER_POLITE = (r"^\s*(?:please\s+)?"
+                        r"(?:(?:can|could|would|will)\s+you\s+)?"
+                        r"(?:please\s+)?")
     _REMINDER_RE = re.compile(
-        r"^\s*(?:please\s+)?(?:remind|alert|notify|ping|wake)\s+"
+        _REMINDER_POLITE +
+        r"(?:remind|alert|notify|ping|wake)\s+"
         r"me\s+(?:up\s+)?"
         r"(?P<when>.+?)\s+(?:to|about|of|that)\s+"
         r"(?P<task>.+?)\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
-        r"^\s*(?:please\s+)?(?:remind|alert|notify|ping|wake)\s+"
+        _REMINDER_POLITE +
+        r"(?:remind|alert|notify|ping|wake)\s+"
         r"me\s+(?:up\s+)?to\s+(?P<task>.+?)\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_NOTASK_RE = re.compile(
-        r"^\s*(?:please\s+)?(?:remind|alert|notify|ping|wake)\s+"
+        _REMINDER_POLITE +
+        r"(?:remind|alert|notify|ping|wake)\s+"
         r"me\s+(?:up\s+)?(?P<when>.+?)\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_CANCEL_RE = re.compile(
-        r"^\s*(?:please\s+)?(?:cancel|delete|remove|drop|clear)\s+"
+        _REMINDER_POLITE +
+        r"(?:cancel|delete|remove|drop|clear)\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
         r"(?:\s*(?:for|about|on|of|to)\s+(?P<tail>.+?))?"
         r"\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_SNOOZE_RE = re.compile(
-        r"^\s*(?:please\s+)?(?:snooze|postpone|delay|push\s+back)\s+"
+        _REMINDER_POLITE +
+        r"(?:snooze|postpone|delay|push\s+back)\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
         r"(?:\s+(?:for|until|till|to|by)\s+(?P<dur>.+?))?\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_TOGGLE_RE = re.compile(
-        r"^\s*(?:please\s+)?(?P<verb>turn|switch|disable|enable|"
-        r"re-?enable|pause|resume|unpause)\s+(?P<body>.+?)?"
+        _REMINDER_POLITE +
+        r"(?P<verb>turn|switch|disable|enable|re-?enable|pause|"
+        r"resume|unpause|stop|mute|silence)\s+(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?)\b"
         r"\s*(?P<dir>back\s+on|off|on)?\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_STOP_RE = re.compile(
-        r"^\s*(?:please\s+)?(?:don'?t|do\s+not|stop|quit|never)\s+"
+        _REMINDER_POLITE +
+        r"(?:don'?t|do\s+not|stop|quit|never)\s+"
         r"(?:remind(?:ing)?|alert(?:ing)?|notify(?:ing)?|"
         r"ping(?:ing)?|wak(?:e|ing))\s+me\b"
         r"(?:\s+(?:to|about)\s+(?P<topic>.+?)|"
-        r"\s+(?:anymore|again|any\s+more|any\s+longer))?\s*[.!?]?\s*$",
+        r"\s+(?:anymore|again|any\s+more|any\s+longer))?\s*[.!?]?\s*$"
+        r"|^\s*(?:no\s+more|enough\s+(?:of|with))\s+"
+        r"(?:the\s+)?reminders?\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_RESCHEDULE_RE = re.compile(
-        r"^\s*(?:please\s+)?(?:reschedule|move|change)\s+"
+        _REMINDER_POLITE +
+        r"(?:reschedule|move|change)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?)\b"
         r"\s+(?:to|until|till|for)\s+(?P<when>.+?)\s*[.!?]?\s*$",

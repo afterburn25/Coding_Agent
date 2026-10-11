@@ -1498,6 +1498,124 @@ class TruthGateTests(RecoveryLoopTests):
                 "remind me my editor",
                 "remind me my editor", task.id))
 
+    def test_reminder_polite_wrappers_mutate_rows(self):
+        # Live: "can you stop reminding me about stretching" carried
+        # a polite wrapper none of the reminder regexes consumed; the
+        # turn fell through to the action lane, which read 'stop' as
+        # an app-close and asked for application.manage approval.
+        # Polite-wrapped commands are reminder ops — real row
+        # mutations, never an approval ask for another capability.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+                self._n = 0
+
+            def add(self, name, kind, **kw):
+                self._n += 1
+                row = {"id": f"sc-{self._n}", "name": name,
+                       "kind": kind, "enabled": True, **kw}
+                self.rows.append(row)
+                return row
+
+            def list(self):
+                return list(self.rows)
+
+            def remove(self, sid):
+                n = len(self.rows)
+                self.rows = [r for r in self.rows if r["id"] != sid]
+                return len(self.rows) < n
+
+            def update(self, sid, **fields):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r.update(fields)
+                        return dict(r)
+                return None
+
+            def set_enabled(self, sid, enabled):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r["enabled"] = bool(enabled)
+                        return True
+                return False
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            task = agent.tasks.create("x", "auto")
+
+            # A wrapped create mints a real row at the asked clock.
+            r = agent._reminder_reply(
+                "can you remind me at 3pm to do my stretching",
+                "can you remind me at 3pm to do my stretching",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Reminder set", r.content)
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(
+                row["action"]["detail"], "do my stretching")
+            lt = time.localtime(row["at"])
+            self.assertEqual((lt.tm_hour, lt.tm_min), (15, 0))
+
+            # The defect probe — 'can you stop reminding me' claims
+            # the reminder lane before the action parser can read
+            # 'stop' as an app-close: the reply disables a real row
+            # and carries no application.manage approval ask.
+            r = agent._local_action_reply(
+                "can you stop reminding me about stretching",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertNotIn("approv", r.content.lower())
+            self.assertIn("off", r.content)
+            self.assertFalse(row["enabled"])
+
+            # 'mute'/'silence'/'stop' are off-verbs on the toggle
+            # lane — a scoped stop disables only the matching row.
+            agent._reminder_reply(
+                "turn reminders back on",
+                "turn reminders back on", task.id)
+            r = agent._reminder_reply(
+                "mute my reminders",
+                "mute my reminders", task.id)
+            self.assertIsNotNone(r)
+            self.assertFalse(
+                any(s["enabled"] for s in sup.scheduler.rows))
+            agent._reminder_reply(
+                "turn reminders back on",
+                "turn reminders back on", task.id)
+            r = agent._reminder_reply(
+                "stop the stretching reminder",
+                "stop the stretching reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("off", r.content)
+            self.assertFalse(row["enabled"])
+
+            # 'no more reminders' / 'enough of the reminders' are
+            # unscoped stops — the whole enabled pool flips off.
+            agent._reminder_reply(
+                "turn reminders back on",
+                "turn reminders back on", task.id)
+            r = agent._reminder_reply(
+                "no more reminders",
+                "no more reminders", task.id)
+            self.assertIsNotNone(r)
+            self.assertFalse(
+                any(s["enabled"] for s in sup.scheduler.rows))
+            r = agent._reminder_reply(
+                "enough of the reminders",
+                "enough of the reminders", task.id)
+            self.assertIn("don't have any active reminders",
+                          r.content)
+
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of
         # 10 active rules with no indication the set was truncated —
