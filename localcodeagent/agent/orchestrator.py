@@ -4219,7 +4219,8 @@ class AgentOrchestrator:
                            r"firing|set|the|a|an|my|that|next|time|"
                            r"day|date|hour|i|me|we|you|your|got|"
                            r"still|really|actually|don'?t|dont|not|"
-                           r"no|more|longer|anymore)\b", " ",
+                           r"no|more|longer|anymore|list|show|see|"
+                           r"tell|give|display|view)\b", " ",
                            tm.group(1), flags=re.IGNORECASE).lower()))
         when_ask = bool(re.match(
             r"\s*(?:when|what\s+time)\b", plan_text, re.IGNORECASE))
