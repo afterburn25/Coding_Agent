@@ -2994,7 +2994,8 @@ class AgentOrchestrator:
         if (self._REMINDER_RE.match(match_text)
                 or self._REMINDER_CLARIFY_RE.match(match_text)
                 or self._REMINDER_CANCEL_RE.match(match_text)
-                or self._REMINDER_SNOOZE_RE.match(match_text)):
+                or self._REMINDER_SNOOZE_RE.match(match_text)
+                or self._REMINDER_RESCHEDULE_RE.match(match_text)):
             return None
         # Reminder inventory — "what reminders do i have" asks the
         # scheduler, not conversational facts; a memory recall can only
@@ -3584,13 +3585,15 @@ class AgentOrchestrator:
         return any(re.search(rf"\b{re.escape(v)}\b", low) for v in verbs)
 
     _REMINDER_RE = re.compile(
-        r"^\s*(?:please\s+)?remind\s+me\s+"
+        r"^\s*(?:please\s+)?(?:remind|alert|notify|ping|wake)\s+"
+        r"me\s+(?:up\s+)?"
         r"(?P<when>.+?)\s+(?:to|about|of|that)\s+"
         r"(?P<task>.+?)\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
-        r"^\s*(?:please\s+)?remind\s+me\s+to\s+(?P<task>.+?)"
-        r"\s*[.!?]?\s*$", re.IGNORECASE)
+        r"^\s*(?:please\s+)?(?:remind|alert|notify|ping|wake)\s+"
+        r"me\s+(?:up\s+)?to\s+(?P<task>.+?)\s*[.!?]?\s*$",
+        re.IGNORECASE)
     _REMINDER_CANCEL_RE = re.compile(
         r"^\s*(?:please\s+)?(?:cancel|delete|remove|drop|clear)\s+"
         r"(?P<body>.+?)?\breminders?\b"
@@ -3600,6 +3603,11 @@ class AgentOrchestrator:
     _REMINDER_SNOOZE_RE = re.compile(
         r"^\s*(?:please\s+)?snooze\s+(?P<body>.+?)?\breminders?\b"
         r"(?:\s+(?:for|until|till|to)\s+(?P<dur>.+?))?\s*[.!?]?\s*$",
+        re.IGNORECASE)
+    _REMINDER_RESCHEDULE_RE = re.compile(
+        r"^\s*(?:please\s+)?(?:reschedule|move|change)\s+"
+        r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?\breminders?\b"
+        r"\s+(?:to|until|till|for)\s+(?P<when>.+?)\s*[.!?]?\s*$",
         re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(
         r"\breminders?\b|\balarms?\b", re.IGNORECASE)
@@ -3719,6 +3727,58 @@ class AgentOrchestrator:
                 text = (f"Snoozed "
                         f"“{self._reminder_label(hits[0])}” "
                         f"until {stamp}.")
+        return self._reminder_finish(text, user_text, task_id,
+                                     event_callback)
+
+    def _reminder_reschedule_reply(self, user_text: str, mr: re.Match,
+                                   task_id: str, event_callback):
+        """'reschedule the deploy reminder to friday at 3' — a real
+        scheduler.update of at/kind fields."""
+        sched, rows = self._reminder_rows()
+        if sched is None:
+            return self._reminder_finish(
+                "I can't manage reminders — the scheduler isn't "
+                "running in this session.",
+                user_text, task_id, event_callback)
+        spec = self._reminder_spec(
+            str(mr.group("when") or ""), time.time())
+        if spec is None:
+            return self._reminder_finish(
+                "Reschedule to when? — e.g. “to friday at 3pm” "
+                "or “to every morning”.",
+                user_text, task_id, event_callback)
+        body = str(mr.group("body") or "").strip(" ,;—-")
+        topic_terms = set(re.findall(
+            r"[a-z0-9']+",
+            re.sub(r"\b(?:the|my|that|all|every|each|any|of|to|for|"
+                   r"about)\b", " ", body, flags=re.IGNORECASE).lower()))
+        hits = [s for s in rows if not topic_terms or topic_terms <= set(
+            re.findall(
+                r"[a-z0-9']+",
+                (f"{s.get('name', '')} "
+                 f"{(s.get('action') or {}).get('detail', '')}").lower()))]
+        if not rows:
+            text = "You don't have any reminders set."
+        elif not hits:
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rows[:3])
+            text = (f"I don't see a reminder matching "
+                    f"“{' '.join(sorted(topic_terms))}” — "
+                    f"you have: {names}.")
+        elif len(hits) > 1:
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in hits[:5])
+            text = (f"That matches {len(hits)} reminders: {names} — "
+                    "say which.")
+        else:
+            try:
+                sched.update(str(hits[0]["id"]), **spec)
+            except Exception as exc:
+                text = f"I couldn't reschedule the reminder ({exc})."
+            else:
+                label = self._reminder_label(hits[0])
+                text = (f"Rescheduled “{label}” — "
+                        + self._reminder_spec_text(spec, label))
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
@@ -3848,6 +3908,10 @@ class AgentOrchestrator:
         if ms is not None:
             return self._reminder_snooze_reply(
                 user_text, ms, task_id, event_callback)
+        mr = self._REMINDER_RESCHEDULE_RE.match(plan_text)
+        if mr is not None:
+            return self._reminder_reschedule_reply(
+                user_text, mr, task_id, event_callback)
         m = self._REMINDER_RE.match(plan_text)
         clarify = None
         if m is None:
@@ -3971,7 +4035,8 @@ class AgentOrchestrator:
                 and not (self._REMINDER_RE.match(plan_text)
                          or self._REMINDER_CLARIFY_RE.match(plan_text)
                          or self._REMINDER_CANCEL_RE.match(plan_text)
-                         or self._REMINDER_SNOOZE_RE.match(plan_text))):
+                         or self._REMINDER_SNOOZE_RE.match(plan_text)
+                         or self._REMINDER_RESCHEDULE_RE.match(plan_text))):
             return None
         # Checked before parse_local_action, which has no temporal
         # grammar — without this the ask fell to the model and it

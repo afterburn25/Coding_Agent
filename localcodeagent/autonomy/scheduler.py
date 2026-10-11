@@ -31,6 +31,8 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     t = " ".join(str(when or "").lower().split())
     if not t:
         return None
+    t = re.sub(r"\bat\s+noon\b", "at 12:00 pm", t)
+    t = re.sub(r"\bat\s+midnight\b", "at 12:00 am", t)
     lt = time.localtime(now)
 
     def _meridian(hour: int, mer: str | None) -> int:
@@ -56,14 +58,25 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     clock_tail = (r"(?:\s+at\s+(\d{1,2})(?::(\d{2}))?"
                   r"\s*(a\.?m\.?|p\.?m\.?|am|pm)?)?")
 
+    _WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3,
+              "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+              "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
     m = re.fullmatch(
-        r"in\s+(\d+(?:\.\d+)?)\s*"
+        r"in\s+(?:about\s+|around\s+|roughly\s+)?"
+        r"(\d+(?:\.\d+)?|an?\s+couple\s+of|an?|one|two|three|four|"
+        r"five|six|seven|eight|nine|ten|eleven|twelve|half\s+an?)\s*"
         r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
         r"days?|d)", t)
     if m:
+        n_raw = m.group(1)
+        n = (0.5 if n_raw.startswith("half") else
+             2.0 if "couple" in n_raw else
+             _WORDS.get(n_raw, None))
+        if n is None:
+            n = float(n_raw)
         scale = {"s": 1, "m": 60, "h": 3600, "d": 86400}[
             m.group(2)[0]]
-        return now + float(m.group(1)) * scale
+        return now + n * scale
     m = re.fullmatch(
         r"tomorrow(?:\s+(morning|afternoon|evening|night))?"
         + clock_tail, t)
