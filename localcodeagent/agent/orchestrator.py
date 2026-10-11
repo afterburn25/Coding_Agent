@@ -427,6 +427,20 @@ def _strip_unverified_notice(text: str) -> str:
     return _UNVERIFIED_NOTICE_RE.sub("", str(text or "")).rstrip()
 
 
+def _history_sanitize(content: str) -> str:
+    """Model-facing sanitize for one stored assistant turn. A turn the
+    truth gate flagged is a parrot seed — the model riffs on its own
+    invented telemetry and fabricates fresh claims each round. Withhold
+    the claim text entirely: the verbatim record stays in the store for
+    the recall lanes and UI, but the model only learns that a flagged
+    reply exists."""
+    text = str(content or "")
+    if UNVERIFIED_CLAIMS_MARKER in text:
+        return ("(An earlier reply was flagged for unverified action "
+                "claims — its text is withheld from context.)")
+    return _strip_unverified_notice(text)
+
+
 # Shared surface renderer for deterministic/builtin replies — the
 # repetition ledger spans turns and conversations so canned lines cool
 # down instead of replaying verbatim (context/realize.py).
@@ -10314,7 +10328,7 @@ class AgentOrchestrator:
                 for msg in reversed(history[-history_turns:]):
                     content = str(msg.get("content") or "")
                     if str(msg.get("role") or "") == "assistant":
-                        content = _strip_unverified_notice(content)
+                        content = _history_sanitize(content)
                     if not content or budget[0] <= 0:
                         continue
                     if len(content) > budget[0]:
@@ -10447,7 +10461,7 @@ class AgentOrchestrator:
                 for msg in reversed(history[-24:]):
                     content = str(msg.get("content") or "")
                     if str(msg.get("role") or "") == "assistant":
-                        content = _strip_unverified_notice(content)
+                        content = _history_sanitize(content)
                     if not content or budget[0] <= 0:
                         continue
                     if len(content) > budget[0]:

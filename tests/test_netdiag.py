@@ -1345,7 +1345,12 @@ class TruthGateTests(RecoveryLoopTests):
             sent = json.dumps(provider.last_messages or [],
                               ensure_ascii=False)
             self.assertNotIn("Unverified action claims", sent)
-            self.assertIn("all green", sent)
+            # The flag's furniture AND the flagged claim text stay out —
+            # the claims themselves are the parrot seed (each repeat
+            # fabricates fresh telemetry); the verbatim record still
+            # serves the recall lanes and UI transcript.
+            self.assertNotIn("all green", sent)
+            self.assertIn("withheld", sent)
 
 
 class _DeadProcess:
