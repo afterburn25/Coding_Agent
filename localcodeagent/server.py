@@ -5166,13 +5166,17 @@ class AppState:
             spec = parse_reminder_schedule(" ".join(words[i:]), now)
             if spec is not None:
                 return spec, " ".join(words[:i]).strip(" ,;—-")
-        parts = re.split(r"\s+(?:to|for)\s+", body)
-        if len(parts) > 1:
-            for i in range(1, len(parts)):
-                spec = parse_reminder_schedule(
-                    " ".join(parts[:i]), now)
-                if spec is not None:
-                    return spec, " ".join(parts[i:]).strip(" ,;—-")
+        # Latest boundary first — 'at quarter to 5 to leave' splits
+        # at the 'to' inside 'quarter to' when the first boundary
+        # wins; 'at 5 to 6 to go' stole '6 go' as the task with a
+        # wrong 17:00 clock. The last 'to'/'for' keeps the worded
+        # clock whole and the task clean.
+        bounds = list(re.finditer(r"\s+(?:to|for)\s+", body))
+        for dm in reversed(bounds):
+            spec = parse_reminder_schedule(
+                body[:dm.start()].strip(), now)
+            if spec is not None:
+                return spec, body[dm.end():].strip(" ,;—-")
         return None, str(body or "").strip()
 
     def _reminder_spec_text(self, spec: dict) -> str:
