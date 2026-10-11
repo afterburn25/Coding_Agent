@@ -1579,6 +1579,28 @@ class CrossChatMemoryTests(unittest.TestCase):
                 [r for r in memory._data["facts"]
                  if r.get("active") and "timeout" in r["text"]])
 
+    def test_same_for_asks_never_guesses(self):
+        # "same for the staging api" is an elliptical value request
+        # whose referent is ambiguous — a model riff once applied the
+        # backup schedule ("runs at 2am") to the staging API and the
+        # fabrication banked into Answer Memory. The deterministic lane
+        # asks for the value and banks nothing.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            memory.learn_from_user("the backup runs at 2am")
+            for utterance in (
+                "same for the staging api",
+                "same goes for the prod api",
+            ):
+                learned = memory.learn_from_user(utterance)
+                self.assertFalse(learned["facts"], utterance)
+                self.assertEqual(len(learned.get("clarify") or []), 1,
+                                 utterance)
+            # Only the real fact is active — nothing guessed.
+            self.assertEqual(
+                [r["text"] for r in memory._data["facts"]
+                 if r.get("active")], ["backup runs at 2am"])
+
     def test_stated_plan_banks_as_plan(self):
         # BUG-082 — "we're switching to mysql next week" declares
         # intent, not current use; unhandled it fell to a model that

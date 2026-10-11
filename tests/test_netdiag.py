@@ -723,6 +723,35 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(reply)
             self.assertIn("titan", reply.text)
 
+    def test_port_probe_is_answer_type_slot(self):
+        # "which port is prod on" — 'port' names the answer's type, not
+        # the entity; the stored fact is 'prod api is on 443' and never
+        # carries the word 'port' (live-observed 503).
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            agent.conversation_memory.learn_from_user(
+                "staging api uses port 8443")
+            reply = agent._single_fact_recall_reply(
+                "which port is prod on", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("443", reply.text)
+            self.assertNotIn("8443", reply.text)
+            # A fact that merely *mentions* 'prod' in its value loses
+            # to the subject-anchored one — the question asks about the
+            # entity, not an incidental tail term.
+            agent.conversation_memory.learn_from_user(
+                "staging db is postgres and prod is mysql")
+            reply = agent._single_fact_recall_reply(
+                "which port is prod on then", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertEqual("The prod api is on 443.", reply.text)
+
     def test_when_does_probe_drops_trailing_verb(self):
         # "when does the freeze lift" — the probe's own verb isn't a
         # fact term; after the strict subset fails, retry on the noun

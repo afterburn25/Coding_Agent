@@ -1154,18 +1154,26 @@ class ConversationMemory:
         and_parts = re.split(r"\s+and\s+", raw)
         if len(and_parts) > 1:
             decl = re.compile(
-                r"^(?:my|the|our|i|we|it)\b.{1,60}?\b"
+                r"^\w.{1,60}?\b"
                 r"(?:" + self._DECL_PRED_ALT + r")\s+\S",
                 re.IGNORECASE)
             if all(decl.match(p.strip()) for p in and_parts):
+                split_out: dict[str, list] = {}
                 for part in and_parts:
                     sub = self.learn_from_user(
                         part.strip(),
                         project_id=project_id,
                         conversation_id=conversation_id)
                     for key, value in sub.items():
+                        split_out.setdefault(key, []).extend(value)
+                if any(split_out.values()):
+                    for key, value in split_out.items():
                         result.setdefault(key, []).extend(value)
-                return result
+                    return result
+                # Every part parsed as a clause yet nothing banked
+                # (e.g. single-noun values killed by the adjective
+                # guard) — fall through so the ordinary single-decl
+                # path can still record the statement verbatim.
 
         # Reported speech / hearsay — "i heard the port is 9090",
         # "someone said the build is green" — is acknowledged but never
@@ -1251,6 +1259,20 @@ class ConversationMemory:
             # 9090" — the hoisted `body` is already marker-stripped, so
             # the same hedged-claim rule applies.
             if body != raw and _hedged(body):
+                return result
+            # Elliptical "same for X" — the user means "X gets whatever
+            # value was just discussed", but the referent is genuinely
+            # ambiguous and guessing banks a wrong fact (a model once
+            # applied the backup schedule to the staging API). Ask for
+            # the value deterministically instead.
+            same_for = re.match(
+                r"^same\s+(?:for|goes\s+for|with|applies\s+to)\s+"
+                r"(.+?)[.!?]?$",
+                body, flags=re.IGNORECASE)
+            if same_for:
+                result.setdefault("clarify", []).append(
+                    f"Same what for {same_for.group(1).strip()}? "
+                    "Tell me the value and I'll note it.")
                 return result
             for pattern in (
                 r"^remember\s+that\s+(.+)$",
