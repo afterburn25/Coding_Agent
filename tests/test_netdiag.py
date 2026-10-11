@@ -1852,6 +1852,29 @@ class TruthGateTests(RecoveryLoopTests):
                 self.assertIn("Cancel", result.content, idiom)
                 self.assertEqual(len(sup.scheduler.rows), n0, idiom)
 
+            # A bare clock is a valid cancel scope — 'cancel my 9pm'
+            # got a model-composed 'the 9pm reminder is canceled'
+            # live with no removal; 'kill the 21:00' the same.
+            for clock_text in ("cancel my 9pm", "kill the 21:00",
+                               "delete noon please"):
+                n0 = len(sup.scheduler.rows)
+                sup.scheduler.add(
+                    "reminder: late check", "once",
+                    at=time.time() + 3600,
+                    action={"kind": "notify",
+                            "detail": "late check"})
+                late_row = sup.scheduler.rows[-1]
+                lt9 = time.localtime(time.time() + 86400)
+                hh, mm = (21, 0) if "9pm" in clock_text or "21" in \
+                    clock_text else (12, 0)
+                late_row["at"] = time.mktime(
+                    (lt9.tm_year, lt9.tm_mon, lt9.tm_mday, hh, mm, 0,
+                     lt9.tm_wday, lt9.tm_yday, lt9.tm_isdst))
+                result = agent.run(clock_text, mode="auto")
+                self.assertIn("Cancel", result.content, clock_text)
+                self.assertEqual(len(sup.scheduler.rows), n0,
+                                 clock_text)
+
             row["enabled"] = True
             row["name"] = "reminder: standup"
             lt = time.localtime(time.time() + 86400)
@@ -1889,6 +1912,12 @@ class TruthGateTests(RecoveryLoopTests):
                 result = agent.run(vague, mode="auto")
                 self.assertIn("couldn't pin a time", result.content,
                               vague)
+            # 'wake me up early tomorrow' — the NOTASK when parsed
+            # ('early tomorrow') but spec failed → the model answered
+            # 'just say “set wake-up for 6am”' instead of asking.
+            result = agent.run("wake me up early tomorrow",
+                               mode="auto")
+            self.assertIn("couldn't pin a time", result.content)
             result = agent.run("push the 3pm reminder to 10pm",
                                mode="auto")
             self.assertIn("Snoozed", result.content)

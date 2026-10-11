@@ -3624,9 +3624,14 @@ class AgentOrchestrator:
         r"axe?|ditch|forget)"
         r"|(?:i\s+)?(?:don'?t|do\s+not|dont)\s+"
         r"(?:need|want|use|like))\s+"
-        r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
+        r"(?:(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
         + _REMINDER_ECHO +
         r"(?:\s*(?:for|about|on|of|to|at)\s+(?P<tail>.+?))?"
+        # Bare clock target — 'cancel my 9pm' is a scoped cancel; the
+        # clock lands in 'ctime' and becomes the topic below.
+        r"|(?:(?:the|my|that)\s+)?"
+        r"(?P<ctime>\d{1,2}:\d{2}\s*(?:am|pm)?\b|"
+        r"\d{1,2}\s*(?:am|pm)\b|noon|midnight))"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_SNOOZE_RE = re.compile(
@@ -4155,7 +4160,8 @@ class AgentOrchestrator:
         body = str(mc.group("body") or "").strip(" ,;—-")
         all_flag = bool(
             re.search(r"\b(?:all|every|each)\b", body, re.IGNORECASE))
-        topic_src = mc.group("tail") or re.sub(
+        topic_src = mc.groupdict().get("ctime") or mc.group(
+            "tail") or re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
             " ", body, flags=re.IGNORECASE)
         topic_terms = set(
@@ -4374,6 +4380,14 @@ class AgentOrchestrator:
                             and self._REMINDER_TIMEISH_RE.search(wtxt)):
                         return self._reminder_finish(
                             f"Sure — remind you to do what {wtxt}?",
+                            user_text, task_id, event_callback)
+                    if self._REMINDER_TIMEISH_RE.search(wtxt):
+                        # 'wake me up early tomorrow' — timeish but
+                        # unparseable → ask for a concrete clock.
+                        return self._reminder_finish(
+                            f"I couldn't pin a time from "
+                            f"“{wtxt}” — say “at 6am”, “in 30 minutes”"
+                            f", or “tomorrow at 9”.",
                             user_text, task_id, event_callback)
                 return None
             # 'remind me to X' with no time — claim and ask rather
