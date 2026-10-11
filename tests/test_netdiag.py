@@ -1181,6 +1181,92 @@ class TruthGateTests(RecoveryLoopTests):
                 "remind me what my editor is", task.id))
             self.assertEqual(len(sup.scheduler.rows), 1)
 
+    def test_reminder_combined_time_and_cancel(self):
+        # Live: "remind me tomorrow at 9am to review the deploy"
+        # fell to fact recall (mutually-exclusive regex alternatives
+        # couldn't consume 'tomorrow at 9am'), and "cancel the deploy
+        # reminder" was banked as a fact instead of a scheduler op.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+                self._n = 0
+
+            def add(self, name, kind, **kw):
+                self._n += 1
+                row = {"id": f"sc-{self._n}", "name": name,
+                       "kind": kind, "enabled": True, **kw}
+                self.rows.append(row)
+                return row
+
+            def list(self):
+                return list(self.rows)
+
+            def remove(self, sid):
+                n = len(self.rows)
+                self.rows = [r for r in self.rows if r["id"] != sid]
+                return len(self.rows) < n
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            cm = ConversationMemory(Path(td) / "cm.json")
+            agent.conversation_memory = cm
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            task = agent.tasks.create("x", "auto")
+
+            # Combined 'tomorrow at 9am' parses to tomorrow 09:00.
+            r = agent._reminder_reply(
+                "remind me tomorrow at 9am to review the deploy",
+                "remind me tomorrow at 9am to review the deploy",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("09:00", r.content)
+            row = sup.scheduler.rows[-1]
+            self.assertIn("review the deploy",
+                          row["action"]["detail"])
+            lt = time.localtime(row["at"])
+            now = time.localtime()
+            self.assertEqual((lt.tm_hour, lt.tm_min), (9, 0))
+            self.assertNotEqual(
+                (lt.tm_year, lt.tm_mon, lt.tm_mday),
+                (now.tm_year, now.tm_mon, now.tm_mday))
+
+            # Scheduling commands bank no conversation facts.
+            self.assertFalse(cm.recall_facts("deploy"))
+
+            # Inventory reads the scheduler, not the fact store.
+            inv = agent._reminder_inventory_reply(
+                "what reminders do i have", "what reminders do i have")
+            self.assertIsNotNone(inv)
+            self.assertIn("review the deploy", inv.text)
+
+            # Named cancel removes the matching schedule only.
+            r = agent._reminder_reply(
+                "remind me in 5 minutes to check the build",
+                "remind me in 5 minutes to check the build", task.id)
+            self.assertEqual(len(sup.scheduler.rows), 2)
+            r = agent._reminder_reply(
+                "cancel the deploy reminder",
+                "cancel the deploy reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            self.assertEqual(len(sup.scheduler.rows), 1)
+            self.assertIn("check the build",
+                          sup.scheduler.rows[0]["name"])
+
+            # Unknown topic reports what actually exists.
+            r = agent._reminder_reply(
+                "cancel the dentist reminder",
+                "cancel the dentist reminder", task.id)
+            self.assertIn("don't see a reminder", r.content)
+            self.assertEqual(len(sup.scheduler.rows), 1)
+
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of
         # 10 active rules with no indication the set was truncated —

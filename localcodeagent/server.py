@@ -4799,7 +4799,8 @@ class AppState:
         # missions running" answers from the supervisor store, never the
         # model. Interrogative-shaped only; action phrasings ("stop the
         # mission", "run the tests daily") belong to their own lanes.
-        if ((re.search(r"\b(?:standing\s+goals?|missions?|schedul\w*|triggers?)\b", low)
+        if ((re.search(r"\b(?:standing\s+goals?|missions?|schedul\w*|"
+                       r"triggers?|reminders?|alarms?)\b", low)
                 and re.search(
                     r"\b(?:what|which|list|show|any|are\s+there|"
                     r"do\s+you\s+have|how\s+many|running|active)\b", low)

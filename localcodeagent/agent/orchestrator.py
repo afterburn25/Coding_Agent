@@ -2992,8 +2992,28 @@ class AgentOrchestrator:
         # lead would otherwise term-match the task's topic against
         # stored facts and answer a scheduling request with trivia.
         if (self._REMINDER_RE.match(match_text)
-                or self._REMINDER_CLARIFY_RE.match(match_text)):
+                or self._REMINDER_CLARIFY_RE.match(match_text)
+                or self._REMINDER_CANCEL_RE.match(match_text)):
             return None
+        # Reminder inventory — "what reminders do i have" asks the
+        # scheduler, not conversational facts; a memory recall can only
+        # term-match the word 'reminders' against trivia.
+        if (self._SCHEDULE_INVENTORY_RE.search(match_text)
+                and re.search(
+                    r"\b(?:what|which|any|how\s+many|list|show|"
+                    r"do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
+                    r"are\s+there|got|active|pending|upcoming)\b",
+                    match_text, re.IGNORECASE)
+                and not re.match(
+                    r"\s*(?:please\s+)?(?:remind|cancel|delete|"
+                    r"remove|drop|clear|set|create|add|schedule)\b",
+                    match_text, re.IGNORECASE)
+                and not re.search(
+                    r"\babout\b.{0,40}\breminders?\b|\btold\b",
+                    match_text, re.IGNORECASE)):
+            out = self._reminder_inventory_reply(user_text, match_text)
+            if out is not None:
+                return out
         if frame is not None and not frame.allows("memory_recall"):
             return None
         if (self.conversation_memory is None
@@ -3564,50 +3584,249 @@ class AgentOrchestrator:
 
     _REMINDER_RE = re.compile(
         r"^\s*(?:please\s+)?remind\s+me\s+"
-        r"(?:(?:in\s+(?P<amt>\d+(?:\.\d+)?)\s*"
-        r"(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?|days?))|"
-        r"(?P<tomorrow>tomorrow(?:\s+(?:morning|afternoon|evening))?)|"
-        r"(?:at\s+(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*"
-        r"(?P<ampm>a\.?\s?m\.?|p\.?\s?m\.?)?))"
-        r"[\s,]*(?:to|about|of|that)\s+(?P<task>.+?)\s*[.!?]?\s*$",
+        r"(?P<when>.+?)\s+(?:to|about|of|that)\s+"
+        r"(?P<task>.+?)\s*[.!?]?\s*$",
         re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         r"^\s*(?:please\s+)?remind\s+me\s+to\s+(?P<task>.+?)"
         r"\s*[.!?]?\s*$", re.IGNORECASE)
+    _REMINDER_CANCEL_RE = re.compile(
+        r"^\s*(?:please\s+)?(?:cancel|delete|remove|drop|clear)\s+"
+        r"(?P<body>.+?)?\breminders?\b"
+        r"(?:\s*(?:for|about|on|of|to)\s+(?P<tail>.+?))?"
+        r"\s*[.!?]?\s*$",
+        re.IGNORECASE)
+    _SCHEDULE_INVENTORY_RE = re.compile(
+        r"\breminders?\b|\balarms?\b", re.IGNORECASE)
+    # Temporal tokens in a failed when-clause → ask when, don't claim.
+    _REMINDER_TIMEISH_RE = re.compile(
+        r"\d|morning|afternoon|evening|night|noon|midnight|tomorrow|"
+        r"tonight|today|next|mon|tue|wed|thu|fri|sat|sun|week|minute|"
+        r"hour|day|am\b|pm\b", re.IGNORECASE)
+    _REMINDER_EVENTISH_RE = re.compile(
+        r"\b(?:when|once|if|as\s+soon\s+as|after|before|until|"
+        r"whenever|every\s+time)\b", re.IGNORECASE)
+    _WEEKDAYS = {"mon": 0, "monday": 0, "tue": 1, "tues": 1,
+                 "tuesday": 1, "wed": 2, "wednesday": 2, "thu": 3,
+                 "thur": 3, "thurs": 3, "thursday": 3, "fri": 4,
+                 "friday": 4, "sat": 5, "saturday": 5, "sun": 6,
+                 "sunday": 6}
 
-    def _reminder_at(self, m: re.Match) -> float | None:
-        """Wall-clock timestamp for the matched time phrase."""
-        now = time.time()
-        amt = m.group("amt")
-        if amt:
-            unit = (m.group("unit") or "minutes").lower()
-            secs = (1 if unit.startswith(("sec",)) else
-                    86400 if unit.startswith("day") else
-                    3600 if unit.startswith(("h",)) else 60)
-            return now + float(amt) * secs
-        if m.group("tomorrow"):
-            lt = time.localtime(now + 86400)
-            part = m.group("tomorrow").lower()
-            hour = (9 if "morning" in part else
-                    15 if "afternoon" in part else
-                    19 if "evening" in part else 9)
-            return time.mktime(
-                (lt.tm_year, lt.tm_mon, lt.tm_mday, hour, 0, 0,
-                 -1, -1, -1))
-        hour = int(m.group("hour") or 0)
-        minute = int(m.group("minute") or 0)
-        ampm = re.sub(r"[\s.]", "", (m.group("ampm") or "").lower())
-        if ampm == "pm" and hour < 12:
-            hour += 12
-        elif ampm == "am" and hour == 12:
-            hour = 0
+    def _reminder_at_when(self, when: str, now: float) -> float | None:
+        """Parse a reminder when-clause → wall-clock timestamp.
+
+        Covers 'in 5 minutes', 'tomorrow [morning] [at 9am]',
+        'at 14:30 [tomorrow]', 'tonight', 'this morning', 'friday
+        [at 3]', 'noon', 'midnight'. Returns None when nothing
+        parseable is present."""
+        t = " ".join(str(when or "").lower().split())
+        if not t:
+            return None
         lt = time.localtime(now)
-        at = time.mktime(
-            (lt.tm_year, lt.tm_mon, lt.tm_mday, hour, minute, 0,
-             -1, -1, -1))
-        if at <= now:
-            at += 86400
-        return at
+
+        def _meridian(hour: int, mer: str | None) -> int:
+            mer = re.sub(r"[\s.]", "", mer or "")
+            if mer == "pm" and hour < 12:
+                return hour + 12
+            if mer == "am" and hour == 12:
+                return 0
+            if not mer and hour <= 6:
+                # Bare "at 3" in reminder speech is afternoon, not 3am.
+                return hour + 12
+            return hour
+
+        def _clock(hour: int, minute: int, day_offset: int = 0,
+                   *, roll: bool = True) -> float:
+            cand = time.mktime(
+                (lt.tm_year, lt.tm_mon, lt.tm_mday + day_offset,
+                 hour, minute, 0, -1, -1, -1))
+            if roll and cand <= now:
+                cand += 86400
+            return cand
+
+        clock_tail = (r"(?:\s+at\s+(\d{1,2})(?::(\d{2}))?"
+                      r"\s*(a\.?m\.?|p\.?m\.?|am|pm)?)?")
+
+        m = re.fullmatch(
+            r"in\s+(\d+(?:\.\d+)?)\s*"
+            r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
+            r"days?|d)", t)
+        if m:
+            scale = {"s": 1, "m": 60, "h": 3600, "d": 86400}[
+                m.group(2)[0]]
+            return now + float(m.group(1)) * scale
+        m = re.fullmatch(
+            r"tomorrow(?:\s+(morning|afternoon|evening|night))?"
+            + clock_tail, t)
+        if m:
+            part, hr, mn, mer = m.groups()
+            minute = 0
+            if hr is not None:
+                hour = _meridian(int(hr), mer)
+                minute = int(mn or 0)
+            elif part:
+                hour = {"morning": 9, "afternoon": 15,
+                        "evening": 19, "night": 21}[part]
+            else:
+                hour = 9
+            return _clock(hour, minute, 1, roll=False)
+        if re.fullmatch(r"(?:this\s+night|tonight|this\s+evening)", t):
+            return _clock(21 if "night" in t else 19, 0)
+        m = re.fullmatch(r"this\s+(morning|afternoon|evening)", t)
+        if m:
+            return _clock({"morning": 9, "afternoon": 15,
+                           "evening": 19}[m.group(1)], 0)
+        if t == "noon":
+            return _clock(12, 0)
+        if t == "midnight":
+            return _clock(0, 0)
+        if t == "next week":
+            return _clock(9, 0, 7, roll=False)
+        m = re.fullmatch(
+            r"(?:(on|next)\s+)?(\w+?)" + clock_tail, t)
+        if m:
+            wd = self._WEEKDAYS.get(m.group(2))
+            if wd is not None and m.group(1) == "next":
+                # 'next monday' — the coming week's occurrence, never
+                # today-or-tomorrow.
+                delta = (wd - lt.tm_wday) % 7
+                return _clock(
+                    _meridian(int(m.group(3)), m.group(5))
+                    if m.group(3) else 9,
+                    int(m.group(4) or 0),
+                    delta if delta else 7, roll=False)
+            if wd is not None:
+                hr, mn, mer = m.group(3), m.group(4), m.group(5)
+                hour = _meridian(int(hr), mer) if hr else 9
+                delta = (wd - lt.tm_wday) % 7
+                cand = _clock(hour, int(mn or 0), delta, roll=False)
+                if cand <= now:
+                    cand = _clock(hour, int(mn or 0), delta + 7,
+                                  roll=False)
+                return cand
+        m = re.fullmatch(
+            r"(at\s+)?(\d{1,2})(?::(\d{2}))?\s*"
+            r"(a\.?m\.?|p\.?m\.?|am|pm)?"
+            r"(?:\s+(tomorrow|tonight))?", t)
+        if m and (m.group(1) or m.group(3) or m.group(4)):
+            hour = _meridian(int(m.group(2)), m.group(4))
+            offset = 1 if m.group(5) == "tomorrow" else 0
+            if m.group(5) == "tonight" and hour < 12:
+                hour += 12
+            return _clock(hour, int(m.group(3) or 0), offset)
+        return None
+
+    def _reminder_rows(self):
+        """Enabled reminder schedules (chat-set notify rows)."""
+        sup = (self._autonomy() if callable(self._autonomy)
+               else self._autonomy)
+        sched = getattr(sup, "scheduler", None)
+        if sched is None:
+            return None, []
+        rows = [s for s in (sched.list() or [])
+                if s.get("enabled", True)
+                and (str(s.get("name") or "").lower()
+                     .startswith("reminder")
+                     or (s.get("action") or {}).get("kind") == "notify")]
+        return sched, rows
+
+    def _reminder_label(self, s: dict) -> str:
+        name = re.sub(r"^reminder\s*:\s*", "",
+                      str(s.get("name") or "").strip(),
+                      flags=re.IGNORECASE)
+        return name or str((s.get("action") or {}).get("detail")
+                           or s.get("id") or "")
+
+    def _reminder_when_text(self, s: dict, now: float) -> str:
+        at = s.get("at") or s.get("next_run")
+        if not at:
+            return "pending"
+        fmt = "%a %H:%M" if at - now > 20 * 3600 else "%H:%M"
+        return time.strftime(fmt, time.localtime(at))
+
+    def _reminder_cancel_reply(self, user_text: str, mc: re.Match,
+                               task_id: str, event_callback):
+        """'cancel the deploy reminder' — a real scheduler removal by
+        topic match, with ambiguity listed rather than guessed."""
+        sched, rows = self._reminder_rows()
+        if sched is None:
+            return self._reminder_finish(
+                "I can't manage reminders — the scheduler isn't "
+                "running in this session.",
+                user_text, task_id, event_callback)
+        body = str(mc.group("body") or "").strip(" ,;—-")
+        all_flag = bool(
+            re.search(r"\b(?:all|every|each)\b", body, re.IGNORECASE))
+        topic_src = mc.group("tail") or re.sub(
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
+            " ", body, flags=re.IGNORECASE)
+        topic_terms = set(
+            re.findall(r"[a-z0-9']+", str(topic_src or "").lower()))
+        if not topic_terms and re.search(
+                r"\breminders\b", mc.group(0), re.IGNORECASE):
+            # 'cancel my reminders' (plural, no topic) is a wipe-all.
+            all_flag = True
+        now = time.time()
+
+        def _matches(s: dict) -> bool:
+            if not topic_terms:
+                return True
+            hay = set(re.findall(
+                r"[a-z0-9']+",
+                (f"{s.get('name', '')} "
+                 f"{(s.get('action') or {}).get('detail', '')}").lower()))
+            return topic_terms <= hay
+
+        hits = [s for s in rows if _matches(s)]
+        if not rows:
+            text = "You don't have any reminders set."
+        elif topic_terms and not hits:
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rows[:3])
+            text = (f"I don't see a reminder matching "
+                    f"“{' '.join(sorted(topic_terms))}” — "
+                    f"you have: {names}.")
+        elif len(hits) > 1 and not all_flag:
+            names = "; ".join(
+                f"“{self._reminder_label(s)}” "
+                f"({self._reminder_when_text(s, now)})"
+                for s in hits[:5])
+            text = (f"That matches {len(hits)} reminders: {names} — "
+                    "say which, or “cancel all reminders”.")
+        else:
+            try:
+                gone = sum(bool(sched.remove(str(s["id"])))
+                           for s in hits)
+            except Exception as exc:
+                text = f"I couldn't cancel the reminder ({exc})."
+            else:
+                text = (f"Cancelled the reminder "
+                        f"“{self._reminder_label(hits[0])}”."
+                        if gone == 1 else
+                        f"Cancelled {gone} reminders.")
+        return self._reminder_finish(text, user_text, task_id,
+                                     event_callback)
+
+    def _reminder_inventory_reply(self, user_text: str,
+                                  plan_text: str):
+        """'what reminders do i have' — answers from the scheduler
+        store, never from conversational facts."""
+        sched, rows = self._reminder_rows()
+        if sched is None:
+            return None
+        now = time.time()
+        if not rows:
+            text = ("No reminders set — say “remind me in 10 minutes "
+                    "to …” and I'll schedule it.")
+        else:
+            bits = "; ".join(
+                f"“{self._reminder_label(s)}” "
+                f"({self._reminder_when_text(s, now)})"
+                for s in rows[:5])
+            text = (f"You've got {len(rows)} reminder"
+                    f"{'s' if len(rows) != 1 else ''}: {bits}.")
+        from ..context.realize import RenderedReply
+        return RenderedReply(text=text, speech_act="answer")
 
     def _reminder_reply(self, user_text: str, plan_text: str,
                         task_id: str, *, event_callback=None):
@@ -3615,6 +3834,10 @@ class AgentOrchestrator:
         notify action through the autonomy scheduler, not a promise.
         Falls through (None) for 'remind me the tag' recall asks —
         those belong to memory lanes."""
+        mc = self._REMINDER_CANCEL_RE.match(plan_text)
+        if mc is not None:
+            return self._reminder_cancel_reply(
+                user_text, mc, task_id, event_callback)
         m = self._REMINDER_RE.match(plan_text)
         clarify = None
         if m is None:
@@ -3624,6 +3847,29 @@ class AgentOrchestrator:
             # 'remind me to X' with no time — claim and ask rather
             # than let the model improvise a commitment.
             clarify = str(m2.group("task") or "").strip()
+        else:
+            when_raw = str(m.group("when") or "").strip(" ,;—-")
+            at = self._reminder_at_when(when_raw, time.time())
+            if at is None:
+                if self._REMINDER_EVENTISH_RE.search(when_raw):
+                    return self._reminder_finish(
+                        f"I can't watch for a trigger like "
+                        f"“{when_raw}” — reminders need a clock time "
+                        "(“in 30 minutes”, “at 3pm”, "
+                        "“tomorrow at 9”).",
+                        user_text, task_id, event_callback)
+                if not self._REMINDER_TIMEISH_RE.search(when_raw):
+                    # 'remind me about the deploy' — a recall ask, not
+                    # scheduling. Leave it to the memory lanes.
+                    return None
+                # Temporal-ish but unparseable — claim and ask for a
+                # usable time rather than improvise a commitment.
+                task0 = str(m.group("task") or "").strip().rstrip(".")
+                return self._reminder_finish(
+                    f"I couldn't pin a time from “{when_raw}” — say "
+                    f"“at 3pm”, “in 30 minutes”, or “tomorrow at 9” "
+                    f"and I'll set the reminder to {task0}.",
+                    user_text, task_id, event_callback)
         task = (clarify if clarify is not None
                 else str(m.group("task") or "")).strip().rstrip(".")
         if not task:
@@ -3638,7 +3884,8 @@ class AgentOrchestrator:
             text = ("I can't set reminders — the scheduler isn't "
                     "running in this session.")
         else:
-            at = self._reminder_at(m)
+            at = self._reminder_at_when(
+                str(m.group("when") or ""), time.time())
             if at is None:
                 return None
             try:
@@ -3656,6 +3903,13 @@ class AgentOrchestrator:
                         "%a %H:%M", time.localtime(at))
                 text = (f"Reminder set for {when} — I'll ping you "
                         f"to {task}.")
+        return self._reminder_finish(text, user_text, task_id,
+                                     event_callback)
+
+    def _reminder_finish(self, text: str, user_text: str,
+                         task_id: str, event_callback):
+        """Shared task-completion + exchange-recording tail for every
+        reminder-lane reply."""
         decision = RoutingDecision(
             role="utility", model_id="builtin-local",
             reasons=["reminder lane — no model call"], complexity=0)
@@ -3694,8 +3948,6 @@ class AgentOrchestrator:
         # delete it" / 'she said "delete it"' / 'if you deleted it'
         # must never reach the planner.
         frame = getattr(env, "semantic", None)
-        if frame is not None and not frame.allows("local_action"):
-            return None
         # Parse the quote-masked, case-preserved text — 'the note says
         # "delete d:\logs"' discusses a path; it must never become the
         # plan's target.
@@ -3704,6 +3956,14 @@ class AgentOrchestrator:
                      else user_text)
         # Reminders are a bounded local action: 'remind me in 5
         # minutes to X' → a real once-schedule firing a notification.
+        # Their own regexes are the tighter gate — 'remind me to X'
+        # (no time) classifies no local_action allowance yet still
+        # needs the ask-when reply instead of a model commitment.
+        if (frame is not None and not frame.allows("local_action")
+                and not (self._REMINDER_RE.match(plan_text)
+                         or self._REMINDER_CLARIFY_RE.match(plan_text)
+                         or self._REMINDER_CANCEL_RE.match(plan_text))):
+            return None
         # Checked before parse_local_action, which has no temporal
         # grammar — without this the ask fell to the model and it
         # regurgitated stored facts about the reminder's topic.
