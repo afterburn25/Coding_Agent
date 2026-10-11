@@ -1206,6 +1206,13 @@ class TruthGateTests(RecoveryLoopTests):
                 self.rows = [r for r in self.rows if r["id"] != sid]
                 return len(self.rows) < n
 
+            def update(self, sid, **fields):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r.update(fields)
+                        return dict(r)
+                return None
+
         class _Sup:
             def __init__(self):
                 self.scheduler = _Sched()
@@ -1266,6 +1273,43 @@ class TruthGateTests(RecoveryLoopTests):
                 "cancel the dentist reminder", task.id)
             self.assertIn("don't see a reminder", r.content)
             self.assertEqual(len(sup.scheduler.rows), 1)
+
+            # Cadences create the matching schedule kind — 'every
+            # friday' is weekly, not a failed one-shot.
+            r = agent._reminder_reply(
+                "remind me every friday to submit timesheets",
+                "remind me every friday to submit timesheets",
+                task.id)
+            self.assertIsNotNone(r)
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(row["kind"], "weekly")
+            self.assertEqual(row["weekday"], 4)
+            self.assertEqual((row["hour"], row["minute"]), (9, 0))
+            r = agent._reminder_reply(
+                "remind me every 2 hours to drink water",
+                "remind me every 2 hours to drink water", task.id)
+            self.assertEqual(sup.scheduler.rows[-1]["kind"], "interval")
+            self.assertEqual(
+                sup.scheduler.rows[-1]["interval_s"], 7200.0)
+
+            # Snooze re-anchors 'at' via scheduler.update — a real
+            # reschedule, not a narrated postponement.
+            build_row = next(
+                s for s in sup.scheduler.rows if "build" in s["name"])
+            r = agent._reminder_reply(
+                "snooze the build reminder for 20 minutes",
+                "snooze the build reminder for 20 minutes", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Snoozed", r.content)
+            # Snooze re-anchors from now — at ≈ now + 20 minutes.
+            self.assertGreaterEqual(
+                build_row["at"], time.time() + 19 * 60)
+            self.assertLessEqual(
+                build_row["at"], time.time() + 21 * 60)
+            r = agent._reminder_reply(
+                "snooze the nonexistent reminder",
+                "snooze the nonexistent reminder", task.id)
+            self.assertIn("don't see a reminder", r.content)
 
     def test_rules_inventory_reports_true_count(self):
         # Live: "what rules are you following right now" listed 8 of

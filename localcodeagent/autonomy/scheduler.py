@@ -126,6 +126,74 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     return None
 
 
+def parse_reminder_schedule(when: str, now: float) -> dict | None:
+    """Parse a when-clause → schedule spec.
+
+    One-shots return ``{"kind": "once", "at": ts}``; cadences return
+    ``{"kind": "daily"|"weekly"|"interval", ...}`` so 'remind me
+    every friday to X' becomes a real weekly schedule instead of an
+    "unparseable" decline. Returns None when nothing parseable."""
+    t = " ".join(str(when or "").lower().split())
+    if not t:
+        return None
+
+    def _meridian(hour: int, mer: str | None) -> int:
+        mer = re.sub(r"[\s.]", "", mer or "")
+        if mer == "pm" and hour < 12:
+            return hour + 12
+        if mer == "am" and hour == 12:
+            return 0
+        if not mer and hour <= 6:
+            return hour + 12
+        return hour
+
+    clock_tail = (r"(?:\s+at\s+(\d{1,2})(?::(\d{2}))?"
+                  r"\s*(a\.?m\.?|p\.?m\.?|am|pm)?)?")
+
+    # 'every N units' / 'every hour' / 'hourly' — interval cadence.
+    m = re.fullmatch(
+        r"(?:every\s+(\d+(?:\.\d+)?)\s*"
+        r"(minutes?|mins?|hours?|hrs?|days?)|every\s+hour|hourly)", t)
+    if m:
+        if m.group(1) is None:
+            interval = 3600.0
+        else:
+            unit = m.group(2)
+            interval = float(m.group(1)) * (
+                60 if unit.startswith(("m", "min")) else
+                3600 if unit.startswith("h") else 86400)
+        return {"kind": "interval", "interval_s": max(60.0, interval)}
+    # 'every day/morning/evening [at T]' — daily cadence.
+    m = re.fullmatch(
+        r"(?:every\s+day|daily|every\s+morning|every\s+afternoon|"
+        r"every\s+evening|each\s+(?:morning|evening|day))"
+        + clock_tail, t)
+    if m:
+        hr, mn, mer = m.group(1), m.group(2), m.group(3)
+        if hr is not None:
+            hour = _meridian(int(hr), mer)
+        else:
+            hour = (9 if "morning" in t else
+                    15 if "afternoon" in t else
+                    19 if "evening" in t else 9)
+        return {"kind": "daily", "hour": hour,
+                "minute": int(mn or 0)}
+    # 'every <weekday> [at T]' — weekly cadence.
+    m = re.fullmatch(
+        r"every\s+(\w+?)" + clock_tail, t)
+    if m:
+        wd = _WEEKDAY_NAMES.get(m.group(1))
+        if wd is not None:
+            hr, mn, mer = m.group(2), m.group(3), m.group(4)
+            return {"kind": "weekly", "weekday": wd,
+                    "hour": _meridian(int(hr), mer) if hr else 9,
+                    "minute": int(mn or 0)}
+    at = parse_reminder_when(t, now)
+    if at is not None:
+        return {"kind": "once", "at": at}
+    return None
+
+
 def _next_daily(hour: int, minute: int, *, weekday: int | None = None,
                 after: float | None = None) -> float:
     """Next local wall-clock occurrence of hour:minute (optionally only on a
@@ -199,6 +267,34 @@ class Scheduler:
                     self._store.schedules.save()
                     return True
         return False
+
+    def update(self, schedule_id: str, **fields) -> dict | None:
+        """Patch schedule fields (name, at, interval_s, hour, minute,
+        weekday, action, enabled) and recompute next_run — the write
+        path behind 'snooze the X reminder' and similar edits."""
+        with self._lock:
+            for r in self._store.schedules.data.setdefault("schedules", []):
+                if r.get("id") != schedule_id:
+                    continue
+                for key, value in fields.items():
+                    if key in ("id", "created_at", "created_by",
+                               "last_run", "next_run"):
+                        continue
+                    if key == "at":
+                        value = float(value) if value else None
+                    elif key == "interval_s":
+                        value = max(60.0, float(value)) if value else 0
+                    elif key in ("hour", "minute"):
+                        value = max(0, min(23 if key == "hour" else 59,
+                                         int(value)))
+                    elif key == "action" and isinstance(value, dict):
+                        value = dict(value)
+                    r[key] = value
+                r["next_run"] = (self._compute_next(r)
+                                 if r.get("enabled", True) else None)
+                self._store.schedules.save()
+                return dict(r)
+        return None
 
     def list(self) -> list[dict]:
         return [dict(r) for r in self._store.schedules.rows()]

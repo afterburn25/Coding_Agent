@@ -2993,7 +2993,8 @@ class AgentOrchestrator:
         # stored facts and answer a scheduling request with trivia.
         if (self._REMINDER_RE.match(match_text)
                 or self._REMINDER_CLARIFY_RE.match(match_text)
-                or self._REMINDER_CANCEL_RE.match(match_text)):
+                or self._REMINDER_CANCEL_RE.match(match_text)
+                or self._REMINDER_SNOOZE_RE.match(match_text)):
             return None
         # Reminder inventory — "what reminders do i have" asks the
         # scheduler, not conversational facts; a memory recall can only
@@ -3596,6 +3597,10 @@ class AgentOrchestrator:
         r"(?:\s*(?:for|about|on|of|to)\s+(?P<tail>.+?))?"
         r"\s*[.!?]?\s*$",
         re.IGNORECASE)
+    _REMINDER_SNOOZE_RE = re.compile(
+        r"^\s*(?:please\s+)?snooze\s+(?P<body>.+?)?\breminders?\b"
+        r"(?:\s+(?:for|until|till|to)\s+(?P<dur>.+?))?\s*[.!?]?\s*$",
+        re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(
         r"\breminders?\b|\balarms?\b", re.IGNORECASE)
     # Temporal tokens in a failed when-clause → ask when, don't claim.
@@ -3613,6 +3618,109 @@ class AgentOrchestrator:
         reminder lane parses identically."""
         from ..autonomy.scheduler import parse_reminder_when
         return parse_reminder_when(when, now)
+
+    def _reminder_spec(self, when: str, now: float) -> dict | None:
+        """When-clause → schedule spec (once/daily/weekly/interval)."""
+        from ..autonomy.scheduler import parse_reminder_schedule
+        return parse_reminder_schedule(when, now)
+
+    def _reminder_spec_text(self, spec: dict, task: str) -> str:
+        """'every friday at 15:00 — I'll ping you to X.' style suffix."""
+        kind = spec["kind"]
+        now = time.time()
+        if kind == "once":
+            at = spec["at"]
+            when = time.strftime("%H:%M", time.localtime(at))
+            if at - now > 20 * 3600:
+                when = time.strftime("%a %H:%M", time.localtime(at))
+            return f"for {when} — I'll ping you to {task}."
+        if kind == "daily":
+            return (f"every day at {int(spec['hour']):02d}:"
+                    f"{int(spec['minute']):02d} — I'll ping you "
+                    f"to {task}.")
+        if kind == "weekly":
+            day = ("Monday", "Tuesday", "Wednesday", "Thursday",
+                   "Friday", "Saturday", "Sunday")[int(spec["weekday"])]
+            return (f"every {day} at {int(spec['hour']):02d}:"
+                    f"{int(spec['minute']):02d} — I'll ping you "
+                    f"to {task}.")
+        secs = int(spec.get("interval_s") or 60)
+        if secs % 3600 == 0:
+            span = f"{secs // 3600} hour" + ("s" if secs > 3600 else "")
+        elif secs % 60 == 0:
+            span = f"{secs // 60} minute" + ("s" if secs > 60 else "")
+        else:
+            span = f"{secs} seconds"
+        return f"every {span} — I'll ping you to {task}."
+
+    def _reminder_snooze_reply(self, user_text: str, ms: re.Match,
+                               task_id: str, event_callback):
+        """'snooze the X reminder [for 20m|until 3pm]' — a real `at`
+        update via scheduler.update, never a narrated postponement."""
+        sched, rows = self._reminder_rows()
+        if sched is None:
+            return self._reminder_finish(
+                "I can't manage reminders — the scheduler isn't "
+                "running in this session.",
+                user_text, task_id, event_callback)
+        body = str(ms.group("body") or "").strip(" ,;—-")
+        topic_terms = set(re.findall(
+            r"[a-z0-9']+",
+            re.sub(r"\b(?:the|my|that|all|every|each|any|of|to|for|"
+                   r"about)\b", " ", body, flags=re.IGNORECASE).lower()))
+        dur = str(ms.group("dur") or "").strip(" ,;—-")
+        when = None
+        now = time.time()
+        if dur:
+            dm = re.fullmatch(
+                r"(?:in\s+)?(\d+(?:\.\d+)?)\s*"
+                r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
+                r"days?|d)", dur)
+            if dm:
+                scale = {"s": 1, "m": 60, "h": 3600, "d": 86400}[
+                    dm.group(2)[0]]
+                when = now + float(dm.group(1)) * scale
+            else:
+                when = self._reminder_at_when(dur, now)
+            if when is None:
+                return self._reminder_finish(
+                    f"Snooze until when? — e.g. “for 20 minutes” "
+                    f"or “until 3pm”.",
+                    user_text, task_id, event_callback)
+        else:
+            when = now + 600  # bare 'snooze' — a default ten minutes.
+        hits = [s for s in rows if not topic_terms or topic_terms <= set(
+            re.findall(
+                r"[a-z0-9']+",
+                (f"{s.get('name', '')} "
+                 f"{(s.get('action') or {}).get('detail', '')}").lower()))]
+        if not rows:
+            text = "You don't have any reminders set."
+        elif not hits:
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rows[:3])
+            text = (f"I don't see a reminder matching "
+                    f"“{' '.join(sorted(topic_terms))}” — "
+                    f"you have: {names}.")
+        elif len(hits) > 1:
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in hits[:5])
+            text = (f"That matches {len(hits)} reminders: {names} — "
+                    "say which.")
+        else:
+            try:
+                sched.update(str(hits[0]["id"]), at=when)
+            except Exception as exc:
+                text = f"I couldn't snooze the reminder ({exc})."
+            else:
+                stamp = time.strftime(
+                    "%a %H:%M" if when - now > 20 * 3600 else "%H:%M",
+                    time.localtime(when))
+                text = (f"Snoozed "
+                        f"“{self._reminder_label(hits[0])}” "
+                        f"until {stamp}.")
+        return self._reminder_finish(text, user_text, task_id,
+                                     event_callback)
 
     def _reminder_rows(self):
         """Enabled reminder schedules (chat-set notify rows)."""
@@ -3736,6 +3844,10 @@ class AgentOrchestrator:
         if mc is not None:
             return self._reminder_cancel_reply(
                 user_text, mc, task_id, event_callback)
+        ms = self._REMINDER_SNOOZE_RE.match(plan_text)
+        if ms is not None:
+            return self._reminder_snooze_reply(
+                user_text, ms, task_id, event_callback)
         m = self._REMINDER_RE.match(plan_text)
         clarify = None
         if m is None:
@@ -3747,8 +3859,8 @@ class AgentOrchestrator:
             clarify = str(m2.group("task") or "").strip()
         else:
             when_raw = str(m.group("when") or "").strip(" ,;—-")
-            at = self._reminder_at_when(when_raw, time.time())
-            if at is None:
+            spec = self._reminder_spec(when_raw, time.time())
+            if spec is None:
                 if self._REMINDER_EVENTISH_RE.search(when_raw):
                     return self._reminder_finish(
                         f"I can't watch for a trigger like "
@@ -3782,25 +3894,23 @@ class AgentOrchestrator:
             text = ("I can't set reminders — the scheduler isn't "
                     "running in this session.")
         else:
-            at = self._reminder_at_when(
+            spec = self._reminder_spec(
                 str(m.group("when") or ""), time.time())
-            if at is None:
+            if spec is None:
                 return None
+            kind = spec["kind"]
+            fields = {k: v for k, v in spec.items() if k != "kind"}
             try:
                 sched.add(
-                    f"reminder: {task[:100]}", "once", at=at,
+                    f"reminder: {task[:100]}", kind,
                     action={"kind": "notify", "title": "Reminder",
                             "detail": task},
-                    created_by="user")
+                    created_by="user", **fields)
             except Exception as exc:
                 text = f"I couldn't set the reminder ({exc})."
             else:
-                when = time.strftime("%H:%M", time.localtime(at))
-                if at - time.time() > 20 * 3600:
-                    when = time.strftime(
-                        "%a %H:%M", time.localtime(at))
-                text = (f"Reminder set for {when} — I'll ping you "
-                        f"to {task}.")
+                text = ("Reminder set " +
+                        self._reminder_spec_text(spec, task))
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
@@ -3860,7 +3970,8 @@ class AgentOrchestrator:
         if (frame is not None and not frame.allows("local_action")
                 and not (self._REMINDER_RE.match(plan_text)
                          or self._REMINDER_CLARIFY_RE.match(plan_text)
-                         or self._REMINDER_CANCEL_RE.match(plan_text))):
+                         or self._REMINDER_CANCEL_RE.match(plan_text)
+                         or self._REMINDER_SNOOZE_RE.match(plan_text))):
             return None
         # Checked before parse_local_action, which has no temporal
         # grammar — without this the ask fell to the model and it
