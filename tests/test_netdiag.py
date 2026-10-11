@@ -2429,6 +2429,34 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("matches 2", result.content)
             sup.scheduler.rows.clear()
 
+            # Snooze idioms — 'give me 5 more minutes' got a model
+            # 'That's now set for 20:26' over an unchanged row; the
+            # imminent one-shot is the intent. 'make it earlier'
+            # went to the editor lane. Bare directions on the pool
+            # ('snooze everything earlier') must move rows back,
+            # not push them forward.
+            near = sup.scheduler.add(
+                "reminder: near", "once",
+                at=time.time() + 600,
+                action={"kind": "notify", "detail": "near"})
+            far = sup.scheduler.add(
+                "reminder: far", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "far"})
+            result = agent.run("give me 5 more minutes", mode="auto")
+            self.assertIn("Snoozed", result.content)
+            self.assertAlmostEqual(
+                near["at"], time.time() + 900, delta=30)
+            self.assertAlmostEqual(
+                far["at"], time.time() + 86400, delta=30)
+            result = agent.run("make them earlier", mode="auto")
+            self.assertIn("Snoozed 2", result.content)
+            self.assertAlmostEqual(
+                near["at"], time.time() + 300, delta=30)
+            self.assertAlmostEqual(
+                far["at"], time.time() + 85800, delta=30)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

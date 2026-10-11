@@ -3769,10 +3769,25 @@ class AgentOrchestrator:
         r"(?:\s+(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
         r"schedules?|it|that|this|them|everything|all)\b"
         + _REMINDER_ECHO + r")?"
-        r"(?:\s+(?:(?P<way>for|until|till|to|by|back|up|forward|"
-        r"later|earlier|sooner)\s+"
-        r"|(?=\d|a\s|an\s|one\s))(?P<dur>.+?))?"
-        + _REMINDER_TRAIL,
+        r"(?:\s+(?P<way>for|until|till|to|by|back|up|forward|"
+        r"later|earlier|sooner))?"
+        r"(?:\s+(?P<dur>.+?))?"
+        + _REMINDER_TRAIL +
+        # 'give me 5 more minutes' — a snooze on the imminent row;
+        # the model narrated 'That's now set for 20:26' over an
+        # unchanged row.
+        r"|" + _REMINDER_POLITE +
+        r"(?:give\s+me|gimme|let\s+me\s+have)\s+"
+        r"(?P<dur2>.+?\s*more\s+(?:time|minutes?|mins?|seconds?|"
+        r"secs?|hours?|hrs?|days?))\b" + _REMINDER_TRAIL +
+        # 'make it earlier [by an hour]' — direction-word snooze;
+        # the editor lane answered 'your editor is earlier'.
+        r"|" + _REMINDER_POLITE +
+        r"make\s+(?:(?P<body2>.+?)\s+)?"
+        r"(?P<noun3>reminders?|alarms?|timers?|it|that|this|them|"
+        r"everything|all)\s+"
+        r"(?P<way2>earlier|later|sooner|back|forward)\b"
+        r"(?:\s+(?:by\s+)?(?P<dur3>.+?))?" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_TOGGLE_RE = re.compile(
         _REMINDER_POLITE +
@@ -3886,17 +3901,30 @@ class AgentOrchestrator:
                                task_id: str, event_callback):
         """'snooze the X reminder [for 20m|until 3pm]' — a real `at`
         update via scheduler.update, never a narrated postponement."""
-        sched, rows = self._reminder_rows(noun=ms.group("noun"))
+        sched, rows = self._reminder_rows(
+            noun=(ms.groupdict().get("noun")
+                  or ms.groupdict().get("noun3")))
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
                 "running in this session.",
                 user_text, task_id, event_callback)
-        body = str(ms.group("body") or "").strip(" ,;—-")
+        body = str(ms.groupdict().get("body")
+                   or ms.groupdict().get("body2") or "")
+        body = body.strip(" ,;—-")
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
             " ", body, flags=re.IGNORECASE))
-        dur = str(ms.group("dur") or "").strip(" ,;—-")
+        dur = str(ms.groupdict().get("dur")
+                  or ms.groupdict().get("dur3") or "")
+        dur = dur.strip(" ,;—-")
+        more = bool(ms.groupdict().get("dur2"))
+        if more and not dur:
+            # 'give me 5 more minutes' — 'more' sits inside the
+            # captured duration; stripping it leaves '5  minutes',
+            # which the duration parser reads fine.
+            dur = re.sub(r"\s*\bmore\b\s*", " ",
+                         str(ms.group("dur2"))).strip()
         when = None
         delta = None
         now = time.time()
@@ -3924,7 +3952,14 @@ class AgentOrchestrator:
             delta = 600.0  # bare 'snooze' — a default ten minutes.
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
-        all_scope = (str(ms.group("noun") or "").lower()
+        if more and len(hits) > 1:
+            # 'give me 5 more minutes' — the imminent row is the
+            # intent; snooze it rather than asking which.
+            hits = [min(hits, key=lambda s: float(
+                s.get("next_run") or s.get("at") or now))]
+        all_scope = (str(ms.groupdict().get("noun")
+                         or ms.groupdict().get("noun3")
+                         or "").lower()
                      in ("them", "everything", "all")
                      and not topic_terms)
         if all_scope:
@@ -3941,8 +3976,13 @@ class AgentOrchestrator:
                         skipped += 1
                         continue
                     base = float(s.get("at") or now)
+                    way_all = str(
+                        ms.groupdict().get("way")
+                        or ms.groupdict().get("way2") or "").lower()
+                    back = way_all in ("earlier", "sooner", "up")
                     tgt = (when if when is not None
-                           else max(now, base) + delta)
+                           else (max(now, base - delta) if back
+                                 else max(now, base) + delta))
                     sched.update(str(s["id"]), at=tgt)
                     moved += 1
             except Exception as exc:
@@ -3996,7 +4036,9 @@ class AgentOrchestrator:
                 # dialect this lane already answers.
                 if when is None:
                     base = float(hits[0].get("at") or now)
-                    if str(ms.group("way") or "").lower() in (
+                    way = str(ms.groupdict().get("way")
+                              or ms.groupdict().get("way2") or "")
+                    if way.lower() in (
                             "earlier", "sooner", "up"):
                         when = max(now, base - delta)
                     else:
