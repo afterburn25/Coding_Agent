@@ -3710,7 +3710,8 @@ class AgentOrchestrator:
             text = (f"I don't see a reminder matching "
                     f"“{' '.join(sorted(topic_terms))}” — "
                     f"you have: {names}.")
-        elif len(hits) > 1:
+        elif (len(hits) > 1
+                and not self._reminder_identical(hits)):
             names = "; ".join(
                 f"“{self._reminder_label(s)}” "
                 f"({self._reminder_when_text(s, now)})"
@@ -3720,6 +3721,8 @@ class AgentOrchestrator:
         else:
             try:
                 sched.update(str(hits[0]["id"]), at=when)
+                merged = sum(bool(sched.remove(str(s["id"])))
+                             for s in hits[1:])
             except Exception as exc:
                 text = f"I couldn't snooze the reminder ({exc})."
             else:
@@ -3728,7 +3731,10 @@ class AgentOrchestrator:
                     time.localtime(when))
                 text = (f"Snoozed "
                         f"“{self._reminder_label(hits[0])}” "
-                        f"until {stamp}.")
+                        f"until {stamp}."
+                        + (f" (merged {merged} duplicate"
+                           + ("s.)" if merged != 1 else ".)")
+                           if merged else ""))
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
@@ -3767,7 +3773,8 @@ class AgentOrchestrator:
             text = (f"I don't see a reminder matching "
                     f"“{' '.join(sorted(topic_terms))}” — "
                     f"you have: {names}.")
-        elif len(hits) > 1:
+        elif (len(hits) > 1
+                and not self._reminder_identical(hits)):
             names = "; ".join(
                 f"“{self._reminder_label(s)}” "
                 f"({self._reminder_when_text(s, time.time())})"
@@ -3777,12 +3784,17 @@ class AgentOrchestrator:
         else:
             try:
                 sched.update(str(hits[0]["id"]), **spec)
+                merged = sum(bool(sched.remove(str(s["id"])))
+                             for s in hits[1:])
             except Exception as exc:
                 text = f"I couldn't reschedule the reminder ({exc})."
             else:
                 label = self._reminder_label(hits[0])
                 text = (f"Rescheduled “{label}” — "
-                        + self._reminder_spec_text(spec, label))
+                        + self._reminder_spec_text(spec, label)
+                        + (f" (merged {merged} duplicate"
+                           + ("s.)" if merged != 1 else ".)")
+                           if merged else ""))
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
@@ -3813,6 +3825,20 @@ class AgentOrchestrator:
             return "pending"
         fmt = "%a %H:%M" if at - now > 20 * 3600 else "%H:%M"
         return time.strftime(fmt, time.localtime(at))
+
+
+    def _reminder_identical(self, hits: list) -> bool:
+        """True when every hit is the same reminder re-saved — same
+        task and same schedule spec. 'say which' can't tell identical
+        rows apart, so treat them as one reminder and merge."""
+        if len(hits) < 2:
+            return False
+        key = lambda s: (
+            str((s.get("action") or {}).get("detail", ""))
+            .strip().lower(),
+            s.get("kind"), s.get("at"), s.get("interval_s"),
+            s.get("hour"), s.get("minute"), s.get("weekday"))
+        return len({key(s) for s in hits}) == 1
 
     def _reminder_cancel_reply(self, user_text: str, mc: re.Match,
                                task_id: str, event_callback):
@@ -3856,7 +3882,8 @@ class AgentOrchestrator:
             text = (f"I don't see a reminder matching "
                     f"“{' '.join(sorted(topic_terms))}” — "
                     f"you have: {names}.")
-        elif len(hits) > 1 and not all_flag:
+        elif (len(hits) > 1 and not all_flag
+                and not self._reminder_identical(hits)):
             names = "; ".join(
                 f"“{self._reminder_label(s)}” "
                 f"({self._reminder_when_text(s, now)})"
