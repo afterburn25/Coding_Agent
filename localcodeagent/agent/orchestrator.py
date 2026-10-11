@@ -3885,7 +3885,9 @@ class AgentOrchestrator:
     _WITNESSED_CLAIM_SRC = (
         r"\b(?:i['’]ve|i have|i['’]d|i)\s+" + _CLAIM_ADVERBS +
         r"(?:seen|saw|noticed|observed|spotted|detected|recorded|"
-        r"watched|witnessed)\s+"
+        r"watched|witnessed|checked|verified|reviewed|inspected|"
+        r"examined|scanned|monitored|read|looked|pulled|audited)\s+"
+        r"(?:at|through|over|up|back|into|across|on|in)?\s*"
         r"(?:(?:it|them|those|these)\b|(?:a|an|the|this|that|my|your|its)\s+"
         r"(?:issues?|errors?|failures?|crashes?|restarts?|deploys?|"
         r"builds?|jobs?|missions?|services?|process(?:es)?|requests?|"
