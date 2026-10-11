@@ -3623,8 +3623,8 @@ class AgentOrchestrator:
         r"saturday|sunday)|hourly|daily|weekly|monthly|nightly|"
         r"fortnightly)\s+"
         r"(?:remind|alert|notify|ping|wake)\s+me\s+(?:up\s+)?"
-        r"(?:to|about|of|that)\s+"
-        r"(?P<task>.+?)" + _REMINDER_TRAIL,
+        r"(?:(?:to|about|of|that)\s+(?P<task>.+?)"
+        r"|(?P<when2>(?:at|in|on)\s+.+?))" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_NOTASK_RE = re.compile(
         _REMINDER_POLITE +
@@ -4380,6 +4380,26 @@ class AgentOrchestrator:
         m = self._REMINDER_RE.match(plan_text)
         if m is None:
             m = self._REMINDER_LEAD_CADENCE_RE.match(plan_text)
+            if (m is not None
+                    and not str(m.group("task") or "").strip()):
+                # 'every morning wake me up at 7' — cadence leads and
+                # the tail is a bare when with no task; combine both
+                # into the when and ask for the task.
+                wtxt = (str(m.group("when") or "") + " "
+                        + str(m.group("when2") or "")).strip()
+                if (self._reminder_spec(wtxt, time.time())
+                        is not None
+                        and self._REMINDER_TIMEISH_RE.search(wtxt)):
+                    return self._reminder_finish(
+                        f"Sure — remind you to do what {wtxt}?",
+                        user_text, task_id, event_callback)
+                if self._REMINDER_TIMEISH_RE.search(wtxt):
+                    return self._reminder_finish(
+                        f"I couldn't pin a time from “{wtxt}” — say "
+                        f"“at 6am”, “in 30 minutes”, or "
+                        f"“tomorrow at 9”.",
+                        user_text, task_id, event_callback)
+                return None
         clarify = None
         if m is None:
             m2 = self._REMINDER_CLARIFY_RE.match(plan_text)

@@ -1475,6 +1475,15 @@ class AutonomyApiTests(unittest.TestCase):
                 out = state._mission_command("review my PRs weekly")
                 self.assertIsNotNone(out)
                 self.assertIn("Standing goal", out["content"])
+                # A leading cadence with an explicit remind-me verb is
+                # a reminder request the orchestrator's lead-cadence
+                # lane owns — live it minted a standing goal titled
+                # 'weekly remind me to water plants'.
+                for msg in ("weekly remind me to water plants",
+                            "every morning wake me up at 7",
+                            "hourly ping me about the queue"):
+                    self.assertIsNone(
+                        state._mission_command(msg), msg)
             finally:
                 if getattr(state, "autonomy", None) is not None:
                     state.autonomy.stop()

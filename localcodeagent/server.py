@@ -5059,6 +5059,13 @@ class AppState:
             main = frame.main_clause or ""
         except Exception:
             masked, act, main = low, None, ""
+        # 'weekly remind me to water plants' — a leading cadence with
+        # an explicit remind-me verb is a reminder request the
+        # orchestrator's lead-cadence lane owns, not a standing goal
+        # whose objective is the raw utterance.
+        if re.search(r"\b(?:remind|alert|notify|ping|wake)\s+me\b",
+                     low):
+            return None
         # The trigger phrase must modify the requested work — inside the
         # command's own clause ("review my PRs weekly") or leading the
         # message ("every morning, run the smoke tests"). A cadence in a
