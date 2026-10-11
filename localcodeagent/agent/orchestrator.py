@@ -4853,7 +4853,18 @@ class AgentOrchestrator:
 
     @classmethod
     def can_answer_locally(cls, user_text: str) -> bool:
-        return cls.builtin_utility_response(user_text) is not None or cls.looks_like_training_command(user_text)
+        if cls.builtin_utility_response(user_text) is not None \
+                or cls.looks_like_training_command(user_text):
+            return True
+        # Reminder commands resolve through the deterministic scheduler
+        # lanes — no model needed for 'remind me at 3pm to X' or
+        # 'mute my reminders'.
+        t = str(user_text or "")
+        return any(rx.match(t) for rx in (
+            cls._REMINDER_RE, cls._REMINDER_CLARIFY_RE,
+            cls._REMINDER_NOTASK_RE, cls._REMINDER_CANCEL_RE,
+            cls._REMINDER_SNOOZE_RE, cls._REMINDER_TOGGLE_RE,
+            cls._REMINDER_STOP_RE, cls._REMINDER_RESCHEDULE_RE))
 
     @staticmethod
     def direct_image_generation_intent(user_text: str) -> bool:

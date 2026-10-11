@@ -425,7 +425,11 @@ class TestServiceControl(unittest.TestCase):
         # and a named non-setting object never binds a session undo.
         svc, store, _ = make_service()
         for q in ("mute my reminders", "silence the reminders",
-                  "turn off my alarms", "stop the timer"):
+                  "turn off my alarms", "stop the timer",
+                  # Question form too — 'build' must not resolve the
+                  # toolchain capability answer over a snooze command.
+                  "could you please snooze the build reminder "
+                  "for 10 minutes"):
             self.assertIsNone(svc.respond(q), q)
         self.assertFalse(store["voice_muted"])
         # Pronoun undo still binds; a named object that isn't the

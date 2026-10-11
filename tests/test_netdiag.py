@@ -1449,9 +1449,15 @@ class TruthGateTests(RecoveryLoopTests):
                 next(s for s in sup.scheduler.rows
                      if "timesheets" in s["name"])["enabled"])
             # A reminder-directed stop never banks a behavior rule —
-            # 'Never remind me' would be unenforced, i.e. a lie.
+            # 'Never remind me' would be unenforced, i.e. a lie. The
+            # row-directed form ('stop the X reminder') is the same
+            # control op — live: it banked 'Never the stretching
+            # reminder' while the toggle lane owned the mutation.
             learned = cm.learn_from_user(
                 "don't remind me anymore", project_id="x")
+            self.assertFalse(learned.get("behavior_rules"))
+            learned = cm.learn_from_user(
+                "stop the stretching reminder", project_id="x")
             self.assertFalse(learned.get("behavior_rules"))
             # Unscoped stop hits the whole enabled pool; with nothing
             # left on, the reply says so instead of acking a no-op.

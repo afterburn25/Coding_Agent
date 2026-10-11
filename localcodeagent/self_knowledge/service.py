@@ -132,6 +132,13 @@ class SelfKnowledgeService:
                 (src or str(text or "")).lower()))
             if not t:
                 return None
+            # Scheduler nouns belong to the reminder lane — 'mute my
+            # reminders' disables schedule rows, not voice; 'snooze the
+            # build reminder' isn't a build-capability ask. The control
+            # surface owns no reminder/alarm/timer vocabulary, so no
+            # probe may claim a turn that names one.
+            if re.search(r"\b(?:reminders?|alarms?|timers?)\b", t):
+                return None
             for probe in (self._followup, self._diagnostics,
                           self._control, self._where,
                           self._runtime,
@@ -695,12 +702,6 @@ class SelfKnowledgeService:
     def _control(self, t: str) -> Resolution | None:
         """Direct mutation requests — 'turn voice off', 'use Isabella',
         'set workers to four'."""
-        # Scheduler nouns belong to the reminder lane — 'mute my
-        # reminders' disables schedule rows, not voice. No control-
-        # surface setting or action owns reminders/alarms/timers, so
-        # a bare 'mute'/'stop' alias must never claim them.
-        if re.search(r"\b(?:reminders?|alarms?|timers?)\b", t):
-            return None
         # Whole-utterance gate: a mute/setting keyword inside a
         # prohibition ('don't mute yourself'), question about how a
         # setting works, quote, or hypothetical must never mutate.

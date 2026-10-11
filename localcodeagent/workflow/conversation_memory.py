@@ -2677,15 +2677,17 @@ class ConversationMemory:
                 # files right now" must not bank "Never whatever you're
                 # doing…". Only concrete repeatable actions qualify.
                 # Reminder-directed stops ('don't remind me anymore',
-                # 'stop reminding me to X') are control commands on
-                # live schedule rows — the reminder lane executes them;
-                # an unenforced "Never remind me" rule would just lie.
+                # 'stop reminding me to X', 'stop the X reminder') are
+                # control commands on live schedule rows — the reminder
+                # lane executes them; an unenforced "Never remind me"
+                # rule would just lie.
                 ephemeral = re.search(
                     r"\b(?:whatever|what\s+you'?re|right\s+now|for\s+now|"
                     r"at\s+the\s+moment|currently)\b"
                     r"|^(?:it|that|this|everything|all\s+that)\b"
                     r"|^(?:remind|alert|notify|ping|wake)(?:ing)?\s+"
-                    r"me\b",
+                    r"me\b"
+                    r"|\b(?:reminders?|alarms?|timers?)\b",
                     action, flags=re.IGNORECASE)
                 # Negation-of-positive — "don't forget the keys" means
                 # DO remember them; 'Never forget the keys' inverts the
