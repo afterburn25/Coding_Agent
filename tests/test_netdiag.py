@@ -2143,6 +2143,34 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("reminders for me", mode="auto")
             self.assertIn("reminder", result.content.lower())
             self.assertNotIn("do what", result.content)
+            # Gerund/keep creates, referential scope, verb-typos —
+            # 'keep reminding me every friday' got a model 'already
+            # set' over zero rows; 'that reminder at 3' and 'reminder
+            # me at 3' got fake 'I've set the reminder for Friday at
+            # 3 PM' narrations over zero rows.
+            result = agent.run("keep reminding me every friday",
+                               mode="auto")
+            self.assertIn("do what", result.content)
+            result = agent.run("keep reminding me to stretch",
+                               mode="auto")
+            self.assertIn("When should", result.content)
+            n0 = len(sup.scheduler.rows)
+            result = agent.run(
+                "keep reminding me every friday to stretch",
+                mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("that reminder at 3", mode="auto")
+            self.assertIn("reminder", result.content.lower())
+            self.assertEqual(len(sup.scheduler.rows), n0)
+            result = agent.run("reminder me at 3", mode="auto")
+            self.assertIn("do what", result.content)
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("reminder me at 3 to leave",
+                               mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
             # Terse forms — 'reminders off' got a model 'all inactive'
             # over untouched rows; 'snooze everything' got a false
             # capability refusal. Both are real pool mutations now.
