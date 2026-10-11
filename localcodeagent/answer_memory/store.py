@@ -140,9 +140,11 @@ class AnswerMemoryStore:
                 return
         except OSError:
             pass
-        threading.Thread(target=self._integrity_check_once,
-                         name="answer-memory-integrity",
-                         daemon=True).start()
+        self._integrity_thread = threading.Thread(
+            target=self._integrity_check_once,
+            name="answer-memory-integrity",
+            daemon=True)
+        self._integrity_thread.start()
 
     def _integrity_check_once(self) -> None:
         conn: sqlite3.Connection | None = None
@@ -310,6 +312,15 @@ class AnswerMemoryStore:
 
     def close(self) -> None:
         # No long-lived connection; close flushes deferred stat writes.
+        # Join the background integrity checker first — its side
+        # connection still touches the DB file (and WAL sidecars), so a
+        # teardown that deletes the store's directory can race it.
+        checker = getattr(self, "_integrity_thread", None)
+        if checker is not None:
+            try:
+                checker.join(timeout=10.0)
+            except Exception:
+                pass
         try:
             self.flush()
         except Exception:
