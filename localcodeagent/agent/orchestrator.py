@@ -3620,7 +3620,8 @@ class AgentOrchestrator:
     _REMINDER_CANCEL_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
-        r"skip|scratch)\s+"
+        r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
+        r"axe?|ditch)\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
         + _REMINDER_ECHO +
         r"(?:\s*(?:for|about|on|of|to|at)\s+(?P<tail>.+?))?"

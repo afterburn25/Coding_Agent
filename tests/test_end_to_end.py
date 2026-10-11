@@ -1431,6 +1431,21 @@ class AutonomyApiTests(unittest.TestCase):
                     self.assertIsNotNone(out, q)
                     self.assertIn("epistemic-step", out["content"], q)
                     self.assertIn("every 1h", out["content"], q)
+                # Bare 'goals'/'timers' nouns qualify too — live, 'what
+                # goals do i have' skipped the lead (it required the
+                # 'standing' prefix) and fell to fact recall.
+                sup.add_standing_goal("run the smoke tests")
+                for q in ("what goals do i have", "list my goals"):
+                    out = state._mission_command(q)
+                    self.assertIsNotNone(out, q)
+                    self.assertIn("smoke tests", out["content"], q)
+                # 'timers' is a reminder noun — the mission lead must
+                # defer (None) so the reminder lane's filtered
+                # inventory can claim the turn instead of dumping the
+                # autonomy store under a timer-scoped ask.
+                out = state._mission_command(
+                    "what timers are set")
+                self.assertIsNone(out)
             finally:
                 if getattr(state, "autonomy", None) is not None:
                     state.autonomy.stop()

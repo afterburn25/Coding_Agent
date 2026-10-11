@@ -1825,6 +1825,22 @@ class TruthGateTests(RecoveryLoopTests):
             # 'skip'/'scratch' are cancel verbs — 'skip the 3pm
             # reminder' got a model-composed 'No reminder scheduled
             # for 3 PM.' live while the row stayed put.
+            # Cancel idioms — 'get rid of'/'trash' got model essays
+            # claiming the rows were 'part of the daily automation
+            # built into Nexus Core' and the agent 'doesn't have
+            # permission' — false refusals over live rows.
+            for idiom in ("get rid of the standup reminder",
+                          "trash the standup reminder",
+                          "nuke the standup reminder"):
+                n0 = len(sup.scheduler.rows)
+                sup.scheduler.add(
+                    "reminder: standup", "once",
+                    at=time.time() + 3600,
+                    action={"kind": "notify", "detail": "standup"})
+                result = agent.run(idiom, mode="auto")
+                self.assertIn("Cancel", result.content, idiom)
+                self.assertEqual(len(sup.scheduler.rows), n0, idiom)
+
             row["enabled"] = True
             row["name"] = "reminder: standup"
             lt = time.localtime(time.time() + 86400)

@@ -4799,8 +4799,9 @@ class AppState:
         # missions running" answers from the supervisor store, never the
         # model. Interrogative-shaped only; action phrasings ("stop the
         # mission", "run the tests daily") belong to their own lanes.
-        if ((re.search(r"\b(?:standing\s+goals?|missions?|schedul\w*|"
-                       r"triggers?|reminders?|alarms?)\b", low)
+        if ((re.search(r"\b(?:(?:standing\s+)?goals?|missions?|"
+                       r"schedul\w*|triggers?|reminders?|alarms?|"
+                       r"timers?)\b", low)
                 and re.search(
                     r"\b(?:what|which|list|show|any|are\s+there|"
                     r"do\s+you\s+have|how\s+many|running|active)\b", low)
@@ -4820,10 +4821,12 @@ class AppState:
             # 'list my reminders') belongs to the reminder lane's
             # filtered inventory — the full dump would bury a simple
             # list under goals, daemon schedules, and missions.
-            if (re.search(r"\breminders?\b|\balarms?\b", low)
+            if (re.search(
+                        r"\breminders?\b|\balarms?\b|\btimers?\b", low)
                     and not re.search(
                         r"\b(?:standing|goals?|missions?|triggers?)\b",
-                        re.sub(r"\b(?:reminders?|alarms?)\b", " ", low))):
+                        re.sub(r"\b(?:reminders?|alarms?|timers?)\b",
+                               " ", low))):
                 return None
             # A definite 'the <thing> schedule' names a world entity —
             # "what's the backup schedule" asks about the banked fact
