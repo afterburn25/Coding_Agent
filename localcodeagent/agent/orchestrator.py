@@ -2603,7 +2603,17 @@ class AgentOrchestrator:
     # This lane's own recall/attribution outputs — meta-statements about
     # the record, not content. Anaphoric replay skips them so it quotes
     # the underlying utterance, not a previous recall reply.
+    _REPEAT_ASK_RE = re.compile(
+        r"^\s*(?:please\s+)?(?:can\s+you\s+)?(?:"
+        r"(?:say|repeat|tell\s+me)\s+(?:that|it)\s+again|"
+        r"repeat\s+(?:that|it|what\s+you\s+(?:just\s+)?said|"
+        r"the\s+last\s+(?:thing|part|bit))\s*(?:again\s*)?|"
+        r"say\s+(?:that|it)\s+one\s+more\s+time|"
+        r"one\s+more\s+time|"
+        r"what\s+did\s+you\s+(?:just\s+)?say)\s*[.!?]?\s*$",
+        re.IGNORECASE)
     _RECALL_REPLY_PREFIXES = (
+        "Here it is again:",
         "Earlier I said:",
         "Yes — that's on record.",
         "Not exactly — closest thing on record",
@@ -2613,6 +2623,11 @@ class AgentOrchestrator:
         "You asked:",
         "You said:",
         "I don't have an earlier question",
+        # Voice-repeat fallbacks replay the last utterance inside a
+        # status ack — the ack is meta, not replayable content.
+        "Voice isn't available — last thing I said was:",
+        "Voice is muted — last thing I said was:",
+        "Nothing buffered to re-speak — last thing I said was:",
     )
     _FACT_RECALL_SKIP_RE = re.compile(
         r"^\s*what\s+(?:do\s+you(?!\s+(?:have|got|know|remember|"
@@ -2719,22 +2734,28 @@ class AgentOrchestrator:
         "mentioned", "made"})
 
     def _discourse_referent(self, prop: str) -> str | None:
-        """'user' | 'assistant' | None — the prop names a discourse-role
-        referent (an answer I gave / a question you asked) and carries
-        no topic terms. A pure referent resolves against the recorded
-        turns, never against stored facts — a 'matching' fact could
-        only have hit on filler vocabulary ('last', 'answer')."""
+        """'user' | 'user_q' | 'assistant' | None — the prop names a
+        discourse-role referent (an answer I gave / a question or
+        statement you gave me) and carries no topic terms. A pure
+        referent resolves against the recorded turns, never against
+        stored facts — a 'matching' fact could only have hit on filler
+        vocabulary ('last', 'answer'). 'user_q' prefers genuine
+        questions when the referent is 'question'."""
         memory = self.conversation_memory
         if memory is None:
             return None
         # User-side referents — "my last question", "what did I just
-        # ask", "the thing I asked about". The record's last user
-        # question resolves these; replaying an assistant turn would
-        # answer with the wrong speaker's utterance.
+        # ask", "the thing I asked/told you about". The record's last
+        # user turn resolves these; replaying an assistant turn would
+        # answer with the wrong speaker's utterance. A 'question' or
+        # 'asked' referent prefers actual questions; a 'thing I told
+        # you' referent takes the latest user turn either way.
         user_head = re.search(
             r"\b(?:my|the)\s+(?:last|previous|first|earlier|recent)\s+"
-            r"(?:question|query|thing\s+i\s+asked)\b|"
-            r"\b(?:last|previous|first|recent)\s+thing\s+i\s+asked\b|"
+            r"(?:question|query|thing\s+i\s+(?:asked|told|said|"
+            r"mentioned|shared))\b|"
+            r"\b(?:last|previous|first|recent)\s+thing\s+i\s+"
+            r"(?:asked|told|said|mentioned|shared)\b|"
             r"\b(?:did\s+)?i\s+(?:just\s+)?ask(?:ed)?\b",
             prop, re.IGNORECASE)
         if user_head is not None:
@@ -2742,7 +2763,10 @@ class AgentOrchestrator:
                     + prop[user_head.end():])
             if not (memory._content_terms(rest)
                     - self._ANAPHORA_FILLER_TERMS):
-                return "user"
+                prefer_q = not re.search(
+                    r"thing\s+i\s+(?:told|said|mentioned|shared)",
+                    user_head.group(0), re.IGNORECASE)
+                return ("user_q" if prefer_q else "user")
         # A bare noun is not anaphoric — "do the thing" strips to
         # prop="thing", which must not read as a discourse referent.
         # Definite reference needs the article/possessive or a pronoun.
@@ -2766,10 +2790,20 @@ class AgentOrchestrator:
         if memory is None:
             return None
         referent = self._discourse_referent(prop)
-        if referent == "user":
-            return self._user_recall_replay(history)
+        if referent in ("user", "user_q"):
+            return self._user_recall_replay(
+                history, prefer_question=(referent == "user_q"))
         if referent != "assistant":
             return None
+        quoted = self._last_assistant_quote(history)
+        if quoted is not None:
+            return f"Earlier I said: \"{quoted}\""
+        return "I don't have an earlier answer on record."
+
+    def _last_assistant_quote(self, history: list) -> str | None:
+        """Most recent non-meta assistant utterance, normalized to one
+        line, truth-gate marker preserved verbatim — the quoted
+        substance for replays and repeats."""
         for row in reversed(history):
             if str(row.get("role")) != "assistant":
                 continue
@@ -2780,28 +2814,43 @@ class AgentOrchestrator:
             # the underlying utterance.
             if content.startswith(self._RECALL_REPLY_PREFIXES):
                 continue
-            if content:
-                # Keep a trailing truth-gate marker verbatim —
-                # truncating it off would re-present a flagged
-                # utterance as if it had been confirmed clean.
-                marker_at = content.find(UNVERIFIED_CLAIMS_MARKER)
-                if marker_at > 0:
-                    # Split at the ⚠ glyph so the notice stays
-                    # byte-verbatim ("⚠ **Unverified …** — …").
-                    warn_at = content.rfind("⚠", 0, marker_at)
-                    if warn_at < 0:
-                        warn_at = marker_at
-                    quoted = (content[:warn_at].rstrip()[:200]
-                              + " " + content[warn_at:])
-                else:
-                    quoted = content[:200]
-                return f"Earlier I said: \"{quoted}\""
-        return "I don't have an earlier answer on record."
+            if not content:
+                continue
+            # Keep a trailing truth-gate marker verbatim — truncating
+            # it off would re-present a flagged utterance as if it had
+            # been confirmed clean.
+            marker_at = content.find(UNVERIFIED_CLAIMS_MARKER)
+            if marker_at > 0:
+                # Split at the ⚠ glyph so the notice stays
+                # byte-verbatim ("⚠ **Unverified …** — …").
+                warn_at = content.rfind("⚠", 0, marker_at)
+                if warn_at < 0:
+                    warn_at = marker_at
+                return (content[:warn_at].rstrip()[:200]
+                        + " " + content[warn_at:])
+            return content[:200]
+        return None
 
-    def _user_recall_replay(self, history: list) -> str | None:
-        """'my last question / what did I just ask' — resolve to the
-        last user turn on record, preferring actual questions over
-        statements when the referent is 'question'."""
+    def repeat_last_reply(self) -> str | None:
+        """Text of the most recent non-meta assistant utterance — the
+        conversational echo behind 'say that again', used when a
+        voice-repeat can't re-speak it."""
+        memory = self.conversation_memory
+        if memory is None:
+            return None
+        try:
+            history = memory.history(limit=40)
+        except Exception:
+            return None
+        return self._last_assistant_quote(history)
+
+    def _user_recall_replay(self, history: list,
+                            prefer_question: bool = True) -> str | None:
+        """'my last question / what did I just ask / the last thing I
+        told you' — resolve to the last user turn on record. A
+        'question' referent prefers actual questions over interleaved
+        statements; 'the last thing I told you' takes the latest user
+        turn either way."""
         memory = self.conversation_memory
         if memory is None:
             return None
@@ -2813,6 +2862,8 @@ class AgentOrchestrator:
                 r"\s+", " ", str(row.get("content", ""))).strip()
             if not content:
                 continue
+            if not prefer_question:
+                return f"You said: \"{content[:200]}\""
             if content.endswith("?") or re.match(
                     r"^(?:who|what|when|where|why|how|which|whose|can|"
                     r"could|would|will|do|does|did|is|are|was|were|"
@@ -2874,8 +2925,6 @@ class AgentOrchestrator:
         model call; questions the store can't answer fall through."""
         text = str(user_text or "")
         frame = self._utterance_frame(env, text)
-        if frame is not None and not frame.allows("memory_recall"):
-            return None
         match_text = (frame.masked_case
                       if frame is not None and frame.masked_case
                       else text)
@@ -2899,6 +2948,24 @@ class AgentOrchestrator:
             r"isn'?t\s+(?:it|that\s+so)|don'?t\s+you\s+think|"
             r"you\s+know)\s*[?!.]?\s*$",
             "", match_text, flags=re.IGNORECASE).strip()
+        # Conversational repeats — "repeat what you just said", "say
+        # it again", "what did you say" — the referent is the last
+        # assistant utterance itself; replay it verbatim instead of
+        # letting the model paraphrase. (Voice may claim these
+        # upstream as a TTS re-speak; a turn that reaches the agent
+        # wants the text.) The check precedes the frame-allows and
+        # skip gates: an imperative like "say that again" can classify
+        # as a bare assertion, and "what did you say" trips the
+        # what-did-you exclusion — both are repeat asks by shape.
+        if self._REPEAT_ASK_RE.match(match_text):
+            quoted = self.repeat_last_reply()
+            if quoted is not None:
+                from ..context.realize import RenderedReply
+                return RenderedReply(
+                    text=f"Here it is again: \"{quoted}\"",
+                    speech_act="answer")
+        if frame is not None and not frame.allows("memory_recall"):
+            return None
         if (self.conversation_memory is None
                 or self._FACT_RECALL_SKIP_RE.search(match_text)):
             return None
@@ -2945,8 +3012,9 @@ class AgentOrchestrator:
             except Exception:
                 history = []
             verdict = (
-                self._user_recall_replay(history)
-                if referent == "user"
+                self._user_recall_replay(
+                    history, prefer_question=(referent == "user_q"))
+                if referent in ("user", "user_q")
                 else self._anaphoric_replay(prop, history))
             if verdict is not None:
                 from ..context.realize import RenderedReply

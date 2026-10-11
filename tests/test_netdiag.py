@@ -1040,6 +1040,43 @@ class TruthGateTests(RecoveryLoopTests):
                 "what was my last question?", "conv", "proj")
             self.assertIsNotNone(r)
             self.assertIn("port should the api use", r.text.lower())
+            # 'the last thing I told you' is a statement referent —
+            # the latest user turn either way, not a question search.
+            r = agent._single_fact_recall_reply(
+                "what's the last thing i told you?", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("port is 9090", r.text.lower())
+
+    def test_repeat_ask_replays_last_reply(self):
+        # Live: "repeat what you just said" reached the model, which
+        # paraphrased instead of quoting — and "say that again" fell
+        # through voice's re-speak path into a dead-end. A repeat ask
+        # replays the recorded utterance verbatim.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.record_exchange(
+                "what port should the api use", "Use port 8080.")
+            for q in ("repeat what you just said",
+                      "say that again",
+                      "what did you say"):
+                r = agent._single_fact_recall_reply(q, "conv", "proj")
+                self.assertIsNotNone(r, q)
+                self.assertIn("use port 8080", r.text.lower(), q)
+            # A repeat of a repeat lands on the same utterance — the
+            # lane's own echo is meta and skipped.
+            agent.conversation_memory.record_exchange(
+                "say that again",
+                "Here it is again: \"Use port 8080.\"")
+            r = agent._single_fact_recall_reply(
+                "say that again", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertEqual(
+                r.text.lower().count("here it is again"), 1)
+            self.assertIn("use port 8080", r.text.lower())
 
     def test_bare_wh_anaphora_replays_record(self):
         # Live: "what was it — the answer you gave me?" carries no

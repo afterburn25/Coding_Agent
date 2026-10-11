@@ -2332,21 +2332,37 @@ class AppState:
                 return {"applied": cmd["op"], "ack": ack}
             if cmd.get("op") == "voice_repeat":
                 v = getattr(self, "voice", None)
-                if v is None:
+                muted = False
+                ok = False
+                if v is not None:
+                    try:
+                        muted = bool(v.muted())
+                    except Exception:
+                        muted = False
+                    if not muted:
+                        try:
+                            ok = bool(v.repeat_last())
+                        except Exception:
+                            ok = False
+                if ok:
                     return {"applied": "voice_repeat",
-                            "ack": "Voice isn't available right now."}
-                try:
-                    muted = v.muted()
-                except Exception:
-                    muted = False
-                if muted:
+                            "ack": "Sure — once more."}
+                # Voice can't re-speak (unavailable, muted, or nothing
+                # buffered) — the conversational read of "say that
+                # again" is still satisfiable: replay the last reply
+                # as text instead of a dead-end ack.
+                agent = getattr(self, "agent", None)
+                quoted = (agent.repeat_last_reply()
+                          if agent is not None else None)
+                if quoted:
+                    why = ("Voice isn't available" if v is None
+                           else "Voice is muted" if muted
+                           else "Nothing buffered to re-speak")
                     return {"applied": "voice_repeat",
-                            "ack": "Voice is muted — say \"speak "
-                                   "again\" first."}
-                ok = bool(v.repeat_last())
+                            "ack": f"{why} — last thing I said was: "
+                                   f"\"{quoted}\""}
                 return {"applied": "voice_repeat",
-                        "ack": ("Sure — once more."
-                                if ok else "Nothing to repeat yet.")}
+                        "ack": "Nothing to repeat yet."}
             prof = self.profiles.active()
             if not prof:
                 return None
