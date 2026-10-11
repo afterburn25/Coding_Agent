@@ -1616,6 +1616,18 @@ class CrossChatMemoryTests(unittest.TestCase):
                 "we are moving to postgres")
             self.assertEqual(
                 learned["facts"], ["we are moving to postgres"])
+            # The object can sit between verb and 'to' — "switching the
+            # cache db to memcached" — and 'we will <base verb>' banks
+            # the same way (BUG-089 follow-on).
+            learned = memory.learn_from_user(
+                "we're switching the cache db to memcached")
+            self.assertEqual(
+                learned["facts"],
+                ["we are switching cache db to memcached"])
+            learned = memory.learn_from_user(
+                "we will migrate the api to graphql")
+            self.assertEqual(
+                learned["facts"], ["we are migrating api to graphql"])
 
     def test_compound_turns_learn_first_clause_only(self):
         # A compound turn's second clause is a separate intent, not part

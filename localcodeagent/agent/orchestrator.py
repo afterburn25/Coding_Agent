@@ -2571,7 +2571,8 @@ class AgentOrchestrator:
         # 3000") aren't noun phrases — a definite article garbles them
         # ("the never use port 3000").
         if not text[:1].isupper() and not re.match(
-                r"^(?:the|a|an|my|your|our|never|don'?t|do not|stop|avoid|always)\b",
+                r"^(?:the|a|an|my|your|our|we|i|you|never|don'?t|do not|"
+                r"stop|avoid|always)\b",
                 text, re.IGNORECASE):
             text = "the " + text
         return text[:1].upper() + text[1:]

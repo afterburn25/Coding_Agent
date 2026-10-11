@@ -1529,14 +1529,23 @@ class ConversationMemory:
                     # honest ack instead of a model riff.
                     plan = re.match(
                         r"^we(?:'re|\s+are|\s+will)\s+"
-                        r"(switching|moving|migrating|changing|"
-                        r"transitioning|upgrading|downgrading)\s+"
+                        r"(switch(?:ing)?|mov(?:e|ing)|migrat(?:e|ing)|"
+                        r"chang(?:e|ing)|transition(?:ing)?|"
+                        r"upgrad(?:e|ing)|downgrad(?:e|ing))"
+                        r"(?:\s+((?:(?:the|a|an|my|our)\s+)?"
+                        r"[a-z0-9][a-z0-9 ._-]{0,38}?))?\s+"
                         r"(?:over\s+)?to\s+(.+?)[.!?]?$",
                         body, flags=re.IGNORECASE)
                     if plan:
-                        value = self._clean_value(plan.group(2))
+                        obj = self._clean_subject(plan.group(2) or "")
+                        value = self._clean_value(plan.group(3))
+                        verb = plan.group(1).lower()
+                        if not verb.endswith("ing"):
+                            verb = (verb[:-1] if verb.endswith("e")
+                                    else verb) + "ing"
                         if value:
-                            fact = (f"we are {plan.group(1).lower()} "
+                            fact = (f"we are {verb} "
+                                    f"{obj + ' ' if obj else ''}"
                                     f"to {value}")
                     # Corrections — "correction: the port is 5433",
                     # "no, I meant SQLite", "actually it was Redis not
