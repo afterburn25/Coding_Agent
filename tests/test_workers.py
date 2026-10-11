@@ -273,6 +273,25 @@ class TestClassification(unittest.TestCase):
         self.assertEqual(classify_role("do stuff", hinted="research"),
                          "research")
 
+    def test_internal_kind_ignores_text_keywords(self):
+        # Live: the auto-appended "Prior runs: … investigate what
+        # changed" suffix on internal: nodes steered classification to
+        # 'research' — a 3GB VRAM/model-slot reservation for a
+        # deterministic Python node that needs none, starving
+        # housekeeping whenever the GPU was saturated. Deterministic
+        # kinds take their KIND_ROLE regardless of text.
+        text = ("internal:learning_consolidate Prior runs: 3 "
+                "(3 succeeded). Don't repeat identical work — "
+                "investigate what changed or why it persists.")
+        self.assertEqual(
+            classify_role(text, kind="internal"), "tool")
+        self.assertEqual(
+            classify_role("internal:wait investigate the logs",
+                          kind="wait"), "tool")
+        # Agent-kind nodes keep keyword steering — they do invoke models.
+        self.assertEqual(
+            classify_role(text, kind="agent"), "research")
+
     def test_estimate_overrides(self):
         e = estimate_for("tool", overrides={"ram_mb": 42})
         self.assertEqual(e.ram_mb, 42)
