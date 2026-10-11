@@ -3750,6 +3750,30 @@ class AgentOrchestrator:
     # rhetoric in turns where no tools were ever expected; those still
     # mark the reply unverified for Answer Memory but never add the badge.
     _CLAIM_ADVERBS = r"(?:(?:already|just|now|also|even|still|fully|been|got|currently)\s+)*"
+    # Witnessed-event claims — "I've seen it trigger twice", "I noticed
+    # the service restart" — assert telemetry that only exists if a
+    # log/tool actually surfaced it; same fabrication class as claiming
+    # the check itself ran. Passive-telemetry claims — "the log showed
+    # a timeout", "metrics confirm the fix" — cite system evidence the
+    # model never read. Shared by _EXECUTED_CLAIM_RE and the
+    # badge-on-utility-turns gate below.
+    _WITNESSED_CLAIM_SRC = (
+        r"\b(?:i['’]ve|i have|i['’]d|i)\s+" + _CLAIM_ADVERBS +
+        r"(?:seen|saw|noticed|observed|spotted|detected|recorded|"
+        r"watched|witnessed)\s+"
+        r"(?:(?:it|them|those|these)\b|(?:a|an|the|this|that|my|your|its)\s+"
+        r"(?:issues?|errors?|failures?|crashes?|restarts?|deploys?|"
+        r"builds?|jobs?|missions?|services?|process(?:es)?|requests?|"
+        r"events?|incidents?|alerts?|patterns?|behaviou?rs?|timeouts?|"
+        r"loops?|repeats?|resets?|retries?|outages?|regressions?|drift|"
+        r"churn|thrash(?:ing)?|spikes?|systems?|logs?|schedulers?|"
+        r"daemons?|runtimes?|queues?|workers?|nodes?|models?|backends?|"
+        r"servers?|apis?|databases?|disks?|gpus?|networks?|agents?)\b)"
+        r"|\b(?:the\s+)?(?:logs?|metrics?|telemetry|traces?|records?|"
+        r"history|ledger|audit|monitor(?:ing|s)?|dashboards?)\s+"
+        r"(?:show(?:ed|s)?|confirm(?:ed|s)?|indicate[sd]?|reveal(?:ed|s)?|"
+        r"report(?:ed|s)?|list(?:ed|s)?|flag(?:ged|s)?)\b")
+    _WITNESSED_CLAIM_RE = re.compile(_WITNESSED_CLAIM_SRC, re.I | re.S)
     _EXECUTED_CLAIM_RE = re.compile(
         r"(?:\b(?:i['’]ve|i have|i already|i just|just now|i now)\s+"
         + _CLAIM_ADVERBS +
@@ -3762,28 +3786,10 @@ class AgentOrchestrator:
         r"modified|edited|deleted|removed|saved|added|renamed|moved|"
         r"copied|implemented|refactored|reverted|migrated|configured|"
         r"enabled|disabled|stopped|cleaned|wiped|reworked|rewrote)\b)"
-        # Witnessed-event claims — "I've seen it trigger twice",
-        # "I noticed the service restart" — assert telemetry that only
-        # exists if a log/tool actually surfaced it; same fabrication
-        # class as claiming the check itself ran.
-        + r"|\b(?:i['’]ve|i have|i['’]d|i)\s+" + _CLAIM_ADVERBS +
-        r"(?:seen|saw|noticed|observed|spotted|detected|recorded|"
-        r"watched|witnessed)\s+"
-        r"(?:(?:it|them|those|these)\b|(?:a|an|the|this|that|my|your|its)\s+"
-        r"(?:issues?|errors?|failures?|crashes?|restarts?|deploys?|"
-        r"builds?|jobs?|missions?|services?|process(?:es)?|requests?|"
-        r"events?|incidents?|alerts?|patterns?|behaviou?rs?|timeouts?|"
-        r"loops?|repeats?|resets?|retries?|outages?|regressions?|drift|"
-        r"churn|thrash(?:ing)?|spikes?|systems?|logs?|schedulers?|"
-        r"daemons?|runtimes?|queues?|workers?|nodes?|models?|backends?|"
-        r"servers?|apis?|databases?|disks?|gpus?|networks?|agents?)\b)"
-        # Passive-telemetry claims — "the log showed a timeout",
-        # "metrics confirm the fix" — cite system evidence the model
-        # never actually read.
-        + r"|\b(?:the\s+)?(?:logs?|metrics?|telemetry|traces?|records?|"
-        r"history|ledger|audit|monitor(?:ing|s)?|dashboards?)\s+"
-        r"(?:show(?:ed|s)?|confirm(?:ed|s)?|indicate[sd]?|reveal(?:ed|s)?|"
-        r"report(?:ed|s)?|list(?:ed|s)?|flag(?:ged|s)?)\b"
+        # Witnessed-event and telemetry-citation claims — never persona
+        # color, so they badge even on utility turns (see the
+        # witnessed-claims clause in the truth-gate check below).
+        + r"|(?:" + _WITNESSED_CLAIM_SRC + ")"
         # Simple-past execution claims — "I updated the file", "I ran
         # the tests". Phrasal-verb guards keep "I ran into an error",
         # "I checked out a movie", "I started up" from flagging, and
@@ -8100,22 +8106,33 @@ class AgentOrchestrator:
                                         "actions without execution")
                         except Exception:
                             pass
-                if claims and not session.tool_events \
-                        and not session.research_context.get("sources") \
-                        and session.decision.role != "utility":
-                    # Casual utility replies describe persona color
-                    # ("just finished polishing the logs") — flag them
-                    # for memory silently, but never badge the chat.
+                # Casual utility replies describe persona color
+                # ("just finished polishing the logs") — flag them for
+                # memory silently, but never badge the chat. The
+                # exemption only covers do-claims: witnessed-event and
+                # telemetry-citation claims ("I've seen it trigger
+                # twice", "the log showed a timeout") are falsifiable
+                # system assertions, never persona color — they badge
+                # on any role.
+                witnessed = set(
+                    self._claims_matching(
+                        session.main_content, self._WITNESSED_CLAIM_RE)
+                    ) if session.decision.role == "utility" else set()
+                badgeable = (
+                    [c for c in claims if c in witnessed]
+                    if session.decision.role == "utility" else claims)
+                if badgeable and not session.tool_events \
+                        and not session.research_context.get("sources"):
                     notice = (
                         f"\n\n⚠ **{UNVERIFIED_CLAIMS_MARKER}** — no tools or "
                         "commands ran in this reply. Statements asserting "
-                        "completed actions above are narrative, not "
-                        "confirmed execution.")
+                        "completed actions or observed events above are "
+                        "narrative, not confirmed execution.")
                     session.main_content += notice
                     claims_event = {
                         "type": "unverified_action_claims",
                         "model_id": session.profile.id,
-                        "claims": [c[:120] for c in claims[:3]],
+                        "claims": [c[:120] for c in badgeable[:3]],
                     }
                     session.model_events.append(claims_event)
                     self._emit(session, "model", event=claims_event)

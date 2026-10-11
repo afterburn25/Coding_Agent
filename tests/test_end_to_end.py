@@ -826,6 +826,31 @@ class EndToEndAgentTests(unittest.TestCase):
             self.assertIn("$ system_resources", log)
             self.assertIn("$ list_files", log)
 
+    def test_witnessed_claim_badges_on_utility_turn(self):
+        # Live: a casual "tell me something you noticed" reply invented
+        # telemetry ("I've seen it trigger twice") with no tools run —
+        # the utility-role badge exemption treated it as persona color.
+        # Witnessed-event claims are falsifiable system assertions and
+        # must badge on any role; persona do-claims stay unbadged.
+        from localcodeagent.agent.orchestrator import (
+            UNVERIFIED_CLAIMS_MARKER)
+        fake = _FakeModelServer()
+        self.addCleanup(fake.close)
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
+            state = self._state(td, fake.endpoint)
+            fake.static_reply = (
+                "I've seen it trigger twice in the last 48 hours.")
+            result = state.agent.run(
+                "tell me something you noticed about the system")
+            self.assertIn(UNVERIFIED_CLAIMS_MARKER,
+                          result.content or "")
+            # A pure do-claim on a casual turn is persona color — the
+            # memory flag still applies but the chat stays unbadged.
+            fake.static_reply = "I ran the checks for you."
+            result = state.agent.run("anything new?")
+            self.assertNotIn(UNVERIFIED_CLAIMS_MARKER,
+                             result.content or "")
+
     def test_pending_approval_survives_restart(self):
         fake = _FakeModelServer()
         self.addCleanup(fake.close)
