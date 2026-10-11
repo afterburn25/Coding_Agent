@@ -4093,7 +4093,12 @@ class AgentOrchestrator:
                                   plan_text: str):
         """'what reminders do i have' — answers from the scheduler
         store, never from conversational facts."""
-        sched, rows = self._reminder_rows()
+        # A singular alarm/timer noun scopes the whole reply —
+        # 'what timers do i have' lists timers, not reminders.
+        nm = re.search(r"\b(alarms?|timers?)\b", plan_text,
+                       re.IGNORECASE)
+        sched, rows = self._reminder_rows(
+            noun=nm.group(1).lower() if nm else None)
         if sched is None:
             return None
         now = time.time()
@@ -4107,7 +4112,8 @@ class AgentOrchestrator:
         if sm is not None:
             scope_terms = set(re.findall(
                 r"[a-z0-9']+",
-                re.sub(r"\b(?:reminders?|alarms?|the|a|an|my|that)\b",
+                re.sub(r"\b(?:reminders?|alarms?|timers?|the|a|an|my|"
+                       r"that)\b",
                        " ", sm.group(1), flags=re.IGNORECASE).lower()))
         if not scope_terms:
             tm = re.search(
