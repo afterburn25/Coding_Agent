@@ -1871,7 +1871,13 @@ class TruthGateTests(RecoveryLoopTests):
 
             # A bare clock is a valid cancel scope — 'cancel my 9pm'
             # got a model-composed 'the 9pm reminder is canceled'
-            # live with no removal; 'kill the 21:00' the same.
+            # live with no removal; 'kill the 21:00' the same. Pin
+            # the standing row to 07:30 first — at now+1h it can
+            # itself land on 21:00/12:00 and trip the ambiguity list.
+            lt730 = time.localtime(time.time() + 86400)
+            row["at"] = time.mktime(
+                (lt730.tm_year, lt730.tm_mon, lt730.tm_mday, 7, 30, 0,
+                 lt730.tm_wday, lt730.tm_yday, lt730.tm_isdst))
             for clock_text in ("cancel my 9pm", "kill the 21:00",
                                "delete noon please"):
                 n0 = len(sup.scheduler.rows)
