@@ -4816,6 +4816,15 @@ class AppState:
                     r"the\s+(?:scheduled|regular|recurring)\s+\w+)\b"
                     r".{0,40}\bruns?\b",
                     low)):
+            # A reminder-scoped ask ('what reminders do i have',
+            # 'list my reminders') belongs to the reminder lane's
+            # filtered inventory — the full dump would bury a simple
+            # list under goals, daemon schedules, and missions.
+            if (re.search(r"\breminders?\b|\balarms?\b", low)
+                    and not re.search(
+                        r"\b(?:standing|goals?|missions?|triggers?)\b",
+                        re.sub(r"\b(?:reminders?|alarms?)\b", " ", low))):
+                return None
             # A definite 'the <thing> schedule' names a world entity —
             # "what's the backup schedule" asks about the banked fact
             # 'backup schedule is every day at 3am', not the autonomy
