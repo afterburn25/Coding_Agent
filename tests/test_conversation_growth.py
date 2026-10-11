@@ -1538,6 +1538,35 @@ class CrossChatMemoryTests(unittest.TestCase):
                 "the registry mount is at HKLM")
             self.assertTrue(learned["facts"])
 
+    def test_modal_hedges_and_proposals_never_bank(self):
+        # BUG-082 follow-on — "maybe X", "perhaps X", and "X should be
+        # Y" proposals are unverified claims too; unhandled they fell
+        # to the model which riffed fabricated persona confirmations.
+        # Question inversions and elliptical deferrals must not claim.
+        with tempfile.TemporaryDirectory() as td:
+            memory = ConversationMemory(Path(td) / "memory.json")
+            for utterance in (
+                "maybe the timeout should be 30 seconds",
+                "the timeout should be 30 seconds",
+                "perhaps the queue is draining slowly",
+                "we shouldn't deploy on fridays",
+            ):
+                learned = memory.learn_from_user(utterance)
+                self.assertFalse(learned["facts"], utterance)
+                self.assertEqual(len(learned.get("hedged") or []), 1,
+                                 utterance)
+            for not_claim in (
+                "maybe later",
+                "should we deploy now",
+                "we agreed the API should stay REST",  # a decision
+            ):
+                self.assertFalse(
+                    memory.learn_from_user(not_claim).get("hedged"),
+                    not_claim)
+            self.assertFalse(
+                [r for r in memory._data["facts"]
+                 if r.get("active") and "timeout" in r["text"]])
+
     def test_stated_plan_banks_as_plan(self):
         # BUG-082 — "we're switching to mysql next week" declares
         # intent, not current use; unhandled it fell to a model that

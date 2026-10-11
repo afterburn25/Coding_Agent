@@ -1185,6 +1185,30 @@ class ConversationMemory:
                 r"understanding|impression)\s+is)\s*[,:—-]*\s*"
                 r"(?:that\s+)?(.+?)[.!?]?$",
                 text, flags=re.IGNORECASE)
+            if m is None:
+                # Modal hedges and proposals — "maybe the cache ttl is
+                # 300", "the timeout should be 30 seconds". A
+                # suggestion is an unverified claim about the world:
+                # noted, never banked. Question inversions ("should
+                # we…?") are excluded by the leading-word guard.
+                m = re.match(
+                    r"^(?:maybe|perhaps|possibly|probably)\s*[,:]?\s*"
+                    r"(.+?)[.!?]?$",
+                    text, flags=re.IGNORECASE) or re.match(
+                    r"^((?!(?:what|when|where|which|who|whom|whose|"
+                    r"why|how|is|are|was|were|do|does|did|can|could|"
+                    r"would|shall|may|might|should)\b)[a-z0-9]"
+                    r".{1,90}?\bshould(?:n'?t|\s+not)?\b.+?)[.!?]?$",
+                    text, flags=re.IGNORECASE)
+                # "we agreed the API should stay REST" is a decision
+                # (assertive), not a proposal — the decision lane
+                # banks it. Only 'should' without a decision verb is
+                # an unverified suggestion.
+                if m is not None and re.search(
+                        r"\b(?:decid\w+|agre\w+|settl\w+|conclud\w+|"
+                        r"commit\w+|chose|chosen|elect\w+|opt\w+)\b",
+                        text, flags=re.IGNORECASE):
+                    m = None
             if not m:
                 return False
             claim = m.group(1).strip()
