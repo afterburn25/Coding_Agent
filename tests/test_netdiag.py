@@ -868,6 +868,49 @@ class TruthGateTests(RecoveryLoopTests):
                 self.assertIsNone(
                     agent._single_fact_recall_reply(q, "conv", "proj"), q)
 
+    def test_attribution_verification_against_record(self):
+        # Live: "didn't you say the deadline was friday" was claimed by
+        # the recall lane, starved on an empty store, then fell to the
+        # model — which confirmed a claim nobody made ("Yes, the
+        # deadline was Friday"). A verification ask must answer from
+        # the recorded turns: confirm only a full-term hit, deny with
+        # the closest thing actually said, or admit no record.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            cm = agent.conversation_memory
+            cm.record_exchange("when is the launch",
+                               "the deadline is friday, per the board.")
+            # Full-term hit — the record does hold the claim.
+            r = agent._single_fact_recall_reply(
+                "didn't you say the deadline was friday",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("deadline is friday", r.text.lower())
+            # Related-but-different — deny, then show the closest
+            # thing actually on record instead of a flat refusal.
+            r = agent._single_fact_recall_reply(
+                "didn't you say the deadline was monday",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("deadline is friday", r.text.lower())
+            self.assertNotIn("yes", r.text.lower()[:5])
+            # Nothing resembling the claim exists — honest no-record.
+            r = agent._single_fact_recall_reply(
+                "didn't you say the server runs on port 9999",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("record", r.text.lower())
+            # Tagged reported speech verifies too.
+            r = agent._single_fact_recall_reply(
+                "you told me the deadline was friday, right",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("deadline is friday", r.text.lower())
+
     def test_scoped_recall_and_inventory_asks(self):
         # Live: "do you have anything on the backup schedule" dumped
         # the AUTONOMY inventory (standing goals/missions) instead of

@@ -2553,7 +2553,7 @@ class AgentOrchestrator:
         # tagged "you said X, right" ask the store to confirm or
         # contradict, not the model. Untagged 'you said X' stays
         # assertion-framed and never reaches this lane.
-        r"(?:didn'?t|did\s+not)\s+you\s+say\s+|did\s+you\s+say\s+|"
+        r"(?:didn'?t|did\s+not|did)\s+you\s+(?:say|tell)(?:\s+me)?\s*|"
         r"you\s+(?:said|told\s+me)\s+|i\s+thought\s+you\s+"
         r"(?:said|told\s+me)\s+|"
         # Hedged recall asks — "do you happen to know my editor",
@@ -2597,6 +2597,77 @@ class AgentOrchestrator:
         r"(?:^|[,;—–])\s*you\s+know\s*[?!.,;—–]*\s*$|"
         r"\babout me\b",
         re.IGNORECASE)
+
+    # Reported-speech verification — "didn't you say X", "you told me
+    # X, right", "i thought you said X". These turns ask the RECORD to
+    # confirm or deny a claim attributed to a prior utterance; on an
+    # empty store they must still answer honestly rather than fall to
+    # the model (which confirms from vibes). An untagged declarative
+    # "you said the deploy was fine" is an accusation/complaint, not a
+    # verification ask — it keeps falling through.
+    @staticmethod
+    def _attribution_probe(raw_text: str, match_text: str) -> bool:
+        mt = str(match_text or "").strip().lower()
+        if re.match(
+                r"^(?:didn'?t|did\s+not|did)\s+you\s+(?:say|tell)\b|"
+                r"^i\s+thought\s+you\s+(?:said|told\s+me)\b", mt):
+            return True
+        if re.match(r"^you\s+(?:said|told\s+me)\b", mt):
+            # The tag was stripped from match_text before this lane
+            # ran — check the raw text for the verification marker.
+            raw = str(raw_text or "").strip().lower()
+            return bool(
+                re.search(r"[?]\s*$", raw)
+                or re.search(
+                    r"[,;]?\s*(?:right|correct|yeah|huh|eh|"
+                    r"isn'?t\s+(?:it|that\s+so)|don'?t\s+you\s+think|"
+                    r"you\s+know)\s*[?!.]?\s*$", raw))
+        return False
+
+    def _verify_attributed_claim(self, match_text: str) -> str | None:
+        """Answer a reported-speech verification from the recorded
+        turns. Strips the attribution lead, then scans prior assistant
+        messages for the proposition's content terms: a full hit
+        confirms with the quoted record, a partial hit denies with the
+        closest thing actually said, no hit is an honest
+        not-on-record. Returns None when history is unavailable or the
+        proposition carries no content terms (let the model lane have
+        shapeless turns)."""
+        memory = self.conversation_memory
+        if memory is None:
+            return None
+        try:
+            history = memory.history(limit=40)
+        except Exception:
+            return None
+        if not history:
+            return ("I don't have anything on record to check that "
+                    "against.")
+        prop = self._FACT_RECALL_RE.sub("", match_text)
+        prop = re.sub(r"[,;]?\s*(?:right|correct|yeah|ok(?:ay)?|huh|"
+                      r"eh|yes|no|isn'?t\s+(?:it|that\s+so)|"
+                      r"don'?t\s+you\s+think|you\s+know)\s*[?!.]?\s*$",
+                      "", prop, flags=re.IGNORECASE).strip()
+        prop = prop.rstrip("?.!").strip()
+        terms = memory._content_terms(prop)
+        if not terms:
+            return None
+        best_text, best_hits = "", 0
+        for row in reversed(history):
+            if str(row.get("role")) != "assistant":
+                continue
+            content = str(row.get("content", ""))
+            hits = len(terms & memory._content_terms(content))
+            if hits > best_hits:
+                best_text, best_hits = content, hits
+        snippet = re.sub(r"\s+", " ", best_text).strip()[:160]
+        if best_hits >= len(terms):
+            return (f"Yes — that's on record. I said: \"{snippet}\"")
+        if best_hits:
+            return (f"Not exactly — closest thing on record is: "
+                    f"\"{snippet}\"")
+        return ("I don't have that on record — as far as I can see, "
+                "I didn't say that.")
 
     @staticmethod
     def _recalled_fact_sentence(row: dict) -> str:
@@ -2688,6 +2759,15 @@ class AgentOrchestrator:
             match_text, project_id=project_id,
             conversation_id=conversation_id)
         if not rows:
+            # Reported-speech verification — "didn't you say X" is
+            # claimed by this lane; an empty store means verify against
+            # the recorded turns, never the model's vibe-confirmation.
+            if self._attribution_probe(text, match_text):
+                verdict = self._verify_attributed_claim(match_text)
+                if verdict is not None:
+                    from ..context.realize import RenderedReply
+                    return RenderedReply(text=verdict,
+                                         speech_act="answer")
             # Possessive probes ("what's my editor", "did I tell you my
             # port") can only be answered by taught facts — an empty
             # store is itself the honest answer; don't fall to the
@@ -2822,6 +2902,15 @@ class AgentOrchestrator:
                         rows = hit
                         break
             if not rows:
+                # Same attribution check as the early path — a
+                # reported-speech turn that survives the precision
+                # gate's retries still answers from the record.
+                if self._attribution_probe(text, match_text):
+                    verdict = self._verify_attributed_claim(match_text)
+                    if verdict is not None:
+                        from ..context.realize import RenderedReply
+                        return RenderedReply(text=verdict,
+                                             speech_act="answer")
                 return None
             # Subject anchoring: the question asks ABOUT an entity, so a
             # fact whose subject carries the query terms ('prod api is
