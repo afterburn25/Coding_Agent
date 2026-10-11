@@ -4988,7 +4988,7 @@ class AppState:
         # carries a parseable time (a bare "remember to X" remains
         # eligible for the standing-goal lane below).
         rem = re.match(
-            r"^(?:please\s+)?(remind\s+me\s+to|"
+            r"^(?:please\s+)?(remind\s+me(?:\s+to)?|"
             r"(?:set|create|add|schedule)\s+(?:a\s+|me\s+a\s+)?"
             r"reminder(?:\s+(?:for|to|about|that))?|"
             r"remember\s+to)\s+(.+?)[.!?]?$",
@@ -4998,7 +4998,12 @@ class AppState:
         if rem and not (rem.group(1).startswith("remember")
                         and any(p in low
                                 for p in self._MISSION_STANDING_PHRASES)):
-            out = self._set_reminder(sup, rem.group(2))
+            # 'remind me ...' defers to the orchestrator lanes when no
+            # spec parses — recall ('remind me about X') and clarify
+            # ('remind me to X' with no time) are decided there.
+            out = self._set_reminder(
+                sup, rem.group(2),
+                defer_no_time=rem.group(1).startswith("remind me"))
             if out is not None:
                 return out
 
@@ -5048,9 +5053,13 @@ class AppState:
                             ).speech_act in (COMMAND, REQUEST)
             except Exception:
                 return False
-        wants_standing = any(p in masked and _modifies_command(p)
+        # Word-boundary matching — 'every week' must not fire inside
+        # 'every weekday'/'every weekend'.
+        def _phrase_in(p: str) -> bool:
+            return bool(re.search(r"\b" + re.escape(p) + r"\b", masked))
+        wants_standing = any(_phrase_in(p) and _modifies_command(p)
                              for p in self._MISSION_STANDING_PHRASES)
-        wants_mission = any(p in masked and _modifies_command(p)
+        wants_mission = any(_phrase_in(p) and _modifies_command(p)
                             for p in self._MISSION_CREATE_PHRASES)
         if not (wants_mission or wants_standing):
             return None
@@ -5153,15 +5162,19 @@ class AppState:
                               time.localtime(spec.get("at") or 0))
         return f"for {stamp}"
 
-    def _set_reminder(self, sup, body: str) -> dict | None:
+    def _set_reminder(self, sup, body: str,
+                      defer_no_time: bool = False) -> dict | None:
         """'check the deploy tomorrow at 3' → real schedule whose
         fire emits a notification — once or recurring via the shared
         spec grammar. Never fabricates a reminder — no parseable time
-        gets an honest ask-for-the-time ack."""
+        gets an honest ask-for-the-time ack, unless defer_no_time
+        hands the ask to the orchestrator's clarify/recall lanes."""
         spec, desc = self._parse_reminder_time(str(body or ""), time.time())
         if not desc:
             return {"content": "Remind you to do what?"}
         if spec is None:
+            if defer_no_time:
+                return None
             return {"content": (
                 f"Noted — “{desc}”. I can't pin a reminder without a "
                 "time — say when, like “at 3pm”, “tomorrow”, "

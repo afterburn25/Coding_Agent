@@ -1549,9 +1549,16 @@ class AutonomyApiTests(unittest.TestCase):
                               scheds[-1]["action"]["detail"])
                 self.assertEqual(
                     time.localtime(scheds[-1]["at"]).tm_wday, 4)
-                # No parseable time — honest ask, no phantom schedule.
+                # No parseable time — 'remind me' defers to the
+                # orchestrator clarify lane; no phantom schedule.
                 out = state._mission_command(
                     "remind me to water the plants")
+                self.assertIsNone(out)
+                self.assertEqual(len(_reminders()), 3)
+                # An explicit reminder noun still gets the local
+                # ask-for-the-time reply.
+                out = state._mission_command(
+                    "set a reminder to water the plants")
                 self.assertIsNotNone(out)
                 self.assertIn("can't pin", out["content"])
                 self.assertEqual(len(_reminders()), 3)
