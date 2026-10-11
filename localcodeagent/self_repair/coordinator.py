@@ -597,8 +597,16 @@ class SelfRepairCoordinator:
             return "patching" if self._lost_worktree(inc) else ""
         diff = ""
         try:
+            # Candidate = everything the worktree carries vs its
+            # merge-base — committed work counts too; `diff HEAD` alone
+            # would call a fully committed patch "empty".
+            base = ""
+            try:
+                base = self.patcher.worktree_base(wt)
+            except Exception:
+                pass
             diff = __import__("subprocess").run(
-                ["git", "-C", str(wt), "diff", "HEAD"],
+                ["git", "-C", str(wt), "diff", base or "HEAD"],
                 capture_output=True, text=True, timeout=20, encoding="utf-8", errors="replace").stdout
         except Exception:
             pass

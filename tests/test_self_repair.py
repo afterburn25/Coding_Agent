@@ -448,6 +448,58 @@ class ScenarioA_CodeRepairPromoted(unittest.TestCase):
             self.assertIn("calc.py",
                           git("status", "--porcelain", cwd=repo).stdout)
 
+    def test_committed_worktree_patch_promotes(self):
+        """A mission that COMMITS inside its repair worktree must still
+        promote — `git diff HEAD` alone would call a fully committed
+        candidate 'empty patch' and stall the pipeline."""
+        def committing_generator(incident, wt: Path):
+            result = good_generator(incident, wt)
+            git("-c", "user.email=t@t", "-c", "user.name=t",
+                "add", "-A", cwd=wt)
+            git("-c", "user.email=t@t", "-c", "user.name=t",
+                "commit", "-m", "repair candidate", cwd=wt)
+            return result
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo,
+                               patch_generator=committing_generator,
+                               canary=Canary(lambda i, w, **k:
+                                             {"ok": True, "port": 1}))
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            final = coord.get(inc["id"])
+            self.assertEqual(final["state"], "resolved")
+            self.assertIn("if b == 0",
+                          (repo / "mod" / "calc.py").read_text())
+            self.assertTrue(
+                (repo / "tests" / "test_calc_repair.py").is_file())
+
+    def test_promotion_refuses_drifted_files(self):
+        """If the primary moved a candidate file since the worktree was
+        cut, promotion aborts instead of clobbering the newer content."""
+        def drift_generator(incident, wt: Path):
+            # Primary advances the very file the repair touches.
+            (repo / "mod" / "calc.py").write_text(
+                "def divide(a, b):\n    return -1\n", encoding="utf-8")
+            git("-c", "user.email=t@t", "-c", "user.name=t",
+                "add", "-A", cwd=repo)
+            git("-c", "user.email=t@t", "-c", "user.name=t",
+                "commit", "-m", "drift", cwd=repo)
+            return good_generator(incident, wt)
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo,
+                               patch_generator=drift_generator,
+                               canary=Canary(lambda i, w, **k:
+                                             {"ok": True, "port": 1}))
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            final = coord.get(inc["id"])
+            self.assertNotEqual(final["state"], "resolved")
+            # Primary content preserved — never clobbered.
+            self.assertIn("return -1",
+                          (repo / "mod" / "calc.py").read_text())
+
 
 class DestructivePatchReviewTests(unittest.TestCase):
     """A generated patch that guts a file — a stub replacing thousands
