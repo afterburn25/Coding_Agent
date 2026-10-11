@@ -3773,10 +3773,9 @@ class AgentOrchestrator:
                 "running in this session.",
                 user_text, task_id, event_callback)
         body = str(ms.group("body") or "").strip(" ,;—-")
-        topic_terms = set(re.findall(
-            r"[a-z0-9']+",
-            re.sub(r"\b(?:the|my|that|all|every|each|any|of|to|for|"
-                   r"about)\b", " ", body, flags=re.IGNORECASE).lower()))
+        topic_terms = self._reminder_terms(re.sub(
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
+            " ", body, flags=re.IGNORECASE))
         dur = str(ms.group("dur") or "").strip(" ,;—-")
         when = None
         delta = None
@@ -3885,10 +3884,9 @@ class AgentOrchestrator:
                 "or “to every morning”.",
                 user_text, task_id, event_callback)
         body = str(mr.group("body") or "").strip(" ,;—-")
-        topic_terms = set(re.findall(
-            r"[a-z0-9']+",
-            re.sub(r"\b(?:the|my|that|all|every|each|any|of|to|for|"
-                   r"about)\b", " ", body, flags=re.IGNORECASE).lower()))
+        topic_terms = self._reminder_terms(re.sub(
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
+            " ", body, flags=re.IGNORECASE))
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
         if not rows:
@@ -4030,6 +4028,16 @@ class AgentOrchestrator:
                 text += " tomorrow"
         return set(re.findall(r"[a-z0-9']+", text.lower()))
 
+    @staticmethod
+    def _reminder_terms(text: str) -> set:
+        """User-side scope terms — a possessive ('tomorrow's') folds
+        to its stem so it can match hay tokens, and stray 's
+        residues ('what's') drop out instead of echoing as scope."""
+        return {w for w in (
+            re.sub(r"'s$|'$", "", w)
+            for w in re.findall(r"[a-z0-9']+",
+                                str(text or "").lower())) if w}
+
     def _reminder_when_text(self, s: dict, now: float) -> str:
         kind = s.get("kind")
         hour, minute = s.get("hour"), s.get("minute")
@@ -4121,10 +4129,9 @@ class AgentOrchestrator:
                 "running in this session.",
                 user_text, task_id, event_callback)
         pool = [s for s in rows if s.get("enabled", True) != want_on]
-        topic_terms = set(re.findall(
-            r"[a-z0-9']+",
-            re.sub(r"\b(?:the|my|that|all|every|each|any|of|to|for|"
-                   r"about)\b", " ", body, flags=re.IGNORECASE).lower()))
+        topic_terms = self._reminder_terms(re.sub(
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
+            " ", body, flags=re.IGNORECASE))
         _hay = self._reminder_hay
         hits = [s for s in pool
                 if not topic_terms or topic_terms <= _hay(s)]
@@ -4220,8 +4227,7 @@ class AgentOrchestrator:
             "tail") or re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
             " ", body, flags=re.IGNORECASE)
-        topic_terms = set(
-            re.findall(r"[a-z0-9']+", str(topic_src or "").lower()))
+        topic_terms = self._reminder_terms(topic_src)
         if not topic_terms and re.search(
                 r"\b(?:reminders|alarms|timers)\b", mc.group(0),
                 re.IGNORECASE):
@@ -4286,28 +4292,23 @@ class AgentOrchestrator:
             r"\b(?:about|regarding|for|on|of)\s+(.+?)\s*[.!?]?\s*$",
             plan_text, re.IGNORECASE)
         if sm is not None:
-            scope_terms = set(re.findall(
-                r"[a-z0-9']+",
-                re.sub(r"\b(?:reminders?|alarms?|timers?|the|a|an|my|"
-                       r"that)\b",
-                       " ", sm.group(1), flags=re.IGNORECASE).lower()))
+            scope_terms = self._reminder_terms(re.sub(
+                r"\b(?:reminders?|alarms?|timers?|the|a|an|my|that)\b",
+                " ", sm.group(1), flags=re.IGNORECASE))
         if not scope_terms:
             tm = re.search(
                 r"\b(?:the\s+|my\s+)?([a-z0-9][a-z0-9'\s]{0,40}?)\s+"
                 r"(?:reminders?|alarms?|timers?)\b", plan_text,
                 re.IGNORECASE)
             if tm is not None:
-                scope_terms = set(re.findall(
-                    r"[a-z0-9']+",
-                    re.sub(r"\b(?:what|which|when|does|do|is|are|have|"
-                           r"has|any|go|goes|going|off|fire|fires|"
-                           r"firing|set|the|a|an|my|that|next|time|"
-                           r"day|date|hour|i|me|we|you|your|got|"
-                           r"still|really|actually|don'?t|dont|not|"
-                           r"no|more|longer|anymore|list|show|see|"
-                           r"how|many|much|number|count|total|"
-                           r"tell|give|display|view)\b", " ",
-                           tm.group(1), flags=re.IGNORECASE).lower()))
+                scope_terms = self._reminder_terms(re.sub(
+                    r"\b(?:what|which|when|does|do|is|are|have|has|any|"
+                    r"go|goes|going|off|fire|fires|firing|set|the|a|an|"
+                    r"my|that|next|time|day|date|hour|i|me|we|you|your|"
+                    r"got|still|really|actually|don'?t|dont|not|no|"
+                    r"more|longer|anymore|list|show|see|how|many|much|"
+                    r"number|count|total|tell|give|display|view)\b",
+                    " ", tm.group(1), flags=re.IGNORECASE))
         when_ask = bool(re.match(
             r"\s*(?:when|what\s+time)\b", plan_text, re.IGNORECASE))
         if scope_terms:
@@ -4383,11 +4384,9 @@ class AgentOrchestrator:
                 # stop to the rows firing at that time.
                 topic = f"{topic} {attime}".strip()
             if topic:
-                terms = set(re.findall(
-                    r"[a-z0-9']+",
-                    re.sub(r"\b(?:the|my|that|all|every|each|any|of|"
-                           r"to|for|about|at)\b", " ", topic,
-                           flags=re.IGNORECASE).lower()))
+                terms = self._reminder_terms(re.sub(
+                    r"\b(?:the|my|that|all|every|each|any|of|to|for|"
+                    r"about|at)\b", " ", topic, flags=re.IGNORECASE))
                 rows = [s for s in rows
                         if not terms or terms <= self._reminder_hay(s)]
                 if not rows:

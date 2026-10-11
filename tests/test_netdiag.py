@@ -2054,6 +2054,25 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Cancel", result.content)
             self.assertFalse(sup.scheduler.rows)
 
+            # Possessive scopes — 'cancel tomorrow's reminder' left
+            # 'tomorrow's' as one token that never matched hay
+            # 'tomorrow'; "what's my next reminder" echoed scope 's.
+            sup.scheduler.add(
+                "reminder: poss", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "poss"})
+            result = agent.run("cancel tomorrow's reminder",
+                               mode="auto")
+            self.assertIn("Cancel", result.content)
+            self.assertFalse(sup.scheduler.rows)
+            sup.scheduler.add(
+                "reminder: poss2", "once",
+                at=time.time() + 3600,
+                action={"kind": "notify", "detail": "poss2"})
+            result = agent.run("what's my next reminder", mode="auto")
+            self.assertIn("poss2", result.content)
+            sup.scheduler.remove(str(sup.scheduler.rows[-1]["id"]))
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
