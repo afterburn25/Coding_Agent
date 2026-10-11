@@ -2504,8 +2504,10 @@ class AgentOrchestrator:
         return reply
 
     _FACTS_RECALL_RE = re.compile(
+        # `about me` dumps; `about my X` scopes to user-owned facts;
+        # `about python` (no possession) is a general-knowledge ask.
         r"\bwhat do you (?:know|remember|have)(?:\s+learned)?\s+"
-        r"about\b|\bwhat do you remember\b|\bwhat have you "
+        r"about\s+(?:me|my)\b|\bwhat do you remember\b|\bwhat have you "
         r"(?:learned|remembered)\b|\bwhat have i "
         r"told you\b|\bwhat(?:'s| do you have) (?:on|saved about) "
         r"me\b", re.IGNORECASE)
