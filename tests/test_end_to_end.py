@@ -1610,6 +1610,76 @@ class AutonomyApiTests(unittest.TestCase):
                 if getattr(state, "autonomy", None) is not None:
                     state.autonomy.stop()
 
+    def test_goal_control_and_reminder_fallthrough(self):
+        # Live: "remind me every day except sundays to check email"
+        # minted a verbatim standing goal when the reminder parse
+        # failed — an unenforceable goal, not a reply. And "stop the
+        # smoke tests goal" banked an operating rule while the goal
+        # kept running. Unparseable 'remind me' leads defer to the
+        # orchestrator's honest lanes; goal verbs mutate real state.
+        with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
+            from localcodeagent.config import AgentConfig, ModelProfile
+            from localcodeagent.server import AppState
+            ws = Path(td)
+            cfg = AgentConfig(profiles_onboarding_gate=False,
+                models=[ModelProfile(
+                    id="fake", endpoint="http://127.0.0.1:1/v1",
+                    model="fake-model", roles=["primary_coder"],
+                    runtime="external")],
+                process_watchdog=False, research_enabled=False,
+            )
+            state = AppState(cfg, ws, ws / ".runtime")
+            try:
+                sup = state.autonomy
+                # An exclusion cadence the scheduler can't represent
+                # defers — never becomes a goal or a row.
+                self.assertIsNone(state._mission_command(
+                    "remind me every day except sundays "
+                    "to check email"))
+                self.assertFalse(sup.standing_goals())
+                self.assertFalse([
+                    s for s in sup.scheduler.list()
+                    if s.get("created_by") == "chat"])
+                # Mint a real goal, then control it by name.
+                out = state._mission_command(
+                    "every morning, run the smoke tests")
+                self.assertIsNotNone(out)
+                self.assertIn("Standing goal", out["content"])
+                goal = sup.standing_goals()[0]
+                self.assertTrue(goal.get("enabled", True))
+                out = state._mission_command(
+                    "stop the smoke tests goal")
+                self.assertIsNotNone(out)
+                self.assertIn("Stopped", out["content"])
+                self.assertFalse(
+                    sup.standing_goals()[0].get("enabled", True))
+                # Idempotent stop reports state, not a fake op.
+                out = state._mission_command(
+                    "stop the smoke tests goal")
+                self.assertIn("already off", out["content"])
+                out = state._mission_command(
+                    "resume the smoke tests goal")
+                self.assertIn("Re-enabled", out["content"])
+                self.assertTrue(
+                    sup.standing_goals()[0].get("enabled", True))
+                # Unknown topic lists what exists; unrelated stop
+                # verbs ('stop the music') don't claim.
+                out = state._mission_command(
+                    "stop the plumber goal")
+                self.assertIn("don't see", out["content"])
+                self.assertIsNone(
+                    state._mission_command("stop the music"))
+                # Non-goal stop verbs stay untouched.
+                self.assertIsNone(state._mission_command(
+                    "don't remind me anymore"))
+                # Plural unscoped hits the whole pool.
+                out = state._mission_command("pause all goals")
+                self.assertIsNotNone(out)
+                self.assertIn("Stopped", out["content"])
+            finally:
+                if getattr(state, "autonomy", None) is not None:
+                    state.autonomy.stop()
+
 
 class ChatAttachmentTests(unittest.TestCase):
     """Chat '+' attachments: text files inline into the model's user

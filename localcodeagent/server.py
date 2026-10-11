@@ -5010,6 +5010,31 @@ class AppState:
                 noun=noun)
             if out is not None:
                 return out
+            if rem.group(1).startswith("remind me"):
+                # A failed 'remind me' parse defers to the
+                # orchestrator's recall/clarify lanes — falling
+                # through would mint a standing goal out of the raw
+                # utterance ('remind me every day except sundays').
+                return None
+
+        # Standing-goal control — 'stop the smoke tests goal' /
+        # 'pause my goals' / 're-enable the review goal' flip a real
+        # enabled flag (reversible), never a banked rule.
+        gm = re.match(
+            r"^(?:please\s+)?(stop|pause|disable|cancel|remove|"
+            r"delete|end|kill|turn\s+off|switch\s+off|shut\s+off|"
+            r"start|enable|re-?enable|resume|unpause|turn\s+on|"
+            r"turn\s+back\s+on|switch\s+on|restart|bring\s+back)"
+            r"\s+(?:(?:the|my|that|all|every|each|any)\s+)*"
+            r"(?P<body>.*?)"
+            r"\b(?P<goal>standing\s+goals?|goals?)\b"
+            r"(?:\s*(?:for|about|on|of)\s+(?P<tail>.+?))?"
+            r"\s*[.!?]?\s*$",
+            low)
+        if gm:
+            out = self._goal_control_reply(sup, gm)
+            if out is not None:
+                return out
 
         # Autonomy triggers must come from the user's own words, in a
         # request — not from quoted text ('the doc says "keep working
@@ -5250,6 +5275,73 @@ class AppState:
             + (f" — {desc}" if desc != noun else "") + ". "
             "It'll surface as a notification; cancel it from the "
             "Missions page if plans change.")}
+
+    def _goal_control_reply(self, sup, gm) -> dict | None:
+        """Enable/disable standing goals by topic — a real
+        set_goal_enabled flip, reversible and never narrated."""
+        want_on = bool(re.fullmatch(
+            r"start|enable|re-?enable|resume|unpause|turn\s+on|"
+            r"turn\s+back\s+on|switch\s+on|restart|bring\s+back",
+            gm.group(1)))
+        goals = sup.standing_goals() or []
+        state = "on" if want_on else "off"
+        topic_src = gm.group("tail") or gm.group("body") or ""
+        topic_terms = set(re.findall(
+            r"[a-z0-9']+",
+            re.sub(r"\b(?:the|my|that|all|every|each|any|of|to|for|"
+                   r"about|on|running|doing|up|down)\b", " ",
+                   str(topic_src), flags=re.IGNORECASE).lower()))
+        hay = lambda g: set(re.findall(
+            r"[a-z0-9']+", str(g.get("objective") or "").lower()))
+        pool = [g for g in goals
+                if bool(g.get("enabled", True)) != want_on]
+        hits = [g for g in pool
+                if not topic_terms or topic_terms <= hay(g)]
+        if not goals:
+            return {"content": "There aren't any standing goals set."}
+        if topic_terms and not hits:
+            if any(topic_terms <= hay(g) for g in goals):
+                return {"content": f"That goal is already {state}."}
+            names = "; ".join(
+                f"“{str(g.get('objective') or '')[:50]}”"
+                for g in goals[:3])
+            return {"content": (
+                f"I don't see a goal matching "
+                f"“{' '.join(sorted(topic_terms))}” — "
+                f"there {'is' if len(goals) == 1 else 'are'}: "
+                f"{names}.")}
+        if not topic_terms and not hits:
+            return {"content": (
+                f"All your goals are already {state}."
+                if want_on else
+                "There are no active goals to stop.")}
+        all_flag = (not topic_terms
+                    and bool(re.search(r"\bgoals\b", gm.group(0),
+                                       re.IGNORECASE)))
+        if len(hits) > 1 and not all_flag:
+            names = "; ".join(
+                f"“{str(g.get('objective') or '')[:50]}”"
+                for g in hits[:5])
+            return {"content": (
+                f"That matches {len(hits)} goals: {names} — "
+                "say which.")}
+        if all_flag:
+            done = sum(1 for g in hits
+                       if sup.set_goal_enabled(str(g["id"]), want_on))
+            return {"content": (
+                f"{'Re-enabled' if want_on else 'Stopped'} "
+                f"{done} goal{'s' if done != 1 else ''}.")}
+        ok = sup.set_goal_enabled(str(hits[0]["id"]), want_on)
+        obj = str(hits[0].get("objective") or hits[0]["id"])
+        if not ok:
+            return {"content": (
+                "I couldn't change that goal — the supervisor "
+                "didn't accept the update.")}
+        return {"content": (
+            f"{'Re-enabled' if want_on else 'Stopped'} the goal "
+            f"“{obj[:80]}”."
+            + ("" if want_on else
+               " Say “resume the goal” to bring it back."))}
 
     def _mission_reply_result(self, text: str) -> dict:
         """Synthesize an agent-result-shaped payload for command replies."""

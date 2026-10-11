@@ -1435,6 +1435,45 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertTrue(all(
                 s["enabled"] for s in sup.scheduler.rows))
 
+            # 'don't remind me to X' disables the matching rows — a
+            # real control op, not a banked 'Never remind me' rule.
+            r = agent._reminder_reply(
+                "don't remind me to check the build",
+                "don't remind me to check the build", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("off", r.content)
+            build_row = next(
+                s for s in sup.scheduler.rows if "build" in s["name"])
+            self.assertFalse(build_row["enabled"])
+            self.assertTrue(
+                next(s for s in sup.scheduler.rows
+                     if "timesheets" in s["name"])["enabled"])
+            # A reminder-directed stop never banks a behavior rule —
+            # 'Never remind me' would be unenforced, i.e. a lie.
+            learned = cm.learn_from_user(
+                "don't remind me anymore", project_id="x")
+            self.assertFalse(learned.get("behavior_rules"))
+            # Unscoped stop hits the whole enabled pool; with nothing
+            # left on, the reply says so instead of acking a no-op.
+            r = agent._reminder_reply(
+                "stop reminding me",
+                "stop reminding me", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("off", r.content)
+            self.assertFalse(
+                any(s["enabled"] for s in sup.scheduler.rows))
+            r = agent._reminder_reply(
+                "don't remind me anymore",
+                "don't remind me anymore", task.id)
+            self.assertIn("don't have any active reminders",
+                          r.content)
+            # Restore the pool for the inventory probes below.
+            r = agent._reminder_reply(
+                "turn reminders back on",
+                "turn reminders back on", task.id)
+            self.assertTrue(all(
+                s["enabled"] for s in sup.scheduler.rows))
+
             # Scoped inventory answers the topic, not the dump; a
             # when-ask over one hit answers the time directly.
             inv = agent._reminder_inventory_reply(

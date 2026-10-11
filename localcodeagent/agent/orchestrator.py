@@ -2996,6 +2996,7 @@ class AgentOrchestrator:
                 or self._REMINDER_CANCEL_RE.match(match_text)
                 or self._REMINDER_SNOOZE_RE.match(match_text)
                 or self._REMINDER_TOGGLE_RE.match(match_text)
+                or self._REMINDER_STOP_RE.match(match_text)
                 or self._REMINDER_RESCHEDULE_RE.match(match_text)):
             return None
         # Reminder inventory — "what reminders do i have" asks the
@@ -3617,6 +3618,13 @@ class AgentOrchestrator:
         r"\b(?P<noun>reminders?|alarms?|timers?)\b"
         r"\s*(?P<dir>back\s+on|off|on)?\s*[.!?]?\s*$",
         re.IGNORECASE)
+    _REMINDER_STOP_RE = re.compile(
+        r"^\s*(?:please\s+)?(?:don'?t|do\s+not|stop|quit|never)\s+"
+        r"(?:remind(?:ing)?|alert(?:ing)?|notify(?:ing)?|"
+        r"ping(?:ing)?|wak(?:e|ing))\s+me\b"
+        r"(?:\s+(?:to|about)\s+(?P<topic>.+?)|"
+        r"\s+(?:anymore|again|any\s+more|any\s+longer))?\s*[.!?]?\s*$",
+        re.IGNORECASE)
     _REMINDER_RESCHEDULE_RE = re.compile(
         r"^\s*(?:please\s+)?(?:reschedule|move|change)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?"
@@ -4204,6 +4212,55 @@ class AgentOrchestrator:
         if mr is not None:
             return self._reminder_reschedule_reply(
                 user_text, mr, task_id, event_callback)
+        mstop = self._REMINDER_STOP_RE.match(plan_text)
+        if mstop is not None:
+            # 'don't remind me anymore' — disable every reminder
+            # row (reversible), never a banked unenforceable rule.
+            sched, rows = self._reminder_rows()
+            if sched is None:
+                return self._reminder_finish(
+                    "I can't manage reminders — the scheduler isn't "
+                    "running in this session.",
+                    user_text, task_id, event_callback)
+            topic = str(mstop.group("topic") or "").strip(" ,;—-.")
+            if topic:
+                terms = set(re.findall(
+                    r"[a-z0-9']+",
+                    re.sub(r"\b(?:the|my|that|all|every|each|any|of|"
+                           r"to|for|about)\b", " ", topic,
+                           flags=re.IGNORECASE).lower()))
+                rows = [s for s in rows
+                        if not terms or terms <= self._reminder_hay(s)]
+                if not rows:
+                    text = (f"I don't see an active reminder matching "
+                            f"“{topic}”.")
+                    return self._reminder_finish(
+                        text, user_text, task_id, event_callback)
+            if not rows:
+                text = "You don't have any active reminders."
+            else:
+                done = sum(
+                    1 for s in rows
+                    if sched.set_enabled(str(s["id"]), False))
+                if topic:
+                    if len(rows) == 1:
+                        label = self._reminder_label(rows[0])
+                        text = (
+                            f"Done — the reminder “{label}” is off. "
+                            f"Say “turn the {label} reminder back "
+                            "on” to resume it.")
+                    else:
+                        text = (
+                            f"Done — {done} matching reminders are "
+                            "off. Say “turn reminders back on” to "
+                            "resume them.")
+                else:
+                    text = (
+                        f"Done — {done} reminder"
+                        f"{'s are' if done != 1 else ' is'} off. "
+                        "Say “turn reminders back on” to resume them.")
+            return self._reminder_finish(
+                text, user_text, task_id, event_callback)
         m = self._REMINDER_RE.match(plan_text)
         clarify = None
         if m is None:
@@ -4360,6 +4417,7 @@ class AgentOrchestrator:
                          or self._REMINDER_CANCEL_RE.match(plan_text)
                          or self._REMINDER_SNOOZE_RE.match(plan_text)
                          or self._REMINDER_TOGGLE_RE.match(plan_text)
+                         or self._REMINDER_STOP_RE.match(plan_text)
                          or self._REMINDER_RESCHEDULE_RE.match(plan_text)
                          or self._REMINDER_NOTASK_RE.match(plan_text))):
             return None
