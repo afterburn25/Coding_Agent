@@ -73,8 +73,29 @@ class Patcher:
                                     ".repair-worktrees"))
         return wt
 
+    def worktree_base(self, wt: Path) -> str:
+        """The primary-checkout commit the worktree diverged from —
+        `git diff <base>` inside the worktree describes the whole
+        candidate, committed AND uncommitted. '' when unresolvable."""
+        try:
+            head = self._git("rev-parse", "HEAD")
+            if head.returncode != 0:
+                return ""
+            mb = subprocess.run(
+                ["git", "-C", str(wt), "merge-base", "HEAD",
+                 head.stdout.strip()],
+                capture_output=True, text=True, timeout=15,
+                creationflags=no_window_flags(), encoding="utf-8",
+                errors="replace")
+            return mb.stdout.strip() if mb.returncode == 0 else ""
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+
     def changed_files(self, wt: Path, base_files: list[str] | None = None) -> list[str]:
-        """Repo-relative *file* paths modified/added inside the worktree.
+        """Repo-relative *file* paths the candidate changes — dirty and
+        untracked work plus anything committed on the repair branch
+        (missions may commit inside their sandbox; `status --porcelain`
+        alone would call a fully committed patch "empty").
         Directories, `__pycache__`, and other repair worktrees are never
         candidate payload."""
         def _ok(rel: str) -> bool:
@@ -85,18 +106,29 @@ class Patcher:
                 and ".repair-worktrees" not in parts
         if self.is_git_repo():
             try:
+                files: set[str] = set()
                 out = subprocess.run(
                     ["git", "-C", str(wt), "status", "--porcelain"],
                     capture_output=True, text=True, timeout=15,
                     creationflags=no_window_flags(), encoding="utf-8", errors="replace").stdout
-                files = []
                 for line in out.splitlines():
                     if not line.strip():
                         continue
                     rel = line[3:].strip().split(" -> ")[-1].strip('"')
                     if _ok(rel) and (wt / rel).is_file():
-                        files.append(rel)
-                return files
+                        files.add(rel)
+                base = self.worktree_base(wt)
+                if base:
+                    committed = subprocess.run(
+                        ["git", "-C", str(wt), "diff", "--name-only", base],
+                        capture_output=True, text=True, timeout=15,
+                        creationflags=no_window_flags(), encoding="utf-8",
+                        errors="replace").stdout
+                    for rel in committed.splitlines():
+                        rel = rel.strip()
+                        if _ok(rel) and (wt / rel).is_file():
+                            files.add(rel)
+                return sorted(files)
             except (OSError, subprocess.TimeoutExpired):
                 return []
         # sandbox: diff against the stable tree byte-for-byte
@@ -110,35 +142,86 @@ class Patcher:
                 changed.append(str(rel).replace("\\", "/"))
         return changed
 
+    def _drifted(self, wt: Path, base: str,
+                 files: list[str]) -> str | None:
+        """Name of a candidate file the primary moved since the
+        worktree was cut, else None. Copying or applying over a drifted
+        file would silently revert primary-tree changes made after the
+        worktree's base — promotion must fail loudly instead."""
+        for f in files:
+            try:
+                show = subprocess.run(
+                    ["git", "-C", str(self.repo_root), "rev-parse",
+                     f"{base}:{f}"],
+                    capture_output=True, text=True, timeout=15,
+                    creationflags=no_window_flags())
+                base_blob = show.stdout.strip() \
+                    if show.returncode == 0 else None
+                dst = self.repo_root / f
+                if dst.is_file():
+                    # hash-object normalizes line endings the same way
+                    # the stored blob does — raw byte compares flag CRLF
+                    # checkouts as drift they aren't.
+                    cur = subprocess.run(
+                        ["git", "-C", str(self.repo_root),
+                         "hash-object", "--", f],
+                        capture_output=True, text=True, timeout=15,
+                        creationflags=no_window_flags())
+                    cur_blob = cur.stdout.strip() \
+                        if cur.returncode == 0 else "<unreadable>"
+                else:
+                    cur_blob = None
+            except (OSError, subprocess.TimeoutExpired):
+                return f
+            if cur_blob != base_blob:
+                return f
+        return None
+
     def promote(self, wt: Path) -> str:
         """Apply the candidate to the stable tree. Returns a description
-        of how it was applied (for the audit trail)."""
-        if self.is_git_repo() and (wt / ".git").exists():
-            r = subprocess.run(
-                ["git", "-C", str(wt), "diff", "HEAD", "--binary"],
-                capture_output=True, timeout=30,
-                creationflags=no_window_flags())
-            if r.returncode == 0 and r.stdout.strip():
-                ap = subprocess.run(
-                    ["git", "-C", str(self.repo_root), "apply", "--whitespace=nowarn"],
-                    input=r.stdout, capture_output=True, timeout=30,
-                    creationflags=no_window_flags())
-                if ap.returncode == 0:
-                    # git diff excludes untracked additions (e.g. a new
-                    # regression test) — copy anything still differing.
-                    for f in self.changed_files(wt):
-                        src, dst = wt / f, self.repo_root / f
-                        if src.is_file() and (not dst.is_file() or
-                                              src.read_bytes()
-                                              != dst.read_bytes()):
-                            dst.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.copy2(src, dst)
-                    return "git-apply"
-            # fallback — copy all differing files
+        of how it was applied (for the audit trail).
+
+        The whole candidate — committed AND uncommitted worktree work —
+        lands as one diff against the worktree's merge-base, plus copies
+        of untracked additions. If the primary moved any candidate file
+        since the worktree was cut, promotion refuses loudly: wholesale
+        copying would silently revert newer primary-tree changes."""
+        if not (self.is_git_repo() and (wt / ".git").exists()):
             self._copy_changed(wt)
-            return "copy-untracked"
-        self._copy_changed(wt)
-        return "copy-sandbox"
+            return "copy-sandbox"
+        base = self.worktree_base(wt)
+        files = self.changed_files(wt)
+        if base:
+            drifted = self._drifted(wt, base, files)
+            if drifted:
+                raise RuntimeError(
+                    f"primary checkout moved {drifted} since the repair "
+                    "worktree was cut — promotion aborted "
+                    "(conflict, never clobbered)")
+        r = subprocess.run(
+            ["git", "-C", str(wt), "diff", base or "HEAD", "--binary"],
+            capture_output=True, timeout=30,
+            creationflags=no_window_flags())
+        if r.returncode == 0 and r.stdout.strip():
+            ap = subprocess.run(
+                ["git", "-C", str(self.repo_root), "apply",
+                 "--whitespace=nowarn"],
+                input=r.stdout, capture_output=True, timeout=30,
+                creationflags=no_window_flags())
+            if ap.returncode != 0:
+                raise RuntimeError(
+                    "candidate diff does not apply on the current "
+                    "tree: " + (ap.stderr or b"").decode(
+                        "utf-8", errors="replace")[:400])
+        # Anything still differing is an untracked addition (diff never
+        # covers `??` files) — copy it over.
+        for f in files or self.changed_files(wt):
+            src, dst = wt / f, self.repo_root / f
+            if src.is_file() and (not dst.is_file() or
+                                  src.read_bytes() != dst.read_bytes()):
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+        return "git-apply"
 
     def _copy_changed(self, wt: Path) -> None:
         for f in self.changed_files(wt):

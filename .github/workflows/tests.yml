@@ -22,9 +22,12 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install test dependencies
-        run: python -m pip install --disable-pip-version-check "cryptography==50.0.1" "numpy==2.3.5"
+        run: python -m pip install --disable-pip-version-check "cryptography==50.0.1" "numpy==2.3.5" "pytest==9.1.1"
       - name: Run unit tests
-        run: python -m unittest discover -s tests -v
+        # pytest collects unittest.TestCase suites too — and runs the
+        # pytest-native files (test_semantic_frame.py) that unittest
+        # discovery cannot even import.
+        run: python -m pytest tests -v
 
       - name: Action-lane eval
         # Deterministic-lane correctness scorecard — exits non-zero on

@@ -28,6 +28,12 @@ def register_workspace_tools(registry: ToolRegistry, manager) -> None:
         path = str(args.get("path") or "").strip()
         if not path:
             return "ERROR: 'path' is required"
+        from . import gitguard
+        if gitguard.autonomous_mission(registry):
+            return ("blocked: autonomous missions may not adopt or "
+                    "activate workspaces — adopting a root mutates the "
+                    "shared session state for every lane; the mission "
+                    "workspace is fixed at spawn")
         try:
             rec = manager.open(path, create=bool(args.get("create", False)))
         except FileNotFoundError:

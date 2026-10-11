@@ -1,1 +1,101 @@
+<<<<<<< HEAD
 invokeai.yaml
+=======
+__pycache__/
+*.pyc
+.venv/
+config.json
+.agent/cache/
+.DS_Store
+.agent/runtime/
+.agent/worker_costs.json
+models/**/*.gguf
+models/*.gguf
+.agent/tasks.json
+.agent/queue.json
+.agent/queue.json.tmp
+.agent/terminal/
+.agent/memory.json
+.agent/repo_index.json
+.agent/checkpoints/
+# Local image/browser runtime data
+models/image/
+data/image/
+ComfyUI/
+tools/InvokeAI/
+tools/.invokeai-*.log
+data/invokeai/
+
+# Kokoro TTS model binaries + build-time asset cache
+models/voice/
+packaging/voice-assets/
+packaging/llama-runtime.zip
+packaging/llama-runtime/
+
+# Local packaging output (PyInstaller/dotnet dist trees)
+build/
+dist/
+dist-*/
+build-*/
+**/publish/
+**/publish-rid/
+.agent/browser/
+
+.agent/research/
+
+# Local model-routing outcome telemetry
+.agent/model_performance.json
+.agent/model_performance.json.tmp
+# Tool runtime dirs (worktrees, sandbox, media pipelines, charts, indexes)
+.agent/sandbox/
+.agent/worktrees/
+.agent/media/
+.agent/blender/
+.agent/data/
+.agent/workflow_runs/
+.agent/knowledge_index.json
+
+# Dev-server runtime state (chat history, charts, image outputs at repo root)
+data/
+output/
+desktop/**/bin/
+desktop/**/obj/
+
+# UI debug artifacts
+cdp_shot.js
+*_shot.png
+*_detail.png
+nexus_welcome.png
+splash_preview.png
+tools_*.png
+
+# Local PyInstaller output
+/bin/
+
+# Local UI screenshot QA
+.shots/
+.shots-baseline/
+.agent/rag_index.db
+.agent/rag_index.db-shm
+.agent/rag_index.db-wal
+
+# Recovered feature spec (session artifact)
+.spec_full.txt
+
+# Windows null-device artifact (something redirects to NUL as a filename)
+NUL
+.repair-worktrees/
+repair-worktrees/
+Devinchat-nexus/
+.dogfood/
+runtime/
+
+# generated listening samples (deliverable on disk, not in git)
+samples/
+
+# Chatterbox conditioning cache — recomputed per reference bytes, must
+# never ship inside a frozen bundle or be committed alongside voices
+localcodeagent/voice/chatterbox_voices/**/conds-*.pt
+models/voice/chatterbox/voices/**/conds-*.pt
+_work_audio/
+>>>>>>> 630630a84d34d9aa1106403dcfd3063fac24a560

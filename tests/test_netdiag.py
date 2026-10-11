@@ -39,6 +39,21 @@ from localcodeagent.workflow.tasks import TaskStore
 import io
 
 
+class _RetriedTemporaryDirectory(tempfile.TemporaryDirectory):
+    """Windows-safe teardown: a just-closing sqlite `-shm`/`-wal` handle
+    lingers tens of ms after the server thread exits, and deleting an
+    open file is a hard PermissionError (ignore_cleanup_errors does not
+    cover the _resetperms chmod path on 3.14)."""
+
+    def cleanup(self) -> None:
+        for _ in range(40):
+            try:
+                return super().cleanup()
+            except PermissionError:
+                time.sleep(0.05)
+        return super().cleanup()
+
+
 def _profile(**overrides) -> ModelProfile:
     values = dict(
         id="local", endpoint="http://127.0.0.1:9999/v1", model="test-model",
@@ -661,6 +676,41 @@ class TruthGateTests(RecoveryLoopTests):
             ):
                 self.assertFalse(det(text), text)
 
+    def test_detector_catches_witnessed_event_claims(self):
+        # Live: "tell me something you're not sure about" produced
+        # "I've seen it trigger twice in the last 48 hours" — invented
+        # telemetry, unbadged because the detector only knew DO-verbs.
+        # Witnessing system events is the same fabrication class as
+        # claiming the check ran.
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            det = agent._executed_action_claims
+            for claim in (
+                "I've seen it trigger twice in the last 48 hours.",
+                "I noticed the failure pattern again.",
+                "I saw it crash yesterday.",
+                "I observed the retries climbing.",
+                "I've detected the drift since Tuesday.",
+                "I noticed the service restart last night.",
+                "I just noticed the system tried to auto-schedule "
+                "a build.",
+                # Passive telemetry citations — evidence the model
+                # never actually read.
+                "The log showed a timeout right after.",
+                "Metrics confirm the fix held.",
+                "History shows the same failure every night.",
+            ):
+                self.assertTrue(det(claim), claim)
+            for text in (
+                "I've seen worse.",
+                "I've seen this movie before.",
+                "I think it restarted.",
+                "I haven't seen the logs yet.",
+                "I'm watching.",
+                "The history books tell a different story.",
+            ):
+                self.assertFalse(det(text), text)
+
     def test_my_probe_empty_store_answers_honestly(self):
         # BUG-051: "what is my editor" with nothing taught must answer
         # "you haven't told me" — possessive probes can only be
@@ -723,6 +773,479 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(reply)
             self.assertIn("titan", reply.text)
 
+    def test_recall_through_discourse_preambles(self):
+        # Discourse preambles ("sorry,", "i forgot", "wait —") framed
+        # the turn as assertion and bounced it off the recall lane.
+        # The analyzer strips punctuation-separated markers, and a
+        # wh-complement under a forgetting verb is itself the ask.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my shell is zsh")
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            for q in (
+                    "sorry, what's my shell",
+                    "i forgot what my shell is",
+                    "i forgot — what is my shell",
+                    "i can't remember what my shell is",
+                    "wait — is the prod api on 443",
+                    "i don't remember what port the prod api uses"):
+                reply = agent._single_fact_recall_reply(
+                    q, "conv", "proj")
+                self.assertIsNotNone(reply, q)
+            # An admission with no wh stays out of recall.
+            self.assertIsNone(agent._single_fact_recall_reply(
+                "i forgot the deadline", "conv", "proj"))
+
+    def test_filler_sounds_never_pollute_banked_facts(self):
+        # "hmm the port is 8080" used to bank 'hmm the port is 8080'
+        # verbatim — filler syllables leaked into stored text. And
+        # "hmm what was my editor" banked the QUESTION as a fact
+        # ('hmm what' parsed as the subject of 'was').
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            r = cm.learn_from_user("hmm the port is 8080")
+            self.assertEqual(r["facts"], ["port is 8080"])
+            r = cm.learn_from_user("uh my editor is vim")
+            self.assertEqual(r["facts"], ["my editor is vim"])
+            for q in ("hmm what was my editor",
+                      "um what is the port",
+                      "hmm what was my editor again"):
+                self.assertEqual(cm.learn_from_user(q)["facts"], [], q)
+
+    def test_connector_led_wh_question_recalls_fact(self):
+        # Companion to never-banking: "oh and what port was prod on" must
+        # still reach recall once it classifies as a question — the
+        # connector strip feeds the same text to the recall anchor.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            for q in ("oh and what port was prod on",
+                      "and what port is the prod api on"):
+                reply = agent._single_fact_recall_reply(q, "conv", "proj")
+                self.assertIsNotNone(reply, q)
+                self.assertIn("443", reply.text, q)
+
+    def test_connector_led_wh_question_never_banks(self):
+        # Live: "oh and what port was prod on" banked 'and what port was
+        # prod on' as a fact — 'oh' was stripped but 'and' survived, so
+        # subj 'and what port' + pred 'was' slipped past the wh guards.
+        # Leading coordinators strip like other discourse markers, and a
+        # subject whose FIRST token is an interrogative determiner is
+        # question-shaped, never a fact.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            for q in ("oh and what port was prod on",
+                      "and what port is prod on",
+                      "but when is the standup",
+                      "so where is the config",
+                      "ok so what time is the standup",
+                      "yeah and what port is prod on",
+                      "well who is on call",
+                      "hey what is the deadline"):
+                self.assertEqual(cm.learn_from_user(q)["facts"], [], q)
+            # Politeness/discourse leads before real declaratives still
+            # bank — the strip only takes the marker stack.
+            r = cm.learn_from_user("and the deadline is friday")
+            self.assertEqual(r["facts"], ["deadline is friday"])
+            r = cm.learn_from_user("but the build is green")
+            self.assertEqual(r["facts"], ["build is green"])
+            r = cm.learn_from_user("ok the port is 8080")
+            self.assertEqual(r["facts"], ["port is 8080"])
+            r = cm.learn_from_user("yeah the maintainer is sam")
+            self.assertEqual(r["facts"], ["maintainer is sam"])
+
+    def test_reported_speech_and_meta_recall(self):
+        # Live: "you said my editor was cursor, right" let the MODEL
+        # contradict the store; "what was it again — the retry limit"
+        # hallucinated a stale value; "i keep meaning to ask" missed
+        # recall entirely. Verification and meta-recall idioms must
+        # answer deterministically from the banked fact.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my editor is cursor")
+            agent.conversation_memory.learn_from_user("retry limit is 10")
+            agent.conversation_memory.learn_from_user("my shell is zsh")
+            agent.conversation_memory.learn_from_user(
+                "staging api uses port 8443")
+            cases = (
+                ("you said my editor was cursor, right", "cursor"),
+                ("you told me the retry limit was 10, yeah", "10"),
+                ("didn't you say the prod api was on 443", "prod api"),
+                ("did you say my editor was cursor", "cursor"),
+                ("what was it again — the retry limit", "10"),
+                ("i keep meaning to ask what shell I use", "zsh"),
+                # Hedged/polite recall leads — live these fell to a
+                # model that contradicted the banked fact.
+                ("do you happen to know my editor", "cursor"),
+                ("do you know my editor", "cursor"),
+                ("any chance you remember the retry limit", "10"),
+                ("is there any chance you know my shell", "zsh"),
+                ("out of curiosity what shell do I run", "zsh"),
+                ("speaking of ports, what does staging use", "8443"),
+            )
+            agent.conversation_memory.learn_from_user(
+                "prod api is on 443")
+            for q, want in cases:
+                reply = agent._single_fact_recall_reply(q, "conv", "proj")
+                self.assertIsNotNone(reply, q)
+                self.assertIn(want, reply.text, q)
+            # An untagged 'you said …' is a complaint/assertion, not a
+            # verification — it must NOT recall. Nor should a general
+            # question whose terms hit nothing.
+            for q in ("you said this would work",
+                      "you said the deploy was fine",
+                      "do you know the capital of france"):
+                self.assertIsNone(
+                    agent._single_fact_recall_reply(q, "conv", "proj"), q)
+
+    def test_attribution_verification_against_record(self):
+        # Live: "didn't you say the deadline was friday" was claimed by
+        # the recall lane, starved on an empty store, then fell to the
+        # model — which confirmed a claim nobody made ("Yes, the
+        # deadline was Friday"). A verification ask must answer from
+        # the recorded turns: confirm only a full-term hit, deny with
+        # the closest thing actually said, or admit no record.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            cm = agent.conversation_memory
+            cm.record_exchange("when is the launch",
+                               "the deadline is friday, per the board.")
+            # Full-term hit — the record does hold the claim.
+            r = agent._single_fact_recall_reply(
+                "didn't you say the deadline was friday",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("deadline is friday", r.text.lower())
+            # Related-but-different — deny, then show the closest
+            # thing actually on record instead of a flat refusal.
+            r = agent._single_fact_recall_reply(
+                "didn't you say the deadline was monday",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("deadline is friday", r.text.lower())
+            self.assertNotIn("yes", r.text.lower()[:5])
+            # Nothing resembling the claim exists — honest no-record.
+            r = agent._single_fact_recall_reply(
+                "didn't you say the server runs on port 9999",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("record", r.text.lower())
+            # Tagged reported speech verifies too.
+            r = agent._single_fact_recall_reply(
+                "you told me the deadline was friday, right",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("deadline is friday", r.text.lower())
+
+    def test_anaphoric_replay_quotes_last_assistant_turn(self):
+        # Live: "you already told me the answer earlier — what was
+        # it?" missed the recall lane entirely (the 'already' filler
+        # wasn't in the reported-speech lead) and the model
+        # confabulated a fresh answer with invented provenance. An
+        # anaphoric referent resolves by recency — quote the actual
+        # prior utterance, never generate a new one.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            cm = agent.conversation_memory
+            cm.record_exchange("what are my headphones",
+                               "Your headphones are Boson.")
+            r = agent._single_fact_recall_reply(
+                "you already told me the answer earlier — "
+                "what was it?", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("headphones are boson", r.text.lower())
+            # Same anaphora, different filler shapes.
+            r = agent._single_fact_recall_reply(
+                "you already said it — what was the answer?",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("headphones are boson", r.text.lower())
+            # A real topic term still verifies against the record —
+            # anaphora only fires when the tail is content-free.
+            cm.record_exchange("when is the launch",
+                               "the deadline is friday, per the board.")
+            r = agent._single_fact_recall_reply(
+                "you already told me the answer about the deadline "
+                "— was it friday?", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("deadline is friday", r.text.lower())
+            self.assertNotIn("headphones are boson", r.text.lower())
+
+    def test_user_question_referent_replays_user_turn(self):
+        # Live: "what was my last question?" replayed an ASSISTANT
+        # turn ("The backup ran successfully last night.") — the
+        # referent is the user's own question, not the assistant's
+        # last utterance. User-side referents resolve against user
+        # rows on the record.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            cm = agent.conversation_memory
+            cm.record_exchange("what port should the api use",
+                               "Use port 8080.")
+            cm.record_exchange("sounds good, ship it",
+                               "On it.")
+            for q in ("what was my last question?",
+                      "what did i just ask?",
+                      "remind me what i asked you"):
+                r = agent._single_fact_recall_reply(q, "conv", "proj")
+                self.assertIsNotNone(r, q)
+                self.assertIn("port should the api use",
+                              r.text.lower(), q)
+            # A correction statement between questions doesn't hide
+            # the question — 'my last question' skips to the ask.
+            cm.record_exchange("actually the port is 9090", "Noted.")
+            r = agent._single_fact_recall_reply(
+                "what was my last question?", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("port should the api use", r.text.lower())
+            # A stored fact sharing filler vocabulary ('last') must
+            # not hijack the referent — live, 'the backup ran
+            # successfully last night' answered this ask via a
+            # term-coincidence fact hit.
+            cm.learn_from_user(
+                "the backup ran successfully last night")
+            r = agent._single_fact_recall_reply(
+                "what was my last question?", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("port should the api use", r.text.lower())
+            # 'the last thing I told you' is a statement referent —
+            # the latest user turn either way, not a question search.
+            r = agent._single_fact_recall_reply(
+                "what's the last thing i told you?", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("port is 9090", r.text.lower())
+
+    def test_repeat_ask_replays_last_reply(self):
+        # Live: "repeat what you just said" reached the model, which
+        # paraphrased instead of quoting — and "say that again" fell
+        # through voice's re-speak path into a dead-end. A repeat ask
+        # replays the recorded utterance verbatim.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.record_exchange(
+                "what port should the api use", "Use port 8080.")
+            for q in ("repeat what you just said",
+                      "say that again",
+                      "what did you say"):
+                r = agent._single_fact_recall_reply(q, "conv", "proj")
+                self.assertIsNotNone(r, q)
+                self.assertIn("use port 8080", r.text.lower(), q)
+            # A repeat of a repeat lands on the same utterance — the
+            # lane's own echo is meta and skipped.
+            agent.conversation_memory.record_exchange(
+                "say that again",
+                "Here it is again: \"Use port 8080.\"")
+            r = agent._single_fact_recall_reply(
+                "say that again", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertEqual(
+                r.text.lower().count("here it is again"), 1)
+            self.assertIn("use port 8080", r.text.lower())
+
+    def test_bare_wh_anaphora_replays_record(self):
+        # Live: "what was it — the answer you gave me?" carries no
+        # reported-speech lead, so the attribution branch never ran and
+        # the model improvised. The referent is still discourse-role —
+        # the empty-store path must replay the same recorded turn.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            cm = agent.conversation_memory
+            cm.record_exchange("what are my headphones",
+                               "Your headphones are Boson.")
+            for q in ("what was it — the answer you gave me?",
+                      "what was it again?",
+                      "what was the answer?"):
+                r = agent._single_fact_recall_reply(q, "conv", "proj")
+                self.assertIsNotNone(r, q)
+                self.assertIn("headphones are boson",
+                              r.text.lower(), q)
+            # A real topic term stays on the fact path — an empty
+            # store means the lane declines, not a stale replay.
+            r = agent._single_fact_recall_reply(
+                "what was the deadline for the launch?",
+                "conv", "proj")
+            self.assertIsNone(r)
+
+    def test_rules_inventory_reports_true_count(self):
+        # Live: "what rules are you following right now" listed 8 of
+        # 10 active rules with no indication the set was truncated —
+        # a self-inspection lane misreporting its own rule book.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            cm = agent.conversation_memory
+            r = agent._facts_recall_reply(
+                "what rules are you following right now",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("no standing rules", r.text.lower())
+            for i in range(3):
+                cm.learn_from_user(f"never run job {i} on friday")
+            r = agent._facts_recall_reply(
+                "what rules are you following right now",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("operating rules", r.text.lower())
+            self.assertNotIn("more.", r.text.lower())
+            for i in range(3, 10):
+                cm.learn_from_user(f"never run job {i} on friday")
+            r = agent._facts_recall_reply(
+                "what rules are you following right now",
+                "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("10 operating rules", r.text.lower())
+            self.assertIn("2 more", r.text.lower())
+            # "how many rules" counts the STORE, not the last list —
+            # the model lane once answered "eight" off the truncated
+            # rendering while ten were active.
+            r = agent._facts_recall_reply(
+                "how many rules are active", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("10 rules are active", r.text.lower())
+
+    def test_scoped_recall_and_inventory_asks(self):
+        # Live: "do you have anything on the backup schedule" dumped
+        # the AUTONOMY inventory (standing goals/missions) instead of
+        # the banked fact, and "what do you remember about my shell"
+        # dumped every fact in the store. Scoped asks must resolve the
+        # named subject only; "what do you" must not blanket-skip
+        # memory-shaped verbs (have/know/remember).
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "the backup schedule is every day at 3am")
+            agent.conversation_memory.learn_from_user(
+                "retry limit is 10")
+            agent.conversation_memory.learn_from_user(
+                "my shell is zsh")
+            for q, want in (
+                    ("do you have anything on the backup schedule",
+                     "3am"),
+                    ("what do you have on the retry limit", "10"),
+                    ("got anything about the backup schedule", "3am"),
+                    ("you got any info on the retry limit", "10"),
+                    ("what do you know about the retry limit", "10"),
+                    ("what do you remember about my shell", "zsh")):
+                reply = (agent._single_fact_recall_reply(q, "conv",
+                                                       "proj")
+                         or agent._facts_recall_reply(q, "conv", "proj"))
+                self.assertIsNotNone(reply, q)
+                self.assertIn(want, reply.text, q)
+            # Scoped dump returns ONLY the matching fact — the whole
+            # store must not ride along.
+            reply = agent._facts_recall_reply(
+                "what do you remember about my shell", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("zsh", reply.text)
+            self.assertNotIn("retry", reply.text)
+            # Unscoped/about-me still dumps; non-memory "what do you"
+            # stays skipped; unknown scopes fall through.
+            for q in ("what do you do on weekends",
+                      "what do you think about it",
+                      "do you have something on the deploy pipeline"):
+                self.assertIsNone(
+                    agent._single_fact_recall_reply(q, "conv", "proj"),
+                    q)
+
+    def test_ever_tell_and_fact_count(self):
+        # Live: "did I ever tell you my editor" got a self-contradictory
+        # model reply ("No — ... You told me that") because 'ever'
+        # sat between the aux and the verb the recall lead expected;
+        # "how many facts do you have" got a persona-drifted evasion
+        # instead of the actual count.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "my editor is cursor")
+            agent.conversation_memory.learn_from_user(
+                "retry limit is 10")
+            r = agent._single_fact_recall_reply(
+                "did I ever tell you my editor", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("cursor", r.text)
+            # Negative case — the honest "you haven't told me" answer.
+            r = agent._single_fact_recall_reply(
+                "did I ever tell you my birthday", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("haven't told me", r.text)
+            r = agent._facts_recall_reply(
+                "how many facts do you have", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("2", r.text)
+            # "how many things are running" is an autonomy ask — never
+            # a fact count.
+            self.assertIsNone(
+                agent._facts_recall_reply(
+                    "how many things are running", "conv", "proj"))
+
+    def test_topic_pivot_preamble_strips_on_learn(self):
+        # "speaking of ports, prod uses 8443" — the bankable clause
+        # follows the pivot's comma. The pivot itself must not bank
+        # (it did not, but only because the comma routed the turn
+        # away — the strip makes the tail reachable deliberately).
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            for q, want in (
+                    ("speaking of ports, prod uses 8443",
+                     ["prod uses 8443"]),
+                    ("as for the deadline, it is friday", []),  # 'it' anaphora
+                    ("regarding the cache, it expires hourly",
+                     [])):  # ditto
+                self.assertEqual(cm.learn_from_user(q)["facts"], want, q)
+
     def test_port_probe_is_answer_type_slot(self):
         # "which port is prod on" — 'port' names the answer's type, not
         # the entity; the stored fact is 'prod api is on 443' and never
@@ -777,6 +1300,31 @@ class TruthGateTests(RecoveryLoopTests):
                 "is the prod api still on 443", "conv", "proj")
             self.assertIsNotNone(reply)
             self.assertIn("443", reply.text)
+
+    def test_does_the_x_verification_recalls_fact(self):
+        # "does the metrics api run on 9100" — a yes/no verification
+        # with an explicit subject. The interrogative verb ('run') is
+        # filler the fact never carries; recall restates the fact
+        # rather than stalling the model lane (live-observed 180s
+        # stall on the shared GPU).
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            agent.conversation_memory.learn_from_user(
+                "the metrics api is on 9100")
+            reply = agent._single_fact_recall_reply(
+                "does the metrics api run on 9100", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("9100", reply.text)
+            # A wrong value in the question doesn't confirm — recall
+            # still surfaces the stored fact verbatim.
+            reply = agent._single_fact_recall_reply(
+                "does the metrics api use port 8080", "conv", "proj")
+            self.assertIsNotNone(reply)
+            self.assertIn("9100", reply.text)
 
     def test_when_does_probe_drops_trailing_verb(self):
         # "when does the freeze lift" — the probe's own verb isn't a
@@ -876,7 +1424,12 @@ class TruthGateTests(RecoveryLoopTests):
             sent = json.dumps(provider.last_messages or [],
                               ensure_ascii=False)
             self.assertNotIn("Unverified action claims", sent)
-            self.assertIn("all green", sent)
+            # The flag's furniture AND the flagged claim text stay out —
+            # the claims themselves are the parrot seed (each repeat
+            # fabricates fresh telemetry); the verbatim record still
+            # serves the recall lanes and UI transcript.
+            self.assertNotIn("all green", sent)
+            self.assertIn("withheld", sent)
 
 
 class _DeadProcess:
@@ -1190,7 +1743,7 @@ class PortCollisionTests(unittest.TestCase):
         stop = threading.Event()
         t: threading.Thread | None = None
         try:
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            with _RetriedTemporaryDirectory(ignore_cleanup_errors=True) as td:
                 ws = Path(td)
                 (ws / "web").mkdir()
                 t = threading.Thread(

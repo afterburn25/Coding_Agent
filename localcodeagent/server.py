@@ -147,6 +147,16 @@ _FOREGROUND_STALL_SECONDS = 660.0
 
 
 class AppState:
+    # Mission sources that count as USER demand — the user asked for
+    # the work explicitly (chat command, API, manual trigger), so it
+    # and its subtasks are foreground intent and only yield to an
+    # occupied lane. Everything else (schedule/trigger/goal/
+    # self_repair/detector/social/internal…) is autonomous background
+    # work, held behind the chat-idle gate.
+    _USER_MISSION_SOURCES = frozenset({
+        "chat", "api", "user", "manual", "manual_research",
+        "queue", "prompt", "cli"})
+
     def __init__(self, config: AgentConfig, workspace: Path, runtime_root: Path, config_path: Path | None = None, boot: Callable[[float, str, str], None] | None = None) -> None:
         self.config = config
         self.workspace = workspace.resolve()
@@ -458,8 +468,15 @@ class AppState:
             prompt = str(payload.get("prompt") or "")
             if prompt:
                 try:
+                    # Preserve mission attribution — a worker-queue entry
+                    # from a mission is scheduled work, gated on chat
+                    # idle and sorted behind interactive prompts.
+                    mission_id = str(
+                        payload.get("mission_id")
+                        or getattr(worker, "mission_id", "") or "")
                     self.queue.enqueue(prompt,
-                                       mode=str(payload.get("mode") or "auto"))
+                                       mode=str(payload.get("mode") or "auto"),
+                                       mission_id=mission_id)
                     self._dequeue_next()
                 except Exception:
                     pass
@@ -869,6 +886,10 @@ class AppState:
         # Operational state — last user interaction drives the "away"
         # briefing and the idle/away signal in /api/nexus/state.
         self._last_interaction_at = time.time()
+        # Separate clock for the scheduled-work gate — boot is not a
+        # chat interaction (a fresh process is fully idle, so scheduled
+        # work may start without waiting out the window).
+        self._last_chat_at = 0.0
         manifests_dir = Path(getattr(config, "tool_manifests_dir", "tools/manifests")).expanduser()
         if not manifests_dir.is_absolute():
             manifests_dir = runtime_root / manifests_dir
@@ -2252,6 +2273,23 @@ class AppState:
         self._vdm_until = 0.0  # bust the delivery cache
         return val
 
+    def _record_persona_exchange(self, message: str, ack: str) -> None:
+        """Persona/voice command acks bypass the agent — record the turn
+        into both conversation stores so the visible exchange isn't a
+        gap in the record (recall lanes and history views read these).
+        Best-effort: a recording failure must not lose the reply."""
+        try:
+            self.conversation_manager.record_exchange(
+                message, ack, intent="conversation",
+                response_source="persona_command")
+            conv = self.conversation_manager.active() or {}
+            self.conversation_memory.record_exchange(
+                message, ack,
+                conversation_id=str(conv.get("id") or "") or None)
+            self.history = self.conversation_manager.history(limit=32)
+        except Exception:
+            pass
+
     def _persona_command(self, message: str) -> dict | None:
         """Deterministic persona style commands ("be less sarcastic",
         "serious mode for an hour", "reset personality"). Returns the
@@ -2311,21 +2349,41 @@ class AppState:
                 return {"applied": cmd["op"], "ack": ack}
             if cmd.get("op") == "voice_repeat":
                 v = getattr(self, "voice", None)
-                if v is None:
+                muted = False
+                ok = False
+                if v is not None:
+                    try:
+                        muted = bool(v.muted())
+                    except Exception:
+                        muted = False
+                    if not muted:
+                        try:
+                            ok = bool(v.repeat_last())
+                        except Exception:
+                            ok = False
+                if ok:
                     return {"applied": "voice_repeat",
-                            "ack": "Voice isn't available right now."}
-                try:
-                    muted = v.muted()
-                except Exception:
-                    muted = False
+                            "ack": "Sure — once more."}
+                # Voice can't re-speak (unavailable, muted, or nothing
+                # buffered) — the conversational read of "say that
+                # again" is still satisfiable: replay the last reply
+                # as text instead of a dead-end ack.
+                agent = getattr(self, "agent", None)
+                quoted = (agent.repeat_last_reply()
+                          if agent is not None else None)
+                if quoted:
+                    why = ("Voice isn't available" if v is None
+                           else "Voice is muted" if muted
+                           else "Nothing buffered to re-speak")
+                    return {"applied": "voice_repeat",
+                            "ack": f"{why} — last thing I said was: "
+                                   f"\"{quoted}\""}
                 if muted:
                     return {"applied": "voice_repeat",
                             "ack": "Voice is muted — say \"speak "
                                    "again\" first."}
-                ok = bool(v.repeat_last())
                 return {"applied": "voice_repeat",
-                        "ack": ("Sure — once more."
-                                if ok else "Nothing to repeat yet.")}
+                        "ack": "Nothing to repeat yet."}
             prof = self.profiles.active()
             if not prof:
                 return None
@@ -3279,9 +3337,21 @@ class AppState:
                     pass
             return out
 
-        def lane_free() -> bool:
-            """Interactive chat/queued work outranks background missions."""
-            return not self._agent_lane_active(include_waiting_approval=True)
+        def lane_free(mission=None) -> bool:
+            """Interactive chat/queued work outranks background missions.
+
+            Autonomous/scheduled work also holds until the chat lane has
+            been quiet for the configured idle window — a mission
+            starting mid-conversation queues the user's next message
+            behind it. User-initiated missions are foreground demand and
+            skip the idle wait (they still yield to an occupied lane)."""
+            if self._agent_lane_active(include_waiting_approval=True):
+                return False
+            if mission is not None:
+                src = str(mission.get("source") or "").split(":", 1)[0]
+                if src not in self._USER_MISSION_SOURCES:
+                    return self._chat_idle_enough()
+            return True
 
         def _restore_latest_backup() -> dict:
             """DATABASE_CORRUPT remedy: restore the newest backup whose
@@ -3301,10 +3371,12 @@ class AppState:
             "evict_idle_models": lambda: self.runtime.evict_idle(),
             "release_vram": lambda gb: self.runtime.release_managed_models_for_vram(
                 required_vram_gb=float(gb),
-                busy_models=self._busy_model_ids()),
+                busy_models=self._busy_model_ids(),
+                include_baseline=False),
             "release_ram": lambda gb: self.runtime.release_managed_models_for_ram(
                 required_ram_gb=float(gb),
-                busy_models=self._busy_model_ids()),
+                busy_models=self._busy_model_ids(),
+                include_baseline=False),
             "stop_models": lambda: self.runtime.stop_all(),
             "restart_model": lambda: self.runtime.restart_unhealthy_managed(),
             # Marker — the executor's per-request auto-fallback already
@@ -3385,6 +3457,34 @@ class AppState:
         # user-tunable and the service itself decides whether acting is
         # worthwhile, so the schedule only wakes the check.
         sup.social_heartbeat = self.social.heartbeat
+        # Shell tools resolve mission attribution for the git guard —
+        # an autonomous mission may not push or rewrite primary-tree
+        # history via run_shell/terminal_run without a standing grant.
+        self.tools.context["mission_source"] = self._mission_source_by_id
+
+        def _autonomy_grant(action: str, scope: str = "") -> bool:
+            policy = getattr(sup, "policy", None)
+            if policy is None:
+                return False
+            try:
+                return policy.matching_grant(action, scope=scope) is not None
+            except Exception:
+                return False
+        self.tools.context["autonomy_grant"] = _autonomy_grant
+
+        def _mission_workspace_by_id(mission_id: str) -> str:
+            """The mission record's workspace root — filesystem write
+            tools confine autonomous-mission writes inside it (repair
+            worktree etc.). Falls back to the primary root, matching the
+            supervisor's `m.get("workspace") or self.workspace`."""
+            try:
+                m = self.autonomy.missions.get(str(mission_id))
+            except Exception:
+                m = None
+            if not isinstance(m, dict):
+                return ""
+            return str(m.get("workspace") or self.workspace)
+        self.tools.context["mission_workspace"] = _mission_workspace_by_id
         # Peer-intelligence hook — stuck missions may open peer
         # consults; external_wait nodes poll consult state through it.
         sup.social = self.social
@@ -4714,6 +4814,53 @@ class AppState:
                     r"the\s+(?:scheduled|regular|recurring)\s+\w+)\b"
                     r".{0,40}\bruns?\b",
                     low)):
+            # A definite 'the <thing> schedule' names a world entity —
+            # "what's the backup schedule" asks about the banked fact
+            # 'backup schedule is every day at 3am', not the autonomy
+            # inventory. Same for scoped inventory phrasings — "do you
+            # have anything on the backup schedule" names the same
+            # subject through a different interrogative shape. Defer
+            # to fact recall when the named scope is a stored fact's
+            # subject; bare 'the schedule'/'any schedules' still list
+            # the inventory.
+            cm = getattr(self, "conversation_memory", None)
+            dqm = re.match(
+                r"what(?:'s|\s+is)\s+(?:the\s+|my\s+|our\s+)?"
+                r"(.+?)[?!.\s]*$", low)
+            scope_text = dqm.group(1) if dqm else None
+            if scope_text is None:
+                # Scoped inventory asks — strip the interrogative and
+                # inventory vocabulary; whatever content terms remain
+                # name the thing asked about.
+                scope_text = re.sub(
+                    r"\b(?:do\s+you\s+have|do\s+you|have\s+you\s+got|"
+                    r"what|which|list|show|any|anything|something|"
+                    r"are\s+there|how\s+many|running|active|about|on|"
+                    r"of|the|a|an|my|our|me|tell\s+me)\b",
+                    " ", low, flags=re.IGNORECASE)
+            if cm is not None and scope_text:
+                et = cm._content_terms(scope_text) - {
+                    "schedule", "schedules", "goal", "goals",
+                    "mission", "missions", "trigger", "triggers",
+                    "standing",
+                    # Slot-filler — the answer's type, not the entity:
+                    # 'anything on the deploy status' asks about the
+                    # deploy; 'the port version' asks about the thing,
+                    # not the word 'port'.
+                    "status", "state", "port", "version", "number",
+                    "time", "date", "called", "named", "known",
+                    "thing", "info", "details"}
+                if et:
+                    for row in cm.recall_facts(low):
+                        slot = str(row.get("slot") or "")
+                        if slot.startswith("my:"):
+                            ssubj = slot[3:]
+                        elif ":" in slot:
+                            ssubj = slot.rpartition(":")[0]
+                        else:
+                            ssubj = slot
+                        if et <= cm._content_terms(ssubj):
+                            return None
             goals = [g for g in (sup.standing_goals() or [])
                      if g.get("enabled", True)]
             scheds = [s for s in (sup.scheduler.list() or [])
@@ -6531,7 +6678,10 @@ class AppState:
             return
         if family and cooldown_s > 0:
             last = float(self._notice_last.get(family) or 0.0)
-            if time.monotonic() - last < cooldown_s:
+            # `last == 0` means never-spoken — monotonic() is boot-
+            # relative so uptime < cooldown would otherwise swallow the
+            # family's very first notice on a fresh boot.
+            if last and time.monotonic() - last < cooldown_s:
                 return
             self._notice_last[family] = time.monotonic()
         if len(self._queue_announced) > 512:
@@ -6781,6 +6931,46 @@ class AppState:
 
     def note_interaction(self) -> None:
         self._last_interaction_at = time.time()
+        self._last_chat_at = time.time()
+
+    def _chat_idle_enough(self) -> bool:
+        """True when no interactive chat has arrived within the
+        configured idle window (``autonomy_chat_idle_seconds``,
+        default 10 min). Scheduled/autonomy work only starts after a
+        real lull so it can never queue the user's next message behind
+        a mid-conversation mission. Never having chatted counts as
+        idle — a fresh boot isn't a conversation."""
+        idle_s = float(getattr(
+            self.config, "autonomy_chat_idle_seconds", 600.0) or 0.0)
+        if idle_s <= 0:
+            return True
+        last = getattr(self, "_last_chat_at", 0.0) or 0.0
+        return not last or (time.time() - last) >= idle_s
+
+    def _mission_source_by_id(self, mission_id: str) -> str:
+        """Source prefix of a mission ('self_repair', 'schedule', 'chat',
+        'detector:kind' → 'detector'…). '' when the mission can't be
+        resolved — callers treat that as autonomous."""
+        try:
+            sup = getattr(self, "autonomy", None)
+            if sup is not None and mission_id:
+                for m in sup.missions.list():
+                    if str(m.get("id") or "") == str(mission_id):
+                        return str(m.get("source") or "").split(":", 1)[0]
+        except Exception:
+            pass
+        return ""
+
+    def _mission_is_user_initiated(self, queue_item: dict | None) -> bool:
+        """True when a queue item's owning mission was user-initiated
+        (source chat/api/manual…) — its subtasks are foreground demand.
+        Unknown sources default to autonomous (conservative: scheduled
+        work waits rather than surprising an active chat)."""
+        mission_id = str((queue_item or {}).get("mission_id") or "")
+        if not mission_id:
+            return False
+        src = self._mission_source_by_id(mission_id)
+        return src in self._USER_MISSION_SOURCES
 
     def operational_state(self) -> dict:
         """Structured snapshot of what Nexus is doing — focus, load,
@@ -7031,6 +7221,14 @@ class AppState:
                 if not self.queue.remove(str(item["id"])):
                     return  # raced — another dequeue took it
             else:
+                # Only mission-submitted items remain — autonomous
+                # missions wait for the chat-idle window, same gate as
+                # supervisor dispatch; a user-requested mission's
+                # subtasks are foreground demand.
+                if not self._chat_idle_enough() and \
+                        not self._mission_is_user_initiated(
+                            self.queue.peek()):
+                    return
                 item = self.queue.pop()
             if item is None:
                 return
@@ -13030,6 +13228,8 @@ class Handler(BaseHTTPRequestHandler):
                 # no model call needed for an ack.
                 persona_cmd = self.state._persona_command(message)
                 if persona_cmd is not None:
+                    self.state._record_persona_exchange(
+                        message, persona_cmd["ack"])
                     payload = self.state._mission_reply_result(
                         persona_cmd["ack"])
                     self._sse_begin()
@@ -13224,6 +13424,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not message and not chat_attachments:
                     self._json({"error": "message is required"}, 400)
                     return
+                self.state.note_interaction()
                 if not message:
                     message = "Please look at the attached file(s)."
                 current = self.state.tasks.current()
@@ -13263,6 +13464,8 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 persona_cmd = self.state._persona_command(message)
                 if persona_cmd is not None:
+                    self.state._record_persona_exchange(
+                        message, persona_cmd["ack"])
                     self._json(self.state._mission_reply_result(
                         persona_cmd["ack"]))
                     return

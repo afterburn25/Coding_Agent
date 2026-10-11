@@ -334,6 +334,13 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         except Exception:
             pass
 
+    def _mission_gate(*, remote: bool = False) -> str | None:
+        """Autonomous missions may not push, publish, or mutate the
+        primary checkout without a standing grant — the self-repair
+        pipeline is the governed path."""
+        from .gitguard import mission_git_tool_block
+        return mission_git_tool_block(registry, workspace, remote=remote)
+
     # CI/PR observations flow onto the event bus so autonomy triggers
     # (ci_failed / ci_completed / pull_request_updated) can react — that
     # is what closes the git→push→PR→CI loop without the model polling
@@ -392,6 +399,9 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         return _current_branch(workspace)
 
     def git_create_branch(args: dict) -> str:
+        g = _mission_gate()
+        if g:
+            return g
         branch = str(args.get("branch", "")).strip()
         if not branch:
             raise ValueError("branch is required")
@@ -407,6 +417,9 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         return json.dumps({"branch": branch, "status": "created"}, indent=2)
 
     def git_commit(args: dict) -> str:
+        g = _mission_gate()
+        if g:
+            return g
         message = str(args.get("message", "")).strip()
         if not message:
             raise ValueError("commit message is required")
@@ -433,6 +446,9 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         return json.dumps({"commit": sha, "message": message, "output": output[-8000:]}, indent=2)
 
     def git_push(args: dict) -> str:
+        g = _mission_gate(remote=True)
+        if g:
+            return g
         remote = str(args.get("remote") or remote_default).strip()
         branch = str(args.get("branch") or "").strip() or _current_branch(workspace)
         _ensure_token()
@@ -550,6 +566,9 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         return json.dumps({"repository": repo, "items": compact}, indent=2)
 
     def github_create_issue(args: dict) -> str:
+        g = _mission_gate(remote=True)
+        if g:
+            return g
         _ensure_token()
         remote = str(args.get("remote") or remote_default).strip()
         repo = _repo_slug(workspace, remote)
@@ -572,6 +591,9 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         }, indent=2)
 
     def github_create_pull_request(args: dict) -> str:
+        g = _mission_gate(remote=True)
+        if g:
+            return g
         _ensure_token()
         remote = str(args.get("remote") or remote_default).strip()
         repo = _repo_slug(workspace, remote)
@@ -842,6 +864,9 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         }, indent=2)
 
     def github_rerun(args: dict) -> str:
+        g = _mission_gate(remote=True)
+        if g:
+            return g
         remote = str(args.get("remote") or remote_default).strip()
         repo = _repo_slug(workspace, remote)
         owner, name = repo.split("/", 1)
@@ -856,6 +881,9 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         return json.dumps({"rerun": run_id, "repository": repo}, indent=2)
 
     def github_issue_comment(args: dict) -> str:
+        g = _mission_gate(remote=True)
+        if g:
+            return g
         remote = str(args.get("remote") or remote_default).strip()
         repo = _repo_slug(workspace, remote)
         owner, name = repo.split("/", 1)
@@ -895,6 +923,9 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         }, indent=2)
 
     def github_checkout_pr(args: dict) -> str:
+        g = _mission_gate()
+        if g:
+            return g
         num = int(args.get("number") or 0)
         if num <= 0:
             raise ValueError("number is required")
@@ -986,6 +1017,9 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         }, indent=2)
 
     def github_create_release(args: dict) -> str:
+        g = _mission_gate(remote=True)
+        if g:
+            return g
         _ensure_token()
         slug, oq, nq = _slug(args)
         tag = str(args.get("tag") or "").strip()
@@ -1058,6 +1092,9 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         return p.name, p, None
 
     def github_upload_release_asset(args: dict) -> str:
+        g = _mission_gate(remote=True)
+        if g:
+            return g
         _ensure_token()
         if not client.authenticated:
             raise RuntimeError(
@@ -1325,6 +1362,9 @@ def register_github_tools(registry: ToolRegistry, workspace: Path,
         return json.dumps(res, indent=2)
 
     def github_delete_release_asset(args: dict) -> str:
+        g = _mission_gate(remote=True)
+        if g:
+            return g
         _ensure_token()
         slug, oq, nq = _slug(args)
         if not bool(args.get("confirm")):

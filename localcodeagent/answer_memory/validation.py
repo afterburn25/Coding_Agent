@@ -57,6 +57,14 @@ _DISCOURSE_REF_RE = re.compile(
     r"we were|we just|last thing|earlier|before)\b|"
     r"\bdid we (?:ever )?(?:settle|decide|agree|pick|choose|land|"
     r"end up|figure)\b|"
+    # Temporal asks about the conversation itself — "how long ago did
+    # we start talking", "when did we first meet" — the referent is the
+    # session timeline, and a settings alias ("talking" → voice) must
+    # never intercept it.
+    r"\b(?:when|how\s+long)\b[^.?!]{0,25}\bwe\b[^.?!]{0,25}"
+    r"\b(?:talking|chatting|discussing|messaging|speaking|texting|"
+    r"started|began|begun|start|begin|met|meet|talk|chat|"
+    r"connect(?:ing|ed)?)\b|"
     r"\b(?:the|that) (?:thing|stuff|issue|topic|one|part|option|file|"
     r"version|preset|name)\s+(?:from |we |that )?(?:earlier|before|"
     r"last time|just now)\b|"
@@ -66,9 +74,11 @@ _DISCOURSE_REF_RE = re.compile(
     # assistant said in THIS conversation: "what did you just say",
     # "you said a port earlier", "your last suggestion". No stored
     # answer can resolve a reference into live history.
-    r"\b(?:did|do|would|could)\s+you\s+(?:just\s+)?(?:say|mean|tell|"
+    r"\b(?:did|do|would|could)\s+you\s+"
+    r"(?:(?:just|already|earlier)\s+)?(?:say|mean|tell|"
     r"mention|show|explain|claim|promise|suggest|recommend)\b|"
-    r"\byou\s+(?:just\s+)?(?:said|mentioned|told|meant|suggested)\b|"
+    r"\byou\s+(?:(?:just|already|earlier)\s+)?"
+    r"(?:said|mentioned|told|meant|suggested)\b|"
     r"\bwhat\s+you\s+(?:just\s+)?(?:said|meant|told|promised|"
     r"suggested)\b|"
     r"\b(?:your|the)\s+(?:last|previous|earlier)\s+(?:answer|reply|"

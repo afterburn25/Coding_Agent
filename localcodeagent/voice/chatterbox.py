@@ -30,6 +30,8 @@ import time
 import uuid
 import wave
 from pathlib import Path
+
+from ..procutil import no_window_flags as _no_window_flags
 from typing import Any
 
 import numpy as np
@@ -199,7 +201,9 @@ class ChatterboxEngine(TTSEngine):
         proc = subprocess.run(
             [ffmpeg, "-y", "-i", str(src), "-ac", "1", "-ar", "24000",
              "-f", "wav", str(out)],
-            capture_output=True, text=True, timeout=120, encoding="utf-8", errors="replace")
+            capture_output=True, text=True, timeout=120,
+            encoding="utf-8", errors="replace",
+            creationflags=_no_window_flags())
         if proc.returncode != 0 or not out.exists():
             raise VoiceEngineError(
                 "ffmpeg could not decode the reference audio: "

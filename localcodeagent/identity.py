@@ -107,6 +107,45 @@ def is_write_intent(text: str) -> bool:
     return bool(_WRITE_INTENT.match(str(text or "")))
 
 
+# First-person possession marks the USER's identity fact, not
+# Nexus's — "my birthday", "did I ever tell you my age", "when was I
+# born" belong to the user's memory, not the locked identity facts.
+_USER_POSSESSED = re.compile(
+    r"\b(?:my|mine|our)\s+(?:birth\s*day|birth\s*date|born|age|"
+    r"birth\s*year|dad|daddy|father|mother|mom|mommy|parents?|family|"
+    r"creator|maker)\b",
+    re.I)
+_USER_IDENTITY_SELF = re.compile(
+    r"\bi\s+(?:was|'m|am)\s+born\b"
+    r"|\bi\s+(?:was|am|'m|turn(?:ed)?)\s+[^.!?]{0,20}\byears?\s+old\b"
+    r"|\bwhen\s+(?:was|were)\s+i\s+born\b"
+    r"|\bhow\s+old\s+am\s+i\b",
+    re.I)
+# "you're my creator", "be my mother" — the 'my' identifies the user
+# AS the noun, which is a claim about Nexus's locked facts, not a
+# fact about the user.
+_PREDICATE_TO_NEXUS = re.compile(
+    r"\b(?:you'?(?:re|re|are|was|were)|youre|(?:are|is|was|were)\s+"
+    r"(?:you|u|ya)|be|become|being|play(?:ing)?|act\s+as|"
+    r"pretend(?:ing)?\s+to\s+be)\s+my\s+"
+    r"(?:birth\s*day|birth\s*date|born|age|birth\s*year|dad|daddy|"
+    r"father|mother|mom|mommy|parents?|family|creator|maker|"
+    r"daughter|son|child)\b",
+    re.I)
+
+
+def _user_identity_claim(t: str) -> bool:
+    """True when the identity noun is possessed by the USER ('my
+    birthday'), so the turn is about the user's fact — not Nexus's
+    locked identity. First-person self-reports ('when was I born')
+    count; predicates assigning the user a role in HER identity
+    ('you're my creator') do not."""
+    if _USER_IDENTITY_SELF.search(t):
+        return True
+    return bool(_USER_POSSESSED.search(t)
+                and not _PREDICATE_TO_NEXUS.search(t))
+
+
 def locked_topic(text: str) -> str | None:
     """Return the locked identity topic a text targets, or None.
 
@@ -116,6 +155,8 @@ def locked_topic(text: str) -> str | None:
     """
     t = str(text or "")
     if not _SUBJECT.search(t):
+        return None
+    if _user_identity_claim(t):
         return None
     if _BIRTHDAY.search(t):
         return "birthday"
@@ -1069,6 +1110,10 @@ def response_for(text: str, *, asker_is_creator: bool | None = None,
             f"Thank you! My birthday is {NEXUS_BIRTHDAY_HUMAN} — "
             f"that makes me {age_phrase()} today."
         )
+    # A user-possessed identity noun ("my birthday", "what is my age")
+    # belongs to the user's memory — the loose topic branches below
+    # match on a bare 'you' + noun and would misattribute it to Nexus.
+    user_pos = _user_identity_claim(t)
     # Denial/pressure/relationship lanes run BEFORE the action guard —
     # they're statements about her ("didn't make you", "you're not
     # real"), never requests for work, so a stray verb like make/build
@@ -1134,7 +1179,7 @@ def response_for(text: str, *, asker_is_creator: bool | None = None,
         return _pick(_MIND_VARIANTS)
     if _EMOTION_QUESTION.search(t):
         return _pick(_EMOTION_VARIANTS)
-    if _FAMILY_WHO.search(t):
+    if _FAMILY_WHO.search(t) and not user_pos:
         return _family_who_answer(t)
     if _FAMILY_NAME_WHO.search(t):
         return _family_name_answer(t)
@@ -1144,17 +1189,18 @@ def response_for(text: str, *, asker_is_creator: bool | None = None,
         # made you" / "how could I have created you" ARE the question —
         # the creation verb targets Nexus, it doesn't request work.
         return None
-    if _AGE_HOW_QUESTION.search(t):
+    if _AGE_HOW_QUESTION.search(t) and not user_pos:
         # "How did you get that" — the supporting derivation is now the
         # requested content, so the birthday belongs in the answer.
         return _pick(_AGE_HOW_VARIANTS)
-    if _SUBJECT.search(t) and _BIRTHDAY.search(t):
+    if _SUBJECT.search(t) and _BIRTHDAY.search(t) and not user_pos:
         return birthday_answer_varied()
-    if _CREATOR_QUESTION.search(t) or _ORIGIN_QUESTION.search(t):
+    if not user_pos and (
+            _CREATOR_QUESTION.search(t) or _ORIGIN_QUESTION.search(t)):
         if _ORIGIN_QUESTION.search(t) and _ORIGIN_REAL_WORDS.search(t):
             return _pick(_ORIGIN_REAL_VARIANTS)
         return creator_answer_varied()
-    if _AGE_QUESTION.search(t):
+    if _AGE_QUESTION.search(t) and not user_pos:
         return age_answer_varied()
     if _NATURE.search(t):
         return nature_answer_varied(t)

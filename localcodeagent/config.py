@@ -209,6 +209,11 @@ class AgentConfig:
     # Optional quiet-hours window [start_hour, end_hour] local time during
     # which noncritical notifications are muted.
     autonomy_quiet_hours: list[int] | None = None
+    # Chat idle window (seconds) before scheduled/autonomy work may start:
+    # interactive chat always outranks background work, and a mission
+    # starting mid-conversation would queue the user's next message
+    # behind it — scheduled tasks wait for a real lull. 0 disables.
+    autonomy_chat_idle_seconds: float = 600.0
     # When False (default) a verified self-repair candidate stops at
     # needs_human for review; when True a code repair that passes every
     # gate (confidence, tests, review, canary) promotes itself.
@@ -767,6 +772,8 @@ def load_config(path: Path | None) -> AgentConfig:
     qh = raw.get("autonomy_quiet_hours", cfg.autonomy_quiet_hours)
     if isinstance(qh, (list, tuple)) and len(qh) == 2:
         cfg.autonomy_quiet_hours = [int(qh[0]) % 24, int(qh[1]) % 24]
+    cfg.autonomy_chat_idle_seconds = max(0.0, float(raw.get(
+        "autonomy_chat_idle_seconds", cfg.autonomy_chat_idle_seconds)))
     cfg.model_idle_unload_seconds = max(0.0, float(raw.get("model_idle_unload_seconds", cfg.model_idle_unload_seconds)))
     cfg.demand_eviction_cooldown_s = max(0.0, float(raw.get("demand_eviction_cooldown_s", cfg.demand_eviction_cooldown_s)))
     cfg.context_shrink_idle_seconds = max(0.0, float(raw.get("context_shrink_idle_seconds", cfg.context_shrink_idle_seconds)))

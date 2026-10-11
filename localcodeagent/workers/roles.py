@@ -130,6 +130,12 @@ def classify_role(text: str, *, kind: str = "", hinted: str = "") -> str:
     task-kind default."""
     if hinted in ROLE_PROFILES:
         return hinted
+    # Deterministic kinds run local code, never a model — the
+    # instruction text is bookkeeping ("Prior runs: … investigate what
+    # changed"), and keyword steering on it misclassified a heartbeat as
+    # a 3GB research node that starved on a busy GPU.
+    if kind in {"internal", "wait"}:
+        return KIND_ROLE.get(kind, "generic")
     t = (text or "")[:4000]
     for pattern, role in _ROLE_HINTS:
         if pattern.search(t):

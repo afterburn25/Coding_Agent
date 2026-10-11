@@ -17,6 +17,23 @@ from localcodeagent.autonomy.detectors import (
 from localcodeagent.autonomy.state import AutonomyStore
 
 
+class _RetriedTemporaryDirectory(tempfile.TemporaryDirectory):
+    """Race-safe teardown: supervisor/worker threads can still be
+    mid-write inside the sandboxed ``data/autonomy`` tree when the
+    with-block exits — on Linux that surfaces as ENOTEMPTY (a file
+    lands after rmtree's scandir), on Windows as PermissionError from
+    held handles. The writer finishes within milliseconds, so a short
+    retry makes teardown deterministic."""
+
+    def cleanup(self) -> None:
+        for _ in range(40):
+            try:
+                return super().cleanup()
+            except OSError:
+                time.sleep(0.05)
+        return super().cleanup()
+
+
 def make_store(td: str) -> AutonomyStore:
     return AutonomyStore(Path(td) / "data" / "autonomy")
 
@@ -45,7 +62,7 @@ def make_sup(td: str, **kw) -> AutonomousSupervisor:
         workspace=root,
         store_root=root / "data" / "autonomy",
         executor=lambda m, n, cb: {"ok": True, "output": "done"},
-        lane_free=lambda: True,
+        lane_free=lambda *a: True,
         worker_manager=AdaptiveWorkerManager(
             root, monitor=mon, on_queue_event=lambda t, p: None),
     )
@@ -411,7 +428,7 @@ class ScannerTests(unittest.TestCase):
 
 class SupervisorRoutingTests(unittest.TestCase):
     def test_repair_route_opens_incident(self):
-        with tempfile.TemporaryDirectory() as td:
+        with _RetriedTemporaryDirectory() as td:
             sup = make_sup(td)
             calls = []
 
@@ -431,7 +448,7 @@ class SupervisorRoutingTests(unittest.TestCase):
             self.assertEqual(calls[0]["source"], "detector:disk_pressure")
 
     def test_mission_route_creates_and_dedupes(self):
-        with tempfile.TemporaryDirectory() as td:
+        with _RetriedTemporaryDirectory() as td:
             sup = make_sup(td)
             f = new_finding(kind="mission_failure_rate",
                             title="Failures high", route="mission",
@@ -447,13 +464,13 @@ class SupervisorRoutingTests(unittest.TestCase):
             self.assertIn("sig:m", str(mission))
 
     def test_suggestion_route_returns_empty(self):
-        with tempfile.TemporaryDirectory() as td:
+        with _RetriedTemporaryDirectory() as td:
             sup = make_sup(td)
             self.assertEqual(sup._route_finding(new_finding(
                 kind="k", title="t", route="suggestion")), "")
 
     def test_scanner_tick_inside_supervisor(self):
-        with tempfile.TemporaryDirectory() as td:
+        with _RetriedTemporaryDirectory() as td:
             seen = []
             sup = make_sup(td)
             sup.scanner.detectors = [
@@ -464,7 +481,7 @@ class SupervisorRoutingTests(unittest.TestCase):
             self.assertEqual(len(sup.scanner.list()), 1)
 
     def test_critical_finding_maps_urgent_priority(self):
-        with tempfile.TemporaryDirectory() as td:
+        with _RetriedTemporaryDirectory() as td:
             sup = make_sup(td)
             mid = sup._route_finding(new_finding(
                 kind="crash_storm", title="storm", route="mission",
@@ -489,7 +506,7 @@ class SchedulingTests(unittest.TestCase):
         return m["id"]
 
     def test_priority_ordering(self):
-        with tempfile.TemporaryDirectory() as td:
+        with _RetriedTemporaryDirectory() as td:
             sup = make_sup(td)
             bg = self._mission(sup, "background")
             urg = self._mission(sup, "urgent")
@@ -517,8 +534,8 @@ class SchedulingTests(unittest.TestCase):
 
     def test_lane_busy_blocks_normal_not_urgent(self):
         """Interactive lane busy → normal missions wait, urgent proceed."""
-        with tempfile.TemporaryDirectory() as td:
-            sup = make_sup(td, lane_free=lambda: False)
+        with _RetriedTemporaryDirectory() as td:
+            sup = make_sup(td, lane_free=lambda *a: False)
             # build a mission whose graph has a runnable agent node
             for prio in ("normal", "urgent"):
                 m = sup.missions.create(

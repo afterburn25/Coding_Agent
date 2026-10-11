@@ -47,7 +47,7 @@ def make_sup(td: str, **kw):
         workspace=root,
         store_root=root / "data" / "autonomy",
         executor=lambda m, n, cb: {"ok": True, "output": "done"},
-        lane_free=lambda: True,
+        lane_free=lambda *a: True,
         worker_manager=_AnyFitWorkers(),
     )
     defaults.update(kw)
@@ -370,7 +370,7 @@ class JobNodeTests(unittest.TestCase):
             seen = []
             sup = make_sup(
                 td,
-                lane_free=lambda: False,  # interactive lane is busy
+                lane_free=lambda *a: False,  # interactive lane is busy
                 job_runner=lambda m, n: (seen.append(n["id"]) or
                                          {"ok": True, "output": "x"}))
             sup.policy.set_resource_mode("conservative")
@@ -390,7 +390,7 @@ class JobNodeTests(unittest.TestCase):
             # Balanced/performance no longer yield to the busy lane.
             tb = Path(td) / "b"
             tb.mkdir()
-            sup2 = make_sup(str(tb), lane_free=lambda: True,
+            sup2 = make_sup(str(tb), lane_free=lambda *a: True,
                             job_runner=lambda m, n: (seen.append(n["id"]) or
                                                      {"ok": True, "output": "x"}))
             m2 = sup2.create_mission(
@@ -2606,7 +2606,7 @@ class SupervisorLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             ran = []
             sup = make_sup(
-                td, lane_free=lambda: False,
+                td, lane_free=lambda *a: False,
                 executor=lambda m, n, cb: ran.append(n["id"]) or {"ok": True})
             m = sup.create_mission(objective="x")
             sup.start_mission(m["id"])
@@ -3247,6 +3247,32 @@ class LearningConsolidateInternalTests(unittest.TestCase):
             self.assertTrue(res["ok"])
             out = json.loads(res["output"])
             self.assertIn("skill_proposals_pending", out)
+            sup.stop()
+
+
+class EpistemicStepInternalTests(unittest.TestCase):
+    def test_epistemic_step_reaches_social_service(self):
+        # Live: the epistemic branch referenced an undefined
+        # 'mission_id' — every node failed with NameError and retried
+        # for ~24h before a diagnose-failure node surfaced it. A
+        # working social service must actually be invoked.
+        class _Social:
+            def __init__(self):
+                self.calls = []
+
+            def epistemic_step(self, **kw):
+                self.calls.append(kw)
+                return {"ok": True, "unit": "journal"}
+
+        with tempfile.TemporaryDirectory() as td:
+            sup = make_sup(td)
+            sup.social = _Social()
+            res = sup._default_internal(
+                {"id": "m-test"},
+                {"instruction": "internal:epistemic_step"})
+            self.assertTrue(res["ok"], res)
+            self.assertTrue(sup.social.calls)
+            self.assertNotIn("mission_id", res.get("output") or "")
             sup.stop()
 
 

@@ -85,6 +85,17 @@ def register_filesystem_tools(
     def safe(raw: str) -> Path:
         return _safe_path(workspace, raw, extra_roots)
 
+    def write_safe(raw: str) -> Path:
+        """safe() + the mission boundary: autonomous missions write only
+        inside their own mission workspace (repair worktree etc.) — the
+        registered-roots allowlist alone would let them reach primary."""
+        from . import gitguard
+        p = safe(raw)
+        block = gitguard.mission_fs_write_block(registry, p)
+        if block:
+            raise PermissionError(block)
+        return p
+
     def display_path(path: Path) -> str:
         """Human-facing relative path — uses the registered root that
         contains the file so attached-workspace paths display sanely."""
@@ -139,7 +150,7 @@ def register_filesystem_tools(
         return "\n".join(f"{i+1}: {rows[i]}" for i in range(start-1, min(end, len(rows))))
 
     def write_file(args: dict) -> str:
-        path = safe(args["path"])
+        path = write_safe(args["path"])
         path.parent.mkdir(parents=True, exist_ok=True)
         track_mutation(path)
         atomic_write_text(path, args.get("content", ""))
@@ -162,7 +173,7 @@ def register_filesystem_tools(
         for item in changes:
             if not isinstance(item, dict) or not item.get("path"):
                 raise ValueError("every patch change requires a path")
-            path = safe(str(item["path"]))
+            path = write_safe(str(item["path"]))
             existed = path.exists()
             old_text = path.read_text(encoding="utf-8", errors="replace") if existed and path.is_file() else ""
             if path.exists() and not path.is_file():
@@ -256,13 +267,13 @@ def register_filesystem_tools(
         return detail
 
     def fs_mkdir(args: dict) -> str:
-        path = safe(args["path"])
+        path = write_safe(args["path"])
         detail = _verified_op("mkdir", {"path": str(path)})
         track_mutation(path)
         return f"MKDIR_OK {display_path(path)} — {detail}"
 
     def fs_delete(args: dict) -> str:
-        path = safe(args["path"])
+        path = write_safe(args["path"])
         if not path.exists():
             raise ValueError(f"target does not exist: {display_path(path)}")
         rec = args.get("recursive")
@@ -274,8 +285,8 @@ def register_filesystem_tools(
         return f"DELETE_OK {display_path(path)} — {detail}"
 
     def fs_move(args: dict) -> str:
-        src = safe(args["src"])
-        dst = safe(args["dst"])
+        src = write_safe(args["src"])
+        dst = write_safe(args["dst"])
         detail = _verified_op("move", {"src": str(src), "dst": str(dst)})
         track_mutation(src)
         track_mutation(dst)
@@ -283,7 +294,7 @@ def register_filesystem_tools(
 
     def fs_copy(args: dict) -> str:
         src = safe(args["src"])
-        dst = safe(args["dst"])
+        dst = write_safe(args["dst"])
         detail = _verified_op("copy", {"src": str(src), "dst": str(dst)})
         track_mutation(dst)
         return f"COPY_OK {display_path(src)} -> {display_path(dst)} — {detail}"
@@ -329,7 +340,7 @@ def register_filesystem_tools(
     def fs_archive(args: dict) -> str:
         import zipfile
         src = safe(args["src"])
-        dst = safe(args["dst"])
+        dst = write_safe(args["dst"])
         if not src.exists():
             raise ValueError(f"archive source does not exist: {display_path(src)}")
         if dst.suffix.lower() != ".zip":
@@ -363,7 +374,7 @@ def register_filesystem_tools(
     def fs_extract(args: dict) -> str:
         import zipfile
         src = safe(args["src"])
-        dst = safe(args["dst"])
+        dst = write_safe(args["dst"])
         if not src.is_file():
             raise ValueError(f"archive does not exist: {display_path(src)}")
         dst.mkdir(parents=True, exist_ok=True)

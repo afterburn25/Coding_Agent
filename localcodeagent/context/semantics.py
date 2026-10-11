@@ -284,7 +284,7 @@ def _strip_quotes(t: str) -> tuple[str, list[str]]:
 # sequencing conjunctions. Commas split only before discourse pivots;
 # "fix the build, it keeps failing" keeps both clauses distinct.
 _CLAUSE_SPLIT_RE = re.compile(
-    r"[.!?;]+|\s*[—–]{1,2}\s*|\n+|,\s+(?=but\b|and\s+then\b)|"
+    r"[.!?;]+|\s*[—–]{1,2}\s*|\s+-\s+|\n+|,\s+(?=but\b|and\s+then\b)|"
     r"\s+but\s+|\s+and\s+then\s+|\s+then\s+", re.IGNORECASE)
 
 # An "if/when/unless" condition wrapping an action clause — the ACTION
@@ -392,6 +392,7 @@ _ACTION_LEAD_RE = re.compile(
     r"(?:hey|ok|okay|yo|hi|hello)\s+\w+[,!]?\s+)*(?:"
     r"create|make|write|edit|fix|delete|remove|add|build|rebuild|run|"
     r"execute|update|upgrade|install|uninstall|download|upload|open|"
+    r"mkdir|rmdir|rm|touch|"
     r"close|move|copy|rename|push|pull|commit|deploy|save|start|stop|"
     r"restart|kill|set|turn|mute|unmute|pause|resume|enable|disable|"
     r"connect|disconnect|check|show|list|give|put|get|fetch|grab|"
@@ -445,8 +446,30 @@ _WANT_TO_KNOW_RE = re.compile(
     r"\b(?:tell|let)\s+me\s+know\b|\btell\s+me\s+(?:whether|if|what|"
     r"why|how|about|your|the)\b|\bi'?m\s+(?:curious|wondering)\b|"
     r"\bi\s+wonder\b|\bwondering\s+(?:if|whether|what|how|why)\b|"
+    r"\bi\s+(?:keep\s+)?(?:meaning|wanted|meant|was\s+going|"
+    r"have\s+been\s+meaning)\s+to\s+ask\b|"
+    # Hedged information asks — "any chance you remember the port",
+    # "is there any chance you know" — the politeness wrapper is
+    # filler; the tail is the ask.
+    r"\bany\s+chance\s+you\s+\w|\bis\s+there\s+any\s+chance\s+you\b|"
+    # Elided 'have you got' — "got anything on the backup schedule"
+    # asks for stored info; without the verb it's assertion-shaped.
+    r"\b(?:you\s+)?got\s+(?:(?:any|anything|some|something|"
+    r"everything|stuff|info|details|data|notes?|news|dirt|intel)"
+    r"\s+){1,2}(?:on|about|for|regarding)\b|"
     r"\bwhat\s+does\b.{0,60}\bmean\b|\bwhat\s+(?:does|do|did)\s+"
     r"(?:that|this|it)\s+mean\b",
+    re.IGNORECASE)
+
+# "i forgot what my shell is" / "i can't remember when the deploy is"
+# — a wh-complement under a forgetting/recall verb is an information
+# ask. Bare "i forgot the deadline" (no wh) stays an assertion.
+_FORGOT_Q_RE = re.compile(
+    r"^(?:i\s+forgot(?:ten)?|i\s+keep\s+forgetting|"
+    r"i\s+(?:can'?t|cannot|couldn'?t|don'?t|do\s+not|didn'?t|"
+    r"did\s+not)\s+(?:remember|recall))\s+"
+    r"(?:(?:the|that|about|of)\s+)?"
+    r"(?:what|when|where|which|who|whose|whom|why|how|whether|if)\b",
     re.IGNORECASE)
 
 # A negated imperative anywhere in the message vetoes action lanes even
@@ -467,6 +490,7 @@ _EMBEDDED_PROHIBITION_RE = re.compile(
 _EXEC_TOPIC_RE = (
     r"\b(?:create|make|write|edit|fix|delete|remove|add|build|rebuild|"
     r"run|execute|update|upgrade|install|uninstall|download|upload|"
+    r"mkdir|rmdir|rm|touch|"
     r"open|close|move|copy|rename|push|pull|commit|deploy|save|start|"
     r"stop|restart|kill|set|turn|mute|unmute|pause|resume|enable|"
     r"disable|connect|disconnect|generate|draw|paint|render|search|"
@@ -633,14 +657,21 @@ def _clauses(masked: str) -> list[str]:
 # the communicative clause — 'ok so, is the voice on' asks the same
 # question as 'is the voice on'; 'pls push it' is the same command.
 _DISCOURSE_FREE_RE = re.compile(
-    r"^(?:(?:um+|uh+|er+|hmm+|ok(?:ay)?|so(?:\s+like)?|well|"
+    r"^(?:(?:um+|uh+|er+|hmm+|oh+|ah+|ok(?:ay)?|so(?:\s+like)?|well|"
+    r"and|but|then|or|plus|"
+    r"out\s+of\s+curiosity|out\s+of\s+interest|"
     r"anyways?|alright|also|yeah|yep|yup|tbh|btw|honestly|actually|"
     r"basically|literally|like|pls|please|kindly|now|hey)\b"
     r"[\s,.\-—–!?]*)+", re.IGNORECASE)
 # Imperative-adjacent markers ('wait a second' is a command, 'wait,'
 # is discourse) — only strip when punctuation separates them.
 _DISCOURSE_COMMA_RE = re.compile(
-    r"^(?:(?:wait|look|listen|yo|see)\b\s*[,—–\-]\s*)+",
+    r"^(?:(?:wait|look|listen|yo|see|sorry)\b\s*[,—–\-]\s*|"
+    # Topic pivots — "speaking of ports, what does staging use"
+    # carries the ask after a phrasal preamble.
+    r"(?:speaking|talking)\s+of\s+[^,;—–]{1,60}[,;—–]\s*|"
+    r"(?:on\s+the\s+(?:topic|subject)\s+of|as\s+for|"
+    r"regarding|about)\s+[^,;—–]{1,60}[,;—–]\s*)+",
     re.IGNORECASE)
 
 
@@ -960,12 +991,26 @@ def _speech_act(clause: str, *, raw_norm: str) -> str:
         return QUESTION
     if _INTERROGATIVE_LEAD_RE.match(low) or clause.rstrip().endswith("?"):
         return QUESTION
+    # Embedded interrogative under a memory verb — "i forgot what my
+    # shell is", "i can't remember when the deploy is": the wh-clause
+    # IS the ask; the forgetting lead is why it's being asked.
+    if _FORGOT_Q_RE.match(low):
+        return QUESTION
     if _WANT_TO_KNOW_RE.search(low):
         return QUESTION
     if _ACTION_LEAD_RE.match(low):
         return COMMAND
     if _COMPLAINT_RE.search(low):
         return COMPLAINT
+    # Reported speech + confirmation tag — "you said my editor was
+    # cursor, right" is a verification ask (the tag may drop the '?').
+    if re.match(r"^(?:you\s+(?:said|told\s+me)|i\s+thought\s+you\s+"
+                r"(?:said|told\s+me))\b",
+                low) and re.search(
+                r"[,;]?\s*(?:right|correct|yeah|huh|eh|yes|no|"
+                r"isn'?t\s+(?:it|that\s+so)|don'?t\s+you\s+think)\s*"
+                r"[?!.]?\s*$", low):
+        return QUESTION
     return ASSERTION
 
 

@@ -1410,6 +1410,11 @@ class CrossChatMemoryTests(unittest.TestCase):
                 ("set the theme to dark", "theme is dark"),
                 ("use port 8080", "port is 8080"),
                 ("the test database uses port 5433", "test database"),
+                # Numeric adjustment verbs carry an explicit 'to'
+                # connector — they're value-sets, not action requests.
+                ("bump the retry limit to 10", "retry limit is 10"),
+                ("raise the worker ceiling to 12", "worker ceiling is 12"),
+                ("lower the api timeout to 30", "api timeout is 30"),
             ):
                 memory2 = ConversationMemory(
                     Path(td) / f"m{abs(hash(utterance))}.json")
@@ -1616,6 +1621,18 @@ class CrossChatMemoryTests(unittest.TestCase):
                 "we are moving to postgres")
             self.assertEqual(
                 learned["facts"], ["we are moving to postgres"])
+            # The object can sit between verb and 'to' — "switching the
+            # cache db to memcached" — and 'we will <base verb>' banks
+            # the same way (BUG-089 follow-on).
+            learned = memory.learn_from_user(
+                "we're switching the cache db to memcached")
+            self.assertEqual(
+                learned["facts"],
+                ["we are switching cache db to memcached"])
+            learned = memory.learn_from_user(
+                "we will migrate the api to graphql")
+            self.assertEqual(
+                learned["facts"], ["we are migrating api to graphql"])
 
     def test_compound_turns_learn_first_clause_only(self):
         # A compound turn's second clause is a separate intent, not part
@@ -1632,6 +1649,10 @@ class CrossChatMemoryTests(unittest.TestCase):
                 ("the timeout is 30 — explain why", "timeout is 30"),
                 ("the cache ttl is 300, and tell me the port",
                  "cache ttl is 300"),
+                # The comma-splice bound must also strip the comma
+                # itself — 'standup is at 9am,' banked verbatim once.
+                ("the standup is at 9am, and what port is prod on",
+                 "standup is at 9am"),
             ):
                 memory = ConversationMemory(
                     Path(td) / f"m{abs(hash(utterance))}.json")

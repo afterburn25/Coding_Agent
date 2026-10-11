@@ -333,6 +333,12 @@ def register_migration_tools(
             root, found = _systems_for(args)
         except ValueError as exc:
             return f"ERROR: {exc}"
+        from . import gitguard
+        for s in found:
+            block = gitguard.mission_fs_write_block(
+                registry, Path(s["root"]))
+            if block:
+                return f"ERROR: {block}"
         results = []
         for s in found:
             system = s["system"]
@@ -373,6 +379,12 @@ def register_migration_tools(
         if args.get("dry_run"):
             # Honest dry-run: status only — never pretend apply-sql.
             return migrations_status(args)
+        from . import gitguard
+        for s in found:
+            block = gitguard.mission_fs_write_block(
+                registry, Path(s["root"]))
+            if block:
+                return f"ERROR: {block}"
         results = []
         for s in found:
             for argv in _COMMANDS[s["system"]]["apply"]:

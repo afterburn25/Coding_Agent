@@ -451,6 +451,10 @@ MULTI_SENTENCE = [
     # context then question
     ("My laptop has been slow all week. The fan runs constantly. "
      "What could cause that?", ("question",), None),
+    # spaced ASCII hyphen is informal dash punctuation — the trailing
+    # interrogative carries the act, not the declarative preamble
+    ("you already told me the answer earlier - what was it?",
+     ("question",), None),
     # assertion then offer
     ("The new model dropped yesterday. I could install it for you. "
      "Interested?", ("offer", "preference_question"), "offer_response"),
@@ -833,6 +837,37 @@ def test_wait_comma_is_discourse_but_bare_wait_is_command():
     assert f.main_clause == "what's the time"
     f2 = _frame("wait a second")
     assert f2.main_clause.startswith("wait"), f2.main_clause
+
+
+def test_sorry_comma_is_discourse_but_sorry_about_is_content():
+    """'sorry, what's my shell' — punctuation-separated apology is a
+    discourse preamble. 'sorry about the downtime' keeps the apology —
+    no separator, so 'sorry' is content."""
+    f = _frame("sorry, what's my shell")
+    assert f.speech_act == "question"
+    assert f.allows("memory_recall")
+    f2 = _frame("sorry about the downtime")
+    assert f2.main_clause.startswith("sorry"), f2.main_clause
+
+
+@pytest.mark.parametrize("lead", [
+    "i forgot what my shell is",
+    "i can't remember when the deploy is",
+    "i don't remember who is on call",
+    "i keep forgetting which port prod uses",
+])
+def test_forgot_embedded_wh_is_question(lead):
+    """A wh-complement under a forgetting verb is an information ask,
+    not an admission. Bare 'i forgot the deadline' (no wh) stays an
+    assertion."""
+    f = _frame(lead)
+    assert f.speech_act == "question", (lead, f.speech_act)
+    assert f.allows("memory_recall"), lead
+
+
+def test_forgot_bare_np_stays_assertion():
+    f = _frame("i forgot the deadline")
+    assert f.speech_act == "assertion"
 
 
 # ---------------------------------------------------------------------------

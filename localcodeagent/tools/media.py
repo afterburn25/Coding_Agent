@@ -149,6 +149,10 @@ def register_media_tools(registry: ToolRegistry, workspace: Path, *, jobs=None) 
             return "ERROR: source must be an existing file inside the workspace"
         if dst is None:
             return "ERROR: output path must stay inside the workspace"
+        from . import gitguard
+        block = gitguard.mission_fs_write_block(registry, dst)
+        if block:
+            return f"ERROR: {block}"
         return src, dst
 
     def wrap(builder) -> str:

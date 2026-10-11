@@ -44,6 +44,10 @@ def register_shell_tools(registry: ToolRegistry, workspace: Path,
         command = str(args["command"])
         timeout = max(1, min(int(args.get("timeout", 120)), 600))
         cwd = _resolve_cwd(args)
+        from .gitguard import autonomous_git_block
+        blocked = autonomous_git_block(registry, command, cwd, workspace)
+        if blocked:
+            return blocked
         sink = registry.context.get("stream_sink")
 
         def _emit_chunk(which: str, chunk: str) -> None:

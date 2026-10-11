@@ -547,11 +547,23 @@ class AnswerMemory:
             return {"ok": False}
         exp_id = ""
         if conversation_id:
-            exp = learning.last_experience(self.store, conversation_id)
+            # A correction carrying its own topic ("actually my editor
+            # is neovim") binds to the experience that shares its terms
+            # — the most recent unrelated question is the wrong row to
+            # invalidate (and the wrong key to bank under).
+            exp = (learning.matching_experience(
+                       self.store, conversation_id, correction)
+                   if correction else
+                   learning.last_experience(self.store, conversation_id))
             exp_id = exp["id"] if exp else ""
         if not question and exp_id:
             exp = self.store.query_one("SELECT * FROM experiences WHERE id=?", (exp_id,))
             question = exp["raw_question"] if exp else ""
+        elif not question and correction:
+            # No topical antecedent — bank the correction self-keyed so
+            # it stays retrievable without poisoning an unrelated
+            # question's answer row.
+            question = correction
         from ..identity import locked_topic, locked_refusal
         topic = locked_topic(question)
         if topic:

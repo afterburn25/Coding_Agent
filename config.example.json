@@ -16,6 +16,7 @@
   "autonomy_enabled": true,
   "sync_source_on_start": true,
   "autonomy_quiet_hours": null,
+  "autonomy_chat_idle_seconds": 600,
   "self_repair_auto_promote": false,
   "self_repair_commit_on_promote": true,
   "self_repair_canary_enabled": true,

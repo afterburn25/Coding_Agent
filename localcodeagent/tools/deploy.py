@@ -61,7 +61,16 @@ def register_deploy_tools(registry: ToolRegistry, workspace: Path, *,
                 break
         return None
 
+    def _mission_gate() -> str | None:
+        """Both deploy tools publish to origin — autonomous missions
+        need a git_push grant (same tier as github write tools)."""
+        from .gitguard import mission_git_tool_block
+        return mission_git_tool_block(registry, workspace, remote=True)
+
     def deploy_static(args: dict[str, Any]) -> str:
+        g = _mission_gate()
+        if g:
+            return g
         src = _resolve(str(args.get("path") or ""))
         if src is None:
             return json.dumps({"error": "path must be a directory inside "
@@ -179,6 +188,9 @@ def register_deploy_tools(registry: ToolRegistry, workspace: Path, *,
 
     def deploy_release(args: dict[str, Any]) -> str:
         """Publish artifacts as a GitHub Release via the gh CLI."""
+        g = _mission_gate()
+        if g:
+            return g
         gh_exe = shutil.which("gh")
         if gh_exe is None:
             return json.dumps({

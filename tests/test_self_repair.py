@@ -448,6 +448,58 @@ class ScenarioA_CodeRepairPromoted(unittest.TestCase):
             self.assertIn("calc.py",
                           git("status", "--porcelain", cwd=repo).stdout)
 
+    def test_committed_worktree_patch_promotes(self):
+        """A mission that COMMITS inside its repair worktree must still
+        promote — `git diff HEAD` alone would call a fully committed
+        candidate 'empty patch' and stall the pipeline."""
+        def committing_generator(incident, wt: Path):
+            result = good_generator(incident, wt)
+            git("-c", "user.email=t@t", "-c", "user.name=t",
+                "add", "-A", cwd=wt)
+            git("-c", "user.email=t@t", "-c", "user.name=t",
+                "commit", "-m", "repair candidate", cwd=wt)
+            return result
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo,
+                               patch_generator=committing_generator,
+                               canary=Canary(lambda i, w, **k:
+                                             {"ok": True, "port": 1}))
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            final = coord.get(inc["id"])
+            self.assertEqual(final["state"], "resolved")
+            self.assertIn("if b == 0",
+                          (repo / "mod" / "calc.py").read_text())
+            self.assertTrue(
+                (repo / "tests" / "test_calc_repair.py").is_file())
+
+    def test_promotion_refuses_drifted_files(self):
+        """If the primary moved a candidate file since the worktree was
+        cut, promotion aborts instead of clobbering the newer content."""
+        def drift_generator(incident, wt: Path):
+            # Primary advances the very file the repair touches.
+            (repo / "mod" / "calc.py").write_text(
+                "def divide(a, b):\n    return -1\n", encoding="utf-8")
+            git("-c", "user.email=t@t", "-c", "user.name=t",
+                "add", "-A", cwd=repo)
+            git("-c", "user.email=t@t", "-c", "user.name=t",
+                "commit", "-m", "drift", cwd=repo)
+            return good_generator(incident, wt)
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo,
+                               patch_generator=drift_generator,
+                               canary=Canary(lambda i, w, **k:
+                                             {"ok": True, "port": 1}))
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            final = coord.get(inc["id"])
+            self.assertNotEqual(final["state"], "resolved")
+            # Primary content preserved — never clobbered.
+            self.assertIn("return -1",
+                          (repo / "mod" / "calc.py").read_text())
+
 
 class DestructivePatchReviewTests(unittest.TestCase):
     """A generated patch that guts a file — a stub replacing thousands
@@ -756,6 +808,42 @@ class AbandonTests(unittest.TestCase):
             # abandoned doesn't advance on tick
             coord.tick()
             self.assertEqual(coord.get(inc["id"])["state"], "abandoned")
+
+    def test_sweep_retires_stale_and_orphan_worktrees(self):
+        # A needs_human candidate keeps its worktree for the inspection
+        # window, then the sweep retires it; orphan dirs with no
+        # incident row are always swept. Live incidents are untouched.
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo, patch_generator=good_generator,
+                               auto_promote=False)
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            inc2 = coord.get(inc["id"])
+            self.assertEqual(inc2["state"], "needs_human")
+            wt = Path(inc2["worktree"])
+            self.assertTrue(wt.is_dir())
+
+            orphan = repo / ".repair-worktrees" / "ri-orphaned00"
+            orphan.mkdir(parents=True)
+            # First sweep: the orphan goes immediately (no incident
+            # row), the needs_human candidate keeps its window.
+            coord.tick()
+            self.assertTrue(wt.is_dir())
+            self.assertFalse(orphan.exists())
+
+            # Age the incident past the stale bound and re-tick.
+            inc2["updated_at"] = 0.0
+            coord._last_wt_sweep = 0.0
+            coord.tick()
+            self.assertFalse(wt.exists())
+            # Untriaged past the window, the incident is abandoned —
+            # terminal and auditable, evidence preserved on the row.
+            stale = coord.get(inc["id"])
+            self.assertEqual(stale["state"], "abandoned")
+            self.assertFalse(stale.get("worktree"))
+            self.assertIn("needs_human stale", json.dumps(
+                stale.get("history") or []))
 
 
 class WorktreeLossTests(unittest.TestCase):

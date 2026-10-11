@@ -34,6 +34,7 @@ class AnswerMemoryStore:
         self._lock = threading.RLock()
         self.fts = False
         self.corrupt_quarantine = ""
+        self.integrity_ok = True
         self.flush_interval = 5.0
         self.flush_batch = 64
         self._cache: dict[str, list[dict[str, Any]]] = {}
@@ -55,11 +56,37 @@ class AnswerMemoryStore:
         return conn
 
     def _open(self) -> None:
+        # A previous background integrity check may have flagged this file —
+        # quarantine it now, while no connection holds it open.
+        try:
+            pending = self.path.with_name(self.path.name + ".corrupt-pending")
+            if pending.exists():
+                pending.unlink()
+                quarantine = self.path.with_name(
+                    f"{self.path.name}.corrupt-{int(time.time())}")
+                try:
+                    shutil.move(str(self.path), str(quarantine))
+                    self.corrupt_quarantine = str(quarantine)
+                except OSError:
+                    pass
+        except OSError:
+            pass
         existed = self.path.exists() and self.path.stat().st_size > 0
+        # A non-empty -wal means the previous close was a crash — SQLite
+        # replays it on connect, which is exactly when integrity must be
+        # verified before use. On a clean close, quick_check(1) still scans
+        # every index (~15s on a 12MB store — it stalled app boot past the
+        # port bind); defer that to a background pass instead.
+        wal_pending = False
+        try:
+            wal = self.path.with_name(self.path.name + "-wal")
+            wal_pending = wal.exists() and wal.stat().st_size > 0
+        except OSError:
+            pass
         conn: sqlite3.Connection | None = None
         try:
             conn = self._connect()
-            if existed:
+            if existed and wal_pending:
                 conn.execute("PRAGMA quick_check(1)").fetchone()
         except sqlite3.DatabaseError:
             if conn is not None:
@@ -93,6 +120,52 @@ class AnswerMemoryStore:
             self.fts = migrations.fts_available(conn)
         finally:
             conn.close()
+        if existed and not wal_pending:
+            self._schedule_integrity_check()
+
+    # -- integrity ----------------------------------------------------------
+
+    _INTEGRITY_RECHECK_S = 86400.0
+
+    def _schedule_integrity_check(self) -> None:
+        """Clean-close path: re-verify at most once a day, off the boot
+        path. On failure the DB is flagged via a `.corrupt-pending` marker —
+        moving a live file out from under open connections is unsafe on
+        Windows, so the next _open() performs the quarantine."""
+        marker = self.path.with_name(self.path.name + ".integrity-ok")
+        try:
+            if marker.exists() and (
+                    time.time() - marker.stat().st_mtime
+                    < self._INTEGRITY_RECHECK_S):
+                return
+        except OSError:
+            pass
+        threading.Thread(target=self._integrity_check_once,
+                         name="answer-memory-integrity",
+                         daemon=True).start()
+
+    def _integrity_check_once(self) -> None:
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = self._connect()
+            conn.execute("PRAGMA quick_check(1)").fetchone()
+            self.path.with_name(
+                self.path.name + ".integrity-ok").touch()
+        except sqlite3.DatabaseError:
+            self.integrity_ok = False
+            try:
+                self.path.with_name(
+                    self.path.name + ".corrupt-pending").touch()
+            except OSError:
+                pass
+        except Exception:
+            pass
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     # -- generic helpers -----------------------------------------------------
 

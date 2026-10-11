@@ -18,6 +18,7 @@ from localcodeagent.answer_memory import feedback, invalidation, ttl, validation
 from localcodeagent.answer_memory.embeddings import embedder
 from localcodeagent.answer_memory.normalization import normalize_question
 from localcodeagent.answer_memory.service import AnswerMemory as _AM
+from localcodeagent.answer_memory.store import AnswerMemoryStore
 from localcodeagent.agent.orchestrator import AgentOrchestrator
 from localcodeagent.config import AgentConfig, ModelProfile
 from localcodeagent.models.provider import ProviderResponse
@@ -247,6 +248,40 @@ class LearningAndCorrectionTests(unittest.TestCase):
             self.assertEqual(row["trust_state"], "trusted")
             self.assertEqual(row["source_type"], "correction")
             self.assertIn("Juggernaut", row["answer_text"])
+            am.store.close()
+
+    def test_correction_binds_to_topical_experience_not_latest(self):
+        # Live: "actually my editor is neovim not vscode" banked the
+        # correction under the LAST asked question ("what have you seen
+        # happening"), so that question started replaying "my editor is
+        # neovim". A topic-bearing correction must bind to the
+        # experience sharing its terms — and a correction with no
+        # topical antecedent must not poison an unrelated question.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            am = _mem(td)
+            am.record_exchange("what is my editor",
+                               "your editor is vscode",
+                               conversation_id="c1")
+            am.record_exchange("what have you seen happening",
+                               "nothing unusual",
+                               conversation_id="c1")
+            am.mark_incorrect(
+                correction="actually my editor is neovim not vscode",
+                conversation_id="c1")
+            # The topical binding corrected the editor answer…
+            row = am.store.query_one(
+                "SELECT * FROM answers WHERE invalidated=0 AND "
+                "canonical_question LIKE '%editor%'")
+            self.assertIsNotNone(row)
+            self.assertIn("neovim", row["answer_text"])
+            # …and the unrelated question keeps its own answer — the
+            # correction never landed under its key.
+            row = am.store.query_one(
+                "SELECT * FROM answers WHERE invalidated=0 AND "
+                "canonical_question LIKE '%seen happening%'")
+            self.assertIsNotNone(row)
+            self.assertNotIn("neovim", row["answer_text"])
+            self.assertNotIn("editor", row["answer_text"])
             am.store.close()
 
     def test_mark_incorrect_then_relearn(self):
@@ -788,6 +823,41 @@ class AdminTests(unittest.TestCase):
             self.assertTrue(am.store.corrupt_quarantine)
             self.assertTrue(Path(am.store.corrupt_quarantine).exists())
             am.store.close()
+
+    def test_clean_open_defers_integrity_check(self):
+        # quick_check(1) scans every index (~15s on a real store) — it
+        # stalled app boot past the port bind. On a clean close the check
+        # must move to a background pass, never the _open path.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            path = Path(td) / "am.db"
+            am = _mem(td)
+            am.store.close()
+            scheduled = []
+            orig = AnswerMemoryStore._schedule_integrity_check
+            AnswerMemoryStore._schedule_integrity_check = (
+                lambda self: scheduled.append(self))
+            try:
+                am2 = _mem(td)
+                am2.store.close()
+            finally:
+                AnswerMemoryStore._schedule_integrity_check = orig
+            self.assertTrue(scheduled)
+
+    def test_corrupt_pending_marker_quarantines_on_open(self):
+        # A background check that finds corruption writes
+        # `.corrupt-pending`; the next _open must quarantine the file.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            path = Path(td) / "am.db"
+            am = _mem(td)
+            am.store.close()
+            marker = path.with_name(path.name + ".corrupt-pending")
+            marker.touch()
+            am2 = _mem(td)
+            try:
+                self.assertTrue(am2.store.corrupt_quarantine)
+                self.assertFalse(marker.exists())
+            finally:
+                am2.store.close()
 
     def test_disabled_service_degrades_gracefully(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:

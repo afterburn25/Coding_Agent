@@ -515,6 +515,73 @@ class RagTests(unittest.TestCase):
             self.assertEqual(idx.search("helper"), [])
             idx.close()
 
+    def test_stats_and_search_dont_block_on_update(self):
+        """A long update() holds the write lock end-to-end — readers on
+        the WAL read connection answer from the last committed snapshot
+        instead of queueing behind it (the /api/rag probe flake)."""
+        with tempfile.TemporaryDirectory() as td:
+            ws = self._repo(td)
+            idx = RepoIndex(ws)
+            self.addCleanup(idx.close)
+            idx.update()
+            import threading as _t
+            started = _t.Event()
+            release = _t.Event()
+            real_index = idx._index_file
+
+            def slow_index(path, rel):
+                started.set()
+                release.wait(2)
+                return real_index(path, rel)
+
+            idx._index_file = slow_index  # hold the write lock mid-build
+            (ws / "src" / "new_file.py").write_text(
+                "def brand_new():\n    pass\n")
+            worker = _t.Thread(target=idx.update, daemon=True)
+            worker.start()
+            self.assertTrue(started.wait(2))
+            t0 = time.monotonic()
+            # Readers must return promptly while the writer holds _lock.
+            stats = idx.stats()
+            hits = idx.search("handler")
+            elapsed = time.monotonic() - t0
+            self.assertLess(elapsed, 1.0)
+            self.assertGreater(stats["files"], 0)
+            self.assertTrue(hits)
+            release.set()
+            worker.join(5)
+            idx.close()
+
+    def test_stats_counters_track_updates_exactly(self):
+        """stats() serves meta counters (O(1) — /api/rag must answer inside
+        the smoke probe's 2s); they must never drift from real counts."""
+        with tempfile.TemporaryDirectory() as td:
+            ws = self._repo(td)
+            idx = RepoIndex(ws)
+            self.addCleanup(idx.close)
+            idx.update()
+            stats = idx.stats()
+            real = {
+                t: idx._db.execute(f"SELECT COUNT(*) FROM {t}")
+                .fetchone()[0]
+                for t in ("files", "symbols", "chunks")}
+            self.assertEqual(stats, real)
+            # Change + delete, then re-verify counters stayed exact.
+            (ws / "src" / "util.py").write_text(
+                "def helper():\n    pass\n\ndef new_fn():\n    pass\n")
+            import os
+            os.utime(ws / "src" / "util.py",
+                     (time.time() + 2, time.time() + 2))
+            (ws / "README.md").unlink()
+            idx.update()
+            stats = idx.stats()
+            real = {
+                t: idx._db.execute(f"SELECT COUNT(*) FROM {t}")
+                .fetchone()[0]
+                for t in ("files", "symbols", "chunks")}
+            self.assertEqual(stats, real)
+            idx.close()
+
 
 if __name__ == "__main__":
     unittest.main()

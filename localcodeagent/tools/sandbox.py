@@ -72,6 +72,10 @@ def register_sandbox_tools(registry: ToolRegistry, workspace: Path) -> None:
         code = str(args.get("code", ""))
         if not code.strip():
             return "ERROR: 'code' is required"
+        from .gitguard import mission_python_block
+        blocked = mission_python_block(registry, code)
+        if blocked:
+            return f"ERROR: {blocked}"
         timeout = max(1, min(int(args.get("timeout_seconds", DEFAULT_TIMEOUT)), MAX_TIMEOUT))
         try:
             return json.dumps(run_python(code, sandbox_dir, timeout=timeout), ensure_ascii=False)

@@ -427,6 +427,20 @@ def _strip_unverified_notice(text: str) -> str:
     return _UNVERIFIED_NOTICE_RE.sub("", str(text or "")).rstrip()
 
 
+def _history_sanitize(content: str) -> str:
+    """Model-facing sanitize for one stored assistant turn. A turn the
+    truth gate flagged is a parrot seed — the model riffs on its own
+    invented telemetry and fabricates fresh claims each round. Withhold
+    the claim text entirely: the verbatim record stays in the store for
+    the recall lanes and UI, but the model only learns that a flagged
+    reply exists."""
+    text = str(content or "")
+    if UNVERIFIED_CLAIMS_MARKER in text:
+        return ("(An earlier reply was flagged for unverified action "
+                "claims — its text is withheld from context.)")
+    return _strip_unverified_notice(text)
+
+
 # Shared surface renderer for deterministic/builtin replies — the
 # repetition ledger spans turns and conversations so canned lines cool
 # down instead of replaying verbatim (context/realize.py).
@@ -2504,9 +2518,11 @@ class AgentOrchestrator:
         return reply
 
     _FACTS_RECALL_RE = re.compile(
+        # `about me` dumps; `about my X` scopes to user-owned facts;
+        # `about python` (no possession) is a general-knowledge ask.
         r"\bwhat do you (?:know|remember|have)(?:\s+learned)?\s+"
-        r"about me\b|\bwhat do you remember\b|\bwhat have you "
-        r"(?:learned|remembered)(?:\s+about me)?\b|\bwhat have i "
+        r"about\s+(?:me|my)\b|\bwhat do you remember\b|\bwhat have you "
+        r"(?:learned|remembered)\b|\bwhat have i "
         r"told you\b|\bwhat(?:'s| do you have) (?:on|saved about) "
         r"me\b", re.IGNORECASE)
     _RULES_RECALL_RE = re.compile(
@@ -2530,28 +2546,356 @@ class AgentOrchestrator:
     _FACT_RECALL_RE = re.compile(
         r"^\s*(?:remind me\s+(?:(?:of|about)\s+|"
         r"(?:what|when|where|which|who|whose|how)\s+)?|"
+        # Meta-recall idioms — "what was it again — the retry limit"
+        # defers the referent; the tail terms do the store match.
+        # Must precede the bare 'what ' alternative or it loses the
+        # alternation.
+        r"what\s+was\s+(?:it|that|this)\s+again\b[\s,—–\-]*|"
         r"what(?:'s|\s+s)?\s+|"
-        r"whats\s+|which\s+|whichever\s+|who'?s?\s+|whos\s+|whose\s+|"
+        r"whats\s+|which\s+|whichever\s+|whos\s+|whose\s+|"
+        r"who\s+all\s+(?:(?:is|are|was|were)\s+)?|who'?s?\s+|"
         r"who\s+(?:is|are|was|were)\s+|when\s+(?:is|are|was|were|"
         r"do|does|did|will)\s+|"
+        # "i forgot what my shell is" — the embedded interrogative IS
+        # the recall request; the self-deprecating lead is filler.
+        r"(?:i\s+forgot(?:ten)?|i\s+keep\s+forgetting|"
+        r"i\s+(?:can'?t|cannot|couldn'?t|don'?t|do\s+not|didn'?t|"
+        r"did\s+not)\s+(?:remember|recall)|"
+        r"i\s+(?:keep\s+)?(?:meaning|wanted|meant)\s+to\s+ask)\s+"
+        r"(?:(?:what|when|where|which|who|whose|how)\s+)?|"
+        # Reported-speech verification — "didn't you say X" and the
+        # tagged "you said X, right" ask the store to confirm or
+        # contradict, not the model. Untagged 'you said X' stays
+        # assertion-framed and never reaches this lane.
+        r"(?:didn'?t|did\s+not|did)\s+you\s+(?:say|tell)(?:\s+me)?\s*|"
+        r"you\s+(?:(?:just|already|earlier|before)\s+)?"
+        r"(?:said|told\s+me)\s+|i\s+thought\s+you\s+"
+        r"(?:said|told\s+me)\s+|"
+        # Hedged recall asks — "do you happen to know my editor",
+        # "any chance you remember the retry limit" — the politeness
+        # hedge is filler; the ask is a memory lookup.
+        r"do\s+you\s+(?:happen\s+to\s+)?(?:know|remember|recall|"
+        r"recollect)\s+|(?:is\s+there\s+)?any\s+chance\s+you\s+"
+        r"(?:remember|know|recall)\s+|"
+        # Scoped inventory asks — "do you have anything on the backup
+        # schedule" asks memory, not the autonomy lane; the server-side
+        # inventory deferral hands these off when the scope names a
+        # stored subject.
+        r"(?:do\s+you\s+have|have\s+you\s+got|what\s+do\s+you\s+have|"
+        r"you\s+got|got)\s+(?:(?:any|anything|some|something|"
+        r"everything|stuff|info|details|data|notes?|news|dirt|intel)"
+        r"\s+){0,2}(?:on|about|for|regarding)\s+|"
         r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
         r"do\s+i\s+(?:use|have|like|prefer|run|need)\s+|"
+        # Verification with an explicit subject — "does the metrics
+        # api run on 9100" asks recall to confirm/deny against the
+        # banked fact; the interrogative verb is filler the gate
+        # drops below.
+        r"(?:do|does|did)\s+(?:the|a|an|my|our|your)\s+|"
         # Elliptical verification — "is it still sam", "is the prod
         # api still on 443" asks recall to confirm against the banked
         # fact; the anaphor is resolved by the fact itself.
         r"(?:is|are|was|were)\s+(?:it|that|this|they|he|she|the)\s+"
         r"(?:(?:still|really|actually|currently)\s+)?|"
-        r"(?:did|have|had)\s+i\s+(?:tell|told|mention)\w*\s+you\s+"
-        r"(?:about\s+)?)",
+        r"(?:did|have|had)\s+i\s+(?:ever\s+|already\s+|really\s+)?"
+        r"(?:tell|told|mention)\w*\s+you\s+(?:about\s+)?)",
         re.IGNORECASE)
+    # This lane's own recall/attribution outputs — meta-statements about
+    # the record, not content. Anaphoric replay skips them so it quotes
+    # the underlying utterance, not a previous recall reply.
+    _REPEAT_ASK_RE = re.compile(
+        r"^\s*(?:please\s+)?(?:can\s+you\s+)?(?:"
+        r"(?:say|repeat|tell\s+me)\s+(?:that|it)\s+again|"
+        r"repeat\s+(?:that|it|what\s+you\s+(?:just\s+)?said|"
+        r"the\s+last\s+(?:thing|part|bit))\s*(?:again\s*)?|"
+        r"say\s+(?:that|it)\s+one\s+more\s+time|"
+        r"one\s+more\s+time|"
+        r"what\s+did\s+you\s+(?:just\s+)?say)\s*[.!?]?\s*$",
+        re.IGNORECASE)
+    _RECALL_REPLY_PREFIXES = (
+        "Here it is again:",
+        "Earlier I said:",
+        "Yes — that's on record.",
+        "Not exactly — closest thing on record",
+        "I don't have that on record",
+        "I don't have anything on record",
+        "I don't have an earlier answer on record",
+        "You asked:",
+        "You said:",
+        "I don't have an earlier question",
+        # Voice-repeat fallbacks replay the last utterance inside a
+        # status ack — the ack is meta, not replayable content.
+        "Voice isn't available — last thing I said was:",
+        "Voice is muted — last thing I said was:",
+        "Nothing buffered to re-speak — last thing I said was:",
+    )
     _FACT_RECALL_SKIP_RE = re.compile(
-        r"^\s*what\s+(?:do you|should|would|could|can|"
+        r"^\s*what\s+(?:do\s+you(?!\s+(?:have|got|know|remember|"
+        r"recall|recollect)\b)|should|would|could|can|"
         r"did\s+(?:you|we|they|he|she|it|that|this)|"
         r"does\s+(?:it|that|this|he|she|they)|will|"
         r"happens|happened|else|if)\b|"
-        r"what\s+(?:time|day)\s+is\s+it\b|\byou know\b|"
+        r"what\s+(?:time|day)\s+is\s+it\b|"
+        # 'you know' the tag is terminal or bracketed by commas — the
+        # same words inside 'do you know X' are a genuine ask.
+        r"(?:^|[,;—–])\s*you\s+know\s*[?!.,;—–]*\s*$|"
         r"\babout me\b",
         re.IGNORECASE)
+
+    # Reported-speech verification — "didn't you say X", "you told me
+    # X, right", "i thought you said X". These turns ask the RECORD to
+    # confirm or deny a claim attributed to a prior utterance; on an
+    # empty store they must still answer honestly rather than fall to
+    # the model (which confirms from vibes). An untagged declarative
+    # "you said the deploy was fine" is an accusation/complaint, not a
+    # verification ask — it keeps falling through.
+    @staticmethod
+    def _attribution_probe(raw_text: str, match_text: str) -> bool:
+        mt = str(match_text or "").strip().lower()
+        if re.match(
+                r"^(?:didn'?t|did\s+not|did)\s+you\s+"
+                r"(?:(?:just|already|earlier|before)\s+)?(?:say|tell)\b|"
+                r"^i\s+thought\s+you\s+(?:said|told\s+me)\b", mt):
+            return True
+        if re.match(r"^you\s+(?:(?:just|already|earlier|before)\s+)?"
+                    r"(?:said|told\s+me)\b", mt):
+            # The tag was stripped from match_text before this lane
+            # ran — check the raw text for the verification marker.
+            raw = str(raw_text or "").strip().lower()
+            return bool(
+                re.search(r"[?]\s*$", raw)
+                or re.search(
+                    r"[,;]?\s*(?:right|correct|yeah|huh|eh|"
+                    r"isn'?t\s+(?:it|that\s+so)|don'?t\s+you\s+think|"
+                    r"you\s+know)\s*[?!.]?\s*$", raw))
+        return False
+
+    def _verify_attributed_claim(self, match_text: str) -> str | None:
+        """Answer a reported-speech verification from the recorded
+        turns. Strips the attribution lead, then scans prior assistant
+        messages for the proposition's content terms: a full hit
+        confirms with the quoted record, a partial hit denies with the
+        closest thing actually said, no hit is an honest
+        not-on-record. Returns None when history is unavailable or the
+        proposition carries no content terms (let the model lane have
+        shapeless turns)."""
+        memory = self.conversation_memory
+        if memory is None:
+            return None
+        try:
+            history = memory.history(limit=40)
+        except Exception:
+            return None
+        if not history:
+            return ("I don't have anything on record to check that "
+                    "against.")
+        prop = self._FACT_RECALL_RE.sub("", match_text)
+        prop = re.sub(r"[,;]?\s*(?:right|correct|yeah|ok(?:ay)?|huh|"
+                      r"eh|yes|no|isn'?t\s+(?:it|that\s+so)|"
+                      r"don'?t\s+you\s+think|you\s+know)\s*[?!.]?\s*$",
+                      "", prop, flags=re.IGNORECASE).strip()
+        prop = prop.rstrip("?.!").strip()
+        # Anaphoric replay — "you already told me the answer … what
+        # was it?" names the referent by discourse role and carries
+        # no topic terms. Restate the most recent assistant utterance
+        # verbatim from the record instead of term-matching "answer"
+        # against unrelated turns.
+        replay = self._anaphoric_replay(prop, history)
+        if replay is not None:
+            return replay
+        terms = memory._content_terms(prop)
+        if not terms:
+            return None
+        best_text, best_hits = "", 0
+        for row in reversed(history):
+            if str(row.get("role")) != "assistant":
+                continue
+            content = str(row.get("content", ""))
+            hits = len(terms & memory._content_terms(content))
+            if hits > best_hits:
+                best_text, best_hits = content, hits
+        snippet = re.sub(r"\s+", " ", best_text).strip()[:160]
+        if best_hits >= len(terms):
+            return (f"Yes — that's on record. I said: \"{snippet}\"")
+        if best_hits:
+            return (f"Not exactly — closest thing on record is: "
+                    f"\"{snippet}\"")
+        return ("I don't have that on record — as far as I can see, "
+                "I didn't say that.")
+
+    # Residue verbs describe HOW the referent was produced ("the answer
+    # you gave me", "the thing you mentioned") — they point at the
+    # record, never at a topic. Temporal fillers likewise carry no
+    # discriminating content.
+    _ANAPHORA_FILLER_TERMS = frozenset({
+        "earlier", "again", "before", "previously", "just",
+        "gave", "give", "say", "says", "ask", "asked", "reply",
+        "replied", "respond", "responded", "answered", "mention",
+        "mentioned", "made"})
+
+    def _discourse_referent(self, prop: str) -> str | None:
+        """'user' | 'user_q' | 'assistant' | None — the prop names a
+        discourse-role referent (an answer I gave / a question or
+        statement you gave me) and carries no topic terms. A pure
+        referent resolves against the recorded turns, never against
+        stored facts — a 'matching' fact could only have hit on filler
+        vocabulary ('last', 'answer'). 'user_q' prefers genuine
+        questions when the referent is 'question'."""
+        memory = self.conversation_memory
+        if memory is None:
+            return None
+        # User-side referents — "my last question", "what did I just
+        # ask", "the thing I asked/told you about". The record's last
+        # user turn resolves these; replaying an assistant turn would
+        # answer with the wrong speaker's utterance. A 'question' or
+        # 'asked' referent prefers actual questions; a 'thing I told
+        # you' referent takes the latest user turn either way.
+        user_head = re.search(
+            r"\b(?:my|the)\s+(?:last|previous|first|earlier|recent)\s+"
+            r"(?:question|query|thing\s+i\s+(?:asked|told|said|"
+            r"mentioned|shared))\b|"
+            r"\b(?:last|previous|first|recent)\s+thing\s+i\s+"
+            r"(?:asked|told|said|mentioned|shared)\b|"
+            r"\b(?:did\s+)?i\s+(?:just\s+)?ask(?:ed)?\b",
+            prop, re.IGNORECASE)
+        if user_head is not None:
+            rest = (prop[:user_head.start()] + " "
+                    + prop[user_head.end():])
+            if not (memory._content_terms(rest)
+                    - self._ANAPHORA_FILLER_TERMS):
+                prefer_q = not re.search(
+                    r"thing\s+i\s+(?:told|said|mentioned|shared)",
+                    user_head.group(0), re.IGNORECASE)
+                return ("user_q" if prefer_q else "user")
+        # A bare noun is not anaphoric — "do the thing" strips to
+        # prop="thing", which must not read as a discourse referent.
+        # Definite reference needs the article/possessive or a pronoun.
+        head = re.search(
+            r"\b(?:the\s+|your\s+)(?:answer|reply|response|thing|"
+            r"result|outcome|decision|verdict)\b|\b(?:it|that)\b",
+            prop, re.IGNORECASE)
+        if head is None:
+            return None
+        rest = prop[:head.start()] + " " + prop[head.end():]
+        if memory._content_terms(rest) - self._ANAPHORA_FILLER_TERMS:
+            return None
+        return "assistant"
+
+    def _anaphoric_replay(self, prop: str, history: list) -> str | None:
+        """'the answer / the reply / what was it' — a discourse-role
+        referent with no topic terms resolves by recency, not term
+        match: quote the most recent non-meta assistant turn verbatim
+        (truth-gate markers preserved)."""
+        memory = self.conversation_memory
+        if memory is None:
+            return None
+        referent = self._discourse_referent(prop)
+        if referent in ("user", "user_q"):
+            return self._user_recall_replay(
+                history, prefer_question=(referent == "user_q"))
+        if referent != "assistant":
+            return None
+        quoted = self._last_assistant_quote(history)
+        if quoted is not None:
+            return f"Earlier I said: \"{quoted}\""
+        return "I don't have an earlier answer on record."
+
+    def _last_assistant_quote(self, history: list) -> str | None:
+        """Most recent non-meta assistant utterance, normalized to one
+        line, truth-gate marker preserved verbatim — the quoted
+        substance for replays and repeats."""
+        for row in reversed(history):
+            if str(row.get("role")) != "assistant":
+                continue
+            content = re.sub(
+                r"\s+", " ", str(row.get("content", ""))).strip()
+            # Skip this lane's own recall outputs — replaying a replay
+            # nests "Earlier I said: Earlier I said:" and never reaches
+            # the underlying utterance.
+            if content.startswith(self._RECALL_REPLY_PREFIXES):
+                continue
+            if not content:
+                continue
+            # Keep a trailing truth-gate marker verbatim — truncating
+            # it off would re-present a flagged utterance as if it had
+            # been confirmed clean.
+            marker_at = content.find(UNVERIFIED_CLAIMS_MARKER)
+            if marker_at > 0:
+                # Split at the ⚠ glyph so the notice stays
+                # byte-verbatim ("⚠ **Unverified …** — …").
+                warn_at = content.rfind("⚠", 0, marker_at)
+                if warn_at < 0:
+                    warn_at = marker_at
+                return (content[:warn_at].rstrip()[:200]
+                        + " " + content[warn_at:])
+            return content[:200]
+        return None
+
+    def repeat_last_reply(self) -> str | None:
+        """Text of the most recent non-meta assistant utterance — the
+        conversational echo behind 'say that again', used when a
+        voice-repeat can't re-speak it."""
+        memory = self.conversation_memory
+        if memory is None:
+            return None
+        try:
+            history = memory.history(limit=40)
+        except Exception:
+            return None
+        return self._last_assistant_quote(history)
+
+    def _user_recall_replay(self, history: list,
+                            prefer_question: bool = True) -> str | None:
+        """'my last question / what did I just ask / the last thing I
+        told you' — resolve to the last user turn on record. A
+        'question' referent prefers actual questions over interleaved
+        statements; 'the last thing I told you' takes the latest user
+        turn either way."""
+        memory = self.conversation_memory
+        if memory is None:
+            return None
+        fallback = None
+        for row in reversed(history):
+            if str(row.get("role")) != "user":
+                continue
+            content = re.sub(
+                r"\s+", " ", str(row.get("content", ""))).strip()
+            if not content:
+                continue
+            if not prefer_question:
+                return f"You said: \"{content[:200]}\""
+            if content.endswith("?") or re.match(
+                    r"^(?:who|what|when|where|why|how|which|whose|can|"
+                    r"could|would|will|do|does|did|is|are|was|were|"
+                    r"have|has|had|should|may|might|shall)\b",
+                    content, re.IGNORECASE):
+                return f"You asked: \"{content[:200]}\""
+            if fallback is None:
+                fallback = content
+        if fallback is not None:
+            return f"You said: \"{fallback[:200]}\""
+        return "I don't have an earlier question from you on record."
+
+    def _bare_anaphora_reply(self, match_text: str):
+        """'what was it — the answer you gave me?' — no reported-speech
+        lead, but the referent is still discourse-role: replay the
+        record the same way instead of letting the model improvise a
+        prior answer."""
+        memory = self.conversation_memory
+        if memory is None:
+            return None
+        prop = self._FACT_RECALL_RE.sub("", match_text)
+        prop = prop.rstrip("?.!").strip() or \
+            str(match_text).rstrip("?.!").strip()
+        try:
+            history = memory.history(limit=40)
+        except Exception:
+            return None
+        verdict = self._anaphoric_replay(prop, history)
+        if verdict is None:
+            return None
+        from ..context.realize import RenderedReply
+        return RenderedReply(text=verdict, speech_act="answer")
 
     @staticmethod
     def _recalled_fact_sentence(row: dict) -> str:
@@ -2566,7 +2910,8 @@ class AgentOrchestrator:
         # 3000") aren't noun phrases — a definite article garbles them
         # ("the never use port 3000").
         if not text[:1].isupper() and not re.match(
-                r"^(?:the|a|an|my|your|our|never|don'?t|do not|stop|avoid|always)\b",
+                r"^(?:the|a|an|my|your|our|we|i|you|never|don'?t|do not|"
+                r"stop|avoid|always)\b",
                 text, re.IGNORECASE):
             text = "the " + text
         return text[:1].upper() + text[1:]
@@ -2580,11 +2925,47 @@ class AgentOrchestrator:
         model call; questions the store can't answer fall through."""
         text = str(user_text or "")
         frame = self._utterance_frame(env, text)
-        if frame is not None and not frame.allows("memory_recall"):
-            return None
         match_text = (frame.masked_case
                       if frame is not None and frame.masked_case
                       else text)
+        # Leading discourse particles ("hey what's the queue depth")
+        # aren't part of the ask — the frame layer already strips them
+        # for act detection; the recall regex is anchored, so strip the
+        # same shared vocabulary here before matching.
+        try:
+            from ..context.semantics import _strip_discourse_prefix
+            stripped = _strip_discourse_prefix(match_text)
+            if stripped:
+                match_text = stripped
+        except Exception:
+            pass
+        # Confirmation tags ask for agreement — "you told me the retry
+        # limit was 10, yeah" — and aren't part of the stored value;
+        # the learn path already strips them, recall must too or the
+        # tag pollutes the term match.
+        match_text = re.sub(
+            r"[,;]?\s*(?:right|correct|yeah|ok(?:ay)?|huh|eh|yes|no|"
+            r"isn'?t\s+(?:it|that\s+so)|don'?t\s+you\s+think|"
+            r"you\s+know)\s*[?!.]?\s*$",
+            "", match_text, flags=re.IGNORECASE).strip()
+        # Conversational repeats — "repeat what you just said", "say
+        # it again", "what did you say" — the referent is the last
+        # assistant utterance itself; replay it verbatim instead of
+        # letting the model paraphrase. (Voice may claim these
+        # upstream as a TTS re-speak; a turn that reaches the agent
+        # wants the text.) The check precedes the frame-allows and
+        # skip gates: an imperative like "say that again" can classify
+        # as a bare assertion, and "what did you say" trips the
+        # what-did-you exclusion — both are repeat asks by shape.
+        if self._REPEAT_ASK_RE.match(match_text):
+            quoted = self.repeat_last_reply()
+            if quoted is not None:
+                from ..context.realize import RenderedReply
+                return RenderedReply(
+                    text=f"Here it is again: \"{quoted}\"",
+                    speech_act="answer")
+        if frame is not None and not frame.allows("memory_recall"):
+            return None
         if (self.conversation_memory is None
                 or self._FACT_RECALL_SKIP_RE.search(match_text)):
             return None
@@ -2596,8 +2977,19 @@ class AgentOrchestrator:
             # the recall-shaped clause itself may claim the lane (an
             # earlier action clause keeps the turn on its own path).
             clause_match = None
-            for clause in re.split(r"[.!?\n]+", match_text):
+            # Discourse preambles end on commas/em-dashes too — "sorry,
+            # what's my shell", "wait — what's the port" carry the ask
+            # after a marker clause. Split on those as well, and drop a
+            # leading connector ("and/but/so what's X") left by the
+            # split.
+            for clause in re.split(r"[.!?\n]+|—|;|,\s+", match_text):
                 clause = clause.strip()
+                if not clause:
+                    continue
+                clause = re.sub(
+                    r"^(?:and|but|so|or|anyway|anyways|also|"
+                    r"by\s+the\s+way)\b[\s,]*", "", clause,
+                    flags=re.IGNORECASE).strip()
                 if not clause:
                     continue
                 if self._FACT_RECALL_RE.match(clause):
@@ -2607,10 +2999,43 @@ class AgentOrchestrator:
             if clause_match is None:
                 return None
             match_text = clause_match
+        # A pure discourse referent ("my last question", "the answer")
+        # carries no topic terms — a fact row could only match on filler
+        # vocabulary ('last', 'answer') and replay the wrong record.
+        # Resolve against the turn history before fact lookup.
+        prop = self._FACT_RECALL_RE.sub("", match_text)
+        prop = prop.rstrip("?.!").strip()
+        referent = self._discourse_referent(prop)
+        if referent is not None:
+            try:
+                history = self.conversation_memory.history(limit=40)
+            except Exception:
+                history = []
+            verdict = (
+                self._user_recall_replay(
+                    history, prefer_question=(referent == "user_q"))
+                if referent in ("user", "user_q")
+                else self._anaphoric_replay(prop, history))
+            if verdict is not None:
+                from ..context.realize import RenderedReply
+                return RenderedReply(text=verdict, speech_act="answer")
         rows = self.conversation_memory.recall_facts(
             match_text, project_id=project_id,
             conversation_id=conversation_id)
         if not rows:
+            # Reported-speech verification — "didn't you say X" is
+            # claimed by this lane; an empty store means verify against
+            # the recorded turns, never the model's vibe-confirmation.
+            if self._attribution_probe(text, match_text):
+                verdict = self._verify_attributed_claim(match_text)
+                if verdict is not None:
+                    from ..context.realize import RenderedReply
+                    return RenderedReply(text=verdict,
+                                         speech_act="answer")
+            else:
+                reply = self._bare_anaphora_reply(match_text)
+                if reply is not None:
+                    return reply
             # Possessive probes ("what's my editor", "did I tell you my
             # port") can only be answered by taught facts — an empty
             # store is itself the honest answer; don't fall to the
@@ -2667,7 +3092,17 @@ class AgentOrchestrator:
                         # 'still'/'yet' mark verification mode ("is the
                         # api still on 443") — they ask whether a fact
                         # holds, and no stored fact carries them.
-                        "still", "yet"}
+                        "still", "yet",
+                        # Temporal bounds are recall filler — "who is on
+                        # call this week" asks for the current fact; the
+                        # store holds one value, so 'week' can't
+                        # discriminate and only starves the match.
+                        "week", "weeks", "month", "months", "year",
+                        "years", "weekend", "weekends", "today",
+                        "tonight", "tomorrow", "yesterday",
+                        "morning", "evening", "afternoon", "tonite",
+                        "last", "ago", "previous", "previously",
+                        "earlier", "before", "later", "soon"}
             if not q_terms:
                 return None
             def _terms_hit(terms: set, row) -> bool:
@@ -2683,6 +3118,15 @@ class AgentOrchestrator:
                     for t in terms)
             pre_gate = rows
             rows = [r for r in rows if _terms_hit(q_terms, r)]
+            _PROBE_VERBS = {
+                "run", "runs", "lift", "lifts", "start", "starts",
+                "end", "ends", "expire", "expires", "ship", "ships",
+                "land", "lands", "hold", "holds", "begin", "begins",
+                "resume", "resumes", "pass", "passes", "fail", "fails",
+                "happen", "happens", "occur", "occurs", "cost", "costs",
+                "last", "lasts", "serve", "serves", "fire", "fires",
+                "kick", "use", "uses", "work", "works", "take",
+                "takes", "need", "needs", "listen", "listens"}
             if not rows and len(q_terms) > 1:
                 # The probe's own verb isn't a fact term — "when do the
                 # backups run" asks about 'backups', so a strict subset
@@ -2692,15 +3136,7 @@ class AgentOrchestrator:
                 # the sky" → {color}) would widen the match onto
                 # unrelated facts.
                 tail = re.search(r"([a-z0-9]+)\s*$", body.strip())
-                if tail and tail.group(1) in {
-                        "run", "runs", "lift", "lifts", "start",
-                        "starts", "end", "ends", "expire", "expires",
-                        "ship", "ships", "land", "lands", "hold",
-                        "holds", "begin", "begins", "resume", "resumes",
-                        "pass", "passes", "fail", "fails", "happen",
-                        "happens", "occur", "occurs", "cost", "costs",
-                        "last", "lasts", "serve", "serves", "fire",
-                        "fires", "kick"}:
+                if tail and tail.group(1) in _PROBE_VERBS:
                     trimmed = re.sub(r"\s+\S+\s*$", "", body.strip())
                     t_terms = (self.conversation_memory
                                ._content_terms(trimmed)
@@ -2708,6 +3144,15 @@ class AgentOrchestrator:
                     if t_terms and t_terms != q_terms:
                         rows = [r for r in pre_gate
                                 if _terms_hit(t_terms, r)]
+            if not rows and len(q_terms) > 1:
+                # Verification questions carry the verb mid-question —
+                # "does the metrics api RUN on 9100" leaves 'run' as a
+                # term the fact never contains. Same verb set, dropped
+                # anywhere in the term list.
+                t_terms = q_terms - _PROBE_VERBS
+                if t_terms and t_terms != q_terms:
+                    rows = [r for r in pre_gate
+                            if _terms_hit(t_terms, r)]
             if not rows:
                 # Orthographic compounds — English writes them both
                 # ways ("on call"/oncall, "log in"/login, "set
@@ -2725,6 +3170,19 @@ class AgentOrchestrator:
                         rows = hit
                         break
             if not rows:
+                # Same attribution check as the early path — a
+                # reported-speech turn that survives the precision
+                # gate's retries still answers from the record.
+                if self._attribution_probe(text, match_text):
+                    verdict = self._verify_attributed_claim(match_text)
+                    if verdict is not None:
+                        from ..context.realize import RenderedReply
+                        return RenderedReply(text=verdict,
+                                             speech_act="answer")
+                else:
+                    reply = self._bare_anaphora_reply(match_text)
+                    if reply is not None:
+                        return reply
                 return None
             # Subject anchoring: the question asks ABOUT an entity, so a
             # fact whose subject carries the query terms ('prod api is
@@ -2758,6 +3216,14 @@ class AgentOrchestrator:
                 if subj_rows:
                     rows = subj_rows
         items = [self._recalled_fact_sentence(r) for r in rows[:4]]
+        # Mid-list sentences join with commas/'and' — their renderer-
+        # added capitalization ("The", "We") reads wrong mid-sentence.
+        # Lowercase continuation items' grammatical leads only, so
+        # proper nouns ('API', 'SQL') survive.
+        items[1:] = [
+            re.sub(r"^(The|A|An|We|You|Your|My|It)\b",
+                   lambda mm: mm.group(1).lower(), it)
+            for it in items[1:]]
         my_rows = [r for r in rows[:4]
                    if str(r.get("slot") or "").startswith("my:")]
         if len(items) == 1:
@@ -2793,18 +3259,49 @@ class AgentOrchestrator:
                  if frame is not None and frame.masked_case
                  else user_text) or ""
         rules_q = bool(self._RULES_RECALL_RE.search(probe))
-        if not rules_q and not self._FACTS_RECALL_RE.search(probe):
+        rules_count_q = bool(re.search(
+            r"\bhow\s+many\s+(?:operating\s+|active\s+|standing\s+)?"
+            r"rules?\b", probe, re.IGNORECASE))
+        # 'things'/'items' deliberately excluded — "how many things are
+        # running" is an autonomy-inventory ask, not a fact count.
+        count_q = bool(re.search(
+            r"\bhow\s+many\s+facts?\b|"
+            r"\bhow\s+much\s+(?:do\s+you\s+remember|"
+            r"(?:have\s+you\s+)?(?:learned|remembered|stored))\b",
+            probe, re.IGNORECASE))
+        if not rules_q and not rules_count_q and not count_q \
+                and not self._FACTS_RECALL_RE.search(probe):
             return None
         if self.conversation_memory is None:
             return None
-        if rules_q:
+        if rules_q or rules_count_q:
             rules = self.conversation_memory.active_rules(
                 project_id=project_id, conversation_id=conversation_id)
-            canonical = (
-                "No standing rules yet — nothing you've told me to "
-                "always or never do."
-                if not rules else
-                "Operating rules: " + "; ".join(f'"{r}"' for r in rules[:8]))
+            if rules_count_q and not rules_q:
+                # Ground the count in the store — a model answer would
+                # count whatever list happened to be rendered last.
+                n = len(rules)
+                canonical = (
+                    "No standing rules yet — nothing you've told me "
+                    "to always or never do."
+                    if n == 0 else
+                    f"{n} rule{'s' if n != 1 else ''} "
+                    f"{'are' if n != 1 else 'is'} active.")
+                from ..context.realize import RenderedReply
+                return RenderedReply(text=canonical, speech_act="answer")
+            if not rules:
+                canonical = ("No standing rules yet — nothing you've "
+                             "told me to always or never do.")
+            elif len(rules) <= 8:
+                canonical = ("Operating rules: "
+                             + "; ".join(f'"{r}"' for r in rules))
+            else:
+                # Past the display cap the total still has to be true —
+                # listing 8 of 11 silently misreports the rule set.
+                canonical = (
+                    f"{len(rules)} operating rules — "
+                    + "; ".join(f'"{r}"' for r in rules[:8])
+                    + f"; and {len(rules) - 8} more.")
             from ..context.realize import RenderedReply, SemanticResponse
             sem = SemanticResponse(
                 facts=[canonical], semantic_id="memory:rules_recall",
@@ -2818,6 +3315,38 @@ class AgentOrchestrator:
                 canonical=canonical)
         facts = self.conversation_memory.active_facts(
             project_id=project_id, conversation_id=conversation_id)
+        if count_q:
+            n = len(facts)
+            canonical = (
+                "Nothing yet — you haven't taught me anything to keep."
+                if n == 0 else
+                f"I've kept {n} fact{'s' if n != 1 else ''} "
+                "you've told me.")
+            from ..context.realize import RenderedReply
+            return RenderedReply(text=canonical, speech_act="answer")
+        # Scoped recall — "what do you remember about my shell" asks
+        # for the shell fact, not the whole store. The dump is only for
+        # unscoped/about-me introspection; a named topic filters the
+        # facts and an unmatched scope defers to the single-fact lane.
+        scope = re.search(
+            r"\babout\s+(.+?)\s*[?!.]*$", probe, re.IGNORECASE)
+        if scope:
+            scope_words = scope.group(1).strip().lower()
+            if scope_words not in (
+                    "me", "us", "myself", "what i said",
+                    "what i told you", "the things i said",
+                    "the stuff i told you"):
+                scope_terms = (
+                    self.conversation_memory._content_terms(scope_words))
+                if scope_terms:
+                    def _hit(f: str) -> bool:
+                        ft = self.conversation_memory._fact_query_terms(
+                            f, self.conversation_memory._fact_slot(f))
+                        return bool(scope_terms & ft)
+                    hits = [f for f in facts if _hit(f)]
+                    if not hits:
+                        return None
+                    facts = hits
         if not facts:
             canonical = ("Nothing yet — you haven't taught me anything "
                          "to keep.")
@@ -2976,6 +3505,31 @@ class AgentOrchestrator:
             sem, genome, ctx, intent="state_recall",
             canonical=canonical)
 
+    # Plan-kind → the imperative aliases that could have produced it.
+    # A re-parse on unmasked text is accepted only when one of these
+    # verbs survives outside the quoted spans — proving the command
+    # itself wasn't the quoted/discussed text.
+    _PLAN_KIND_VERBS = {
+        "mkdir": {"create", "make", "new", "mkdir"},
+        "write": {"write", "save", "create", "make", "touch"},
+        "delete": {"delete", "remove", "erase", "rm", "rmdir"},
+        "move": {"move"},
+        "rename": {"rename"},
+        "copy": {"copy", "duplicate"},
+        "archive": {"archive", "zip", "compress"},
+        "extract": {"extract", "unzip", "unarchive"},
+    }
+
+    @staticmethod
+    def _plan_verb_visible(plan, masked_text: str) -> bool:
+        verbs = AgentOrchestrator._PLAN_KIND_VERBS.get(
+            getattr(plan, "kind", ""))
+        if not verbs:
+            head = str(getattr(plan, "action_text", "")).split()[:1]
+            verbs = {head[0].lower()} if head else set()
+        low = str(masked_text or "").lower()
+        return any(re.search(rf"\b{re.escape(v)}\b", low) for v in verbs)
+
     def _local_action_reply(self, user_text: str, task_id: str,
                             event_callback=None, env=None):
         """Deterministic computer-task lane — 'create a folder
@@ -3029,6 +3583,26 @@ class AgentOrchestrator:
                 extra_roots=self.tools.context.get("extra_roots"))
         except Exception:
             return None
+        if (plan is None or getattr(plan, "clarify", None)) \
+                and frame is not None and frame.quoted_spans \
+                and plan_text != user_text:
+            # A masked quoted span may have been the action's payload or
+            # target — 'write "hello" to note.txt', "delete 'junk.txt'"
+            # — not discussed text. Re-parse the unmasked utterance and
+            # accept the plan only when its action verb survives outside
+            # the quotes: 'the note says "delete x"' keeps 'delete'
+            # inside the quote, so the masked text holds no delete verb.
+            try:
+                raw_plan = parse_local_action(
+                    user_text,
+                    workspace=self.checkpoints.workspace,
+                    extra_roots=self.tools.context.get("extra_roots"))
+            except Exception:
+                raw_plan = None
+            if raw_plan is not None and not getattr(
+                    raw_plan, "clarify", None) and self._plan_verb_visible(
+                        raw_plan, plan_text):
+                plan = raw_plan
         if plan is None:
             return None
         outcome = execute_plan(
@@ -3448,6 +4022,39 @@ class AgentOrchestrator:
     # rhetoric in turns where no tools were ever expected; those still
     # mark the reply unverified for Answer Memory but never add the badge.
     _CLAIM_ADVERBS = r"(?:(?:already|just|now|also|even|still|fully|been|got|currently)\s+)*"
+    # Witnessed-event claims — "I've seen it trigger twice", "I noticed
+    # the service restart" — assert telemetry that only exists if a
+    # log/tool actually surfaced it; same fabrication class as claiming
+    # the check itself ran. Passive-telemetry claims — "the log showed
+    # a timeout", "metrics confirm the fix" — cite system evidence the
+    # model never read. Shared by _EXECUTED_CLAIM_RE and the
+    # badge-on-utility-turns gate below.
+    _WITNESSED_CLAIM_SRC = (
+        r"\b(?:i['’]ve|i have|i['’]d|i)\s+" + _CLAIM_ADVERBS +
+        r"(?:seen|saw|noticed|observed|spotted|detected|recorded|"
+        r"watched|witnessed|checked|verified|reviewed|inspected|"
+        r"examined|scanned|monitored|read|looked|pulled|audited|"
+        r"restarted|deployed|patched|applied|installed|updated|"
+        r"modified|configured|enabled|disabled|reverted|migrated|"
+        r"rebuilt|recreated|stopped|killed|merged|pushed|committed|"
+        r"synced|uploaded|downloaded|deleted|removed|wiped|cleaned|"
+        r"renamed|moved|copied|refactored|implemented|created|"
+        r"written|wrote|edited|fixed|repaired|launched|generated|"
+        r"saved|added|attached|cloned)\s+"
+        r"(?:at|through|over|up|back|into|across|on|in|down|off)?\s*"
+        r"(?:(?:it|them|those|these)\b|(?:a|an|the|this|that|my|your|its)\s+"
+        r"(?:issues?|errors?|failures?|crashes?|restarts?|deploys?|"
+        r"builds?|jobs?|missions?|services?|process(?:es)?|requests?|"
+        r"events?|incidents?|alerts?|patterns?|behaviou?rs?|timeouts?|"
+        r"loops?|repeats?|resets?|retries?|outages?|regressions?|drift|"
+        r"churn|thrash(?:ing)?|spikes?|systems?|logs?|schedulers?|"
+        r"daemons?|runtimes?|queues?|workers?|nodes?|models?|backends?|"
+        r"servers?|apis?|databases?|disks?|gpus?|networks?|agents?)\b)"
+        r"|\b(?:the\s+)?(?:logs?|metrics?|telemetry|traces?|records?|"
+        r"history|ledger|audit|monitor(?:ing|s)?|dashboards?)\s+"
+        r"(?:show(?:ed|s)?|confirm(?:ed|s)?|indicate[sd]?|reveal(?:ed|s)?|"
+        r"report(?:ed|s)?|list(?:ed|s)?|flag(?:ged|s)?)\b")
+    _WITNESSED_CLAIM_RE = re.compile(_WITNESSED_CLAIM_SRC, re.I | re.S)
     _EXECUTED_CLAIM_RE = re.compile(
         r"(?:\b(?:i['’]ve|i have|i already|i just|just now|i now)\s+"
         + _CLAIM_ADVERBS +
@@ -3460,6 +4067,10 @@ class AgentOrchestrator:
         r"modified|edited|deleted|removed|saved|added|renamed|moved|"
         r"copied|implemented|refactored|reverted|migrated|configured|"
         r"enabled|disabled|stopped|cleaned|wiped|reworked|rewrote)\b)"
+        # Witnessed-event and telemetry-citation claims — never persona
+        # color, so they badge even on utility turns (see the
+        # witnessed-claims clause in the truth-gate check below).
+        + r"|(?:" + _WITNESSED_CLAIM_SRC + ")"
         # Simple-past execution claims — "I updated the file", "I ran
         # the tests". Phrasal-verb guards keep "I ran into an error",
         # "I checked out a movie", "I started up" from flagging, and
@@ -4083,8 +4694,9 @@ class AgentOrchestrator:
         hearsay = learned.get("hearsay") or []
         hedged = learned.get("hedged") or []
         clarify = learned.get("clarify") or []
+        ack = learned.get("ack") or []
         if not (facts or rules or examples or forgotten or locked or restated
-                or miss or hearsay or hedged or clarify):
+                or miss or hearsay or hedged or clarify or ack):
             return None
         parts = []
         if locked:
@@ -4093,13 +4705,23 @@ class AgentOrchestrator:
             # Echo the landed value — "Got it — 8090." both confirms the
             # correction and proves the new value superseded; narrating
             # the storage mechanism ("I saved that to persistent
-            # memory") is internals the user didn't ask for.
+            # memory") is internals the user didn't ask for. User-owned
+            # facts ("my birthday is march 3") echo second-person — an
+            # ack repeating 'my X' would claim the user's fact as hers.
             if len(facts) == 1:
-                parts.append(f"Got it — {facts[0]}.")
+                echo = facts[0]
+                if str(ConversationMemory._fact_slot(echo)
+                       or "").startswith("my:"):
+                    echo = AgentOrchestrator._second_person_fact(echo)
+                parts.append(f"Got it — {echo}.")
             else:
                 parts.append(f"Got it — noted {len(facts)} things.")
         elif restated:
-            parts.append(f"Already noted — {restated[0]}.")
+            echo = restated[0]
+            if str(ConversationMemory._fact_slot(echo)
+                   or "").startswith("my:"):
+                echo = AgentOrchestrator._second_person_fact(echo)
+            parts.append(f"Already noted — {echo}.")
         elif hearsay:
             # Secondhand claims are acknowledged but never banked —
             # the ack says so plainly instead of pretending either a
@@ -4115,11 +4737,26 @@ class AgentOrchestrator:
                 "so I'll treat it as unverified.")
         elif clarify:
             parts.append(str(clarify[0]))
+        elif ack:
+            # A pure acknowledgement — 'no problem'/'no worries' close
+            # a correction thread ('nothing to change'); 'thanks'/'got
+            # it'/'you already told me' are plain social close-outs.
+            if "social" in ack:
+                parts.append("Anytime.")
+            else:
+                parts.append("Got it — nothing to change.")
         elif not parts and not miss:
             parts.append("Got it.")
         if rules:
-            parts.append("I'll apply that as an operating rule going "
-                         "forward.")
+            # A bounded prohibition ("don't summarize for the next
+            # hour") carries an expiry — the ack must not promise
+            # permanence it won't deliver.
+            bounded = any(
+                ConversationMemory._rule_expiry(str(r)) is not None
+                for r in rules)
+            parts.append(
+                "I'll apply that as an operating rule "
+                + ("for that window." if bounded else "going forward."))
         if examples:
             parts.append("Saved your correction for review.")
         if forgotten:
@@ -7072,8 +7709,20 @@ class AgentOrchestrator:
                 artifact_ids=self._artifact_ids_from_events(session.tool_events),
                 attachments=session.attachments_meta,
             )
+        _am_context_dependent = False
+        try:
+            from ..answer_memory import validation as _am_validation
+            _am_context_dependent = bool(
+                _am_validation.is_context_dependent(session.user_text))
+        except Exception:
+            pass
         if (self.answer_memory is not None and not session.unverified_claims
                 and not mission_attributed
+                # Context-dependent asks ("you already told me the
+                # answer — what was it?") resolve against live
+                # history; their replies banked as reusable answers
+                # replay stale confabulation to unrelated questions.
+                and not _am_context_dependent
                 # Deterministic lane replies — recall acks, honest-empty
                 # memory probes, clock/status answers, training acks —
                 # encode session state, not reusable knowledge. Banking
@@ -7750,22 +8399,33 @@ class AgentOrchestrator:
                                         "actions without execution")
                         except Exception:
                             pass
-                if claims and not session.tool_events \
-                        and not session.research_context.get("sources") \
-                        and session.decision.role != "utility":
-                    # Casual utility replies describe persona color
-                    # ("just finished polishing the logs") — flag them
-                    # for memory silently, but never badge the chat.
+                # Casual utility replies describe persona color
+                # ("just finished polishing the logs") — flag them for
+                # memory silently, but never badge the chat. The
+                # exemption only covers do-claims: witnessed-event and
+                # telemetry-citation claims ("I've seen it trigger
+                # twice", "the log showed a timeout") are falsifiable
+                # system assertions, never persona color — they badge
+                # on any role.
+                witnessed = set(
+                    self._claims_matching(
+                        session.main_content, self._WITNESSED_CLAIM_RE)
+                    ) if session.decision.role == "utility" else set()
+                badgeable = (
+                    [c for c in claims if c in witnessed]
+                    if session.decision.role == "utility" else claims)
+                if badgeable and not session.tool_events \
+                        and not session.research_context.get("sources"):
                     notice = (
                         f"\n\n⚠ **{UNVERIFIED_CLAIMS_MARKER}** — no tools or "
                         "commands ran in this reply. Statements asserting "
-                        "completed actions above are narrative, not "
-                        "confirmed execution.")
+                        "completed actions or observed events above are "
+                        "narrative, not confirmed execution.")
                     session.main_content += notice
                     claims_event = {
                         "type": "unverified_action_claims",
                         "model_id": session.profile.id,
-                        "claims": [c[:120] for c in claims[:3]],
+                        "claims": [c[:120] for c in badgeable[:3]],
                     }
                     session.model_events.append(claims_event)
                     self._emit(session, "model", event=claims_event)
@@ -9827,7 +10487,7 @@ class AgentOrchestrator:
                 for msg in reversed(history[-history_turns:]):
                     content = str(msg.get("content") or "")
                     if str(msg.get("role") or "") == "assistant":
-                        content = _strip_unverified_notice(content)
+                        content = _history_sanitize(content)
                     if not content or budget[0] <= 0:
                         continue
                     if len(content) > budget[0]:
@@ -9960,7 +10620,7 @@ class AgentOrchestrator:
                 for msg in reversed(history[-24:]):
                     content = str(msg.get("content") or "")
                     if str(msg.get("role") or "") == "assistant":
-                        content = _strip_unverified_notice(content)
+                        content = _history_sanitize(content)
                     if not content or budget[0] <= 0:
                         continue
                     if len(content) > budget[0]:
