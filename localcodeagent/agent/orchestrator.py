@@ -3622,9 +3622,10 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_SNOOZE_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:snooze|postpone|delay|push\s+back)\s+"
+        r"(?:snooze|postpone|delay|push\s+back|push|bump|shift)\s+"
         r"(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?)\b"
-        r"(?:\s+(?:(?:for|until|till|to|by)\s+"
+        r"(?:\s+(?:(?P<way>for|until|till|to|by|back|up|forward|"
+        r"later|earlier|sooner)\s+"
         r"|(?=\d|a\s|an\s|one\s))(?P<dur>.+?))?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -3746,7 +3747,7 @@ class AgentOrchestrator:
         now = time.time()
         if dur:
             dm = re.fullmatch(
-                r"(?:in\s+)?(\d+(?:\.\d+)?)\s*"
+                r"(?:(?:in|by)\s+)?(\d+(?:\.\d+)?)\s*"
                 r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
                 r"days?|d)", dur)
             if dm:
@@ -3800,10 +3801,16 @@ class AgentOrchestrator:
             else:
                 # A duration snooze delays the row's own fire time —
                 # 'snooze the friday reminder an hour' lands friday
-                # +1h, never earlier than scheduled.
+                # +1h. 'earlier'/'sooner' pull it before schedule;
+                # 'back'/'forward'/'later' keep the push-back=later
+                # dialect this lane already answers.
                 if when is None:
-                    when = max(now, float(
-                        hits[0].get("at") or now)) + delta
+                    base = float(hits[0].get("at") or now)
+                    if str(ms.group("way") or "").lower() in (
+                            "earlier", "sooner", "up"):
+                        when = max(now, base - delta)
+                    else:
+                        when = max(now, base) + delta
                 try:
                     sched.update(str(hits[0]["id"]), at=when)
                     merged = sum(bool(sched.remove(str(s["id"])))

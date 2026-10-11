@@ -1821,12 +1821,38 @@ class TruthGateTests(RecoveryLoopTests):
             row["enabled"] = True
             row["name"] = "reminder: standup"
             lt = time.localtime(time.time() + 86400)
-            row["at"] = time.mktime(
+            row_at = time.mktime(
                 (lt.tm_year, lt.tm_mon, lt.tm_mday, 15, 0, 0,
                  lt.tm_wday, lt.tm_yday, lt.tm_isdst))
+            row["at"] = row_at
             result = agent.run("skip the 3pm reminder", mode="auto")
             self.assertIn("Cancel", result.content)
             self.assertFalse(sup.scheduler.rows)
+
+            # 'push'/'bump'/'shift' are snooze verbs — 'push the 9pm
+            # reminder to 10pm' got a garbled model echo over the
+            # unchanged 21:00 row live; 'shift … earlier/up' pulls
+            # the fire time BEFORE schedule instead of after.
+            sup.scheduler.add(
+                "reminder: check the oven", "once",
+                at=row_at, action={"kind": "notify",
+                                  "detail": "check the oven"})
+            oven_row = sup.scheduler.rows[-1]
+            result = agent.run("push the 3pm reminder to 10pm",
+                               mode="auto")
+            self.assertIn("Snoozed", result.content)
+            lt2 = time.localtime(oven_row["at"])
+            self.assertEqual((lt2.tm_hour, lt2.tm_min), (22, 0))
+            before = oven_row["at"]
+            result = agent.run("shift the oven reminder earlier "
+                               "by 30 minutes", mode="auto")
+            self.assertIn("Snoozed", result.content)
+            self.assertAlmostEqual(oven_row["at"], before - 1800, 0)
+            before = oven_row["at"]
+            result = agent.run("bump the oven reminder an hour",
+                               mode="auto")
+            self.assertIn("Snoozed", result.content)
+            self.assertAlmostEqual(oven_row["at"], before + 3600, 0)
 
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
