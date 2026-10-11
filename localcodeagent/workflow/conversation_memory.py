@@ -1232,6 +1232,13 @@ class ConversationMemory:
         # a marker-prefixed credential ("fyi the wifi password is
         # hunter2") banks its tail through the same paths as the bare
         # statement, so the gate must see through the marker too.
+        # Topic-pivot preambles — "speaking of editors, mine is vim" —
+        # the bankable clause follows the comma.
+        body = re.sub(
+            r"^(?:(?:speaking|talking)\s+of|"
+            r"on\s+the\s+(?:topic|subject)\s+of|as\s+for|"
+            r"regarding)\s+[^,;]{1,60}[,;]\s*",
+            "", raw, flags=re.IGNORECASE)
         body = re.sub(
             r"^(?:(?:actually|by\s+the\s+way|btw|also|so|fyi|"
             r"note\s+(?:that|this)|note|quick\s+note|"
@@ -1240,8 +1247,9 @@ class ConversationMemory:
             r"on\s+second\s+thought|i\s+mean(?:t)?|"
             r"and|but|then|or|plus|"
             r"ok(?:ay)?|yeah|yep|yup|well|hey|"
+            r"out\s+of\s+curiosity|out\s+of\s+interest|"
             r"hmm+|hm+|um+|uh+|er+|erm+|ah+|oh)[,:\s]+)+",
-            "", raw, flags=re.IGNORECASE)
+            "", body, flags=re.IGNORECASE)
         # Confirmation tags — "the api keys rotate monthly, right?" —
         # ask for agreement; they aren't part of the stated value.
         body = re.sub(

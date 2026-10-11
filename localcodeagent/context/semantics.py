@@ -447,6 +447,10 @@ _WANT_TO_KNOW_RE = re.compile(
     r"\bi\s+wonder\b|\bwondering\s+(?:if|whether|what|how|why)\b|"
     r"\bi\s+(?:keep\s+)?(?:meaning|wanted|meant|was\s+going|"
     r"have\s+been\s+meaning)\s+to\s+ask\b|"
+    # Hedged information asks — "any chance you remember the port",
+    # "is there any chance you know" — the politeness wrapper is
+    # filler; the tail is the ask.
+    r"\bany\s+chance\s+you\s+\w|\bis\s+there\s+any\s+chance\s+you\b|"
     r"\bwhat\s+does\b.{0,60}\bmean\b|\bwhat\s+(?:does|do|did)\s+"
     r"(?:that|this|it)\s+mean\b",
     re.IGNORECASE)
@@ -648,13 +652,19 @@ def _clauses(masked: str) -> list[str]:
 _DISCOURSE_FREE_RE = re.compile(
     r"^(?:(?:um+|uh+|er+|hmm+|oh+|ah+|ok(?:ay)?|so(?:\s+like)?|well|"
     r"and|but|then|or|plus|"
+    r"out\s+of\s+curiosity|out\s+of\s+interest|"
     r"anyways?|alright|also|yeah|yep|yup|tbh|btw|honestly|actually|"
     r"basically|literally|like|pls|please|kindly|now|hey)\b"
     r"[\s,.\-—–!?]*)+", re.IGNORECASE)
 # Imperative-adjacent markers ('wait a second' is a command, 'wait,'
 # is discourse) — only strip when punctuation separates them.
 _DISCOURSE_COMMA_RE = re.compile(
-    r"^(?:(?:wait|look|listen|yo|see|sorry)\b\s*[,—–\-]\s*)+",
+    r"^(?:(?:wait|look|listen|yo|see|sorry)\b\s*[,—–\-]\s*|"
+    # Topic pivots — "speaking of ports, what does staging use"
+    # carries the ask after a phrasal preamble.
+    r"(?:speaking|talking)\s+of\s+[^,;—–]{1,60}[,;—–]\s*|"
+    r"(?:on\s+the\s+(?:topic|subject)\s+of|as\s+for|"
+    r"regarding|about)\s+[^,;—–]{1,60}[,;—–]\s*)+",
     re.IGNORECASE)
 
 

@@ -2554,6 +2554,12 @@ class AgentOrchestrator:
         r"(?:didn'?t|did\s+not)\s+you\s+say\s+|did\s+you\s+say\s+|"
         r"you\s+(?:said|told\s+me)\s+|i\s+thought\s+you\s+"
         r"(?:said|told\s+me)\s+|"
+        # Hedged recall asks — "do you happen to know my editor",
+        # "any chance you remember the retry limit" — the politeness
+        # hedge is filler; the ask is a memory lookup.
+        r"do\s+you\s+(?:happen\s+to\s+)?(?:know|remember|recall|"
+        r"recollect)\s+|(?:is\s+there\s+)?any\s+chance\s+you\s+"
+        r"(?:remember|know|recall)\s+|"
         r"where\s+(?:is|are|was|were)\s+|do you remember\s+|"
         r"do\s+i\s+(?:use|have|like|prefer|run|need)\s+|"
         # Verification with an explicit subject — "does the metrics
@@ -2574,7 +2580,10 @@ class AgentOrchestrator:
         r"did\s+(?:you|we|they|he|she|it|that|this)|"
         r"does\s+(?:it|that|this|he|she|they)|will|"
         r"happens|happened|else|if)\b|"
-        r"what\s+(?:time|day)\s+is\s+it\b|\byou know\b|"
+        r"what\s+(?:time|day)\s+is\s+it\b|"
+        # 'you know' the tag is terminal or bracketed by commas — the
+        # same words inside 'do you know X' are a genuine ask.
+        r"(?:^|[,;—–])\s*you\s+know\s*[?!.,;—–]*\s*$|"
         r"\babout me\b",
         re.IGNORECASE)
 

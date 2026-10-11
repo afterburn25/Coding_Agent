@@ -835,6 +835,8 @@ class TruthGateTests(RecoveryLoopTests):
                 "my editor is cursor")
             agent.conversation_memory.learn_from_user("retry limit is 10")
             agent.conversation_memory.learn_from_user("my shell is zsh")
+            agent.conversation_memory.learn_from_user(
+                "staging api uses port 8443")
             cases = (
                 ("you said my editor was cursor, right", "cursor"),
                 ("you told me the retry limit was 10, yeah", "10"),
@@ -842,6 +844,14 @@ class TruthGateTests(RecoveryLoopTests):
                 ("did you say my editor was cursor", "cursor"),
                 ("what was it again — the retry limit", "10"),
                 ("i keep meaning to ask what shell I use", "zsh"),
+                # Hedged/polite recall leads — live these fell to a
+                # model that contradicted the banked fact.
+                ("do you happen to know my editor", "cursor"),
+                ("do you know my editor", "cursor"),
+                ("any chance you remember the retry limit", "10"),
+                ("is there any chance you know my shell", "zsh"),
+                ("out of curiosity what shell do I run", "zsh"),
+                ("speaking of ports, what does staging use", "8443"),
             )
             agent.conversation_memory.learn_from_user(
                 "prod api is on 443")
@@ -850,11 +860,30 @@ class TruthGateTests(RecoveryLoopTests):
                 self.assertIsNotNone(reply, q)
                 self.assertIn(want, reply.text, q)
             # An untagged 'you said …' is a complaint/assertion, not a
-            # verification — it must NOT recall.
+            # verification — it must NOT recall. Nor should a general
+            # question whose terms hit nothing.
             for q in ("you said this would work",
-                      "you said the deploy was fine"):
+                      "you said the deploy was fine",
+                      "do you know the capital of france"):
                 self.assertIsNone(
                     agent._single_fact_recall_reply(q, "conv", "proj"), q)
+
+    def test_topic_pivot_preamble_strips_on_learn(self):
+        # "speaking of ports, prod uses 8443" — the bankable clause
+        # follows the pivot's comma. The pivot itself must not bank
+        # (it did not, but only because the comma routed the turn
+        # away — the strip makes the tail reachable deliberately).
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            cm = ConversationMemory(Path(td) / "cm.json")
+            for q, want in (
+                    ("speaking of ports, prod uses 8443",
+                     ["prod uses 8443"]),
+                    ("as for the deadline, it is friday", []),  # 'it' anaphora
+                    ("regarding the cache, it expires hourly",
+                     [])):  # ditto
+                self.assertEqual(cm.learn_from_user(q)["facts"], want, q)
 
     def test_port_probe_is_answer_type_slot(self):
         # "which port is prod on" — 'port' names the answer's type, not
