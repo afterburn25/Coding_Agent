@@ -999,6 +999,38 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("deadline is friday", r.text.lower())
             self.assertNotIn("headphones are boson", r.text.lower())
 
+    def test_user_question_referent_replays_user_turn(self):
+        # Live: "what was my last question?" replayed an ASSISTANT
+        # turn ("The backup ran successfully last night.") — the
+        # referent is the user's own question, not the assistant's
+        # last utterance. User-side referents resolve against user
+        # rows on the record.
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            cm = agent.conversation_memory
+            cm.record_exchange("what port should the api use",
+                               "Use port 8080.")
+            cm.record_exchange("sounds good, ship it",
+                               "On it.")
+            for q in ("what was my last question?",
+                      "what did i just ask?",
+                      "remind me what i asked you"):
+                r = agent._single_fact_recall_reply(q, "conv", "proj")
+                self.assertIsNotNone(r, q)
+                self.assertIn("port should the api use",
+                              r.text.lower(), q)
+            # A correction statement between questions doesn't hide
+            # the question — 'my last question' skips to the ask.
+            cm.record_exchange("actually the port is 9090", "Noted.")
+            r = agent._single_fact_recall_reply(
+                "what was my last question?", "conv", "proj")
+            self.assertIsNotNone(r)
+            self.assertIn("port should the api use", r.text.lower())
+
     def test_bare_wh_anaphora_replays_record(self):
         # Live: "what was it — the answer you gave me?" carries no
         # reported-speech lead, so the attribution branch never ran and

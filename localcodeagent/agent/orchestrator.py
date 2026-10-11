@@ -2610,6 +2610,9 @@ class AgentOrchestrator:
         "I don't have that on record",
         "I don't have anything on record",
         "I don't have an earlier answer on record",
+        "You asked:",
+        "You said:",
+        "I don't have an earlier question",
     )
     _FACT_RECALL_SKIP_RE = re.compile(
         r"^\s*what\s+(?:do\s+you(?!\s+(?:have|got|know|remember|"
@@ -2723,6 +2726,21 @@ class AgentOrchestrator:
         memory = self.conversation_memory
         if memory is None:
             return None
+        # User-side referents — "my last question", "what did I just
+        # ask", "the thing I asked about". The record's last user
+        # question resolves these; replaying an assistant turn would
+        # answer with the wrong speaker's utterance.
+        user_head = re.search(
+            r"\b(?:my|the)\s+(?:last|previous|first|earlier|recent)\s+"
+            r"(?:question|query|thing\s+i\s+asked)\b|"
+            r"\b(?:last|previous|first|recent)\s+thing\s+i\s+asked\b|"
+            r"\b(?:did\s+)?i\s+(?:just\s+)?ask(?:ed)?\b",
+            prop, re.IGNORECASE)
+        if user_head is not None:
+            rest = prop[:user_head.start()] + " " + prop[user_head.end():]
+            if not (memory._content_terms(rest)
+                    - self._ANAPHORA_FILLER_TERMS):
+                return self._user_recall_replay(history)
         # A bare noun is not anaphoric — "do the thing" strips to
         # prop="thing", which must not read as a discourse referent.
         # Definite reference needs the article/possessive or a pronoun.
@@ -2764,6 +2782,33 @@ class AgentOrchestrator:
                     quoted = content[:200]
                 return f"Earlier I said: \"{quoted}\""
         return "I don't have an earlier answer on record."
+
+    def _user_recall_replay(self, history: list) -> str | None:
+        """'my last question / what did I just ask' — resolve to the
+        last user turn on record, preferring actual questions over
+        statements when the referent is 'question'."""
+        memory = self.conversation_memory
+        if memory is None:
+            return None
+        fallback = None
+        for row in reversed(history):
+            if str(row.get("role")) != "user":
+                continue
+            content = re.sub(
+                r"\s+", " ", str(row.get("content", ""))).strip()
+            if not content:
+                continue
+            if content.endswith("?") or re.match(
+                    r"^(?:who|what|when|where|why|how|which|whose|can|"
+                    r"could|would|will|do|does|did|is|are|was|were|"
+                    r"have|has|had|should|may|might|shall)\b",
+                    content, re.IGNORECASE):
+                return f"You asked: \"{content[:200]}\""
+            if fallback is None:
+                fallback = content
+        if fallback is not None:
+            return f"You said: \"{fallback[:200]}\""
+        return "I don't have an earlier question from you on record."
 
     def _bare_anaphora_reply(self, match_text: str):
         """'what was it — the answer you gave me?' — no reported-speech
