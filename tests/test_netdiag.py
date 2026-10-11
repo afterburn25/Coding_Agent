@@ -2138,6 +2138,24 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("reminders for me", mode="auto")
             self.assertIn("reminder", result.content.lower())
             self.assertNotIn("do what", result.content)
+            # Terse forms — 'reminders off' got a model 'all inactive'
+            # over untouched rows; 'snooze everything' got a false
+            # capability refusal. Both are real pool mutations now.
+            sup.scheduler.add(
+                "reminder: terse", "once",
+                at=time.time() + 3600,
+                action={"kind": "notify", "detail": "terse"})
+            result = agent.run("reminders off", mode="auto")
+            self.assertIn("off", result.content.lower())
+            self.assertFalse(sup.scheduler.rows[-1]["enabled"])
+            result = agent.run("reminders on", mode="auto")
+            self.assertIn("on", result.content.lower())
+            self.assertTrue(sup.scheduler.rows[-1]["enabled"])
+            t0 = sup.scheduler.rows[-1]["at"]
+            result = agent.run("snooze everything", mode="auto")
+            self.assertIn("Snoozed", result.content)
+            self.assertAlmostEqual(
+                sup.scheduler.rows[-1]["at"], t0 + 600, 0)
             sup.scheduler.rows.clear()
 
             # Possessive scopes — 'cancel tomorrow's reminder' left

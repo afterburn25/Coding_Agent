@@ -3686,7 +3686,7 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:snooze|postpone|delay|push\s+back|push|bump|shift)"
         r"(?:\s+(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
-        r"it|that|this|them)\b"
+        r"it|that|this|them|everything|all)\b"
         + _REMINDER_ECHO + r")?"
         r"(?:\s+(?:(?P<way>for|until|till|to|by|back|up|forward|"
         r"later|earlier|sooner)\s+"
@@ -3702,7 +3702,10 @@ class AgentOrchestrator:
         + _REMINDER_ECHO +
         r"\s*(?P<dir>back\s+on|off|on)?"
         r"(?:\s+(?:until|till|for)\s+(?P<til>.+?))?"
-        + _REMINDER_TRAIL,
+        + _REMINDER_TRAIL +
+        r"|" + _REMINDER_POLITE +
+        r"(?P<noun2>reminders?|alarms?|timers?)\s+"
+        r"(?P<dir2>back\s+on|off|on)" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_STOP_RE = re.compile(
         _REMINDER_POLITE +
@@ -3837,7 +3840,42 @@ class AgentOrchestrator:
             delta = 600.0  # bare 'snooze' — a default ten minutes.
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
-        if not rows:
+        all_scope = (str(ms.group("noun") or "").lower()
+                     in ("them", "everything", "all")
+                     and not topic_terms)
+        if all_scope:
+            hits = list(rows)
+        if all_scope:
+            # 'snooze everything' — each one-shot's own fire time +
+            # delta. Recurring kinds ignore 'at', so they keep their
+            # cadence and get named honestly rather than fake-moved.
+            moved, skipped = 0, 0
+            try:
+                for s in hits:
+                    if s.get("kind") in ("daily", "weekly",
+                                         "interval"):
+                        skipped += 1
+                        continue
+                    base = float(s.get("at") or now)
+                    tgt = (when if when is not None
+                           else max(now, base) + delta)
+                    sched.update(str(s["id"]), at=tgt)
+                    moved += 1
+            except Exception as exc:
+                text = f"I couldn't snooze the reminders ({exc})."
+            else:
+                parts = []
+                if moved:
+                    parts.append(
+                        f"Snoozed {moved} reminder"
+                        f"{'s' if moved != 1 else ''}.")
+                if skipped:
+                    parts.append(
+                        f"{skipped} recurring kept cadence — snooze "
+                        "only shifts one-shots.")
+                text = (" ".join(parts)
+                        or "Nothing to snooze right now.")
+        elif not rows:
             text = "You don't have any reminders set."
         elif not hits:
             names = "; ".join(
@@ -3972,7 +4010,8 @@ class AgentOrchestrator:
                      or (isinstance(s.get("action"), dict)
                          and s["action"].get("kind") == "notify"))]
         if noun and noun not in ("reminder", "reminders", "it",
-                                 "that", "this", "them"):
+                                 "that", "this", "them", "everything",
+                                 "all"):
             stem = noun.rstrip("s").lower()
             rows = [s for s in rows
                     if str(s.get("name") or "").lower()
@@ -4133,29 +4172,37 @@ class AgentOrchestrator:
                                task_id: str, event_callback):
         """'turn off the dentist reminder' / 'pause my reminders' —
         a real set_enabled flip; reversible, never a narrated mute."""
-        verb = str(mt.group("verb") or "").lower()
-        dirw = str(mt.group("dir") or "").lower()
-        body = str(mt.group("body") or "").strip(" ,;—-")
-        if verb in ("turn", "switch"):
-            dm = re.match(r"(off|on|back\s+on)\b", body, re.IGNORECASE)
-            if dirw:
-                want_on = dirw != "off"
-            elif dm:
-                want_on = dm.group(1).lower() != "off"
-                body = body[dm.end():].strip(" ,;—-")
-            else:
-                want_on = None
+        # 'reminders off' — terse noun+direction; verb is absent so
+        # the dir itself decides. Normalized to the same want_on.
+        if mt.groupdict().get("noun2"):
+            want_on = (str(mt.group("dir2") or "").lower() != "off")
+            body = ""
         else:
-            want_on = bool(re.fullmatch(
-                r"enable|re-?enable|resume|unpause|unmute|unsilence",
-                verb))
+            verb = str(mt.group("verb") or "").lower()
+            dirw = str(mt.group("dir") or "").lower()
+            body = str(mt.group("body") or "").strip(" ,;—-")
+            if verb in ("turn", "switch"):
+                dm = re.match(r"(off|on|back\s+on)\b", body,
+                              re.IGNORECASE)
+                if dirw:
+                    want_on = dirw != "off"
+                elif dm:
+                    want_on = dm.group(1).lower() != "off"
+                    body = body[dm.end():].strip(" ,;—-")
+                else:
+                    want_on = None
+            else:
+                want_on = bool(re.fullmatch(
+                    r"enable|re-?enable|resume|unpause|unmute|"
+                    r"unsilence", verb))
         if want_on is None:
             return self._reminder_finish(
                 "Turn them on or off? — e.g. “turn off "
                 "my reminders”.",
                 user_text, task_id, event_callback)
         sched, rows = self._reminder_rows(
-            include_disabled=True, noun=mt.group("noun"))
+            include_disabled=True,
+            noun=mt.group("noun") or mt.groupdict().get("noun2"))
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "

@@ -4994,7 +4994,8 @@ class AppState:
         rem = re.match(
             r"^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?"
             r"(?:please\s+)?(remind\s+me(?:\s+to)?|"
-            r"(?:set|create|add|schedule)\s+(?:a\s+|an\s+|me\s+a\s+)?"
+            r"(?:set|create|add|schedule)\s+"
+            r"(?:a\s+|an\s+|me\s+a\s+|my\s+|the\s+)?"
             r"(?:reminder|alarm|timer)(?:\s+(?:for|to|about|that))?|"
             r"remember\s+to)\s+(.+?)(?:\s*,?\s*(?:please|thanks|"
             r"thank\s+you|ty|pls|plz))*[.!?]?$",
