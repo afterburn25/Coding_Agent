@@ -4,6 +4,7 @@ development servers inside registered workspaces."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from .base import ToolRegistry, ToolSpec
@@ -11,6 +12,12 @@ from .base import ToolRegistry, ToolSpec
 
 def register_devserver_tools(registry: ToolRegistry, manager) -> None:
     def dev_server_start(args: dict[str, Any]) -> str:
+        from .gitguard import autonomous_git_block
+        cwd = Path(str(args.get("path") or ".")).resolve()
+        blocked = autonomous_git_block(
+            registry, str(args.get("command") or ""), cwd, cwd)
+        if blocked:
+            return f"ERROR: {blocked}"
         res = manager.start(
             str(args.get("path") or ""),
             str(args.get("command") or ""),

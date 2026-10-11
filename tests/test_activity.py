@@ -353,5 +353,207 @@ class OrchestratorActivityTests(unittest.TestCase):
             self.assertEqual(store.recent(5)[0]["title"], "dir listing")
 
 
+class AutonomousGitGuardTests(unittest.TestCase):
+    """Mission-attributed shell runs may not push or rewrite the
+    primary tree — a repair mission pushed a CHANGELOG gutting and a
+    merge resolution to origin/main unprompted (aa2454c8/abe582ce)."""
+
+    def _reg(self, mission_id="m-auto", source="self_repair"):
+        import threading
+        from types import SimpleNamespace
+        tls = threading.local()
+        tls.mission_id = mission_id
+        return SimpleNamespace(context={
+            "task_tls": tls,
+            "mission_source": (lambda mid: source) if source else None,
+        })
+
+    def test_autonomous_git_mutations_blocked(self):
+        from localcodeagent.tools.gitguard import autonomous_git_block
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            (ws / ".git").mkdir()
+            reg = self._reg()
+            for cmd in ("git push", "git push origin main",
+                        "git -C /tmp push",
+                        "git commit -m x", "git merge repair/x",
+                        "git checkout -b x", "git switch main",
+                        "git reset --hard HEAD", "git pull",
+                        "git rebase main", "git cherry-pick abc",
+                        "git tag v1", "git branch -D repair/x",
+                        "git branch repair/x", "git stash",
+                        "git add .", "git rm -r .",
+                        "git add . && git commit -m x",
+                        "git -c user.email=x@y commit -m x",
+                        "echo hi && git push",
+                        "echo hi; git merge x",
+                        "git status | git push",
+                        "git checkout `git rev-parse main`"):
+                out = autonomous_git_block(reg, cmd, ws, ws)
+                self.assertIsNotNone(out, cmd)
+
+    def test_autonomous_git_mutations_blocked_through_wrappers(self):
+        from localcodeagent.tools.gitguard import autonomous_git_block
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            (ws / ".git").mkdir()
+            reg = self._reg()
+            for cmd in ('powershell -c "git push"',
+                        'powershell.exe -Command "git merge x"',
+                        "cmd /c git push",
+                        "cmd /k git commit -m x",
+                        'bash -c "git commit -m x"',
+                        "sh -c 'git push'",
+                        "env FOO=1 git push",
+                        "xargs git push",
+                        "start git push"):
+                out = autonomous_git_block(reg, cmd, ws, ws)
+                self.assertIsNotNone(out, cmd)
+
+    def test_git_mutations_inside_scripts_blocked(self):
+        from localcodeagent.tools.gitguard import autonomous_git_block
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            (ws / ".git").mkdir()
+            reg = self._reg()
+            (ws / "fix.bat").write_text(
+                "@echo off\ngit add -A\ngit commit -m wip\n")
+            (ws / "pub.ps1").write_text("git push origin main\n")
+            self.assertIsNotNone(
+                autonomous_git_block(reg, "fix.bat", ws, ws))
+            self.assertIsNotNone(
+                autonomous_git_block(
+                    reg, "cmd /c fix.bat", ws, ws))
+            self.assertIsNotNone(
+                autonomous_git_block(
+                    reg, "powershell -File pub.ps1", ws, ws))
+            # Read-only scripts stay allowed.
+            (ws / "info.bat").write_text("git status\n")
+            self.assertIsNone(
+                autonomous_git_block(reg, "info.bat", ws, ws))
+            # Full-path git is still git.
+            self.assertIsNotNone(autonomous_git_block(
+                reg, "C:\\tools\\git.exe push", ws, ws))
+
+    def test_autonomous_readonly_git_allowed(self):
+        from localcodeagent.tools.gitguard import autonomous_git_block
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            reg = self._reg()
+            for cmd in ("git status", "git log --oneline", "git diff",
+                        "git show HEAD", "git stash list", "git stash show",
+                        "git worktree list", "git fetch",
+                        "git log --all -- push",
+                        "git tag", "git tag -l", "git tag --list v*",
+                        "git branch", "git branch -av",
+                        "git branch --show-current",
+                        "git remote -v", "git remote show origin",
+                        "git remote get-url origin",
+                        "git config --list", "git config --get user.name",
+                        "git config user.name",
+                        "git symbolic-ref HEAD",
+                        "git reflog", "git notes", "git notes list"):
+                self.assertIsNone(
+                    autonomous_git_block(reg, cmd, ws, ws), cmd)
+
+    def test_push_blocked_everywhere_mutate_only_in_primary(self):
+        from localcodeagent.tools.gitguard import autonomous_git_block
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td) / "repo"
+            ws.mkdir()
+            (ws / ".git").mkdir()
+            wt = Path(td) / "worktree"
+            wt.mkdir()
+            (wt / ".git").write_text(
+                "gitdir: ../repo/.git/worktrees/worktree\n")
+            reg = self._reg()
+            # Push is the irreversible act — denied even off-tree.
+            self.assertIsNotNone(
+                autonomous_git_block(reg, "git push", wt, ws))
+            # Refs/config are shared across worktrees — denied off-tree too.
+            self.assertIsNotNone(
+                autonomous_git_block(reg, "git tag v9", wt, ws))
+            self.assertIsNotNone(
+                autonomous_git_block(reg, "git branch -D x", wt, ws))
+            # Mutations inside a worktree are the repair sandbox.
+            self.assertIsNone(
+                autonomous_git_block(reg, "git commit -m x", wt, ws))
+            self.assertIsNone(
+                autonomous_git_block(reg, "git checkout -b fix", wt, ws))
+            self.assertIsNone(
+                autonomous_git_block(reg, "git add -A", wt, ws))
+            # `-C` must not bypass — targeting the primary from a
+            # worktree cwd is still blocked, and vice versa.
+            self.assertIsNotNone(autonomous_git_block(
+                reg, f"git -C {ws} commit -m x", wt, ws))
+            self.assertIsNone(autonomous_git_block(
+                reg, f"git -C {wt} commit -m x", ws, ws))
+            # `cd`/`pushd` relocation must not bypass either.
+            self.assertIsNotNone(autonomous_git_block(
+                reg, f"cd {ws} && git commit -m x", wt, ws))
+            self.assertIsNotNone(autonomous_git_block(
+                reg, f"pushd {ws} && git merge x", wt, ws))
+            self.assertIsNone(autonomous_git_block(
+                reg, f"cd {wt} && git commit -m x", ws, ws))
+
+    def test_python_exec_git_argv_blocked(self):
+        from localcodeagent.tools.gitguard import mission_python_block
+        reg = self._reg()
+        for code in (
+                'import subprocess\nsubprocess.run(["git", "push"])',
+                'subprocess.run(["git", "-C", "D:/repo", "commit", '
+                '"-m", "x"])',
+                'import os\nos.system("git push")',
+                'subprocess.call("git merge x", shell=True)'):
+            self.assertIsNotNone(mission_python_block(reg, code), code)
+        for code in ('subprocess.run(["git", "status"])',
+                     'subprocess.run(["git", "log", "-1"])',
+                     'print("hello")'):
+            self.assertIsNone(mission_python_block(reg, code), code)
+        # Unattributed runs are exempt.
+        reg2 = self._reg(mission_id="", source="self_repair")
+        self.assertIsNone(mission_python_block(
+            reg2, 'subprocess.run(["git", "push"])'))
+
+    def test_standing_grant_unlocks_git_actions(self):
+        from localcodeagent.tools.gitguard import autonomous_git_block
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            (ws / ".git").mkdir()
+            reg = self._reg()
+            grants = {"git_push"}
+            reg.context["autonomy_grant"] = (
+                lambda action, scope="": action in grants)
+            # git_push grant covers push but not ref/config writes.
+            self.assertIsNone(
+                autonomous_git_block(reg, "git push", ws, ws))
+            self.assertIsNotNone(
+                autonomous_git_block(reg, "git tag v9", ws, ws))
+            grants.add("git_commit")
+            self.assertIsNone(
+                autonomous_git_block(reg, "git tag v9", ws, ws))
+            self.assertIsNone(
+                autonomous_git_block(reg, "git commit -m x", ws, ws))
+
+    def test_user_mission_and_unattributed_runs_unblocked(self):
+        from localcodeagent.tools.gitguard import autonomous_git_block
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            # User-initiated mission source → full git.
+            reg = self._reg(mission_id="m-user", source="chat")
+            self.assertIsNone(
+                autonomous_git_block(reg, "git push", ws, ws))
+            self.assertIsNone(
+                autonomous_git_block(reg, "git commit -m x", ws, ws))
+            # No mission attribution at all → interactive tool use.
+            reg2 = self._reg(mission_id="", source="self_repair")
+            self.assertIsNone(
+                autonomous_git_block(reg2, "git push", ws, ws))
+            # Unknown source → conservative: treated as autonomous.
+            reg3 = self._reg(mission_id="m-x", source="")
+            self.assertIsNotNone(
+                autonomous_git_block(reg3, "git push", ws, ws))
+
+
 if __name__ == "__main__":
     unittest.main()

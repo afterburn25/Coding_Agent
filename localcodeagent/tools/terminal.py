@@ -420,6 +420,10 @@ def register_terminal_tools(
                                extra_roots)
         except (ValueError, FileNotFoundError) as exc:
             return f"ERROR: {exc}"
+        from .gitguard import autonomous_git_block
+        blocked = autonomous_git_block(registry, command, cwd, workspace)
+        if blocked:
+            return f"ERROR: {blocked}"
         env = args.get("env")
         merged_env = dict(os.environ)
         if isinstance(env, dict):

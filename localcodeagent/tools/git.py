@@ -61,6 +61,17 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
             raise ValueError("path escapes the registered workspaces")
         return root
 
+    def _mission_gate(args: dict, *, remote: bool = False) -> str | None:
+        """Autonomous missions may not mutate the primary checkout or
+        push without a standing grant — the self-repair pipeline is the
+        governed path."""
+        from .gitguard import mission_git_tool_block
+        try:
+            root = _root_for(args)
+        except Exception:
+            root = workspace
+        return mission_git_tool_block(registry, root, remote=remote)
+
     def git_status(args: dict) -> str:
         root = _root_for(args)
         proc = subprocess.run(["git", "status", "--short", "--branch"],
@@ -127,6 +138,9 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
         return json.dumps({"worktrees": trees}, indent=2)
 
     def git_worktree_remove(args: dict[str, Any]) -> str:
+        g = _mission_gate(args)
+        if g:
+            return g
         target = _worktree_path(str(args.get("path", "")))
         if target is None or not target.exists():
             return "ERROR: worktree must exist under .agent/worktrees/"
@@ -149,6 +163,9 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
         return json.dumps({"root": str(root), "output": out}, indent=2)
 
     def git_switch(args: dict) -> str:
+        g = _mission_gate(args)
+        if g:
+            return g
         branch = str(args.get("branch") or "").strip()
         if not branch:
             return "ERROR: 'branch' is required"
@@ -198,6 +215,9 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
                           indent=2)
 
     def git_pull(args: dict) -> str:
+        g = _mission_gate(args)
+        if g:
+            return g
         remote = str(args.get("remote") or "origin").strip()
         branch = str(args.get("branch") or "").strip()
         argv = ["pull", remote] + ([branch] if branch else [])
@@ -209,6 +229,10 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
 
     def git_stash(args: dict) -> str:
         action = str(args.get("action") or "list").strip().lower()
+        if action != "list":
+            g = _mission_gate(args)
+            if g:
+                return g
         root = _root_for(args)
         if action == "push":
             msg = str(args.get("message") or "").strip()
@@ -226,6 +250,9 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
                           indent=2)
 
     def git_revert(args: dict) -> str:
+        g = _mission_gate(args)
+        if g:
+            return g
         commit = str(args.get("commit") or "").strip()
         if not commit:
             return "ERROR: 'commit' is required"
@@ -237,6 +264,9 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
                           indent=2)
 
     def git_restore(args: dict) -> str:
+        g = _mission_gate(args)
+        if g:
+            return g
         paths = [str(p) for p in (args.get("paths") or []) if str(p).strip()]
         if not paths:
             return "ERROR: 'paths' is required"
@@ -298,6 +328,9 @@ def register_git_tools(registry: ToolRegistry, workspace: Path,
         }, indent=2)
 
     def git_commit(args: dict) -> str:
+        g = _mission_gate(args)
+        if g:
+            return g
         message = str(args.get("message") or "").strip()
         if not message:
             return "ERROR: 'message' is required"

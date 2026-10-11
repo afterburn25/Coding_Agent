@@ -161,6 +161,15 @@ def register_debug_tools(registry: ToolRegistry, workspace: Path, *,
         if target is None or not target.is_file():
             return json.dumps(
                 {"error": "script must be a file inside a registered workspace"})
+        try:
+            from .gitguard import mission_python_block
+            _gb = mission_python_block(
+                registry, target.read_text(encoding="utf-8",
+                                           errors="replace"))
+            if _gb:
+                return json.dumps({"error": _gb})
+        except OSError:
+            pass
         bps = []
         for bp in (args.get("breakpoints") or [])[:20]:
             bp_file, bp_line = bp.get("file"), bp.get("line")

@@ -247,6 +247,10 @@ def register_build_tools(registry: ToolRegistry, workspace: Path, *, default_tim
         if target and entry["id"] in {"cmake", "make", "msbuild"}:
             cmd = f"{cmd} --target {target}" if entry["id"] == "cmake" else f"{cmd} {target}"
         timeout = max(1, min(int(args.get("timeout_seconds", default_timeout)), 3600))
+        from .gitguard import autonomous_git_block
+        blocked = autonomous_git_block(registry, cmd, root, workspace)
+        if blocked:
+            return f"ERROR: {blocked}"
         started = time.time()
         try:
             proc = subprocess.run(cmd, cwd=str(root), shell=True, capture_output=True, text=True, timeout=timeout, creationflags=no_window_flags(), encoding="utf-8", errors="replace")
@@ -432,6 +436,10 @@ def register_build_tools(registry: ToolRegistry, workspace: Path, *, default_tim
         timeout = max(1, min(int(args.get("timeout_seconds", 300)), 1200))
         cmd = (f'"{sys.executable}" -m cProfile -o '
                f'"{out_file}" "{script}" {script_args}'.strip())
+        from .gitguard import autonomous_git_block
+        blocked = autonomous_git_block(registry, cmd, root, workspace)
+        if blocked:
+            return f"ERROR: {blocked}"
         started = time.time()
         try:
             proc = subprocess.run(

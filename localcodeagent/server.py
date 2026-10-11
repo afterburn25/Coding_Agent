@@ -3420,6 +3420,20 @@ class AppState:
         # user-tunable and the service itself decides whether acting is
         # worthwhile, so the schedule only wakes the check.
         sup.social_heartbeat = self.social.heartbeat
+        # Shell tools resolve mission attribution for the git guard —
+        # an autonomous mission may not push or rewrite primary-tree
+        # history via run_shell/terminal_run without a standing grant.
+        self.tools.context["mission_source"] = self._mission_source_by_id
+
+        def _autonomy_grant(action: str, scope: str = "") -> bool:
+            policy = getattr(sup, "policy", None)
+            if policy is None:
+                return False
+            try:
+                return policy.matching_grant(action, scope=scope) is not None
+            except Exception:
+                return False
+        self.tools.context["autonomy_grant"] = _autonomy_grant
         # Peer-intelligence hook — stuck missions may open peer
         # consults; external_wait nodes poll consult state through it.
         sup.social = self.social
@@ -6879,6 +6893,20 @@ class AppState:
         last = getattr(self, "_last_chat_at", 0.0) or 0.0
         return not last or (time.time() - last) >= idle_s
 
+    def _mission_source_by_id(self, mission_id: str) -> str:
+        """Source prefix of a mission ('self_repair', 'schedule', 'chat',
+        'detector:kind' → 'detector'…). '' when the mission can't be
+        resolved — callers treat that as autonomous."""
+        try:
+            sup = getattr(self, "autonomy", None)
+            if sup is not None and mission_id:
+                for m in sup.missions.list():
+                    if str(m.get("id") or "") == str(mission_id):
+                        return str(m.get("source") or "").split(":", 1)[0]
+        except Exception:
+            pass
+        return ""
+
     def _mission_is_user_initiated(self, queue_item: dict | None) -> bool:
         """True when a queue item's owning mission was user-initiated
         (source chat/api/manual…) — its subtasks are foreground demand.
@@ -6887,16 +6915,8 @@ class AppState:
         mission_id = str((queue_item or {}).get("mission_id") or "")
         if not mission_id:
             return False
-        try:
-            sup = getattr(self, "autonomy", None)
-            if sup is not None:
-                for m in sup.missions.list():
-                    if str(m.get("id") or "") == mission_id:
-                        src = str(m.get("source") or "").split(":", 1)[0]
-                        return src in self._USER_MISSION_SOURCES
-        except Exception:
-            pass
-        return False
+        src = self._mission_source_by_id(mission_id)
+        return src in self._USER_MISSION_SOURCES
 
     def operational_state(self) -> dict:
         """Structured snapshot of what Nexus is doing — focus, load,
