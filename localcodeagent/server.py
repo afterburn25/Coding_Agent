@@ -5099,121 +5099,74 @@ class AppState:
             "Missions page. It runs under the Local Autonomous profile; "
             "sensitive actions still ask for approval.")}
 
-    _REMINDER_WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3,
-                          "fri": 4, "sat": 5, "sun": 6}
-
     def _parse_reminder_time(self, body: str, now: float):
-        """Split a trailing time phrase → (timestamp, description).
+        """Split a schedule spec (once or recurring) → (spec, desc).
 
-        Returns (None, body) when nothing parseable is present — the
-        caller decides whether that's an honest "need a time" reply or
-        a fallthrough to other lanes.
+        Tries the trailing when first ('call the vendor friday at
+        3pm', 'check the deploys every morning'), then a leading when
+        ('friday at 3pm to call the vendor'). Returns (None, body)
+        when nothing parseable — the caller decides the reply.
         """
-        import time as _t
-        from .autonomy.scheduler import (
-            _next_daily, parse_reminder_when)
-
-        def _clock(hour: int, minute: int, mer: str | None,
-                   *, days: int = 0) -> float:
-            if mer:
-                mer = mer.lower()
-                if mer == "pm" and hour < 12:
-                    hour += 12
-                elif mer == "am" and hour == 12:
-                    hour = 0
-            elif hour <= 6:
-                # Bare "at 3" in reminder speech is afternoon, not 3am.
-                hour += 12
-            lt = _t.localtime(now)
-            cand = _t.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + days,
-                              hour, minute, 0, 0, 0, -1))
-            if cand <= now:
-                cand = _t.mktime((lt.tm_year, lt.tm_mon,
-                                  lt.tm_mday + days + 1,
-                                  hour, minute, 0, 0, 0, -1))
-            return cand
-
-        # Leading when — "set a reminder for friday at 3pm to call the
-        # vendor" puts the time phrase BEFORE the task; the trailing
-        # searches below only see the tail. Try each 'to'/'for' split
-        # until the prefix parses as a time.
+        from .autonomy.scheduler import parse_reminder_schedule
+        words = str(body or "").split()
+        for i in range(1, len(words)):
+            spec = parse_reminder_schedule(" ".join(words[i:]), now)
+            if spec is not None:
+                return spec, " ".join(words[:i]).strip(" ,;—-")
         parts = re.split(r"\s+(?:to|for)\s+", body)
         if len(parts) > 1:
             for i in range(1, len(parts)):
-                lead_when = parse_reminder_when(
+                spec = parse_reminder_schedule(
                     " ".join(parts[:i]), now)
-                if lead_when is not None:
-                    return (lead_when,
-                            " ".join(parts[i:]).strip(" ,;—-"))
+                if spec is not None:
+                    return spec, " ".join(parts[i:]).strip(" ,;—-")
+        return None, str(body or "").strip()
 
-        m = re.search(
-            r"\s+in\s+(\d+)\s+(minutes?|mins?|hours?|hrs?|days?)\s*$",
-            body, flags=re.IGNORECASE)
-        if m:
-            n, unit = int(m.group(1)), m.group(2).lower()
-            scale = 60 if unit.startswith(("min", "m")) else \
-                3600 if unit.startswith("h") else 86400
-            return now + n * scale, body[:m.start()].strip(" ,;—-")
-        m = re.search(
-            r"\s+tomorrow(?:\s+at\s+(\d{1,2})(?::(\d{2}))?"
-            r"\s*(am|pm)?)?\s*$",
-            body, flags=re.IGNORECASE)
-        if m:
-            desc = body[:m.start()].strip(" ,;—-")
-            if m.group(1):
-                return (_clock(int(m.group(1)), int(m.group(2) or 0),
-                               m.group(3), days=1), desc)
-            lt = _t.localtime(now)
-            return (_t.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + 1,
-                              9, 0, 0, 0, 0, -1)), desc)
-        m = re.search(r"\s+(tonight|today)\s*$", body,
-                      flags=re.IGNORECASE)
-        if m:
-            desc = body[:m.start()].strip(" ,;—-")
-            word = m.group(1).lower()
-            if word == "tonight":
-                return _clock(20, 0, None), desc
-            # "today" — next top of the hour, same day.
-            return now - (now % 3600) + 3600, desc
-        m = re.search(
-            r"\s+(?:on\s+)?(mon|tue|wed|thu|fri|sat|sun)"
-            r"(?:day|sday|rsday|urday)?\s*$",
-            body, flags=re.IGNORECASE)
-        if m:
-            return (_next_daily(9, 0,
-                                weekday=self._REMINDER_WEEKDAYS[
-                                    m.group(1)[:3].lower()],
-                                after=now),
-                    body[:m.start()].strip(" ,;—-"))
-        m = re.search(
-            r"\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*$",
-            body, flags=re.IGNORECASE)
-        if m:
-            return (_clock(int(m.group(1)), int(m.group(2) or 0),
-                           m.group(3)),
-                    body[:m.start()].strip(" ,;—-"))
-        return None, body.strip()
+    def _reminder_spec_text(self, spec: dict) -> str:
+        """'for Fri 03:00 PM' / 'every day at 09:00' — the reply half
+        of a parsed schedule spec."""
+        kind = spec.get("kind")
+        if kind == "interval":
+            secs = int(spec.get("interval_s") or 3600)
+            if secs % 3600 == 0:
+                return f"every {secs // 3600}h"
+            if secs % 60 == 0:
+                return f"every {secs // 60}m"
+            return f"every {secs}s"
+        if kind == "daily":
+            return (f"every day at {int(spec.get('hour') or 0):02d}"
+                    f":{int(spec.get('minute') or 0):02d}")
+        if kind == "weekly":
+            day = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][
+                int(spec.get("weekday") or 0)]
+            return (f"every {day} at {int(spec.get('hour') or 0):02d}"
+                    f":{int(spec.get('minute') or 0):02d}")
+        stamp = time.strftime("%a %I:%M %p",
+                              time.localtime(spec.get("at") or 0))
+        return f"for {stamp}"
 
     def _set_reminder(self, sup, body: str) -> dict | None:
-        """'check the deploy tomorrow at 3' → real once-schedule whose
-        fire emits a notification. Never fabricates a reminder — no
-        parseable time gets an honest ask-for-the-time ack."""
-        when, desc = self._parse_reminder_time(str(body or ""), time.time())
+        """'check the deploy tomorrow at 3' → real schedule whose
+        fire emits a notification — once or recurring via the shared
+        spec grammar. Never fabricates a reminder — no parseable time
+        gets an honest ask-for-the-time ack."""
+        spec, desc = self._parse_reminder_time(str(body or ""), time.time())
         if not desc:
             return {"content": "Remind you to do what?"}
-        if when is None:
+        if spec is None:
             return {"content": (
                 f"Noted — “{desc}”. I can't pin a reminder without a "
-                "time — say when, like “at 3pm”, “tomorrow”, or "
-                "“in 30 minutes”.")}
+                "time — say when, like “at 3pm”, “tomorrow”, "
+                "“every friday”, or “in 30 minutes”.")}
+        kind = spec["kind"]
+        fields = {k: v for k, v in spec.items() if k != "kind"}
         sup.scheduler.add(
-            f"Reminder: {desc[:80]}", "once", at=when,
+            f"Reminder: {desc[:80]}", kind,
             action={"kind": "notify", "title": "Reminder",
                     "detail": desc[:300], "level": "important"},
-            created_by="chat")
-        stamp = time.strftime("%a %I:%M %p", time.localtime(when))
+            created_by="chat", **fields)
         return {"content": (
-            f"Reminder set for {stamp} — {desc}. "
+            f"Reminder set {self._reminder_spec_text(spec)} — {desc}. "
             "It'll surface as a notification; cancel it from the "
             "Missions page if plans change.")}
 
