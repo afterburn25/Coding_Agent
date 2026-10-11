@@ -106,6 +106,10 @@ def register_blender_tools(registry: ToolRegistry, workspace: Path, *, jobs=None
         out = _resolve_out(str(args.get("output", "") or f".agent/blender/render-{int(time.time())}.png"))
         if out is None:
             return "ERROR: output must stay inside the workspace"
+        from . import gitguard
+        block = gitguard.mission_fs_write_block(registry, out)
+        if block:
+            return f"ERROR: {block}"
         spec: dict[str, Any] = {"objects": args.get("objects") or [],
                                 "resolution": args.get("resolution"),
                                 "camera": args.get("camera")}
