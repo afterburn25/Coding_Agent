@@ -3712,7 +3712,9 @@ class AgentOrchestrator:
                     f"you have: {names}.")
         elif len(hits) > 1:
             names = "; ".join(
-                f"“{self._reminder_label(s)}”" for s in hits[:5])
+                f"“{self._reminder_label(s)}” "
+                f"({self._reminder_when_text(s, now)})"
+                for s in hits[:5])
             text = (f"That matches {len(hits)} reminders: {names} — "
                     "say which.")
         else:
@@ -3767,7 +3769,9 @@ class AgentOrchestrator:
                     f"you have: {names}.")
         elif len(hits) > 1:
             names = "; ".join(
-                f"“{self._reminder_label(s)}”" for s in hits[:5])
+                f"“{self._reminder_label(s)}” "
+                f"({self._reminder_when_text(s, time.time())})"
+                for s in hits[:5])
             text = (f"That matches {len(hits)} reminders: {names} — "
                     "say which.")
         else:
@@ -3965,16 +3969,33 @@ class AgentOrchestrator:
             kind = spec["kind"]
             fields = {k: v for k, v in spec.items() if k != "kind"}
             try:
-                sched.add(
-                    f"reminder: {task[:100]}", kind,
-                    action={"kind": "notify", "title": "Reminder",
-                            "detail": task},
-                    created_by="user", **fields)
+                # Re-setting a reminder for the same task moves it —
+                # duplicate rows make 'say which' lists unusable.
+                srows = [s for s in (
+                             getattr(sched, "list", lambda: [])() or [])
+                         if s.get("enabled", True)
+                         and str(s.get("name") or "").lower()
+                            .startswith("reminder:")
+                         and str((s.get("action") or {})
+                                 .get("detail", "")).strip().lower()
+                            == task.lower()]
+                if srows:
+                    sched.update(str(srows[0]["id"]), kind=kind,
+                                 **fields)
+                    for extra in srows[1:]:
+                        sched.remove(str(extra["id"]))
+                    text = ("Moved the reminder — "
+                            + self._reminder_spec_text(spec, task))
+                else:
+                    sched.add(
+                        f"reminder: {task[:100]}", kind,
+                        action={"kind": "notify", "title": "Reminder",
+                                "detail": task},
+                        created_by="user", **fields)
+                    text = ("Reminder set " +
+                            self._reminder_spec_text(spec, task))
             except Exception as exc:
                 text = f"I couldn't set the reminder ({exc})."
-            else:
-                text = ("Reminder set " +
-                        self._reminder_spec_text(spec, task))
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
