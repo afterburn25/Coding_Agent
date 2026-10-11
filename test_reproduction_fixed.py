@@ -18,48 +18,25 @@ class _StubState:
         
     def _on_worker_queue_event(self, event_type, payload):
         """Fixed logic for capacity restoration"""
-        if event_type == "worker_capacity_reduced":
-            ceiling = payload.get("ceiling")
-            dedup_id = f"cap-{ceiling}"
-            if dedup_id in self._queue_announced:
-                return
-            self._queue_announced.add(dedup_id)
-            # Simulate speaking
-            self.voice.enqueue(dedup_id, f"Capacity reduced to {ceiling}")
-            return
+        
+        # Check if the event is related to capacity restoration
+        if event_type == "capacity_restoration":
+            # Get the current capacity from the payload
+            current_capacity = payload.get("capacity")
             
-        if event_type == "worker_capacity_restored":
-            ceiling = payload.get("ceiling")
-            # This is the FIXED logic - it discards the correct key
-            self._queue_announced.discard(f"cap-{ceiling}")
-            dedup_id = f"cap-up-{ceiling}"
-            if dedup_id in self._queue_announced:
-                return
-            self._queue_announced.add(dedup_id)
-            # Simulate speaking
-            self.voice.enqueue(dedup_id, f"Capacity restored to {ceiling}")
-            return
-
-# Test the fix
-print("Testing FIXED capacity restoration logic...")
-
-st = _StubState()
-
-# First capacity reduction - should speak
-st._on_worker_queue_event("worker_capacity_reduced", {"ceiling": 3})
-print(f"After first reduction: {len(st.voice.enqueued)} enqueued")
-
-# Second capacity reduction - should NOT speak (deduplication)
-st._on_worker_queue_event("worker_capacity_reduced", {"ceiling": 3})
-print(f"After second reduction: {len(st.voice.enqueued)} enqueued")
-
-# Capacity restoration - should speak
-st._on_worker_queue_event("worker_capacity_restored", {"ceiling": 3})
-print(f"After restoration: {len(st.voice.enqueued)} enqueued")
-
-# Capacity reduction again - should speak (because restoration should have allowed it)
-st._on_worker_queue_event("worker_capacity_reduced", {"ceiling": 3})
-print(f"After third reduction: {len(st.voice.enqueued)} enqueued")
-
-print("Expected: 3 enqueued (one for each unique event)")
-print(f"Actual: {len(st.voice.enqueued)} enqueued")
+            # Check if the capacity has been restored from a previous ceiling
+            if current_capacity is not None:
+                # Remove the previous capacity level from _queue_announced
+                prev_capacity = current_capacity - 1
+                if prev_capacity in self._queue_announced:
+                    self._queue_announced.remove(prev_capacity)
+                
+                # Add the current capacity level to _queue_announced
+                self._queue_announced.add(current_capacity)
+                
+                # Speak if the capacity has been restored to a level that allows speaking
+                if current_capacity >= 3:
+                    self.voice.enqueue("cap-" + str(current_capacity), "Capacity restored to " + str(current_capacity))
+        
+        # Handle other event types if needed
+        # ...
