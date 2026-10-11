@@ -2635,6 +2635,27 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("in ", result.content)
             sup.scheduler.rows.clear()
 
+            # 'at 6:30 pm friday' — clock-first weekday. The
+            # splitter banked 'at 6:30 pm' as the task at Fri 9am.
+            result = agent.run(
+                "remind me at 6:30 pm friday to call", mode="auto")
+            self.assertIn("call", result.content)
+            row = sup.scheduler.rows[-1]
+            self.assertIn("call", row["name"])
+            self.assertNotIn("6:30", row["name"])
+            lt = time.localtime(row["at"])
+            self.assertEqual(lt.tm_hour, 18)
+            self.assertEqual(lt.tm_min, 30)
+            self.assertEqual(lt.tm_wday, 4)
+            # 'in a few minutes' — vague; honest pin-fail, never
+            # the model's 'The timer is 30 minutes' invention.
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("remind me in a few minutes",
+                               mode="auto")
+            self.assertIn("couldn't pin", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

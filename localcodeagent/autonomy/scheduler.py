@@ -293,6 +293,22 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         return _clock(0, 0)
     if t == "next week":
         return _clock(9, 0, 7, roll=False)
+    # 'at 6:30 pm friday' — clock-first weekday. Without this the
+    # splitter took bare 'friday' as the when and banked 'at 6:30
+    # pm' as the task.
+    m = re.fullmatch(
+        r"at\s+(\d{1,2})(?::(\d{2}))?\s*"
+        r"(a\.?m\.?|p\.?m\.?|am|pm)?\s+(?:on\s+)?(\w+)", t)
+    if m:
+        wd = _WEEKDAY_NAMES.get(m.group(4))
+        if wd is not None:
+            hour = _meridian(int(m.group(1)), m.group(3))
+            minute = int(m.group(2) or 0)
+            delta = (wd - lt.tm_wday) % 7
+            cand = _clock(hour, minute, delta, roll=False)
+            if cand <= now:
+                cand = _clock(hour, minute, delta + 7, roll=False)
+            return cand
     m = re.fullmatch(
         r"(?:(on|next|this|coming)\s+)?(\w+?)" + clock_tail, t)
     if m:
