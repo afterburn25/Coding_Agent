@@ -3868,9 +3868,9 @@ class AgentOrchestrator:
         resolves a weekly-Friday row and 'the daily reminder' a
         daily one."""
         act = s.get("action")
-        text = (f"{s.get('name', '')} "
-                f"{act.get('detail', '') if isinstance(act, dict)
-                   else act or ''}")
+        detail = (act.get("detail", "") if isinstance(act, dict)
+                  else act or "")
+        text = f"{s.get('name', '')} {detail}"
         days = ["monday", "tuesday", "wednesday", "thursday",
                 "friday", "saturday", "sunday"]
         wd = s.get("weekday")
