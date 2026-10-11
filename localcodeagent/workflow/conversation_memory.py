@@ -1237,10 +1237,11 @@ class ConversationMemory:
         forget_match = re.match(
             r"^(?:forget(?:\s+(?:that|about))?|never\s*mind(?:\s+about)?|"
             r"nm(?:\s+about)?|"
-            r"stop\s+(?:remembering|storing|recording|keeping|saving)|"
-            r"quit\s+(?:remembering|storing|recording|keeping|saving)|"
-            r"don'?t\s+remember|do\s+not\s+remember|"
-            r"never\s+(?:remember|store|record|keep|save)|"
+            r"stop\s+(?:remembering|storing|recording|keeping|saving|"
+            r"learning)|quit\s+(?:remembering|storing|recording|"
+            r"keeping|saving|learning)|"
+            r"don'?t\s+(?:remember|learn)|do\s+not\s+(?:remember|learn)|"
+            r"never\s+(?:remember|store|record|keep|save|learn)|"
             r"delete\s+(?:the\s+)?facts?"
             r"(?:\s+about)?)[,:]?\s*(.+)$",
             raw, flags=re.IGNORECASE)
@@ -1254,12 +1255,36 @@ class ConversationMemory:
             forget_body = re.sub(
                 r"^(?:what\s+i\s+(?:told|said|mentioned|shared)\s+"
                 r"(?:you\s+)?(?:about\s+)?|"
+                r"(?:what|everything|all)\s+(?:that\s+)?you\s+"
+                r"(?:know|remember|have|saved|stored|learned)\s+"
+                r"(?:about\s+|on\s+)?|"
                 r"the\s+(?:thing|stuff|part|bit)\s+(?:i\s+(?:told|"
                 r"said|mentioned|shared)\s+(?:you\s+)?)?about\s+|"
                 r"everything\s+i\s+(?:told|said|mentioned)\s+"
                 r"(?:you\s+)?about\s+)",
                 "", forget_body, flags=re.IGNORECASE).strip()
+            if forget_body and re.search(
+                    r"\b(?:about|on)\s*[.!?]*$", forget_body,
+                    flags=re.IGNORECASE):
+                # 'forget what i told you about…' trails off — the
+                # referent is incomplete, not universal.
+                result.setdefault("clarify", []).append(
+                    "Forget what, exactly?")
+                return result
             if not forget_body:
+                # The whole referent WAS the wrapper — 'forget what
+                # you know' / 'delete what you remember' asks for a
+                # full wipe; a stop-form with no body means stop
+                # keeping anything.
+                if re.match(r"^(?:forget|delete)\b", raw,
+                            flags=re.IGNORECASE):
+                    forgotten = self.forget_all()
+                    if forgotten:
+                        result["forgotten"].extend(forgotten)
+                    else:
+                        result["forgotten_miss"] = [raw]
+                else:
+                    result["memory_off"] = [True]
                 return result
             # A bare deictic ('forget that') names nothing to match —
             # ask for the referent instead of searching for 'that'.
@@ -1284,13 +1309,29 @@ class ConversationMemory:
                 "chats", "conversation", "conversations", "here",
                 "anymore", "from", "now", "on", "going", "forward",
                 "the", "that", "those", "it", "about", "of", "ve",
-                "have", "has", "to", "with", "me", "my", "our", "us"}
+                "have", "has", "to", "with", "me", "my", "our", "us",
+                "mine", "fact", "facts", "data", "memories", "memory",
+                "details", "info", "information", "know", "knows",
+                "learned", "saved", "stored"}
             _body_terms = [w for w in re.findall(
                 r"[a-z']+", forget_body.lower()) if w not in _scope_words]
             if (not _body_terms and re.search(
-                    r"\b(?:i|we|you|u|chats?|conversations?|everything|"
-                    r"anything|all)\b", forget_body, flags=re.IGNORECASE)):
-                result["memory_off"] = [True]
+                    r"\b(?:i|we|you|u|me|my|us|our|mine|chats?|"
+                    r"conversations?|everything|anything|all)\b",
+                    forget_body, flags=re.IGNORECASE)):
+                if re.match(r"^(?:forget|delete)\b", raw,
+                            flags=re.IGNORECASE):
+                    # 'forget everything (about me)' is a purge
+                    # request — wipe the learned rows, never a
+                    # literal topic search. Destructive but
+                    # explicitly user-directed.
+                    forgotten = self.forget_all()
+                    if forgotten:
+                        result["forgotten"].extend(forgotten)
+                    else:
+                        result["forgotten_miss"] = [forget_body]
+                else:
+                    result["memory_off"] = [True]
                 return result
             # "nm, my editor is vim" — an abortive marker followed by a
             # fresh statement is a correction, not a forget: the tail
@@ -2921,6 +2962,30 @@ class ConversationMemory:
                         row["active"] = False
                         row["updated_at"] = time.time()
                         forgotten.append(dict(row))
+            if forgotten:
+                self._save()
+        return forgotten
+
+    def forget_all(self) -> list[dict[str, Any]]:
+        """Deactivate every learned fact/rule and drop the correction
+        queue — the user asked to wipe what Nexus remembers, not to
+        match a topic."""
+        forgotten: list[dict[str, Any]] = []
+        with self._lock:
+            for key in ("facts", "behavior_rules"):
+                for row in self._data.get(key, []):
+                    if (not isinstance(row, dict)
+                            or not row.get("active", True)
+                            or self._row_expired(row)):
+                        continue
+                    row["active"] = False
+                    row["updated_at"] = time.time()
+                    forgotten.append(dict(row))
+            for row in self._data.get("training_examples", []):
+                if isinstance(row, dict):
+                    forgotten.append(dict(row))
+            if self._data.get("training_examples"):
+                self._data["training_examples"] = []
             if forgotten:
                 self._save()
         return forgotten
