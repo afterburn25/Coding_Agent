@@ -3626,6 +3626,7 @@ class AgentOrchestrator:
     # claim the inventory lane earlier.
     _REMINDER_NOUNFIRST_RE = re.compile(
         _REMINDER_POLITE +
+        r"(?:(?:a|an|new|another|one)\s+)?"
         r"(?P<noun>reminders?|alarms?|timers?)\s+"
         r"(?P<tail>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)

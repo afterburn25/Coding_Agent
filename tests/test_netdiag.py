@@ -2171,6 +2171,17 @@ class TruthGateTests(RecoveryLoopTests):
                                mode="auto")
             self.assertIn("Reminder set", result.content)
             self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            # Article/adjective leads — 'a reminder for 3pm' and
+            # 'new reminder at 4' got model fake-sets over zero
+            # rows; 'the reminder at 3' stays referential.
+            result = agent.run("a reminder for 3pm", mode="auto")
+            self.assertIn("do what", result.content)
+            result = agent.run("new reminder at 4", mode="auto")
+            self.assertIn("do what", result.content)
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("an alarm at 7", mode="auto")
+            self.assertIn("Alarm set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
             # Terse forms — 'reminders off' got a model 'all inactive'
             # over untouched rows; 'snooze everything' got a false
             # capability refusal. Both are real pool mutations now.
