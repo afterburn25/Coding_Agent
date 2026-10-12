@@ -3353,6 +3353,70 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIsNotNone(r)
         self.assertIn("call mom", r.content)
 
+        # Class exclusions — 'every day except weekends' is a real
+        # weekly spec over the weekdays, not a narrated exception.
+        sup.scheduler.add(
+            "reminder: weekday check", "weekly",
+            weekday=[0, 1, 2, 3, 4], hour=8, minute=0,
+            created_at=time.time(),
+            action={"kind": "notify", "detail": "weekday check"})
+        r = agent._reminder_reply(
+            "remind me every day except weekends at 8am to stretch",
+            "remind me every day except weekends at 8am to stretch",
+            task.id)
+        self.assertIsNotNone(r)
+        new_row = sup.scheduler.rows[-1]
+        self.assertEqual(new_row["kind"], "weekly")
+        self.assertEqual(
+            sorted(new_row["weekday"]), [0, 1, 2, 3, 4])
+        # 'half an hour' is a real duration — the tail peel mustn't
+        # leave 'half' scoping the row. (A recurring row refuses a
+        # snooze by design, so pin a one-shot.)
+        sup.scheduler.add(
+            "timer: tea", "once", at=time.time() + 600,
+            created_at=time.time(),
+            action={"kind": "notify", "detail": "tea"})
+        r = agent._reminder_reply(
+            "snooze the tea half an hour",
+            "snooze the tea half an hour", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("tea", r.content.lower())
+        self.assertIn("snoozed", r.content.lower())
+        # 'reminders i set today' scopes created_at, not the fire
+        # window — rows made today list regardless of fire day.
+        sup.scheduler.rows[0]["created_at"] = time.time() - 90000
+        sup.scheduler.rows[-1]["created_at"] = time.time() - 100
+        r = agent._reminder_reply(
+            "which reminders did i set today",
+            "which reminders did i set today", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("set today", r.content)
+        self.assertIn("weekday check", r.content)
+        self.assertNotIn("standup", r.content)
+        # 'what is the X set for' — a spec ask on the named row.
+        r = agent._reminder_reply(
+            "what is the standup set for",
+            "what is the standup set for", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("standup", r.content)
+        # A singular scope term meets a plural label.
+        r = agent._reminder_reply(
+            "when is my next pill reminder",
+            "when is my next pill reminder", task.id)
+        # No 'pills' row exists here — the honest miss names the
+        # real pool; with one present it resolves (covered live).
+        self.assertIsNotNone(r)
+        # A trailing event clause is a trigger we can't watch —
+        # refuse, never mint '… when i wake up' task text.
+        r = agent._reminder_reply(
+            "remind me to drink water when i wake up",
+            "remind me to drink water when i wake up", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("can't watch", r.content)
+        self.assertFalse(
+            any("wake up" in s["name"]
+                for s in sup.scheduler.rows))
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

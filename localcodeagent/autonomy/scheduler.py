@@ -396,6 +396,8 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     t = re.sub(
         r"\bonly\s+(?=(?:on|at|in|every|next|tomorrow|tonight|"
         r"weekday|weekend|daily|weekly))", "", t)
+    # 'weekdays only' — a trailing 'only' is the same filler.
+    t = re.sub(r"\s+only\s*$", "", t)
     t = " ".join(t.split())
     t = _worded_clock(t)
     if _bad_clock(t):
@@ -987,6 +989,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     t = re.sub(
         r"\bonly\s+(?=(?:on|at|in|every|next|tomorrow|tonight|"
         r"weekday|weekend|daily|weekly))", "", t)
+    # 'weekdays only' — a trailing 'only' is the same filler.
+    t = re.sub(r"\s+only\s*$", "", t)
     t = " ".join(t.split())
     t = _worded_clock(t)
     if _bad_clock(t):
@@ -1204,20 +1208,30 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         return {"kind": "interval", "interval_s": max(60.0, interval),
                 **_anchor(m, 3)}
     # 'every day except sunday [at T]' / 'every weekday but
-    # tuesday' — the day class minus the named day(s), a real
-    # weekly spec rather than a narrated exception.
+    # tuesday' / 'every day except weekends' — the day class
+    # minus the named day(s), a real weekly spec rather than a
+    # narrated exception.
     m = re.fullmatch(
         r"(?:every\s+|on\s+)?(weekdays?|weekends?|day)\s+"
-        r"(?:except|but)\s+(\w+day)s?"
+        r"(?:except|but)\s+(weekdays?|weekends?|\w+day)s?"
         r"(?:\s+and\s+(\w+day)s?)?" + clock_tail, t)
     if m:
+
+        def _excl_set(word: str) -> set:
+            if not word:
+                return set()
+            if word.startswith("weekday"):
+                return {0, 1, 2, 3, 4}
+            if word.startswith("weekend"):
+                return {5, 6}
+            d = _WEEKDAY_NAMES.get(word)
+            return {d} if d is not None else set()
+
         base = ([0, 1, 2, 3, 4]
                 if m.group(1).startswith("weekday")
                 else [5, 6] if m.group(1).startswith("weekend")
                 else list(range(7)))
-        excl = {d for d in (_WEEKDAY_NAMES.get(m.group(2)),
-                            _WEEKDAY_NAMES.get(m.group(3)))
-                if d is not None}
+        excl = _excl_set(m.group(2)) | _excl_set(m.group(3))
         if excl:
             hr, mn, mer = m.group(4), m.group(5), m.group(6)
             return {"kind": "weekly",
