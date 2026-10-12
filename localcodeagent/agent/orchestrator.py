@@ -4166,6 +4166,17 @@ class AgentOrchestrator:
         r"(?:on|off|paused|muted|enabled|disabled|active|"
         r"inactive)\b" + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # Clock-confirm asks — 'is my alarm set for 6'. The topic and
+    # the asked clock both resolve against persisted rows: a hit
+    # confirms or corrects, a miss says which exist. A topic with
+    # no row AND an unparseable clock ('the table set for dinner')
+    # returns None — it isn't a schedule ask at all.
+    _REMINDER_CONFIRMASK_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:are|is)\s+(?:(?:my|the|your|that|this|our|any)\s+)?"
+        r"(?P<ctopic>[a-z0-9][a-z0-9'\s-]{0,40}?)\s+set\s+"
+        r"(?:for|at|to|on)\s+(?P<cclock>.+?)" + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
@@ -6801,6 +6812,7 @@ class AgentOrchestrator:
             and not re.search(
                 r"\b(?:reminders?|alarms?|timers?|schedules?)\b",
                 plan_text, re.IGNORECASE)) and not state_ask
+        confirm_ask = self._REMINDER_CONFIRMASK_RE.match(plan_text)
         countdown_ask = bool(re.search(
             r"\bhow\s+(?:long|soon|much\s+time|much\s+longer)\b|"
             r"\btime\s+(?:is\s+)?(?:left|remaining|until|till)\b|"
@@ -7035,6 +7047,112 @@ class AgentOrchestrator:
                     f"({'on' if s.get('enabled') else 'off'})"
                     for s in hits[:5])
                 text = f"{on_ct} of {len(hits)} on: {bits}."
+        elif confirm_ask is not None:
+            # 'is my alarm set for 6' — confirm or correct from the
+            # row's real clock; a miss names which rows exist, and
+            # an unparseable clock over no row falls through.
+            cbody = str(
+                confirm_ask.group("ctopic") or "").strip(" ,;—-")
+            cclock = str(
+                confirm_ask.group("cclock") or "").strip(" ,;—-.!?")
+            _cn = re.search(
+                r"\b(reminders?|alarms?|timers?|schedules?)\s*$",
+                cbody, re.IGNORECASE)
+            cnoun = _cn.group(1).lower() if _cn is not None else None
+            if _cn is not None:
+                cbody = cbody[:_cn.start()].strip(" ,;—-")
+            _, c_rows = self._reminder_rows(
+                include_disabled=True, noun=cnoun)
+            cterms = self._reminder_terms(cbody)
+            if len(cterms) > 1:
+                cterms -= {"appointment", "appointments"}
+            chits = [s for s in c_rows
+                     if not cterms
+                     or cterms <= self._reminder_hay(s)]
+            cspec = self._reminder_spec(cclock, now)
+            if cspec is None:
+                cspec = self._reminder_spec("at " + cclock, now)
+            if cspec is None and not (chits or cnoun):
+                # 'is the table set for dinner' — no clock, no
+                # row; not a schedule ask at all.
+                return None
+            asked = None
+            if cspec is not None:
+                if cspec.get("kind") == "once" and cspec.get("at"):
+                    _clt = time.localtime(float(cspec["at"]))
+                    asked = (_clt.tm_hour, _clt.tm_min)
+                elif cspec.get("hour") is not None:
+                    asked = (int(cspec["hour"]),
+                             int(cspec.get("minute") or 0))
+            # 'set for 6' names no meridian — a 06:00 row AND a
+            # 18:00 row both satisfy it. Meridian words or a >12
+            # hour ('set for 18') pin the h24 compare.
+            _txt_h = re.search(
+                r"\b(\d{1,2})(?::\d{2})?\b", cclock)
+            _h24_cmp = bool(re.search(
+                r"a\.?m\.?|p\.?m\.?|noon|midnight", cclock,
+                re.IGNORECASE)) or bool(
+                    _txt_h and int(_txt_h.group(1)) > 12)
+
+            def _clock_eq(actual):
+                if actual is None or asked is None:
+                    return False
+                if _h24_cmp:
+                    return actual == asked
+                return (actual[0] % 12 == asked[0] % 12
+                        and actual[1] == asked[1])
+
+            def _row_clock(s):
+                if (s.get("kind") in ("daily", "weekly", "monthly")
+                        and s.get("hour") is not None):
+                    return (int(s["hour"]),
+                            int(s.get("minute") or 0))
+                fire = self._reminder_next_fire(s, now)
+                if fire:
+                    _lt = time.localtime(float(fire))
+                    return (_lt.tm_hour, _lt.tm_min)
+                return None
+            if not chits:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in c_rows[:3])
+                _np = (cnoun or "reminders")
+                if not _np.endswith("s"):
+                    _np += "s"
+                text = (f"No {_np} matching "
+                        f"“{' '.join(sorted(cterms)) or 'that'}”"
+                        + (f" — you've got: {names}."
+                           if c_rows else " set."))
+            elif len(chits) == 1:
+                s = chits[0]
+                actual = _row_clock(s)
+                wt = self._reminder_when_text(s, now)
+                label = self._reminder_label(s)
+                if actual is not None and _clock_eq(actual):
+                    text = (f"Yes — “{label}” is set for {wt}.")
+                elif actual is not None:
+                    text = (f"No — “{label}” is set for {wt}, "
+                            f"not {cclock}.")
+                else:
+                    text = (f"“{label}” exists — {wt} — but I "
+                            "can't compare a clock to it.")
+            else:
+                matching = [s for s in chits
+                            if _clock_eq(_row_clock(s))]
+                if matching:
+                    bits = "; ".join(
+                        f"“{self._reminder_label(s)}”"
+                        for s in matching[:3])
+                    text = (f"Yes — {bits} "
+                            f"{'is' if len(matching) == 1 else 'are'}"
+                            f" set for {cclock}.")
+                else:
+                    bits = "; ".join(
+                        f"“{self._reminder_label(s)}” "
+                        f"({self._reminder_when_text(s, now)})"
+                        for s in chits[:4])
+                    text = (f"None of them is set for {cclock} — "
+                            f"you've got: {bits}.")
         elif fired_ask:
             # 'did my stretch reminder go off' — the row's last_run
             # is the honest answer; a fired once-row may already be
@@ -7509,6 +7627,7 @@ class AgentOrchestrator:
                 or self._REMINDER_STATEASK_RE.match(plan_text)
                 or self._REMINDER_NOUNLESS_STATEASK_RE.match(
                     plan_text)
+                or self._REMINDER_CONFIRMASK_RE.match(plan_text)
                 or self._reminder_inventory_shaped(plan_text)):
             # 'that reminder at 3' / 'tell me about my reminders' —
             # referential or imperative inventory asks, not creates;
@@ -7951,6 +8070,25 @@ class AgentOrchestrator:
                 user_text, task_id, event_callback)
         forced_when = forced_task = None
         m = self._REMINDER_RE.match(plan_text)
+        if m is not None:
+            # 'wake me at quarter to 7' — the lazy 'to' cut inside
+            # the clock phrase; rejoined it's a when-only clause
+            # the NOTASK path owns (wake-AM rewrite included), not
+            # a task named '7'.
+            _wj = str(m.group("when") or "").strip(" ,;—-")
+            _tj = str(m.group("task") or "").strip()
+            if (_wj and _tj
+                    and self._reminder_spec(_wj, time.time()) is None
+                    and re.fullmatch(
+                        r"(?:\d{1,2}(?::\d{2})?(?:\s*(?:a\.?m\.?|"
+                        r"p\.?m\.?))?|quarter|half|noon|midnight|"
+                        r"one|two|three|four|five|six|seven|eight|"
+                        r"nine|ten|eleven|twelve)\s*",
+                        _tj, re.IGNORECASE)
+                    and self._reminder_spec(
+                        f"{_wj} to {_tj}",
+                        time.time()) is not None):
+                m = None
         if m is None:
             m = self._REMINDER_LEAD_CADENCE_RE.match(plan_text)
             if (m is not None
@@ -8076,20 +8214,20 @@ class AgentOrchestrator:
                 mnt = self._REMINDER_NOTASK_RE.match(plan_text)
                 if mnt is not None:
                     wtxt = str(mnt.group("when") or "")
-                    if (str(mnt.group("verb") or "").lower()
-                            in ("wake", "waking")
-                            and not re.search(
-                                r"(?:a\.?m|p\.?m)\b|morning|"
-                                r"afternoon|evening|tonight|"
-                                r"tonite|noon|midnight", wtxt,
-                                re.IGNORECASE)):
-                        # 'wake me at 6' means 6 AM — the bare-clock
-                        # PM inference turns a wake call into dinner.
-                        wtxt = re.sub(
-                            r"(\bat\s+\d{1,2}(?::\d{2})?|"
-                            r"\b\d{1,2}(?::\d{2})?(?=\s*$))",
-                            lambda mm: mm.group(1) + "am",
-                            wtxt, count=1, flags=re.IGNORECASE)
+                    # 'wake me at 6' means 6 AM — the bare-clock PM
+                    # inference turns a wake call into dinner. The
+                    # flag defers the fix to spec level: 'am' glued
+                    # inside 'quarter to 7'/'half past 6' breaks the
+                    # phrase, but shifting the parsed fire time
+                    # handles every clock shape.
+                    _wake_am = (
+                        str(mnt.group("verb") or "").lower()
+                        in ("wake", "waking")
+                        and not re.search(
+                            r"(?:a\.?m|p\.?m)\b|morning|"
+                            r"afternoon|evening|tonight|"
+                            r"tonite|noon|midnight", wtxt,
+                            re.IGNORECASE))
                     # 'remind me tomorrow to' / 'wake me at' — a
                     # dangling connector is not part of the when.
                     # ('\s*' would eat 'on' inside 'noon'.)
@@ -8123,6 +8261,18 @@ class AgentOrchestrator:
                             user_text, task_id, event_callback)
                     spec_nt = self._reminder_spec(wtxt, time.time())
                     nt_task = ""
+                    if spec_nt is None and _wake_am:
+                        # Bare-digit forms ('wake me 6') only parse
+                        # with a meridian glued on; the joined-clock
+                        # ones ('quarter to 7') parsed above and get
+                        # their AM shift after resolution.
+                        wtxt = re.sub(
+                            r"(\bat\s+\d{1,2}(?::\d{2})?|"
+                            r"\b\d{1,2}(?::\d{2})?(?=\s*$))",
+                            lambda mm: mm.group(1) + "am",
+                            wtxt, count=1, flags=re.IGNORECASE)
+                        spec_nt = self._reminder_spec(
+                            wtxt, time.time())
                     if spec_nt is None:
                         # 'about the meeting in 15', 'about the
                         # deploy at 6', 'about the rent on friday' —
@@ -8198,6 +8348,32 @@ class AgentOrchestrator:
                                 spec_nt, wtxt = spec_f, base_n
                                 if bound_n is None:
                                     nt_task = tail_n
+                    if (spec_nt is not None and _wake_am
+                            and re.search(
+                                r"\bat\b|\bto\b|past|quarter|half|"
+                                r"o'?clock|noon|midnight",
+                                wtxt, re.IGNORECASE)):
+                        # A wake call reads PM-inferred clocks as AM
+                        # — 'wake me at quarter to 7' is 06:45, not
+                        # dinner time. Shift the parsed fire time
+                        # since 'am' can't glue inside the phrase.
+                        # Clock-anchored whens only — 'in an hour'
+                        # is a duration, not a meridian question.
+                        if (spec_nt.get("kind") == "once"
+                                and spec_nt.get("at")):
+                            _at = float(spec_nt["at"])
+                            if time.localtime(_at).tm_hour >= 12:
+                                _at -= 12 * 3600
+                                if _at <= time.time():
+                                    _at += 24 * 3600
+                                spec_nt = dict(spec_nt, at=_at)
+                        elif (spec_nt.get("kind")
+                                in ("daily", "weekly", "monthly")
+                                and spec_nt.get("hour") is not None
+                                and int(spec_nt["hour"]) >= 12):
+                            spec_nt = dict(
+                                spec_nt,
+                                hour=int(spec_nt["hour"]) - 12)
                     if spec_nt is None:
                         # 'remind me about the rent' — a connector
                         # lead means the whole when-slot is the
@@ -9430,6 +9606,7 @@ class AgentOrchestrator:
             cls._REMINDER_HAVE_RE,
             cls._REMINDER_STATEASK_RE,
             cls._REMINDER_NOUNLESS_STATEASK_RE,
+            cls._REMINDER_CONFIRMASK_RE,
             cls._REMINDER_WHENLEAD_RE,
             # Bare duration/clock fragments may be pending-clarify
             # replies — the resolver checks the convo at reply time.

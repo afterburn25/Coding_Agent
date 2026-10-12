@@ -2075,6 +2075,79 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIn("2", r.content)
         self.assertFalse(sup.scheduler.rows)
 
+        # 'quarter to 7' — the lazy 'to' split inside the clock;
+        # rejoined it's a when-only clause owned by the NOTASK
+        # path. Wake verbs shift the PM inference to AM — a wake
+        # call is a morning ask, not dinner.
+        r = agent._reminder_reply(
+            "wake me at quarter to 7",
+            "wake me at quarter to 7", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("06:45", r.content)
+        self.assertIn("wake", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 1)
+        r = agent._reminder_reply(
+            "wake me at half past 6",
+            "wake me at half past 6", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("06:30", r.content)
+        # 'in an hour' is a duration, not a clock — no AM shift.
+        r = agent._reminder_reply(
+            "wake me up in an hour",
+            "wake me up in an hour", task.id)
+        self.assertIsNotNone(r)
+        self.assertAlmostEqual(
+            float(sup.scheduler.rows[-1]["at"]),
+            time.time() + 3600, delta=120)
+        # Explicit meridian beats the wake-AM convention.
+        r = agent._reminder_reply(
+            "wake me at 6pm",
+            "wake me at 6pm", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("18:00", r.content)
+
+        # Clock-confirm asks — 'is my alarm set for 6' answers from
+        # the row's real clock: bare digits are meridian-free
+        # (06:00 and 18:00 both confirm), 'am'/'pm'/'>12' pin h24.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "alarm: wake", "daily", hour=6, minute=0,
+            action={"kind": "notify", "detail": "wake"})
+        sup.scheduler.add(
+            "alarm: dinner bell", "daily", hour=18, minute=0,
+            action={"kind": "notify", "detail": "dinner bell"})
+        r = agent._reminder_reply(
+            "is my alarm set for 6",
+            "is my alarm set for 6", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("Yes", r.content)
+        self.assertIn("wake", r.content)
+        self.assertIn("dinner bell", r.content)
+        r = agent._reminder_reply(
+            "is my alarm set for 6am",
+            "is my alarm set for 6am", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        self.assertNotIn("dinner bell", r.content)
+        r = agent._reminder_reply(
+            "is my alarm set for 6pm",
+            "is my alarm set for 6pm", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("dinner bell", r.content)
+        self.assertNotIn("wake", r.content)
+        r = agent._reminder_reply(
+            "is the wake set for 21",
+            "is the wake set for 21", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("No", r.content)
+        self.assertIn("06:00", r.content)
+        r = agent._reminder_reply(
+            "is the dentist set for 3",
+            "is the dentist set for 3", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("No", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 2)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
