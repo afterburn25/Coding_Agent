@@ -4324,7 +4324,8 @@ class AgentOrchestrator:
         r"|" + _REMINDER_POLITE +
         r"(?:give\s+me|gimme|let\s+me\s+have)\s+"
         r"(?P<dur2>.+?\s*more\s+(?:time|minutes?|mins?|seconds?|"
-        r"secs?|hours?|hrs?|days?))\b" + _REMINDER_TRAIL +
+        r"secs?|hours?|hrs?|days?))\b"
+        r"(?:\s+(?:on|of|for)\s+(?P<body7>.+?))?" + _REMINDER_TRAIL +
         # 'make it earlier [by an hour]' — direction-word snooze;
         # the editor lane answered 'your editor is earlier'.
         r"|" + _REMINDER_POLITE +
@@ -4361,7 +4362,8 @@ class AgentOrchestrator:
         r"resume|unpause|unmute|unsilence|stop|mute|silence|"
         r"hold|freeze|suspend|quiet|block|un-?block|unfreeze|"
         r"thaw|bring\s+back|put\s+back|restore|restart|"
-        r"re-?activate|renew|revive)\s+(?P<body>.+?)?"
+        r"re-?activate|activate|deactivate|renew|revive)\s+"
+        r"(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?|schedules?|"
         r"it|that|this|them|everything|all)\b"
         + _REMINDER_ECHO +
@@ -4395,10 +4397,21 @@ class AgentOrchestrator:
         r"unpause|unmute|unsilence|stop|mute|silence|hold|"
         r"freeze|suspend|quiet|block|un-?block|unfreeze|thaw|"
         r"bring\s+back|put\s+back|restore|restart|re-?activate|"
-        r"renew|revive)\s+"
+        r"activate|deactivate|renew|revive)\s+"
         r"(?:the\s+|my\s+|that\s+|this\s+|those\s+|these\s+)"
         r"(?P<body4>[\w'\s-]{1,40}?)"
         r"(?:\s+(?P<dir4>back\s+on|off|on))?"
+        + _REMINDER_TRAIL +
+        # 'turn the standup back on'/'switch the standup off' —
+        # noun-less turn/switch claims only WITH a direction;
+        # 'switch the pay rent reminder to sunday' is a
+        # reschedule, and a direction-less 'turn the oven'
+        # belongs to the action lanes.
+        r"|" + _REMINDER_POLITE +
+        r"(?P<verb5>turn|switch)\s+"
+        r"(?:the\s+|my\s+|that\s+|this\s+|those\s+|these\s+)"
+        r"(?P<body5>[\w'\s-]{1,40}?)\s+"
+        r"(?P<dir5>back\s+on|off|on)\b"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_STOP_RE = re.compile(
@@ -4436,10 +4449,10 @@ class AgentOrchestrator:
     # generic without a noun.
     _REMINDER_RESCHEDULE_BARE_RE = re.compile(
         _REMINDER_POLITE +
-        # 'move'/'change'/'switch' join on a row hit and fall
-        # through on a miss — 'move pay rent' is a schedule op,
-        # 'move the table' isn't.
-        r"(?P<verb>reschedule|move|change|switch)\s+"
+        # 'move'/'change'/'switch'/'make' join on a row hit and
+        # fall through on a miss — 'move pay rent' is a schedule
+        # op, 'move the table' isn't.
+        r"(?P<verb>reschedule|move|change|switch|make)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)"
         r"(?:\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?))?"
         + _REMINDER_TRAIL,
@@ -4599,7 +4612,8 @@ class AgentOrchestrator:
         body = str(ms.groupdict().get("body")
                    or ms.groupdict().get("body2")
                    or ms.groupdict().get("body4")
-                   or ms.groupdict().get("body6") or "")
+                   or ms.groupdict().get("body6")
+                   or ms.groupdict().get("body7") or "")
         body = body.strip(" ,;—-")
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
@@ -4895,7 +4909,7 @@ class AgentOrchestrator:
             # is a file/object turn, not a schedule op; let it fall
             # through to the action lanes.
             return None
-        if (verb_l in ("move", "change", "switch", "push",
+        if (verb_l in ("move", "change", "switch", "make", "push",
                     "bump", "shift")
                 and mr.groupdict().get("noun") is None
                 and str(mr.group("body") or "").strip().lower()
@@ -4905,7 +4919,7 @@ class AgentOrchestrator:
             return None
         sched, rows = self._reminder_rows(noun=noun)
         if sched is None:
-            if (verb_l in ("move", "change", "switch", "push",
+            if (verb_l in ("move", "change", "switch", "make", "push",
                     "bump", "shift")
                     and mr.groupdict().get("noun") is None):
                 # No scheduler to resolve the body against — a
@@ -4916,12 +4930,47 @@ class AgentOrchestrator:
                 "running in this session.",
                 user_text, task_id, event_callback)
         body = str(mr.group("body") or "").strip(" ,;—-")
+        shift_txt = ""
+        if mr.group("when") is None:
+            # 'push the standup back an hour', 'move it up 30
+            # minutes', 'make the standup earlier' — the shift
+            # tails the body because the when-slot only takes
+            # to/until/for/digit leads. Peel it for the offset
+            # math below (bare 'earlier' still clarifies).
+            shm = re.search(
+                r"\s+((?:back|forward|earlier|later|up|down|"
+                r"sooner)(?:\s+by)?(?:\s+(?:a|an|one|two|three|"
+                r"four|five|six|seven|eight|nine|ten|couple|few|"
+                r"\d+(?:\.\d+)?)\s+(?:seconds?|secs?|minutes?|"
+                r"mins?|hours?|hrs?|days?|weeks?))?)$",
+                body, re.IGNORECASE)
+            if shm is not None:
+                shift_txt = shm.group(1)
+                body = body[:shm.start()].strip(" ,;—-")
+        else:
+            # 'push the standup back 30 minutes' — the digit lead
+            # on '30' put the duration in the when slot and left
+            # the direction word on the body; rejoin them as a
+            # shift so the sign isn't lost.
+            shm = re.search(
+                r"\s+(back|forward|earlier|later|up|down|sooner)"
+                r"(?:\s+by)?$", body, re.IGNORECASE)
+            if (shm is not None and re.fullmatch(
+                    r"(?:a|an|one|two|three|four|five|six|seven|"
+                    r"eight|nine|ten|couple|few|\d+(?:\.\d+)?)\s*"
+                    r"(?:seconds?|secs?|minutes?|mins?|hours?|"
+                    r"hrs?|days?|weeks?)",
+                    str(mr.group("when")).strip(),
+                    re.IGNORECASE)):
+                shift_txt = (shm.group(1) + " "
+                             + str(mr.group("when")).strip())
+                body = body[:shm.start()].strip(" ,;—-")
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
             " ", body, flags=re.IGNORECASE))
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
-        if (verb_l in ("move", "change", "switch", "push",
+        if (verb_l in ("move", "change", "switch", "make", "push",
                     "bump", "shift")
                 and mr.groupdict().get("noun") is None
                 and not hits and topic_terms):
@@ -4934,14 +4983,15 @@ class AgentOrchestrator:
                         self._reminder_label(s))
                     and self._reminder_terms(
                         self._reminder_label(s)) <= topic_terms]
-        if (verb_l in ("move", "change", "switch", "push",
+        if (verb_l in ("move", "change", "switch", "make", "push",
                     "bump", "shift")
                 and mr.groupdict().get("noun") is None
                 and not hits):
             # 'move the table'/'change the font' — a body that
             # resolves no reminder row isn't a schedule op.
             return None
-        _wtxt = str(mr.group("when") or "").strip()
+        _wtxt = ("" if shift_txt
+                 else str(mr.group("when") or "").strip())
         _wtxt = re.sub(r"\s+(?:instead|actually)\s*$", "",
                        _wtxt, flags=re.IGNORECASE).strip()
         spec = self._reminder_spec(_wtxt, time.time())
@@ -4962,6 +5012,52 @@ class AgentOrchestrator:
             # 'change my alarm to 7' — a bare clock target.
             spec = self._reminder_spec(
                 "at " + _wtxt, time.time())
+        if spec is None and shift_txt and hits:
+            # 'back an hour'/'up 30 minutes' — offset the hit row's
+            # own fire time; recur_merge retimes a recurring row's
+            # cadence to the shifted clock.
+            sm2 = re.search(
+                r"(back|forward|earlier|later|up|down|sooner)"
+                r"(?:\s+by)?\s*(a|an|one|two|three|four|five|"
+                r"six|seven|eight|nine|ten|couple|few|"
+                r"\d+(?:\.\d+)?)\s*"
+                r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|"
+                r"h|days?|d|weeks?|w)", shift_txt, re.IGNORECASE)
+            if sm2 is not None:
+                scale = {"s": 1, "m": 60, "h": 3600, "d": 86400,
+                         "w": 604800}[sm2.group(3)[0].lower()]
+                n_tok = sm2.group(2).lower()
+                delta = scale * float(
+                    n_tok if n_tok.replace(".", "").isdigit()
+                    else {"a": 1, "an": 1, "one": 1, "two": 2,
+                          "three": 3, "four": 4, "five": 5,
+                          "six": 6, "seven": 7, "eight": 8,
+                          "nine": 9, "ten": 10, "couple": 2,
+                          "few": 3}[n_tok])
+                if sm2.group(1).lower() in (
+                        "earlier", "sooner", "up", "down"):
+                    delta = -delta
+                row0 = hits[0]
+                if (row0.get("kind") in ("daily", "weekly", "monthly")
+                        and row0.get("hour") is not None):
+                    # A recurring row's shift base is its cadence
+                    # clock, not next_run — 9:00 daily +1h retimes
+                    # to 10:00 daily. No clamp: recur_merge only
+                    # reads the clock off spec.at, so a past
+                    # timestamp is fine.
+                    lt0 = time.localtime()
+                    base = time.mktime((
+                        lt0.tm_year, lt0.tm_mon, lt0.tm_mday,
+                        int(row0.get("hour") or 0),
+                        int(row0.get("minute") or 0),
+                        0, lt0.tm_wday, lt0.tm_yday, lt0.tm_isdst))
+                    spec = {"kind": "once", "at": base + delta}
+                else:
+                    base = float(row0.get("next_run")
+                                 or row0.get("at") or time.time())
+                    spec = {"kind": "once",
+                            "at": max(time.time(), base + delta)}
+                _wtxt = shift_txt
         if spec is None:
             return self._reminder_finish(
                 "Reschedule to when? — e.g. “to friday at 3pm” "
@@ -5022,24 +5118,34 @@ class AgentOrchestrator:
         text = str(wtxt or "").lower()
         # A bare digit ('to 11') is a clock — the handler already
         # re-parsed it as 'at 11', so claiming it then keeping the
-        # old hour would be a silent no-op reschedule.
+        # old hour would be a silent no-op reschedule. So is a
+        # shift word ('back an hour') — spec.at already carries
+        # the offset clock.
         has_clock = bool(re.search(
             r"\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b|"
             r"noon|midnight|o'?clock|half\s+past|"
             r"quarter\s+(?:past|to)|\d{1,2}:\d{2}", text)
-            or re.fullmatch(r"\d{1,2}", text.strip()))
+            or re.fullmatch(r"\d{1,2}", text.strip())
+            or bool(re.search(
+                r"\b(?:back|forward|earlier|later|up|down|"
+                r"sooner)\b", text)))
         hour, minute = ((lt.tm_hour, lt.tm_min) if has_clock
                         else (int(row.get("hour") or 9),
                               int(row.get("minute") or 0)))
         # A real date — month name, 'tomorrow', 'next week' — is an
         # explicit one-shot target, not a cadence retiming. So is a
         # duration ('in 30 minutes'): keeping the old cadence fields
-        # would claim a reschedule that never happened.
-        if re.search(
-                r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|"
-                r"nov|dec)\w*\b|\btomorrow\b|\bnext\s+week\b|"
-                r"\btonight\b|\btoday\b|\b\d+\s*(?:minutes?|mins?|"
-                r"hours?|hrs?|days?|weeks?)\b", text):
+        # would claim a reschedule that never happened. A shift
+        # word ('forward 2 hours') is a cadence retime — spec.at
+        # already holds the offset clock.
+        if (not re.search(
+                r"\b(?:back|forward|earlier|later|up|down|sooner)\b",
+                text)
+                and re.search(
+                    r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|"
+                    r"nov|dec)\w*\b|\btomorrow\b|\bnext\s+week\b|"
+                    r"\btonight\b|\btoday\b|\b\d+\s*(?:minutes?|"
+                    r"mins?|hours?|hrs?|days?|weeks?)\b", text)):
             return spec
         if re.search(r"\b(?:the\s+)?\d{1,2}(?:st|nd|rd|th)\b", text):
             return {"kind": "monthly", "day": lt.tm_mday,
@@ -5557,12 +5663,15 @@ class AgentOrchestrator:
             body = ""
         else:
             verb = str(mt.group("verb")
-                       or mt.groupdict().get("verb4") or "").lower()
+                       or mt.groupdict().get("verb4")
+                       or mt.groupdict().get("verb5") or "").lower()
             dirw = str(mt.group("dir")
-                       or mt.groupdict().get("dir4") or "").lower()
+                       or mt.groupdict().get("dir4")
+                       or mt.groupdict().get("dir5") or "").lower()
             body = str(mt.group("body")
                        or mt.groupdict().get("body3")
-                       or mt.groupdict().get("body4") or "")
+                       or mt.groupdict().get("body4")
+                       or mt.groupdict().get("body5") or "")
             body = body.strip(" ,;—-")
             if (verb in ("restart", "restore", "renew", "revive",
                          "resume", "suspend", "block", "freeze",
@@ -5591,7 +5700,7 @@ class AgentOrchestrator:
                     r"enable|re-?enable|resume|unpause|unmute|"
                     r"unsilence|un-?block|unfreeze|thaw|"
                     r"bring\s+back|put\s+back|restore|restart|"
-                    r"re-?activate|renew|revive", verb))
+                    r"re-?activate|activate|renew|revive", verb))
         if want_on is None:
             return self._reminder_finish(
                 "Turn them on or off? — e.g. “turn off "
@@ -5649,7 +5758,8 @@ class AgentOrchestrator:
             tgt_date = self._reminder_day_date(day, time.time())
             hits = [s for s in hits
                     if self._reminder_fires_on(s, tgt_date)]
-        if (mt.groupdict().get("verb4") is not None and rows
+        if ((mt.groupdict().get("verb4") is not None
+                or mt.groupdict().get("verb5") is not None) and rows
                 and not any(topic_terms <= _hay(s) for s in rows)):
             # 'pause the movie' — a noun-less toggle that names no
             # reminder row belongs to the action lanes; claiming a
@@ -6594,8 +6704,14 @@ class AgentOrchestrator:
         if mr is None:
             mr = self._REMINDER_RESCHEDULE_PUSH_RE.match(plan_text)
         if mr is not None and not self._reminder_set_is_create(mr):
-            return self._reminder_reschedule_reply(
+            _rr = self._reminder_reschedule_reply(
                 user_text, mr, task_id, event_callback)
+            if _rr is not None:
+                return _rr
+            # A bare move/change/make claim that resolved no row
+            # falls through to the remaining dispatch — 'make sure
+            # i remember X' is the help-idiom create, not a
+            # reschedule.
         mstop = self._REMINDER_STOP_RE.match(plan_text)
         if mstop is not None:
             # 'don't remind me anymore' — disable every reminder

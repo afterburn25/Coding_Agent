@@ -4506,6 +4506,51 @@ class TruthGateTests(RecoveryLoopTests):
             for q in ("set my alarm for 7", "set the alarm for 8"):
                 r = agent.run(q, mode="auto")
                 self.assertIn("Alarm set", r.content, q)
+            # Noun-less turn/switch claim only WITH a direction —
+            # 'switch the pay rent reminder to sunday' is a
+            # reschedule, not a toggle clarify; 'turn the oven'
+            # (direction-less) is not the lane's call.
+            sup.scheduler.rows[0]["enabled"] = False
+            for q in ("turn the build back on",
+                      "switch the build on"):
+                sup.scheduler.rows[0]["enabled"] = False
+                r = agent.run(q, mode="auto")
+                self.assertTrue(sup.scheduler.rows[0]["enabled"], q)
+            for q in ("turn the build off",
+                      "switch the build off"):
+                sup.scheduler.rows[0]["enabled"] = True
+                r = agent.run(q, mode="auto")
+                self.assertFalse(sup.scheduler.rows[0]["enabled"], q)
+            sup.scheduler.rows[0]["enabled"] = False
+            r = agent.run("activate the build", mode="auto")
+            self.assertTrue(sup.scheduler.rows[0]["enabled"])
+            sup.scheduler.rows[0]["enabled"] = True
+            r = agent.run("deactivate the build", mode="auto")
+            self.assertFalse(sup.scheduler.rows[0]["enabled"])
+            t = agent.tasks.create("x", "auto")
+            self.assertIsNone(
+                agent._reminder_reply(
+                    "turn the oven", "turn the oven", t.id))
+            # 'make sure i remember the dentist at 3' — the 'make'
+            # bare-reschedule verb stole the HELP-idiom create and
+            # returned None on the row miss; a None reschedule now
+            # falls through so the idiom still creates a row.
+            sup.scheduler.rows.clear()
+            r = agent.run(
+                "make sure i remember the dentist at 3",
+                mode="auto")
+            self.assertIn("Reminder set", r.content)
+            self.assertTrue(
+                any("dentist" in str(s.get("name", ""))
+                    for s in sup.scheduler.rows))
+            sup.scheduler.add(
+                "reminder: pay rent", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "pay rent"})
+            r = agent.run(
+                "switch the pay rent reminder to sunday",
+                mode="auto")
+            self.assertIn("Rescheduled", r.content)
 
     def test_clock_scoped_inventory_asks(self):
         # Grammar sweep: 'what happens at 9am', 'whats at 9am',
