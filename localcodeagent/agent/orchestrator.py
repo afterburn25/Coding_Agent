@@ -4107,7 +4107,8 @@ class AgentOrchestrator:
         # matched so scope+dur landed in one capture; split at
         # the connector whose tail parses as a time.
         dsm = re.search(
-            r"\s+(?:by|for|until|till|til|to)\s+(.+)$", dur)
+            r"\s+(?:by|for|until|till|til|to|back|up|forward)\s+"
+            r"(.+)$", dur)
         if dsm is not None:
             head_d = dur[:dsm.start()].strip(" ,;—-")
             tail_d = dsm.group(1).strip(" ,;—-")
