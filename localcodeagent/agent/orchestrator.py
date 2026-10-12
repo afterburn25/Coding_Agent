@@ -4858,6 +4858,8 @@ class AgentOrchestrator:
         topic match, with ambiguity listed rather than guessed."""
         noun = mc.groupdict().get("noun")
         sched, rows = self._reminder_rows(noun=noun)
+        _, rows_d = self._reminder_rows(
+            include_disabled=True, noun=noun)
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
@@ -4916,6 +4918,17 @@ class AgentOrchestrator:
             s for s in rows
             if _matches(s) and not (
                 excl_terms and excl_terms <= self._reminder_hay(s))]
+        if not hits:
+            # 'unschedule the rent reminder' on a paused row —
+            # a disabled-only match still cancels; enabled hits
+            # win when both exist and the ambiguity list counts
+            # enabled only.
+            hits = [
+                s for s in rows_d
+                if not s.get("enabled", True)
+                and _matches(s) and not (
+                    excl_terms
+                    and excl_terms <= self._reminder_hay(s))]
         if want_next and hits:
             def _fire(s):
                 try:
@@ -4924,7 +4937,7 @@ class AgentOrchestrator:
                 except (TypeError, ValueError):
                     return 1e18
             hits = [min(hits, key=_fire)]
-        if not rows:
+        if not rows and not hits:
             text = self._reminder_none_text(
                 sched, noun)
         elif not hits and excl_terms:
