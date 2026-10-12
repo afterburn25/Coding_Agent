@@ -4269,7 +4269,19 @@ class AgentOrchestrator:
         r"undo(?:\s+(?:that|it|this|everything|the\s+(?:last|"
         r"previous)\s+(?:\w+\s+){0,3}(?:thing|change|reminder|"
         r"alarm|timer|one|update|move)|what\s+you\s+(?:just\s+)?"
-        r"did|my\s+last\s+(?:reminder|alarm|timer)))?[.!?]?\s*$",
+        r"did|my\s+(?:last|previous)\s+(?:reminder|alarm|timer|"
+        r"change|update|move|edit)))?[.!?]?\s*$",
+        re.IGNORECASE)
+    # 'what did you just do' — reads the live mutation journal
+    # without consuming it; an empty journal declines so the ask
+    # still reaches non-reminder owners.
+    _REMINDER_WHATDID_RE = re.compile(
+        _REMINDER_POLITE +
+        r"what\s+(?:did|have)\s+you\s+(?:just\s+)?"
+        r"(?:do(?:ne)?|change[ds]?|updat(?:e|ed)|edit(?:ed)?|move[ds]?|"
+        r"schedule[ds]?|re-?schedule[ds]?|set|cancel(?:led|ed)?|"
+        r"delete[ds]?|remove[ds]?|turn(?:ed)?\s+(?:off|on)|"
+        r"mute[ds]?|pause[ds]?|snooze[ds]?|rename[ds]?)[.!?]?\s*$",
         re.IGNORECASE)
     # 'bring back the wake' / 'restore the standup' — re-enables a
     # disabled row or re-adds a journaled deletion; a miss must
@@ -6505,6 +6517,26 @@ class AgentOrchestrator:
         topic_src = (mc.groupdict().get("ctime")
                      or mc.groupdict().get("tail")
                      or mc.groupdict().get("tail2") or body)
+        _just_made = bool(re.search(
+            r"\bi\s+(?:just|recently|lately)\s+"
+            r"(?:set|made|created|scheduled|booked|put|"
+            r"asked\s+for|added|gave\s+you)\b",
+            " ".join(str(g) for g in (
+                mc.groupdict().get("ctime"),
+                mc.groupdict().get("tail"),
+                mc.groupdict().get("tail2"), body) if g),
+            re.IGNORECASE))
+        if re.fullmatch(
+                r"\s*i\s+(?:(?:just|recently|lately)\s+)?"
+                r"(?:set|made|created|scheduled|booked|put|"
+                r"asked\s+for|added|gave\s+you|turned|switched|"
+                r"disabled|muted|paused|silenced|stopped|"
+                r"deactivated|cancelled|canceled|deleted|removed|"
+                r"snoozed|rescheduled|moved|renamed)\b.*",
+                topic_src or "", re.IGNORECASE):
+            # 'cancel the last reminder i made' — tail2 caught the
+            # provenance clause; the real scope lives in body.
+            topic_src = body
         if (noun and re.match(r"\s*and\b", topic_src, re.IGNORECASE)):
             # 'cancel the alarm and the lunch' — the noun word is
             # the first conjunct ('alarm …'), not a kind filter.
@@ -6524,17 +6556,19 @@ class AgentOrchestrator:
             all_flag = True
         # 'cancel the reminder i set for tomorrow' — the relative
         # clause describes how it got there, not what it's named.
-        # 'i just made' is a recency selector — the newest-created
-        # row, resolved through the cmax ordinal below.
-        _just_made = bool(re.search(
-            r"\bi\s+(?:just|recently|lately)\s+"
-            r"(?:set|made|created|scheduled|booked|put|"
-            r"asked\s+for|added|gave\s+you)\b",
-            topic_src, re.IGNORECASE))
+        # 'i just made' (detected above, before the tail fallback)
+        # is a recency selector — the newest-created row, resolved
+        # through the cmax ordinal below.
         topic_src = re.sub(
             r"\bi\s+(?:(?:just|recently|lately)\s+)?"
             r"(?:set|made|created|scheduled|booked|put|"
-            r"asked\s+for|added|gave\s+you)\b",
+            r"asked\s+for|added|gave\s+you|turned|switched|"
+            r"disabled|muted|paused|silenced|stopped|deactivated|"
+            r"cancelled|canceled|deleted|removed|snoozed|"
+            r"rescheduled|moved|renamed)"
+            r"(?:\s+(?:it\s+)?(?:off|on|down|up))?"
+            r"(?:\s+(?!(?:by|for|until|till|til|to|at|in|on|"
+            r"back|forward|earlier|later)\b)\S+)*",
             " ", topic_src, flags=re.IGNORECASE)
         topic_src = re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
@@ -7655,6 +7689,33 @@ class AgentOrchestrator:
             "Undone — " + "; ".join(notes) + ".",
             user_text, task_id, event_callback)
 
+    def _reminder_whatdid_reply(self, user_text: str, task_id: str,
+                                *, event_callback=None):
+        """'what did you just do' — summarizes the live journal
+        without consuming it ('undo that' still works after). An
+        empty journal declines (None) so generic 'what did you do'
+        asks reach their real owners."""
+        journal = getattr(self, "_sched_undo", None) or []
+        if not journal:
+            return None
+        notes = []
+        for ent in journal:
+            if ent[0] == "del":
+                notes.append(f"set “{ent[2]}”")
+            elif ent[0] == "readd":
+                notes.append(f"cancelled “{ent[2]}”")
+            elif ent[0] == "update":
+                notes.append(f"rescheduled “{ent[3]}”")
+            elif ent[0] == "enabled":
+                notes.append(
+                    f"turned “{ent[3]}” "
+                    f"{'off' if ent[2] else 'on'}")
+        if not notes:
+            return None
+        return self._reminder_finish(
+            "I " + "; ".join(notes) + ".",
+            user_text, task_id, event_callback)
+
     def _reminder_restore_reply(self, user_text: str, mr: re.Match,
                                 task_id: str, event_callback):
         """'bring back the wake' — re-enables a matching disabled
@@ -7757,6 +7818,9 @@ class AgentOrchestrator:
         those belong to memory lanes."""
         if self._REMINDER_UNDO_RE.match(plan_text):
             return self._reminder_undo_reply(
+                user_text, task_id, event_callback=event_callback)
+        if self._REMINDER_WHATDID_RE.match(plan_text):
+            return self._reminder_whatdid_reply(
                 user_text, task_id, event_callback=event_callback)
         # A new mutation turn replaces the journal — but only once
         # it actually mutates, so read-only turns keep 'undo that'
@@ -9535,6 +9599,8 @@ class AgentOrchestrator:
                          or self._REMINDER_CLOCKHAVE_RE.match(
                              plan_text)
                          or self._REMINDER_UNDO_RE.match(plan_text)
+                         or self._REMINDER_WHATDID_RE.match(
+                             plan_text)
                          or self._REMINDER_RESTORE_RE.match(plan_text)
                          or self._reminder_inventory_shaped(
                              plan_text)
@@ -10011,6 +10077,7 @@ class AgentOrchestrator:
             cls._REMINDER_CONFIRMASK_RE,
             cls._REMINDER_CLOCKHAVE_RE,
             cls._REMINDER_UNDO_RE,
+            cls._REMINDER_WHATDID_RE,
             cls._REMINDER_RESTORE_RE,
             cls._REMINDER_WHENLEAD_RE,
             # Bare duration/clock fragments may be pending-clarify

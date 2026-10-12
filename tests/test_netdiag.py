@@ -2392,6 +2392,49 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertFalse(sup.scheduler.rows[1]["enabled"])
         self.assertTrue(sup.scheduler.rows[0]["enabled"])
 
+        # 'what did you just do' — reads the live journal without
+        # consuming it, so 'undo' still replays; an empty journal
+        # declines so generic asks reach other owners.
+        agent._sched_undo = []
+        self.assertIsNone(agent._reminder_reply(
+            "what did you just do", "what did you just do",
+            task.id))
+        r = agent._reminder_reply(
+            "turn on the standup", "turn on the standup", task.id)
+        self.assertIsNotNone(r)
+        r = agent._reminder_reply(
+            "what did you just do", "what did you just do",
+            task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("standup", r.content)
+        # Read-only: the journal survives the ask.
+        r = agent._reminder_reply(
+            "undo my last change", "undo my last change", task.id)
+        self.assertIsNotNone(r)
+        self.assertFalse(sup.scheduler.rows[1]["enabled"])
+
+        # 'cancel the last reminder i made' — the provenance clause
+        # in tail2 is not the scope; 'last' still picks by fire
+        # order over the enabled pool.
+        sup.scheduler.rows.clear()
+        base2 = time.time()
+        sup.scheduler.add(
+            "reminder: alpha", "once", at=base2 + 3600,
+            created_at=base2 - 500,
+            action={"kind": "notify", "detail": "alpha"})
+        sup.scheduler.add(
+            "reminder: beta", "once", at=base2 + 7200,
+            created_at=base2 - 100,
+            action={"kind": "notify", "detail": "beta"})
+        r = agent._reminder_reply(
+            "cancel the last reminder i made",
+            "cancel the last reminder i made", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("beta", r.content)
+        self.assertEqual(
+            [s["name"] for s in sup.scheduler.rows],
+            ["reminder: alpha"])
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
