@@ -3229,6 +3229,41 @@ class TruthGateTests(RecoveryLoopTests):
                 self.assertIn(task_word, r.content)
             self.assertFalse(sup.scheduler.rows)
 
+            # 'remind me to X at T' — the clarify regex swallowed
+            # the clock into the task ('When should I remind you to
+            # call mom at 3?'). Longest parseable tail is the when.
+            r = agent._reminder_reply(
+                "remind me to call mom at 3",
+                "remind me to call mom at 3", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("call mom", r.content)
+            self.assertIn("15:00", r.content)
+            r = agent._reminder_reply(
+                "remind me to eat at noon tomorrow",
+                "remind me to eat at noon tomorrow", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("12:00", r.content)
+            self.assertIn("eat", r.content)
+            # 'at the top of the hour' — the split cut inside the
+            # clock phrase; re-joined it resolves to the next :00
+            # and asks for the task honestly.
+            r = agent._reminder_reply(
+                "remind me at the top of the hour",
+                "remind me at the top of the hour", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("do what", r.content)
+            # 'roughly at 6' / '7ish' / '8 and a half' / 'seven-
+            # thirty' / 'school days' resolve real times.
+            spec = agent._reminder_spec(
+                "at the top of the hour", time.time())
+            self.assertIsNotNone(spec)
+            for when in ("at 7ish", "at 8 and a half",
+                         "seven-thirty", "6 am weekdays",
+                         "on school days at 7"):
+                self.assertIsNotNone(
+                    agent._reminder_spec(when, time.time()), when)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

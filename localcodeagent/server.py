@@ -5234,6 +5234,13 @@ class AppState:
         spec, desc = self._parse_reminder_time(body, time.time())
         desc = re.sub(r"^(?:about|of|that|to)\s+", "",
                       desc.strip())
+        # 'remind me roughly at 6' — a hedge word left in the
+        # desc slot isn't a task name.
+        if re.fullmatch(
+                r"me|you|it|that|this|them|us|something|anything|"
+                r"only|just|roughly|about|around|like|basically|"
+                r"maybe|probably|kinda|sorta", desc, re.IGNORECASE):
+            desc = ""
         if (spec is None and noun == "timer"
                 and re.fullmatch(r"\d+(?:\.\d+)?", body.strip())):
             # 'timer for 10' — timers count down; a bare number is

@@ -5069,7 +5069,8 @@ class AgentOrchestrator:
                                     when_d = rest
             if task_d and re.fullmatch(
                     r"me|you|it|that|this|them|us|something|"
-                    r"anything|only",
+                    r"anything|only|just|roughly|about|around|"
+                    r"like|basically|maybe|probably|kinda|sorta",
                     task_d, re.IGNORECASE):
                 # 'reminders for me' — a pronoun isn't a task; let
                 # the when-side ask fail honestly instead. When the
@@ -5122,6 +5123,16 @@ class AgentOrchestrator:
                         when_d, task_d = left, right or task_d
                         spec = spec_l
                         break
+            if spec is None and task_d:
+                # 'at the top | of the hour' — the lazy split cut
+                # inside a clock phrase; re-joining when+task with
+                # 'of' may give one parseable when and no task.
+                joined = f"{when_d} of {task_d}".strip()
+                spec_j = (self._reminder_spec(joined, time.time())
+                          or self._reminder_spec("at " + joined,
+                                                 time.time()))
+                if spec_j is not None:
+                    when_d, task_d, spec = joined, "", spec_j
             if sched is None:
                 return self._reminder_finish(
                     "I can't set reminders — the scheduler isn't "
@@ -5331,6 +5342,7 @@ class AgentOrchestrator:
                     # the main create path.
                     m = mlw
         clarify = None
+        forced_when = forced_task = None
         if m is None:
             m2 = self._REMINDER_CLARIFY_RE.match(plan_text)
             if m2 is None:
@@ -5508,6 +5520,34 @@ class AgentOrchestrator:
             # 'remind me to X' with no time — claim and ask rather
             # than let the model improvise a commitment.
             clarify = str(m2.group("task") or "").strip()
+            # 'remind me to call mom at 3' — the clarify regex
+            # swallowed a trailing clock into the task; split at the
+            # last temporal boundary whose tail parses.
+            parts_c = re.split(
+                r"\s+(?=(?:at|in|on|every|next|tomorrow|today|"
+                r"tonight|tonite|hourly|daily|weekly|monthly)\b)",
+                clarify)
+            if len(parts_c) > 1:
+                # Longest parseable tail wins — 'eat at noon
+                # tomorrow' leaves 'eat', not 'eat at noon'.
+                for i in range(1, len(parts_c)):
+                    tail_c = " ".join(parts_c[i:])
+                    if self._reminder_spec(
+                            tail_c, time.time()) is None:
+                        for lead_c in ("at ", "in "):
+                            if self._reminder_spec(
+                                    lead_c + tail_c,
+                                    time.time()) is not None:
+                                tail_c = lead_c + tail_c
+                                break
+                    if self._reminder_spec(
+                            tail_c, time.time()) is not None:
+                        # The time is real — pretend the when-slot
+                        # held it all along and continue as a DECL.
+                        forced_when = tail_c
+                        forced_task = " ".join(parts_c[:i])
+                        clarify = None
+                        break
         else:
             when_raw = str(m.group("when") or "").strip(" ,;—-")
             spec = self._reminder_spec(when_raw, time.time())
@@ -5549,6 +5589,16 @@ class AgentOrchestrator:
                     f"{task_lazy}? — e.g. “in 10 minutes”, "
                     "“at 3pm”, “tomorrow at 9”.",
                     user_text, task_id, event_callback)
+            if spec is None and task_lazy:
+                # 'at the top | of the hour' — the split cut inside
+                # a clock phrase; re-joined it parses, and the
+                # 'task' was really clock tail.
+                joined = f"{when_raw} of {task_lazy}"
+                if self._reminder_spec(
+                        joined, time.time()) is not None:
+                    return self._reminder_finish(
+                        f"Sure — remind you to do what {joined}?",
+                        user_text, task_id, event_callback)
             if spec is None:
                 if self._REMINDER_EVENTISH_RE.search(when_raw):
                     return self._reminder_finish(
@@ -5570,6 +5620,7 @@ class AgentOrchestrator:
                     f"and I'll set the reminder to {task0}.",
                     user_text, task_id, event_callback)
         task = (clarify if clarify is not None
+                else forced_task if forced_task is not None
                 else str(m.group("task") or "")).strip().rstrip(".")
         if not task:
             return None
@@ -5584,7 +5635,8 @@ class AgentOrchestrator:
                     "running in this session.")
         else:
             spec = self._reminder_spec(
-                str(m.group("when") or ""), time.time())
+                forced_when if forced_when is not None
+                else str(m.group("when") or ""), time.time())
             if spec is None:
                 return None
             kind = spec["kind"]

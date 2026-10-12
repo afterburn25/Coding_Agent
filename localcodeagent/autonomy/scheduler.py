@@ -130,10 +130,11 @@ def _worded_clock(t: str) -> str:
         h = _hour_num(m.group(1))
         if h is not None and 1 <= h <= 12:
             return t[:m.start()] + f"{h}:30" + t[m.end():]
-    # 'at six thirty [pm]' — worded hour + worded minute.
+    # 'at six thirty [pm]' / 'at seven-thirty' — worded hour +
+    # worded minute, spaced or hyphenated.
     m = re.search(
         r"\b(one|two|three|four|five|six|seven|eight|nine|ten|"
-        r"eleven|twelve)\s+(" + _MIN_TOK + r")\b", t)
+        r"eleven|twelve)[-\s]+(" + _MIN_TOK + r")\b", t)
     if m:
         mn = _min_num(m.group(2))
         if mn is not None and 1 <= mn <= 59:
@@ -197,6 +198,19 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     t = re.sub(r"(?<!in\s)(?<!for\s)\b(?:about|around|"
                r"approximately|roughly|like)\s+"
                r"(?=\d|noon|midnight|quarter|half)", "at ", t)
+    # 'roughly at 6' — a hedge word before the preposition isn't
+    # part of the clock.
+    t = re.sub(
+        r"\b(?:roughly|basically|maybe|probably|kinda|sorta|just|"
+        r"like)\s+(?=(?:at|on|in|every|next)\s|tomorrow|tonight|"
+        r"noon|midnight)", "", t)
+    # 'at 7ish' — the colloquial -ish suffix on a digit clock.
+    t = re.sub(r"\b(\d{1,2})\s*ish\b", r"\1", t)
+    # 'at 8 and a half' — 'and a half' is the :30.
+    t = re.sub(r"\b(\d{1,2})\s+and\s+a\s+half\b", r"\1:30", t)
+    # 'on school days' / 'work days' — weekday cadence names.
+    t = re.sub(r"\b(?:school|work|business)\s+days\b",
+               "weekdays", t)
     # 'on 10/15' — a numeric date reads as october 15; 'at 7a' /
     # 'at 7p' shorthand meridiems; 'monday through friday' is the
     # weekdays cadence.
@@ -219,6 +233,14 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     if _bad_clock(t):
         return None
     lt = time.localtime(now)
+
+    # 'at the top of the hour' — the next :00 mark.
+    if re.fullmatch(
+            r"(?:at\s+)?(?:the\s+)?top\s+of\s+(?:the\s+)?hour", t):
+        return time.mktime(
+            (lt.tm_year, lt.tm_mon, lt.tm_mday,
+             (lt.tm_hour + 1) % 24, 0, 0, -1, -1, -1)
+            ) + (86400 if lt.tm_hour == 23 else 0)
 
     # '5 minutes before 3pm' / 'an hour after noon' — a clock
     # offset, not the event trigger the when-clause refused.
@@ -525,6 +547,25 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     t = re.sub(r"(?<!in\s)(?<!for\s)\b(?:about|around|"
                r"approximately|roughly|like)\s+"
                r"(?=\d|noon|midnight|quarter|half)", "at ", t)
+    # 'roughly at 6' — a hedge word before the preposition isn't
+    # part of the clock.
+    t = re.sub(
+        r"\b(?:roughly|basically|maybe|probably|kinda|sorta|just|"
+        r"like)\s+(?=(?:at|on|in|every|next)\s|tomorrow|tonight|"
+        r"noon|midnight)", "", t)
+    # 'at 7ish' — the colloquial -ish suffix on a digit clock.
+    t = re.sub(r"\b(\d{1,2})\s*ish\b", r"\1", t)
+    # 'at 8 and a half' — 'and a half' is the :30.
+    t = re.sub(r"\b(\d{1,2})\s+and\s+a\s+half\b", r"\1:30", t)
+    # 'on school days' / 'work days' — weekday cadence names.
+    t = re.sub(r"\b(?:school|work|business)\s+days\b",
+               "weekdays", t)
+    # '6 am weekdays' — a leading clock belongs inside the
+    # cadence's 'at T' tail.
+    t = re.sub(
+        r"\b(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|am|pm))\s+"
+        r"(weekdays?|weekends?|daily|weekly|mornings?|"
+        r"afternoons?|evenings?|nights?)", r"\2 at \1", t)
     # 'on 10/15' — a numeric date reads as october 15; 'at 7a' /
     # 'at 7p' shorthand meridiems; 'monday through friday' is the
     # weekdays cadence.
