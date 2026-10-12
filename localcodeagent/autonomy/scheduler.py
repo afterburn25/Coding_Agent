@@ -130,6 +130,16 @@ def _worded_clock(t: str) -> str:
         h = _hour_num(m.group(1))
         if h is not None and 1 <= h <= 12:
             return t[:m.start()] + f"{h}:30" + t[m.end():]
+    # 'at six thirty [pm]' — worded hour + worded minute.
+    m = re.search(
+        r"\b(one|two|three|four|five|six|seven|eight|nine|ten|"
+        r"eleven|twelve)\s+(" + _MIN_TOK + r")\b", t)
+    if m:
+        mn = _min_num(m.group(2))
+        if mn is not None and 1 <= mn <= 59:
+            return (t[:m.start()]
+                    + f"{_WORD_NUM[m.group(1)]}:{mn:02d}"
+                    + t[m.end():])
     return t
 
 
@@ -200,11 +210,36 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     t = re.sub(
         r"\bmonday\s*(?:-\s*|\s+(?:through|thru|to|-)\s+)friday\b",
         "weekdays", t)
+    # 'only on weekdays' — the filler isn't part of the cadence.
+    t = re.sub(
+        r"\bonly\s+(?=(?:on|at|in|every|next|tomorrow|tonight|"
+        r"weekday|weekend|daily|weekly))", "", t)
     t = " ".join(t.split())
     t = _worded_clock(t)
     if _bad_clock(t):
         return None
     lt = time.localtime(now)
+
+    # '5 minutes before 3pm' / 'an hour after noon' — a clock
+    # offset, not the event trigger the when-clause refused.
+    m = re.fullmatch(
+        r"(?:in\s+)?(\d+(?:\.\d+)?|an?|one|two|three|four|five|"
+        r"six|seven|eight|nine|ten|eleven|twelve)\s*"
+        r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)\s+"
+        r"(before|after)\s+(.+)", t)
+    if m:
+        base = (parse_reminder_when(m.group(4), now)
+                or parse_reminder_when("at " + m.group(4), now))
+        if base is not None:
+            scale = {"s": 1, "m": 60, "h": 3600}[m.group(2)[0]]
+            n_raw = m.group(1)
+            n = (_WORD_NUM.get(n_raw)
+                 or (1.0 if n_raw in ("a", "an") else None))
+            if n is None:
+                n = float(n_raw)
+            d = n * scale
+            return (base - d if m.group(3) == "before"
+                    else base + d)
 
     def _meridian(hour: int, mer: str | None) -> int:
         mer = re.sub(r"[\s.]", "", mer or "")
@@ -503,10 +538,35 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     t = re.sub(
         r"\bmonday\s*(?:-\s*|\s+(?:through|thru|to|-)\s+)friday\b",
         "weekdays", t)
+    # 'only on weekdays' — the filler isn't part of the cadence.
+    t = re.sub(
+        r"\bonly\s+(?=(?:on|at|in|every|next|tomorrow|tonight|"
+        r"weekday|weekend|daily|weekly))", "", t)
     t = " ".join(t.split())
     t = _worded_clock(t)
     if _bad_clock(t):
         return None
+
+    # '5 minutes before 3pm' — a clock offset.
+    m = re.fullmatch(
+        r"(?:in\s+)?(\d+(?:\.\d+)?|an?|one|two|three|four|five|"
+        r"six|seven|eight|nine|ten|eleven|twelve)\s*"
+        r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)\s+"
+        r"(before|after)\s+(.+)", t)
+    if m:
+        base = (parse_reminder_when(m.group(4), now)
+                or parse_reminder_when("at " + m.group(4), now))
+        if base is not None:
+            scale = {"s": 1, "m": 60, "h": 3600}[m.group(2)[0]]
+            n_raw = m.group(1)
+            n = (_WORD_NUM.get(n_raw)
+                 or (1.0 if n_raw in ("a", "an") else None))
+            if n is None:
+                n = float(n_raw)
+            d = n * scale
+            return {"kind": "once",
+                    "at": (base - d if m.group(3) == "before"
+                           else base + d)}
 
     def _meridian(hour: int, mer: str | None) -> int:
         mer = re.sub(r"[\s.]", "", mer or "")

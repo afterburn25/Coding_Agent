@@ -5234,6 +5234,14 @@ class AppState:
         spec, desc = self._parse_reminder_time(body, time.time())
         desc = re.sub(r"^(?:about|of|that|to)\s+", "",
                       desc.strip())
+        if (spec is None and noun == "timer"
+                and re.fullmatch(r"\d+(?:\.\d+)?", body.strip())):
+            # 'timer for 10' — timers count down; a bare number is
+            # minutes, never the 10:00 clock 'at 10' would pin.
+            spec, _ = self._parse_reminder_time(
+                "in " + body.strip() + " minutes", time.time())
+            if spec is not None:
+                desc = ""
         if spec is None and noun != "reminder":
             # 'set a timer for 5 minutes' — the duration is the
             # whole ask; 'in <dur>' reads it as a countdown, 'at T'

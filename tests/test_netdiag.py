@@ -3065,6 +3065,55 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(row["kind"], "weekly")
             self.assertEqual(row["weekday"], [0, 1, 2, 3, 4])
             self.assertIn("stand", row["name"])
+
+            # 'N units before|after CLOCK' — '5 minutes before
+            # 3pm' booked 15:00 with the garbage task '5 minutes
+            # before' live; it is a real clock offset.
+            ts = _prw("5 minutes before 3pm", now)
+            self.assertIsNotNone(ts)
+            self.assertEqual(
+                time.localtime(ts).tm_hour, 14)
+            self.assertEqual(
+                time.localtime(ts).tm_min, 55)
+            self.assertIsNotNone(
+                _prw("5 minutes after 3", now))
+
+            # 'cancel them all' — noun 'all' + body 'them' scoped
+            # the topic to the pronoun; it wiped nothing live.
+            sup.scheduler.add(
+                "Reminder: stretch", "once",
+                at=time.time() + 3600)
+            r = agent._reminder_reply(
+                "cancel them all", "cancel them all", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("2", r.content)
+            self.assertFalse(sup.scheduler.rows)
+
+            # 'reschedule it' — no target → the deterministic ask,
+            # not the model's 'which reminder' narration.
+            r = agent._reminder_reply(
+                "reschedule it", "reschedule it", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("when", r.content.lower())
+
+            # 'timer for 10' — the bare number is minutes, never
+            # the 10:00 clock the 'at' fallback reached for.
+            r = agent._reminder_reply(
+                "a timer for 10", "a timer for 10", task.id)
+            self.assertIsNotNone(r)
+            row = sup.scheduler.rows[0]
+            self.assertGreater(
+                float(row["at"]) - time.time(), 500)
+            self.assertLess(
+                float(row["at"]) - time.time(), 800)
+
+            # 'at six thirty' — the TRAIL courtesy stripped 'ty'
+            # off 'thirty', leaving 'at six thir' to the model.
+            r = agent._reminder_reply(
+                "remind me at six thirty",
+                "remind me at six thirty", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("do what", r.content)
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —

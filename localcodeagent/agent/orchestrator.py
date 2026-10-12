@@ -3608,7 +3608,8 @@ class AgentOrchestrator:
     # politeness AFTER the command; without a tail it fails the
     # anchored end and the model invents the ack.
     _REMINDER_TRAIL = (r"(?:\s*,?\s*(?:please|thanks|thank\s+you|"
-                       r"ty|pls|plz))*\s*[.!?]?\s*$")
+                       r"(?<![a-z])ty\b|(?<![a-z])pls\b|"
+                       r"(?<![a-z])plz\b))*\s*[.!?]?\s*$")
     # Echo noun — 'turn off reminder notifications' tacks a generic
     # noun after the scoped one; bare 'notifications' belongs to the
     # provisioning lane, so the echo only rides a reminder noun.
@@ -3881,7 +3882,7 @@ class AgentOrchestrator:
         r"\b(?P<noun>reminders?|alarms?|timers?|schedules?|"
         r"it|that|this|them|everything|all)\b"
         + _REMINDER_ECHO +
-        r"\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?)"
+        r"(?:\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?))?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(
@@ -4548,10 +4549,11 @@ class AgentOrchestrator:
             or str(mc.group("noun") or "").lower()
             in ("them", "everything", "all"))
         topic_src = (mc.groupdict().get("ctime") or mc.group("tail")
-                     or mc.groupdict().get("tail2") or re.sub(
-                         r"\b(?:the|my|that|all|every|each|any|of|to|"
-                         r"for|about)\b",
-                         " ", body, flags=re.IGNORECASE))
+                     or mc.groupdict().get("tail2") or body)
+        topic_src = re.sub(
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
+            r"them|it|this|those|these|everything)\b",
+            " ", topic_src, flags=re.IGNORECASE)
         topic_terms = self._reminder_terms(topic_src)
         if not topic_terms and re.search(
                 r"\b(?:reminders|alarms|timers)\b", mc.group(0),
@@ -4961,6 +4963,15 @@ class AgentOrchestrator:
                 now_d = time.time()
                 if self._reminder_spec(rest, now_d) is not None:
                     when_d = rest
+                elif (noun == "timer" and re.fullmatch(
+                        r"\d+(?:\.\d+)?", rest)
+                      and self._reminder_spec(
+                          "in " + rest + " minutes",
+                          now_d) is not None):
+                    # 'timer for 10' — timers count down; a bare
+                    # number is minutes, never the 10:00 clock the
+                    # 'at' fallback reached for first.
+                    when_d = "in " + rest + " minutes"
                 elif self._reminder_spec("in " + rest,
                                          now_d) is not None:
                     # 'a timer for 5 minutes' — 'for' leads a
@@ -5017,7 +5028,8 @@ class AgentOrchestrator:
                                 else:
                                     when_d = rest
             if task_d and re.fullmatch(
-                    r"me|you|it|that|this|them|us|something|anything",
+                    r"me|you|it|that|this|them|us|something|"
+                    r"anything|only",
                     task_d, re.IGNORECASE):
                 # 'reminders for me' — a pronoun isn't a task; let
                 # the when-side ask fail honestly instead. When the
@@ -5366,8 +5378,11 @@ class AgentOrchestrator:
                             + self._reminder_spec_text(
                                 spec_nt, _task_sv),
                             user_text, task_id, event_callback)
-                    if (spec_nt is not None
-                            and self._REMINDER_TIMEISH_RE.search(wtxt)):
+                    if spec_nt is not None:
+                        # 'remind me at six thirty' — the worded
+                        # clock resolved; ask for the task rather
+                        # than demanding a TIMEISH token the words
+                        # 'six thirty' don't carry.
                         return self._reminder_finish(
                             f"Sure — remind you to do what {wtxt}?",
                             user_text, task_id, event_callback)
