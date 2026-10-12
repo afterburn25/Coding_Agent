@@ -12696,6 +12696,11 @@ class AgentOrchestrator:
             # reminder to friday at 10am' banked as facts live, and
             # the restate-ack outranked the real schedule answer.
             and not self._reminder_shaped(user_text)
+            # Complaints are failure reports for the bug-report lane
+            # (or the model), not bankable facts — 'the reminders
+            # didn't fire' banking as a fact outranked the incident
+            # filing and would resurface as a stale "fact" later.
+            and getattr(env.semantic, "speech_act", "") != "complaint"
         ):
             learned = self.conversation_memory.learn_from_user(
                 user_text,
