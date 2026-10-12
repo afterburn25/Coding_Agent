@@ -1388,6 +1388,28 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(
                 (time.localtime(spec["at"]).tm_hour,
                  time.localtime(spec["at"]).tm_min), (23, 55))
+            # 'tonight at 8' — an anchor word + clock is one spec;
+            # before this 'tonight' split off into the task slot
+            # and the leftover 'at 8' tripped the compound reply.
+            spec = parse_reminder_schedule(
+                "tonight at 8", time.time())
+            self.assertIsNotNone(spec)
+            self.assertEqual(time.localtime(spec["at"]).tm_hour, 20)
+            # The daypart word supplies the meridiem — 'morning'
+            # must survive the bare-hour PM convention, and an
+            # evening hour after noon stays PM.
+            spec = parse_reminder_schedule(
+                "this morning at 6", time.time())
+            self.assertEqual(time.localtime(spec["at"]).tm_hour, 6)
+            spec = parse_reminder_schedule(
+                "tomorrow morning at 6", time.time())
+            self.assertEqual(
+                (time.localtime(spec["at"]).tm_hour,
+                 time.localtime(spec["at"]).tm_wday),
+                (6, (time.localtime().tm_wday + 1) % 7))
+            spec = parse_reminder_schedule(
+                "tomorrow evening at 11", time.time())
+            self.assertEqual(time.localtime(spec["at"]).tm_hour, 23)
 
             # Snooze re-anchors 'at' via scheduler.update — a real
             # reschedule, not a narrated postponement.

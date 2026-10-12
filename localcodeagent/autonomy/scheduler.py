@@ -585,6 +585,12 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         minute = 0
         if hr is not None:
             hour = _meridian(int(hr), mer)
+            if not mer and part:
+                # 'tomorrow morning at 6' — the daypart supplies
+                # the meridiem; the bare-hour PM hack would pin
+                # 18:00 (and 'evening at 11' would pin 11 AM).
+                hour = (int(hr) if part == "morning"
+                        else hour + 12 if hour < 12 else hour)
             minute = int(mn or 0)
         elif part:
             hour = {"morning": 9, "afternoon": 15,
@@ -596,6 +602,27 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         if day_w == "today":
             return _clock(hour, minute, 0)
         return _clock(hour, minute, 1, roll=False)
+    # 'tonight at 8' / 'this evening at 7' — a same-day anchor
+    # word supplies the date and the default meridiem; an explicit
+    # clock overrides the daypart's conventional hour.
+    m = re.fullmatch(
+        r"(tonight|this\s+night|this\s+evening|this\s+afternoon|"
+        r"this\s+morning|in\s+the\s+(morning|afternoon|evening))"
+        + clock_tail, t)
+    if m:
+        part_w = re.search(
+            r"morning|afternoon|evening|night", m.group(1)).group(0)
+        if m.group(3):
+            hour = _meridian(int(m.group(3)), m.group(5))
+            if not m.group(5):
+                hour = (int(m.group(3)) if part_w == "morning"
+                        else hour + 12 if hour < 12 else hour)
+            minute = int(m.group(4) or 0)
+        else:
+            hour = {"morning": 9, "afternoon": 15,
+                    "evening": 19, "night": 21}[part_w]
+            minute = 0
+        return _clock(hour, minute, 0)
     if re.fullmatch(r"(?:this\s+night|tonight|this\s+evening)", t):
         return _clock(21 if "night" in t else 19, 0)
     m = re.fullmatch(r"this\s+(morning|afternoon|evening)", t)
