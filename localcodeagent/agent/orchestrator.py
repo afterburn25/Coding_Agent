@@ -3999,6 +3999,24 @@ class AgentOrchestrator:
         r"|" + _REMINDER_POLITE +
         r"(?:what|which)\s+(?:fires?|rings?|goes\s+off|go\s+off|"
         r"comes\s+up|triggers?|happens?|pops\s+up)\s+next\b"
+        + _REMINDER_TRAIL +
+        # Clock/day-scoped inventory — 'whats at 9am', 'what
+        # happens at noon', 'whats on friday', 'do i have anything
+        # at noon'. The temporal term scopes by fire-time/day via
+        # the hay tokens, not by topic text.
+        r"|" + _REMINDER_POLITE +
+        r"(?:what'?s|whats|what\s+is|what\s+happens?)\s+"
+        r"(?:(?:on|at|for|happening|going\s+on|planned|scheduled|"
+        r"set)\s+)*"
+        r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)|noon|midday|midnight|"
+        r"tonight|tonite|tomorrow|today|morning|afternoon|evening|"
+        r"monday|tuesday|wednesday|thursday|friday|saturday|"
+        r"sunday)\b"
+        + _REMINDER_TRAIL +
+        r"|" + _REMINDER_POLITE +
+        r"(?:do|does)\s+i\s+have\s+(?:anything|something)\s+"
+        r"(?:(?:at|on|for|planned|scheduled|set|happening|coming)\s+"
+        r"[\w'\s-]{0,30}?)?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     # State asks — 'are my reminders on', 'is the alarm paused',

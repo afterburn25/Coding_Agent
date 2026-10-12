@@ -4486,6 +4486,81 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("your editor", r.content)
             self.assertNotIn("editor is", r.content)
 
+    def test_clock_scoped_inventory_asks(self):
+        # Grammar sweep: 'what happens at 9am', 'whats at 9am',
+        # 'do i have anything at noon' returned None — the INV_LEAD
+        # grammar had no clock/day-scoped alternative, so the asks
+        # fell to the model which invents schedule state. The hay
+        # already carries clock/day tokens; the claim was the gap.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+                self._n = 0
+
+            def add(self, name, kind, **kw):
+                self._n += 1
+                row = {"id": f"sc-{self._n}", "name": name,
+                       "kind": kind, "enabled": kw.pop("enabled", True),
+                       **kw}
+                self.rows.append(row)
+                return row
+
+            def list(self):
+                return list(self.rows)
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        import datetime
+        def _at(hour):
+            now = datetime.datetime.now()
+            t = now.replace(hour=hour, minute=0, second=0,
+                            microsecond=0)
+            if t <= now:
+                t += datetime.timedelta(days=1)
+            return t.timestamp()
+
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            sup.scheduler.add(
+                "Reminder: standup", "daily", at=_at(9),
+                action={"kind": "notify", "detail": "standup"})
+            sup.scheduler.add(
+                "Reminder: stretch", "daily", at=_at(15),
+                action={"kind": "notify", "detail": "stretch"})
+            # Clock scope matches the row's fire-time, not topic
+            # text — the 9am ask names 'standup', never 'stretch'.
+            for q, want in (("what happens at 9am", "standup"),
+                            ("whats at 9am", "standup"),
+                            ("anything at 3pm", "stretch"),
+                            ("whats at 3pm", "stretch")):
+                r = agent.run(q, mode="auto")
+                self.assertIn(want, r.content, q)
+            r = agent.run("what happens at 9am", mode="auto")
+            self.assertNotIn("stretch", r.content)
+            # Clock/day misses stay honest — report the miss and
+            # the real pool, never 'no reminders set'.
+            for q in ("do i have anything at noon",
+                      "what happens at noon",
+                      "whats on friday"):
+                r = agent.run(q, mode="auto")
+                self.assertIn("no reminder", r.content.lower(), q)
+                self.assertIn("standup", r.content, q)
+            # Non-scheduler asks must not claim — 'do i have
+            # anything to do' / 'whats the weather' aren't inventory.
+            t = agent.tasks.create("x", "auto")
+            for q in ("do i have anything to do",
+                      "whats the weather like"):
+                self.assertIsNone(
+                    agent._reminder_reply(q, q, t.id), q)
+
     def test_ever_tell_and_fact_count(self):
         # Live: "did I ever tell you my editor" got a self-contradictory
         # model reply ("No — ... You told me that") because 'ever'
