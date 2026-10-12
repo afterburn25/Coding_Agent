@@ -2891,6 +2891,17 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(time.localtime(row["at"]).tm_hour, 6)
             sup.scheduler.rows.clear()
 
+            # 'in a half hour' / 'in an hour and twenty
+            # minutes' — idiom fraction and compound-unit
+            # durations pin-failed over real grammar gaps.
+            now = time.time()
+            self.assertAlmostEqual(
+                _prw("in a half hour", now), now + 1800,
+                delta=2)
+            self.assertAlmostEqual(
+                _prw("in an hour and twenty minutes", now),
+                now + 4800, delta=2)
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

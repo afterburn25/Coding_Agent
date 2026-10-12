@@ -186,12 +186,12 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"in\s+(?:(?:about|around|roughly|like)\s+)?"
         r"(\d+(?:\.\d+)?|an?\s+couple\s+(?:of\s+)?|an?|one|two|"
         r"three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
-        r"half\s+an?)\s*"
+        r"half\s+an?|an?\s+half)\s*"
         r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
         r"days?|d|weeks?|w|months?)(?:\s+or\s+so)?", t)
     if m:
         n_raw = m.group(1)
-        n = (0.5 if n_raw.startswith("half") else
+        n = (0.5 if "half" in n_raw else
              2.0 if "couple" in n_raw else
              _WORDS.get(n_raw, None))
         if n is None:
@@ -213,6 +213,25 @@ def parse_reminder_when(when: str, now: float) -> float | None:
                  "d": 86400, "day": 86400, "w": 604800,
                  "week": 604800}[unit]
         return now + n * scale
+    # 'in an hour and twenty minutes' — compound units sum.
+    m = re.fullmatch(
+        r"in\s+(\d+|an?|one|two|three|four|five|six|seven|eight|"
+        r"nine|ten|eleven|twelve)\s*"
+        r"(seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?)"
+        r"\s+and\s+(?:an?\s+)?"
+        r"(\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
+        r"eleven|twelve|twenty|thirty|forty|fifty)\s*"
+        r"(seconds?|secs?|minutes?|mins?)", t)
+    if m:
+        _NUM2 = {**_WORDS, "twenty": 20, "thirty": 30,
+                 "forty": 40, "fifty": 50}
+        n1 = _WORDS.get(m.group(1)) or float(
+            m.group(1) if m.group(1)[0].isdigit() else 1)
+        n2 = _NUM2.get(m.group(3)) or float(m.group(3))
+        scale1 = {"s": 1, "m": 60, "h": 3600, "d": 86400,
+                  "w": 604800}[m.group(2)[0]]
+        scale2 = {"s": 1, "m": 60}[m.group(4)[0]]
+        return now + n1 * scale1 + n2 * scale2
     # 'in 2 and a half hours' — compound worded fraction.
     m = re.fullmatch(
         r"in\s+(\d+(?:\.\d+)?|one|two|three|four|five|six|seven|"
