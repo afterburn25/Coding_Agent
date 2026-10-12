@@ -4565,10 +4565,30 @@ class TruthGateTests(RecoveryLoopTests):
             r = agent.run("is anything on for tonight", mode="auto")
             self.assertIn("standup", r.content)
             self.assertNotIn("“for”", r.content)
+            # Loose noun + clock scope widens past the noun
+            # filter — 'the 9am alarm' over a 'Reminder: standup'
+            # row IS that row; 'no reminder about "9am"' was a
+            # false miss. No-scope noun asks stay noun-strict.
+            for q, want in (("did the 9am alarm go off", "standup"),
+                            ("is the 9am alarm still set", "standup"),
+                            ("did anything happen at 9", "standup"),
+                            ("what did i miss at 9", "standup"),
+                            ("did i miss the 9am", "standup")):
+                r = agent.run(q, mode="auto")
+                self.assertIn(want, r.content, q)
+            r = agent.run("did the timer go off", mode="auto")
+            self.assertIn("No timers set", r.content)
+            r = agent.run("what happened at 9", mode="auto")
+            self.assertIn("standup", r.content)
+            r = agent.run("was i supposed to do something at 9",
+                          mode="auto")
+            self.assertIn("standup", r.content)
             # Non-scheduler asks must not claim — 'do i have
             # anything to do' / 'whats the weather' aren't inventory.
             t = agent.tasks.create("x", "auto")
-            for q in ("do i have anything to do",
+            for q in ("what did i miss",
+                      "was i supposed to call him",
+                      "do i have anything to do",
                       "whats the weather like",
                       "what do i have for dinner",
                       "whats happening",

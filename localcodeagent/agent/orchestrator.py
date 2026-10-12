@@ -3933,6 +3933,13 @@ class AgentOrchestrator:
         r"(?:(?:the|my|that|this|any|a)\s+)?[\w'\s-]{0,30}?"
         r"(?:reminders?|alarms?|timers?)\b"
         + _REMINDER_TRAIL +
+        # Clock-scoped miss asks — 'did i miss the 9am', 'what
+        # did i miss at 3'. last_run answers them.
+        r"|" + _REMINDER_POLITE +
+        r"(?:did\s+i\s+(?:just\s+)?miss(?:ed)?|what\s+did\s+i\s+"
+        r"miss)\s+(?:(?:the|a|at|on)\s+)?"
+        r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)\b"
+        + _REMINDER_TRAIL +
         # Cadence asks — 'how often does the standup fire', 'is the
         # standup daily or weekly', 'what day does the rent
         # reminder hit', 'when does the alarm go off'. A model
@@ -4006,7 +4013,7 @@ class AgentOrchestrator:
         # The temporal term scopes by fire-time/day via the hay
         # tokens, not by topic text.
         r"|" + _REMINDER_POLITE +
-        r"(?:what'?s|whats|what\s+is|what\s+happens?|"
+        r"(?:what'?s|whats|what\s+is|what\s+happen(?:s|ed)?|"
         r"what\s+am\s+i\s+doing|"
         r"what\s+(?:do|does|did)\s+i\s+(?:have|got)|"
         r"what\s+have\s+i\s+got)\s+"
@@ -4039,6 +4046,25 @@ class AgentOrchestrator:
         r"|" + _REMINDER_POLITE +
         r"any\s+(?:meetings?|events?|appointments?)\s+"
         r"(?:at|on|for|scheduled|planned|booked)\s+.+?"
+        + _REMINDER_TRAIL +
+        # 'did anything happen at 9', 'was i supposed to do
+        # something at 3' — noun-less past-clock asks; last_run
+        # and the scoped listing answer them.
+        r"|" + _REMINDER_POLITE +
+        r"(?:did|do|does)\s+(?:anything|something)\s+"
+        r"(?:happen|fire|go\s+off|ring)\s+(?:at|on|for)\s+"
+        r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midday|midnight|"
+        r"tonight|tonite|tomorrow|today|morning|afternoon|evening|"
+        r"monday|tuesday|wednesday|thursday|friday|saturday|"
+        r"sunday)\b"
+        + _REMINDER_TRAIL +
+        r"|" + _REMINDER_POLITE +
+        r"(?:was|were)\s+i\s+supposed\s+to\s+.+?\s+"
+        r"(?:at|on|for)\s+"
+        r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midday|midnight|"
+        r"tonight|tonite|tomorrow|today|morning|afternoon|evening|"
+        r"monday|tuesday|wednesday|thursday|friday|saturday|"
+        r"sunday)\b"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     # State asks — 'are my reminders on', 'is the alarm paused',
@@ -5953,6 +5979,14 @@ class AgentOrchestrator:
                     r"work|works|working|functional|okay|ok|fine|good|"
                     r"view|run|through|walk|read|out)\b",
                     " ", tm.group(1), flags=re.IGNORECASE))
+        if sm is None and not scope_terms:
+            # 'did i miss the 9am', 'what happened at noon' — a
+            # bare trailing clock scopes like a connector tail.
+            clk = re.search(
+                r"\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)|noon|midnight)"
+                r"\b[.!?]?\s*$", plan_text, re.IGNORECASE)
+            if clk is not None:
+                scope_terms = self._reminder_terms(clk.group(1))
         when_ask = bool(re.match(
             r"\s*(?:when|what\s+time|will)\b",
             plan_text, re.IGNORECASE))
@@ -5980,6 +6014,19 @@ class AgentOrchestrator:
             return (_dt.date.fromtimestamp(float(fire))
                     in day_dates)
 
+        def _scoped_hits(pool: list) -> list:
+            # Loose noun + specific scope — 'the 9am alarm' over a
+            # 'Reminder: standup@09:00' row IS that row; the noun
+            # filter alone reported 'no reminder about "9am"'.
+            hits = ([s for s in pool
+                     if scope_terms <= self._reminder_hay(s)]
+                    if scope_terms else pool)
+            if not hits and scope_terms and nm is not None:
+                _, wide = self._reminder_rows(include_disabled=True)
+                hits = [s for s in wide
+                        if scope_terms <= self._reminder_hay(s)]
+            return hits
+
         # 'is my pay rent reminder on' — a state ask. Listing the
         # row's fire time never answers the question; report the
         # enabled flag from the persisted row instead.
@@ -5998,7 +6045,12 @@ class AgentOrchestrator:
             r"(?:reminders?|alarms?|timers?)\b.{0,20}\b"
             r"(?:fired|gone\s+off|rang|rung|happened|triggered|"
             r"popped\s+up)\b|\bdid\b.{0,20}\bmiss(?:ed)?\b"
-            r".{0,25}\b(?:reminders?|alarms?|timers?)\b",
+            r".{0,25}\b(?:reminders?|alarms?|timers?)\b|"
+            r"\bdid\s+(?:anything|something)\s+"
+            r"(?:happen|fire|go\s+off|ring)\b|"
+            r"\bdid\b.{0,20}\bmiss(?:ed)?\b.{0,25}\b\d{1,2}"
+            r"(?::\d{2})?\s*(?:am|pm)\b|"
+            r"\bwhat\s+did\s+i\s+miss\b",
             plan_text, re.IGNORECASE))
         cad_ask = bool(re.search(
             r"\bhow\s+(?:often|frequently)\b|"
@@ -6069,9 +6121,7 @@ class AgentOrchestrator:
             _, state_rows = self._reminder_rows(
                 include_disabled=True,
                 noun=nm.group(1).lower() if nm else None)
-            hits = ([s for s in state_rows
-                     if scope_terms <= self._reminder_hay(s)]
-                    if scope_terms else state_rows)
+            hits = _scoped_hits(state_rows)
             if scope_terms and not hits:
                 names = "; ".join(
                     f"“{self._reminder_label(s)}”" for s in rows[:3])
@@ -6126,9 +6176,7 @@ class AgentOrchestrator:
             _, f_rows = self._reminder_rows(
                 include_disabled=True,
                 noun=nm.group(1).lower() if nm else None)
-            fhits = ([s for s in f_rows
-                      if scope_terms <= self._reminder_hay(s)]
-                     if scope_terms else f_rows)
+            fhits = _scoped_hits(f_rows)
             if not fhits:
                 names = "; ".join(
                     f"“{self._reminder_label(s)}”" for s in rows[:3])
@@ -6188,9 +6236,7 @@ class AgentOrchestrator:
             _, c_rows = self._reminder_rows(
                 include_disabled=True,
                 noun=nm.group(1).lower() if nm else None)
-            chits = ([s for s in c_rows
-                      if scope_terms <= self._reminder_hay(s)]
-                     if scope_terms else c_rows)
+            chits = _scoped_hits(c_rows)
 
             def _cad(s: dict) -> str:
                 return self._reminder_spec_text(
