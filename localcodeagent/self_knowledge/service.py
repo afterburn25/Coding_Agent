@@ -136,8 +136,18 @@ class SelfKnowledgeService:
             # reminders' disables schedule rows, not voice; 'snooze the
             # build reminder' isn't a build-capability ask. The control
             # surface owns no reminder/alarm/timer vocabulary, so no
-            # probe may claim a turn that names one.
-            if re.search(r"\b(?:reminders?|alarms?|timers?)\b", t):
+            # probe may claim a turn that names one. A control verb on
+            # 'everything'/'all' is the same reach — 'mute everything
+            # until tuesday' muted VOICE live, a system it can't even
+            # hold a time bound for.
+            if re.search(r"\b(?:reminders?|alarms?|timers?|schedules?)\b",
+                         t):
+                return None
+            if re.search(
+                    r"\b(?:mute|unmute|silence|turn|pause|resume|"
+                    r"disable|enable|hold|freeze|suspend|quiet|block|"
+                    r"stop|snooze|cancel|delete|remove|clear)\b"
+                    r"[^.!?]{0,25}\b(?:everything|all)\b", t):
                 return None
             for probe in (self._followup, self._diagnostics,
                           self._control, self._where,
