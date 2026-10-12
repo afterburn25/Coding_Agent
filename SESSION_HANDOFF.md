@@ -5184,12 +5184,14 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   don't-forget learn, deploy/region isolation.
 
 ### Watch items
-- Complaint turns (`the api times out after 30 seconds`) stall ~180s
-  when the shared GPU leaves <1GB free for llama load — expected churn,
-  but a complaint should arguably get a deterministic empathize+
-  evidence-capture ack instead of blocking on the model.
-- The deployed instance (:56071) self-corrupted server.py once — audit
-  which repair/self-edit lane can write outside its worktree.
+- ~~Complaint turns stall ~180s when the GPU is starved~~ — RESOLVED:
+  the `bug_report` lane (`102fd70b`, `edfe4d98`) claims complaints
+  naming the agent's own surface, files a real `report_failure`
+  incident, and acks honestly in ~1s. Root cause of the observed stall:
+  the persona veto dropped the ack *after* the incident was already
+  filed — now exempt. World complaints stay on the model path.
+- ~~The deployed instance (:56071) self-corrupted server.py~~ —
+  RESOLVED at `7cb16904` (promote bounded to reviewed set).
 
 ### Truth-lane hardening round (2026-10-12)
 - **State-ask lane** (`758b0088`): `is my <name> reminder on` fell to
@@ -5207,6 +5209,17 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   incident below. Promotion now lands exactly the reviewed set;
   post-review additions send the incident back through review.
   Regression: `test_undeclared_worktree_files_never_promote`.
+- **Bug-report lane** (`102fd70b` + `edfe4d98`): complaints naming
+  the agent's surface ("the api keeps timing out") file a real
+  `report_failure` incident (`source=user_report`, dedupe-bounded,
+  `recurred` counts occurrences) and ack in ~1s — "I logged it" only
+  when intake wrote a row; no intake → honest can't-file text.
+  Persona veto had silently dropped the ack (incident filed, reply
+  dropped → ~180s model stall) — the lane is now veto-exempt like
+  GitHub-status/identity facts. Live: `ri-75ef167720` reached
+  `patching` through the normal bounded pipeline. World complaints
+  ("my code keeps crashing") stay on the model path (verified:
+  real diagnostic reply, no incident).
 - **Watch resolved**: the ~70 "Crash recovery" notifications on
   dogfood correlate with deliberate restart probes (restart*.txt),
   not spontaneous crashes; self-repair incidents on CI failures are
