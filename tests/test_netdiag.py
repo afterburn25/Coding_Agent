@@ -4713,6 +4713,117 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("next reminder is", r.content)
             self.assertIn(" in ", r.content)
 
+    def test_nounless_fired_and_cadence_asks(self):
+        # Grammar sweep: 'has the standup fired', 'did the standup
+        # already go off', 'does the standup repeat', 'is the
+        # standup daily' all fell to the model — the fired/cadence
+        # grammars required the reminder noun. Noun-less claims
+        # resolve the name against rows and decline honestly on a
+        # miss ('does the song repeat' can't narrate a cadence).
+        # 'move the standup to 11' claimed 'Rescheduled' while a
+        # bare-digit when kept the old hour — a fake mutation.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+                self._n = 0
+
+            def add(self, name, kind, **kw):
+                self._n += 1
+                row = {"id": f"sc-{self._n}", "name": name,
+                       "kind": kind,
+                       "enabled": kw.pop("enabled", True), **kw}
+                self.rows.append(row)
+                return row
+
+            def list(self):
+                return list(self.rows)
+
+            def update(self, sid, **kw):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r.update(kw)
+                        return r
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            sup.scheduler.add(
+                "Reminder: standup", "daily", hour=9, minute=0,
+                at=time.time() + 3600,
+                action={"kind": "notify", "detail": "standup"})
+            # Noun-less fired asks answer last_run honestly.
+            for q in ("has the standup fired",
+                      "did the standup already go off",
+                      "did the standup go off",
+                      "did the standup already fire"):
+                r = agent.run(q, mode="auto")
+                self.assertIn("Not yet", r.content, q)
+                self.assertIn("standup", r.content, q)
+            # Noun-less cadence asks answer the row's kind.
+            for q in ("does the standup repeat",
+                      "does the standup reminder repeat",
+                      "is the standup recurring",
+                      "is the standup daily",
+                      "when does the standup repeat",
+                      "how often is the standup"):
+                r = agent.run(q, mode="auto")
+                self.assertIn("every day", r.content, q)
+            # Scoped misses name real rows — never narrate cadence.
+            for q in ("does the song repeat",
+                      "is the report daily",
+                      "how often is the train"):
+                r = agent.run(q, mode="auto")
+                self.assertIn("No reminder about", r.content, q)
+                self.assertIn("standup", r.content, q)
+            # 'remind myself' is the same create ask.
+            r = agent.run("remind myself at 5 to leave",
+                          mode="auto")
+            self.assertIn("17:00", r.content)
+            self.assertEqual(2, len(sup.scheduler.rows))
+            # Bare-digit when retimes the cadence — 'to 11' is a
+            # clock, and the reply can't claim a reschedule that
+            # didn't happen.
+            r = agent.run("move the standup to 11", mode="auto")
+            self.assertIn("Rescheduled", r.content)
+            row = sup.scheduler.rows[0]
+            self.assertEqual("daily", row["kind"])
+            self.assertEqual(11, row["hour"])
+            # A duration target is a one-shot — like a full date —
+            # not a silent cadence keep.
+            r = agent.run("move the standup to in 30 minutes",
+                          mode="auto")
+            row = sup.scheduler.rows[0]
+            self.assertEqual("once", row["kind"])
+            # Generic questions still don't claim.
+            t = agent.tasks.create("x", "auto")
+            for q in ("did something happen", "did it happen",
+                      "did the toast pop up",
+                      "when does the train come"):
+                self.assertIsNone(
+                    agent._reminder_reply(q, q, t.id), q)
+            # Gate parity — locally handled forms must pass the
+            # model-down gate.
+            from localcodeagent.agent.orchestrator import (
+                AgentOrchestrator)
+            for q in ("has the standup fired",
+                      "did the standup already go off",
+                      "does the standup repeat",
+                      "is the standup daily",
+                      "when does the standup repeat",
+                      "how often is the standup",
+                      "remind myself at 5 to leave"):
+                self.assertTrue(
+                    AgentOrchestrator.can_answer_locally(q), q)
+
     def test_ever_tell_and_fact_count(self):
         # Live: "did I ever tell you my editor" got a self-contradictory
         # model reply ("No — ... You told me that") because 'ever'

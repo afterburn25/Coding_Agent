@@ -3787,7 +3787,7 @@ class AgentOrchestrator:
         r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
         r"remind|alert|notify|ping|wake|nudge|nag|buzz|beep|text|page|"
         r"message)\s+"
-        r"me\s+(?:up\s+)?"
+        r"(?:me|myself)\s+(?:up\s+)?"
         r"(?P<when>.+?)\s+(?:to|about|of|that)\s+"
         r"(?P<task>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -3799,7 +3799,7 @@ class AgentOrchestrator:
         r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
         r"remind|alert|notify|ping|wake|nudge|nag|buzz|beep|text|page|"
         r"message)\s+"
-        r"me\s+(?:up\s+)?"
+        r"(?:me|myself)\s+(?:up\s+)?"
         r"(?P<when>.+)\s+(?:to|about|of|that)\s+"
         r"(?P<task>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -3906,7 +3906,9 @@ class AgentOrchestrator:
         + _REMINDER_TRAIL +
         # Past-fire asks — 'did my reminder go off', 'did the alarm
         # fire', 'did any reminders ring'. last_run answers these
-        # honestly; a model guess can't.
+        # honestly; a model guess can't. Without the noun, only the
+        # alarm-flavored verbs claim — 'did the thing happen' stays
+        # with the model.
         r"|" + _REMINDER_POLITE +
         r"did\s+(?:(?:the|my|that|this|any)\s+)?[\w'\s-]{0,30}?"
         r"(?:reminders?|alarms?|timers?)\s+"
@@ -3914,14 +3916,27 @@ class AgentOrchestrator:
         r"(?:(?:go|went)\s+off|fire|fires|fired|ring|rang|happen|"
         r"trigger|pop\s+up)\b(?:\s+.+?)?"
         + _REMINDER_TRAIL +
+        r"|" + _REMINDER_POLITE +
+        r"did\s+(?:(?:the|my|that|this|any)\s+)?[\w'\s-]{0,30}?\s+"
+        r"(?:(?:already|just|yet|still|really|actually)\s+)?"
+        r"(?:(?:go|went)\s+off|fire|fires|fired|ring|rang)\b"
+        r"(?:\s+.+?)?"
+        + _REMINDER_TRAIL +
         # Present-perfect fire asks — 'has my reminder fired yet',
-        # 'has the alarm gone off' — last_run answers these too.
+        # 'has the alarm gone off', 'has the standup fired' —
+        # last_run answers these too; the same noun-optional split
+        # applies (generic verbs keep the noun requirement).
         r"|" + _REMINDER_POLITE +
         r"(?:has|have)\s+(?:(?:the|my|that|this|any)\s+)?"
         r"[\w'\s-]{0,30}?"
         r"(?:reminders?|alarms?|timers?)\s+"
         r"(?:fired|gone\s+off|rang|rung|happened|triggered|"
         r"popped\s+up)\b(?:\s+.+?)?"
+        + _REMINDER_TRAIL +
+        r"|" + _REMINDER_POLITE +
+        r"(?:has|have)\s+(?:(?:the|my|that|this|any)\s+)?"
+        r"[\w'\s-]{0,30}?\s+"
+        r"(?:fired|gone\s+off|rang|rung)\b(?:\s+.+?)?"
         + _REMINDER_TRAIL +
         # Passive inventory — 'am i reminded of anything' asks the
         # same store the active forms do. 'did i miss any
@@ -3956,11 +3971,26 @@ class AgentOrchestrator:
         r"|" + _REMINDER_POLITE +
         r"(?:is|are)\s+(?:(?:my|the|your|that|this)\s+)?"
         r"[\w'\s-]{0,40}?"
-        r"(?:reminders?|alarms?|timers?)\s+(?:a\s+)?"
+        r"(?:(?:reminders?|alarms?|timers?)\s+)?(?:a\s+)?"
         r"(?:daily|weekly|monthly|hourly|yearly|recurring|"
         r"repeating)\b"
         r"(?:\s+or\s+(?:a\s+)?(?:daily|weekly|monthly|hourly|"
         r"yearly|recurring|repeating)\b)?"
+        + _REMINDER_TRAIL +
+        # 'does the standup (reminder) repeat', 'does my alarm
+        # recur' — cadence verbs with the noun optional; a body
+        # naming no row declines honestly.
+        r"|" + _REMINDER_POLITE +
+        r"(?:does|do)\s+(?:(?:my|the|your|that|this)\s+)?"
+        r"[\w'\s-]{0,40}?\s+"
+        r"(?:(?:reminders?|alarms?|timers?)\s+)?"
+        r"(?:repeat|repeats|recur|recurs)\b"
+        + _REMINDER_TRAIL +
+        # 'how often is the standup' — cadence lead with no
+        # terminal fire word at all.
+        r"|" + _REMINDER_POLITE +
+        r"how\s+(?:often|frequently)\s+(?:is|are)\s+"
+        r"[\w'\s-]{1,40}?"
         + _REMINDER_TRAIL +
         r"|" + _REMINDER_POLITE +
         r"(?:is|are)\s+(?:(?:my|the|your|that|this)\s+)?"
@@ -3980,7 +4010,7 @@ class AgentOrchestrator:
         r"(?:tell\s+me\s+)?when\s+(?:(?:does|do|will)\s+)?"
         r"(?:(?:my|the|your|that|this)\s+)?[\w'\s-]{0,40}?\s+"
         r"(?:goes?\s+off|go\s+off|fires?|rings?|hits?|triggers?|"
-        r"happens?|pops?\s+up)\b"
+        r"happens?|pops?\s+up|repeats?|recurs?)\b"
         + _REMINDER_TRAIL +
         # 'will my alarm go off', 'is my reminder going to
         # fire' — future-fire asks; next_run answers them the
@@ -4205,7 +4235,8 @@ class AgentOrchestrator:
         r"(?P<verb>(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
         r"remind|alert|notify|ping|wake|nudge|nag|buzz|beep|text|page|"
         r"message)\s+"
-        r"me\s+(?:up\s+)?(?P<when>.+?)" + _REMINDER_TRAIL,
+        r"(?:me|myself)\s+(?:up\s+)?(?P<when>.+?)"
+        + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_CANCEL_RE = re.compile(
         _REMINDER_POLITE +
@@ -4989,19 +5020,26 @@ class AgentOrchestrator:
         the explicit once conversion."""
         lt = time.localtime(float(spec.get("at") or 0) or time.time())
         text = str(wtxt or "").lower()
+        # A bare digit ('to 11') is a clock — the handler already
+        # re-parsed it as 'at 11', so claiming it then keeping the
+        # old hour would be a silent no-op reschedule.
         has_clock = bool(re.search(
             r"\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b|"
             r"noon|midnight|o'?clock|half\s+past|"
-            r"quarter\s+(?:past|to)|\d{1,2}:\d{2}", text))
+            r"quarter\s+(?:past|to)|\d{1,2}:\d{2}", text)
+            or re.fullmatch(r"\d{1,2}", text.strip()))
         hour, minute = ((lt.tm_hour, lt.tm_min) if has_clock
                         else (int(row.get("hour") or 9),
                               int(row.get("minute") or 0)))
         # A real date — month name, 'tomorrow', 'next week' — is an
-        # explicit one-shot target, not a cadence retiming.
+        # explicit one-shot target, not a cadence retiming. So is a
+        # duration ('in 30 minutes'): keeping the old cadence fields
+        # would claim a reschedule that never happened.
         if re.search(
                 r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|"
                 r"nov|dec)\w*\b|\btomorrow\b|\bnext\s+week\b|"
-                r"\btonight\b|\btoday\b", text):
+                r"\btonight\b|\btoday\b|\b\d+\s*(?:minutes?|mins?|"
+                r"hours?|hrs?|days?|weeks?)\b", text):
             return spec
         if re.search(r"\b(?:the\s+)?\d{1,2}(?:st|nd|rd|th)\b", text):
             return {"kind": "monthly", "day": lt.tm_mday,
@@ -6115,6 +6153,12 @@ class AgentOrchestrator:
             r"(?:fired|gone\s+off|rang|rung|happened|triggered|"
             r"popped\s+up)\b|\bdid\b.{0,20}\bmiss(?:ed)?\b"
             r".{0,25}\b(?:reminders?|alarms?|timers?)\b|"
+            # Noun-less fired asks — 'did the standup already go
+            # off', 'has the standup fired'; INV_LEAD claims them,
+            # this flag picks the last_run answer over the listing.
+            r"\bdid\b.{0,40}\b(?:(?:go|went)\s+off|fire|fires|"
+            r"fired|ring|rang)\b|\b(?:has|have)\b.{0,40}\b"
+            r"(?:fired|gone\s+off|rang|rung)\b|"
             r"\bdid\s+(?:anything|something)\s+"
             r"(?:happen|fire|go\s+off|ring)\b|"
             r"\bdid\b.{0,20}\bmiss(?:ed)?\b.{0,25}\b\d{1,2}"
@@ -6126,6 +6170,13 @@ class AgentOrchestrator:
             r"\b(?:daily|weekly|monthly|hourly|yearly|recurring|"
             r"repeating)\s+or\s+(?:a\s+)?(?:daily|weekly|monthly|"
             r"hourly|yearly|recurring|repeating)\b|"
+            # 'does the standup repeat', 'does my alarm recur' —
+            # repeat/recur is a cadence ask with or without the noun.
+            r"\b(?:repeat|repeats|recur|recurs)\b|"
+            # 'is the standup daily', 'is it recurring' — cadence
+            # adjective under is/are claims the cadence answer.
+            r"\b(?:is|are)\b.{0,40}\b(?:daily|weekly|monthly|"
+            r"hourly|yearly|recurring|repeating)\b|"
             r"\b(?:reminders?|alarms?|timers?)\s+(?:a\s+)?"
             r"(?:daily|weekly|monthly|hourly|yearly|recurring|"
             r"repeating)\b|"
@@ -6133,7 +6184,7 @@ class AgentOrchestrator:
             r"\bgoing\s+to\s+(?:go\s+off|fire|ring|hit|trigger|"
             r"happen|pop\s+up)\b", plan_text,
             re.IGNORECASE))
-        if not scope_terms and (cad_ask or when_ask):
+        if not scope_terms and (cad_ask or when_ask or fired_ask):
             # Noun-less cadence/when asks carry the row name as the
             # object — 'when does THE STANDUP go off', 'is THE
             # STANDUP daily'. The connector/noun extractions miss
@@ -6148,6 +6199,28 @@ class AgentOrchestrator:
                 r"pops?\s+up|reminds?|repeats?|recurs?|daily|"
                 r"weekly|monthly|hourly|yearly|recurring|"
                 r"repeating)\b", plan_text, re.IGNORECASE)
+            if cm is None:
+                # 'how often is THE STANDUP' — no terminal vocab
+                # word; the name runs to end-of-line.
+                cm = re.search(
+                    r"\bhow\s+(?:often|frequently)\s+"
+                    r"(?:is|are)\s+(?:the\s+|my\s+|your\s+|"
+                    r"that\s+|this\s+)?"
+                    r"([a-z0-9][a-z0-9'\s-]{0,40}?)"
+                    r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
+            if cm is None and fired_ask:
+                # 'did THE STANDUP already go off', 'has THE
+                # STANDUP fired' — the name sits between the aux
+                # and the fire verb.
+                cm = re.search(
+                    r"\b(?:did|has|have)\s+(?:the\s+|my\s+|your\s+|"
+                    r"that\s+|this\s+|any\s+)?"
+                    r"([a-z0-9][a-z0-9'\s-]{0,40}?)\s+"
+                    r"(?:(?:already|just|yet|still|really|"
+                    r"actually)\s+)?"
+                    r"(?:(?:go|went)\s+off|fire|fires|fired|"
+                    r"ring|rang|rung|gone\s+off)\b",
+                    plan_text, re.IGNORECASE)
             if cm is not None:
                 scope_terms = self._reminder_terms(re.sub(
                     r"\b(?:does|do|did|is|are|the|a|an|my|that|this|"
