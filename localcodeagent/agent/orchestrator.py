@@ -1861,7 +1861,8 @@ class AgentOrchestrator:
             return None   # action request — the tools/model lane owns it
         if not re.search(
                 r"\b(?:connect\w*|link\w*|access\w*|status|authoriz\w*|"
-                r"log\s?in\w*|sign\s?in\w*|credential\w*|token\w*|"
+                r"log(?:ged)?\s*in\w*|sign(?:ed)?\s*in\w*|"
+                r"credential\w*|token\w*|"
                 r"hooked up|set\s?up|setup|account\w*|authenticat\w*)\b",
                 normalized):
             return None
@@ -7495,7 +7496,15 @@ class AgentOrchestrator:
                 or (cls._FACT_RECALL_RE.match(t)
                     and not cls._FACT_RECALL_SKIP_RE.search(t))
                 or (cls._GIT_STATE_Q_RE.search(t)
-                    and not cls._GIT_STATE_VERB_RE.search(t))):
+                    and not cls._GIT_STATE_VERB_RE.search(t))
+                or (re.search(r"\bgithub\b", t, re.IGNORECASE)
+                    and re.search(
+                        r"connect\w*|link\w*|access\w*|status|"
+                        r"authoriz\w*|log(?:ged)?\s*in\w*|"
+                        r"sign(?:ed)?\s*in\w*|"
+                        r"credential\w*|token\w*|hooked\s+up|"
+                        r"set\s?up|setup|account\w*|authenticat\w*",
+                        t, re.IGNORECASE))):
             # Memory inspection ('what do you know about me'), rules
             # recall, repeat-asks, single-fact recall ('what's my
             # editor') and git repo-state questions ('is the repo
