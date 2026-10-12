@@ -2538,6 +2538,43 @@ class TruthGateTests(RecoveryLoopTests):
             [s["name"] for s in sup.scheduler.rows],
             ["reminder: call mom"])
 
+        # 'turn on the one i just disabled' — a mutation provenance
+        # resolves through the journal to that row, not a 'say
+        # which' over every opposite-state row.
+        r = agent._reminder_reply(
+            "turn on the one i just disabled",
+            "turn on the one i just disabled", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("call mom", r.content)
+        self.assertTrue(sup.scheduler.rows[0]["enabled"])
+        # Cross-verb compounds decline to run a half: no mutation.
+        r = agent._reminder_reply(
+            "turn off the call mom and move stretch to 7",
+            "turn off the call mom and move stretch to 7",
+            task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("one", r.content.lower())
+        self.assertTrue(all(
+            s["enabled"] for s in sup.scheduler.rows))
+        # 'delete everything' removes rows in ANY state — off rows
+        # are still rows. But a scoped miss over an all-off pool
+        # can't claim the store is empty.
+        for s in sup.scheduler.rows:
+            s["enabled"] = False
+        r = agent._reminder_reply(
+            "delete everything", "delete everything", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("call mom", r.content)
+        self.assertFalse(sup.scheduler.rows)
+        sup.scheduler.add(
+            "reminder: wake", "daily", hour=6, minute=0,
+            enabled=False,
+            action={"kind": "notify", "detail": "wake"})
+        r = agent._reminder_reply(
+            "cancel the dentist", "cancel the dentist", task.id)
+        self.assertIsNotNone(r)
+        self.assertNotIn("don't have any", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

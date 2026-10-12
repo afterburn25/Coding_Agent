@@ -6059,6 +6059,24 @@ class AgentOrchestrator:
                 f"“{self._reminder_label(s)}”" for s in pool[:3])
             return (f"No {str(noun).rstrip('s')} set — "
                     f"you've got: {names}.")
+        if not pool:
+            # 'delete everything' over an all-off pool — 'no
+            # reminders' is false while disabled rows exist.
+            off = [s for s in (sched.list() or [])
+                   if not s.get("enabled", True)
+                   and (str(s.get("name") or "").lower()
+                        .startswith("reminder")
+                        or (isinstance(s.get("action"), dict)
+                            and s["action"].get("kind")
+                            == "notify"))]
+            if off:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”" for s in off[:3])
+                return (f"{len(off)} reminder"
+                        f"{'s' if len(off) != 1 else ''} set, "
+                        f"but {'they’re' if len(off) != 1 else 'it’s'} "
+                        f"all off: {names} — say “turn them "
+                        f"back on”.")
         return "You don't have any reminders set."
 
     def _reminder_label(self, s: dict) -> str:
@@ -6443,6 +6461,12 @@ class AgentOrchestrator:
             r"(?:set|made|created|scheduled|booked|put|added|"
             r"asked\s+for|gave\s+you)\b",
             body, re.IGNORECASE))
+        _prov_mut = bool(re.search(
+            r"\bi\s+(?:just\s+|recently\s+|lately\s+)?"
+            r"(?:turned|switched|disabled|muted|paused|silenced|"
+            r"stopped|deactivated|snoozed|rescheduled|moved|"
+            r"renamed|cancelled|canceled|deleted|removed)\b",
+            body, re.IGNORECASE))
         body = re.sub(
             r"\bi\s+(?:just\s+|recently\s+|lately\s+)?"
             r"(?:set|made|created|scheduled|booked|put|added|"
@@ -6455,7 +6479,8 @@ class AgentOrchestrator:
             r"back|forward|earlier|later)\b)\S+)*",
             " ", body, flags=re.IGNORECASE)
         topic_terms = self._reminder_terms(re.sub(
-            r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
+            r"one|ones|this|these|those|them|it)\b",
             " ", body, flags=re.IGNORECASE))
         topic_terms, _ord_sel = self._reminder_ordinal_split(
             topic_terms)
@@ -6469,6 +6494,21 @@ class AgentOrchestrator:
         hits = self._reminder_ordinal_pick(hits, _ord_sel,
                                            time.time())
         state = "on" if want_on else "off"
+        if _prov_mut and not topic_terms and _ord_sel is None:
+            # 'turn on the one i just disabled' — a mutation
+            # provenance resolves through the journal, not a
+            # 'say which' over every opposite-state row.
+            lt = self._reminder_last_touched()
+            if lt is not None:
+                lt_hits = [s for s in pool
+                           if str(s.get("id")) == str(lt.get("id"))]
+                if lt_hits:
+                    hits = lt_hits
+                elif rows:
+                    return self._reminder_finish(
+                        f"“{self._reminder_label(lt)}” is already "
+                        f"{state}.", user_text, task_id,
+                        event_callback)
         if (not topic_terms and _ord_sel is None
                 and re.fullmatch(
                     r"(?:it|that|this|the\s+one|that\s+one)",
@@ -8055,6 +8095,25 @@ class AgentOrchestrator:
         if self._REMINDER_WHATDID_RE.match(plan_text):
             return self._reminder_whatdid_reply(
                 user_text, task_id, event_callback=event_callback)
+        _mverb = (r"turn\s+(?:off|on|back\s+on)|switch\s+(?:off|on)|"
+                  r"cancel|delete|remove|snooze|reschedule|"
+                  r"postpone|delay|rename|mute|unmute|pause|"
+                  r"unpause|disable|enable|silence|move|bump|"
+                  r"shift|push")
+        if re.search(
+                rf"\b(?:{_mverb})\b.{{1,80}}?\band\b.{{1,80}}?"
+                rf"\b(?:{_mverb})\b", plan_text, re.IGNORECASE):
+            # 'turn off the standup and cancel the dentist' — two
+            # ops in one breath. Executing one half silently (or
+            # worse, letting the model narrate both) is a lie; ask
+            # for them one at a time. Create-family verbs stay out
+            # so 'remind me to call and cancel the appointment'
+            # keeps flowing to the create parser.
+            return self._reminder_finish(
+                "One change at a time — tell me each step "
+                "(“turn off the standup”, then “cancel the "
+                "dentist”) and I'll do them in order.",
+                user_text, task_id, event_callback)
         # A new mutation turn replaces the journal — but only once
         # it actually mutates, so read-only turns keep 'undo that'
         # pointed at the last real change.
