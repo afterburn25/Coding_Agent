@@ -7684,7 +7684,8 @@ class AgentOrchestrator:
             # the honest model-down error the 409 would give anyway.
             return True
         return any(rx.match(t) for rx in (
-            cls._REMINDER_RE, cls._REMINDER_CLARIFY_RE,
+            cls._REMINDER_RE, cls._REMINDER_RE_GREEDY,
+            cls._REMINDER_CLARIFY_RE,
             cls._REMINDER_NOTASK_RE, cls._REMINDER_CANCEL_RE,
             cls._REMINDER_CANCEL_BARE_RE,
             cls._REMINDER_SNOOZE_RE, cls._REMINDER_TOGGLE_RE,
