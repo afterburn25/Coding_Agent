@@ -3882,6 +3882,9 @@ class AgentOrchestrator:
         r"\b(?P<noun>reminders?|alarms?|timers?|schedules?|"
         r"it|that|this|them)\b"
         + _REMINDER_ECHO +
+        r"(?:\s+i\s+(?:set|made|created|scheduled|booked|put|"
+        r"added|gave\s+you)\b(?:\s+(?:for|on|at)\s+"
+        r"(?P<rel>.+?))?)?"
         r"\s*(?P<dir>back\s+on|off|on)?"
         r"(?:\s+(?:on\s+)?(?P<day>tomorrow|today|tonight|"
         r"monday|tuesday|wednesday|thursday|friday|saturday|"
@@ -4606,6 +4609,21 @@ class AgentOrchestrator:
         # tomorrow' — the day narrows hits to rows actually firing
         # that date; a miss says so instead of touching others.
         day = str(mt.groupdict().get("day") or "").strip().lower()
+        # 'the reminder i set for friday' — the relative clause's
+        # object is scope (a day word narrows by fire-date; other
+        # words join the topic).
+        rel = str(mt.groupdict().get("rel") or "").strip(" ,;—-.")
+        if rel:
+            if rel.lower() in ("tomorrow", "today", "tonight",
+                               "monday", "tuesday", "wednesday",
+                               "thursday", "friday", "saturday",
+                               "sunday"):
+                day = day or rel.lower()
+            else:
+                topic_terms |= self._reminder_terms(rel)
+                hits = [s for s in pool
+                        if not topic_terms
+                        or topic_terms <= _hay(s)]
         if day and hits:
             tgt_date = self._reminder_day_date(day, time.time())
             hits = [s for s in hits
@@ -6180,6 +6198,15 @@ class AgentOrchestrator:
             # 'remind me at 3pm and cancel the X reminder' — a
             # compound ask; answer honestly rather than create a
             # row named 'X and cancel…' or guess which half ran.
+            return self._reminder_finish(
+                "I can do one thing at a time — say the reminder "
+                "to set, then the reminder to change.",
+                user_text, task_id, event_callback)
+        if self._reminder_spec(task, time.time()) is not None:
+            # 'every monday at 8 and every friday at 9' — the task
+            # slot held a whole second schedule. One row can't
+            # hold two cadences; say so rather than bank 'every
+            # monday at 8' as a task name.
             return self._reminder_finish(
                 "I can do one thing at a time — say the reminder "
                 "to set, then the reminder to change.",

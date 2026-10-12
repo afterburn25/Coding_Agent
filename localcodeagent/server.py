@@ -5351,6 +5351,14 @@ class AppState:
             return {"content": (
                 "I can do one thing at a time — say the reminder "
                 "to set, then the reminder to change.")}
+        # 'every monday at 8 and every friday at 9' — the task
+        # slot held a whole second schedule; one row can't hold
+        # two cadences.
+        spec_t, _ = self._parse_reminder_time(desc, time.time())
+        if spec_t is not None:
+            return {"content": (
+                "I can do one thing at a time — say the reminder "
+                "to set, then the reminder to change.")}
         # 'remind me at 5 then again at 7' — the desc slot held a
         # leftover clock, not a task. Two times for one reminder
         # is a real ambiguity, say so.

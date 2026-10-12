@@ -3703,6 +3703,37 @@ class TruthGateTests(RecoveryLoopTests):
                 mode="auto")
             self.assertIn("Snoozed", result.content)
             sup.scheduler.rows.clear()
+
+            # 'turn off the reminder i set for friday' — the
+            # relative clause is scope, not topic; the model
+            # narrated 'no record of one' over a live row.
+            _lt2 = time.localtime(time.time())
+            _df2 = (4 - _lt2.tm_wday) % 7 or 7
+            sup.scheduler.add(
+                "Reminder: rent", "once",
+                at=time.mktime((_lt2.tm_year, _lt2.tm_mon,
+                                _lt2.tm_mday + _df2, 10, 0, 0,
+                                -1, -1, -1)),
+                action={"kind": "notify", "detail": "rent"})
+            result = agent.run(
+                "turn off the reminder i set for friday",
+                mode="auto")
+            rent = [s for s in sup.scheduler.rows
+                    if "rent" in s["name"]][0]
+            self.assertFalse(rent["enabled"])
+            result = agent.run(
+                "turn off the reminder i set for sunday",
+                mode="auto")
+            self.assertIn("Nothing fires sunday", result.content)
+            sup.scheduler.rows.clear()
+
+            # 'every monday at 8 and every friday at 9' — two
+            # cadences can't share a row; no 'every monday at 8'
+            # task name gets banked.
+            result = agent.run(
+                "remind me every monday at 8 and every friday "
+                "at 9", mode="auto")
+            self.assertFalse(sup.scheduler.rows)
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(
