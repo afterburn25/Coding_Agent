@@ -5425,3 +5425,45 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   clarify -> 'for 20 minutes' -> real row 09:02; 'remind me to
   stretch' -> 'for 30 minutes' -> real row 09:12; cancel
   round-trips. Both task-ask synths consume duration fragments.
+
+## Block N+2 — relative shifts, help-idiom fallthrough, soak de-flake (12 Oct)
+
+- Relative reschedule shifts: 'push/move the standup back|up|
+  down|forward|earlier|later [by] N' retime the recurring
+  cadence clock (daily 09:00 -> 10:00 stays daily); digit
+  durations rejoin the direction word the when-slot lookahead
+  split; no now-clamp on cadence merges; unquantified 'earlier'
+  clarifies honestly.
+- Fake-mutation honesty: 'move the standup to 11' claimed
+  'Rescheduled' but kept hour=9 — recur_merge now reads bare
+  digits as clocks; 'in 30 minutes' converts to once like full
+  dates (e8ffd0e7).
+- Noun-less fired/cadence asks claim: 'has the standup fired',
+  'did the standup already go off', 'does the standup repeat',
+  'when does the standup repeat', 'is the standup recurring',
+  'how often is the standup' (e8ffd0e7).
+- 'make' bare-reschedule stole 'make sure i remember the
+  dentist at 3' — a None reschedule now falls through to the
+  HELP-idiom create (ed26b357). Then 'make a cup of tea' hit
+  can_run_without_coding_model — 'make' moved to its own
+  direction-anchored pattern; unanchored makes never match
+  (52e02d72).
+- Noun-less turn/switch toggles need a direction word — 'turn
+  the standup back on'/'switch the build off' mutate rows,
+  'switch the pay rent reminder to sunday' is a reschedule,
+  'turn the oven' falls through. activate/deactivate join
+  (ed26b357).
+- Soak (Tier 3) had failed every run since 10-08 — three
+  independent flakes fixed at 15fd03ef: 8.3-vs-long temp path
+  compares on CI runners, a shared _Response stream consumable
+  by stray daemon install workers, and GetTickCount64's ~15.6ms
+  monotonic tick vs a 10ms sleep.
+- Artifact rebuilt + deployed at 52e02d72. Live model-down
+  verified: 'make sure i remember the dentist at 3 tomorrow'
+  creates a real builtin-local row; turn/switch directed
+  toggles + activate mutate; 'push the build reminder back an
+  hour' on a once-row gives an honest scoped miss, no fake
+  claim; inventory lists persisted rows.
+- Full local suite green: 3915 passed, 4 skipped. CI green at
+  52e02d72; ed26b357/15fd03ef failed only on the 'make a cup
+  of tea' bypass test the next commit fixed.
