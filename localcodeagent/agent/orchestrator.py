@@ -4670,7 +4670,17 @@ class AgentOrchestrator:
                     "say which.")
         else:
             try:
-                sched.update(str(hits[0]["id"]), **spec)
+                fields = spec
+                if (spec.get("kind") == "once"
+                        and hits[0].get("kind")
+                            in ("daily", "weekly", "monthly")):
+                    # A 'once'-shaped target on a recurring row
+                    # retimes the cadence, it doesn't silently make
+                    # it a one-shot — 'reschedule the daily standup
+                    # to 10am' stays daily at 10:00.
+                    fields = self._reminder_recur_merge(
+                        hits[0], spec, _wtxt)
+                sched.update(str(hits[0]["id"]), **fields)
                 merged = sum(bool(sched.remove(str(s["id"])))
                              for s in hits[1:])
             except Exception as exc:
@@ -4678,12 +4688,54 @@ class AgentOrchestrator:
             else:
                 label = self._reminder_label(hits[0])
                 text = (f"Rescheduled “{label}” — "
-                        + self._reminder_spec_text(spec, label)
+                        + self._reminder_spec_text(fields, label)
                         + (f" (merged {merged} duplicate"
                            + ("s.)" if merged != 1 else ".)")
                            if merged else ""))
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
+
+    def _reminder_recur_merge(self, row: dict, spec: dict,
+                              wtxt: str) -> dict:
+        """Rescheduling a recurring row with a 'once'-shaped target
+        merges the target into the cadence instead of converting:
+        a clock target retimes the row's kind, a day-name becomes
+        weekly, 'the Nth' becomes monthly. Full-date targets keep
+        the explicit once conversion."""
+        lt = time.localtime(float(spec.get("at") or 0) or time.time())
+        text = str(wtxt or "").lower()
+        has_clock = bool(re.search(
+            r"\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b|"
+            r"noon|midnight|o'?clock|half\s+past|"
+            r"quarter\s+(?:past|to)|\d{1,2}:\d{2}", text))
+        hour, minute = ((lt.tm_hour, lt.tm_min) if has_clock
+                        else (int(row.get("hour") or 9),
+                              int(row.get("minute") or 0)))
+        # A real date — month name, 'tomorrow', 'next week' — is an
+        # explicit one-shot target, not a cadence retiming.
+        if re.search(
+                r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|"
+                r"nov|dec)\w*\b|\btomorrow\b|\bnext\s+week\b|"
+                r"\btonight\b|\btoday\b", text):
+            return spec
+        if re.search(r"\b(?:the\s+)?\d{1,2}(?:st|nd|rd|th)\b", text):
+            return {"kind": "monthly", "day": lt.tm_mday,
+                    "hour": hour, "minute": minute}
+        if re.search(
+                r"\b(?:mon|tues|wednes|thurs|fri|satur|sun)"
+                r"(?:day)?s?\b", text):
+            return {"kind": "weekly", "weekday": lt.tm_wday,
+                    "hour": hour, "minute": minute}
+        kind = row.get("kind")
+        if kind == "monthly":
+            return {"kind": "monthly",
+                    "day": int(row.get("day") or 1),
+                    "hour": hour, "minute": minute}
+        if kind == "weekly":
+            return {"kind": "weekly",
+                    "weekday": row.get("weekday"),
+                    "hour": hour, "minute": minute}
+        return {"kind": "daily", "hour": hour, "minute": minute}
 
     def _reminder_rows(self, *, include_disabled: bool = False,
                        noun: str | None = None):
