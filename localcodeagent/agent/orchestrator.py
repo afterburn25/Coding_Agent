@@ -7285,6 +7285,8 @@ class AgentOrchestrator:
                          or self._REMINDER_STATEASK_RE.match(
                              plan_text)
                          or self._REMINDER_WHENLEAD_RE.match(
+                             plan_text)
+                         or self._reminder_inventory_shaped(
                              plan_text))):
             return None
         # Checked before parse_local_action, which has no temporal
