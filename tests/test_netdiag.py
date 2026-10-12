@@ -3812,7 +3812,45 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNone(
                 agent._reminder_spec(
                     "remind me before the meeting", time.time()))
+            # 'remind me about the rent' — a connector lead makes
+            # the whole when-slot the task; ask for the time like
+            # 'remind me to X', never drop to the model.
+            result = agent.run(
+                "remind me about the rent", mode="auto")
+            self.assertIn("When should I remind you", result.content)
+            # 'at the crack of dawn' — 'dawn' landed in the task
+            # slot and the turn fell to the model; the rejoin
+            # covers clock-phrase heads (crack/end/top/…).
+            result = agent.run(
+                "remind me at the crack of dawn", mode="auto")
+            self.assertIn("couldn't pin a time", result.content)
+            # 'i have a dentist appointment tomorrow at 2' — a
+            # declarative appointment is a create; the model
+            # narrated a fake 'say confirm' flow over zero rows.
+            n0 = len(sup.scheduler.rows)
+            result = agent.run(
+                "i have a dentist appointment tomorrow at 2",
+                mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertEqual(len(sup.scheduler.rows), n0 + 1)
+            self.assertIn("dentist appointment",
+                          sup.scheduler.rows[-1]["name"])
+            sup.scheduler.rows.pop()
+            # 'snooze X til friday' — 'til' joins until/till.
+            sup.scheduler.add(
+                "Reminder: rent", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "rent"})
+            result = agent.run(
+                "snooze the rent reminder til friday", mode="auto")
+            self.assertIn("Snoozed", result.content)
             sup.scheduler.rows.clear()
+            # 'every third day' — an ordinal picks every Nth unit.
+            spec = agent._reminder_spec(
+                "every third day", time.time())
+            self.assertIsNotNone(spec)
+            self.assertEqual(spec["kind"], "interval")
+            self.assertEqual(spec["interval_s"], 259200.0)
 
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.

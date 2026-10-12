@@ -3007,6 +3007,7 @@ class AgentOrchestrator:
                 or self._REMINDER_NOUNADJ_RE.match(match_text)
                 or self._REMINDER_LEAD_CADENCE_RE.match(match_text)
                 or self._REMINDER_DECL_RE.match(match_text)
+                or self._REMINDER_HAVE_RE.match(match_text)
                 or self._REMINDER_NOUNFIRST_RE.match(match_text)
                 or self._REMINDER_REFER_RE.match(match_text)):
             return None
@@ -3676,6 +3677,14 @@ class AgentOrchestrator:
         r"(?:reminders?|alarms?|timers?|schedules?)"
         r"(?:\s+(?:at|for|on|about)\s+.+?)?" + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # Declarative appointment — 'i have a dentist appointment
+    # tomorrow at 2' carries no reminder verb; the model narrated
+    # a fake 'I'll set it — say confirm' flow over zero rows. The
+    # named event is the task; the temporal tail is the when.
+    _REMINDER_HAVE_RE = re.compile(
+        _REMINDER_POLITE +
+        r"i\s+have\s+(?:a|an)\s+(?P<thing>.+?)" + _REMINDER_TRAIL,
+        re.IGNORECASE)
     # Imperative inventory leads — 'tell me about my reminders',
     # 'run through my reminders', 'list my reminders'. Command
     # framing skips the question-gated inventory path; the model
@@ -3845,7 +3854,7 @@ class AgentOrchestrator:
         r"(?:\s+(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
         r"schedules?|it|that|this|them|everything|all)\b"
         + _REMINDER_ECHO + r")?"
-        r"(?:\s+(?P<way>for|until|till|to|by|back|up|forward|"
+        r"(?:\s+(?P<way>for|until|till|til|to|by|back|up|forward|"
         r"later|earlier|sooner))?"
         r"(?:\s+(?P<dur>.+?))?"
         + _REMINDER_TRAIL +
@@ -4074,7 +4083,7 @@ class AgentOrchestrator:
         # matched so scope+dur landed in one capture; split at
         # the connector whose tail parses as a time.
         dsm = re.search(
-            r"\s+(?:by|for|until|till|to)\s+(.+)$", dur)
+            r"\s+(?:by|for|until|till|til|to)\s+(.+)$", dur)
         if dsm is not None:
             head_d = dur[:dsm.start()].strip(" ,;—-")
             tail_d = dsm.group(1).strip(" ,;—-")
@@ -4900,7 +4909,7 @@ class AgentOrchestrator:
                 self._REMINDER_STOP_RE, self._REMINDER_RESCHEDULE_RE,
                 self._REMINDER_RESCHEDULE_BARE_RE,
                 self._REMINDER_NOTASK_RE, self._REMINDER_BARE_RE,
-                self._REMINDER_HELP_RE,
+                self._REMINDER_HELP_RE, self._REMINDER_HAVE_RE,
                 self._REMINDER_LEAD_CADENCE_RE,
                 self._REMINDER_LEAD_WHEN_RE, self._REMINDER_DECL_RE,
                 self._REMINDER_NOUNFIRST_RE, self._REMINDER_NOUNADJ_RE,
@@ -5238,6 +5247,54 @@ class AgentOrchestrator:
             if inv is not None:
                 return self._reminder_finish(
                     inv.text, user_text, task_id, event_callback)
+        mh = self._REMINDER_HAVE_RE.match(plan_text)
+        if mh is not None:
+            # 'i have a dentist appointment tomorrow at 2' — the
+            # event names the task; the temporal tail parses at
+            # the earliest boundary. No parseable time → fall
+            # through ('i have a question' isn't scheduling).
+            body_h = str(mh.group("thing") or "").strip(" ,;—-")
+            parts_h = re.split(
+                r"\s+(?=(?:at|in|on|every|next|tomorrow|today|"
+                r"tonight|tonite|this|monday|tuesday|wednesday|"
+                r"thursday|friday|saturday|sunday|morning|"
+                r"afternoon|evening)\b)", body_h)
+            now_h = time.time()
+            task_h = when_h = ""
+            for i_h in range(1, len(parts_h)):
+                cand_h = " ".join(parts_h[i_h:])
+                if self._reminder_spec(cand_h, now_h) is not None:
+                    task_h = " ".join(parts_h[:i_h])
+                    when_h = cand_h
+                    break
+            if (task_h and when_h and not re.fullmatch(
+                    r"(?:the|my|a|an)?\s*(?:reminders?|alarms?|"
+                    r"timers?|schedules?)", task_h, re.IGNORECASE)):
+                sched_h, _rows_h = self._reminder_rows()
+                if sched_h is None:
+                    return self._reminder_finish(
+                        "I can't set reminders — the scheduler "
+                        "isn't running in this session.",
+                        user_text, task_id, event_callback)
+                spec_h = self._reminder_spec(when_h, now_h)
+                fields_h = {k: v for k, v in spec_h.items()
+                            if k != "kind"}
+                try:
+                    sched_h.add(
+                        f"reminder: {task_h[:100]}",
+                        spec_h["kind"],
+                        action={"kind": "notify",
+                                "title": "Reminder",
+                                "detail": task_h},
+                        created_by="user", **fields_h)
+                except Exception as exc:
+                    return self._reminder_finish(
+                        f"I couldn't set the reminder ({exc}).",
+                        user_text, task_id, event_callback)
+                return self._reminder_finish(
+                    "Reminder set "
+                    + self._reminder_spec_text(spec_h, task_h),
+                    user_text, task_id, event_callback)
         md = (self._REMINDER_DECL_RE.match(plan_text)
               or self._REMINDER_NOUNFIRST_RE.match(plan_text)
               or self._REMINDER_NOUNADJ_RE.match(plan_text))
@@ -5810,6 +5867,26 @@ class AgentOrchestrator:
                                 spec_nt, wtxt = spec_f, base_n
                                 if bound_n is None:
                                     nt_task = tail_n
+                    if spec_nt is None:
+                        # 'remind me about the rent' — a connector
+                        # lead means the whole when-slot is the
+                        # task; ask for the time like 'remind me
+                        # to stretch' does, don't drop to the model.
+                        ld = re.match(
+                            r"(about|of|that|to)\s+(.+)", wtxt,
+                            re.IGNORECASE)
+                        if ld is not None and not re.search(
+                                r"\b(?:when|once|if|as\s+soon\s+as|"
+                                r"after|before|until|whenever)\b",
+                                ld.group(2), re.IGNORECASE):
+                            task_t = ld.group(2).strip(" ,;—-")
+                            conn = ("to" if ld.group(1).lower()
+                                    == "to" else "about")
+                            return self._reminder_finish(
+                                f"When should I remind you {conn} "
+                                f"{task_t}? — e.g. “remind me in 10 "
+                                f"minutes {conn} {task_t}”.",
+                                user_text, task_id, event_callback)
                     if spec_nt is not None and nt_task:
                         sup = (self._autonomy() if callable(
                             self._autonomy) else self._autonomy)
@@ -6167,14 +6244,18 @@ class AgentOrchestrator:
                     f"{task_lazy}? — e.g. “in 10 minutes”, "
                     "“at 3pm”, “tomorrow at 9”.",
                     user_text, task_id, event_callback)
-            if (spec is None and task_lazy and re.match(
-                    r"(?:the|a|an)\s", task_lazy)
+            if (spec is None and task_lazy
+                    and (re.match(r"(?:the|a|an)\s", task_lazy)
+                         or re.search(
+                             r"(?:top|end|middle|start|beginning|"
+                             r"crack)\s*$", when_raw, re.IGNORECASE))
                     and not re.search(r"\bof\b", when_raw,
                                       re.IGNORECASE)):
                 # 'at the top | of the hour' — the split cut inside
                 # a clock phrase; re-joined it parses, and the
                 # 'task' was really clock tail. A when that already
-                # holds 'of' would double it.
+                # holds 'of' would double it. 'at the crack | dawn'
+                # rejoins too — 'crack of dawn' is a clock phrase.
                 joined = f"{when_raw} of {task_lazy}"
                 if self._reminder_spec(
                         joined, time.time()) is not None:
@@ -6439,6 +6520,7 @@ class AgentOrchestrator:
                          or self._REMINDER_NOUNADJ_RE.match(plan_text)
                          or self._REMINDER_WHENONLY_RE.match(plan_text)
                          or self._REMINDER_REFER_RE.match(plan_text)
+                         or self._REMINDER_HAVE_RE.match(plan_text)
                          or self._REMINDER_INV_LEAD_RE.match(
                              plan_text)
                          or self._REMINDER_STATEASK_RE.match(

@@ -1002,6 +1002,22 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         return {"kind": "interval", "interval_s": span / n_f}
     if re.fullmatch(r"every\s+other\s+day|every\s+second\s+day", t):
         return {"kind": "interval", "interval_s": 172800.0}
+    # 'every third day' — an ordinal picks every Nth unit.
+    m = re.fullmatch(
+        r"every\s+(third|fourth|fifth|sixth|seventh|eighth|"
+        r"ninth|tenth|(\d+)(?:st|nd|rd|th))\s+"
+        r"(minutes?|mins?|hours?|hrs?|days?|weeks?)", t)
+    if m:
+        n_o = float({"third": 3, "fourth": 4, "fifth": 5,
+                     "sixth": 6, "seventh": 7, "eighth": 8,
+                     "ninth": 9, "tenth": 10}.get(
+                         m.group(1), m.group(2) or 1))
+        unit_o = m.group(3)
+        return {"kind": "interval",
+                "interval_s": n_o * (
+                    60 if unit_o.startswith(("m", "min")) else
+                    3600 if unit_o.startswith("h") else
+                    86400 if unit_o.startswith("d") else 604800)}
     # 'every half hour' / 'every half a day' — fractional spans.
     m = re.fullmatch(
         r"every\s+(?:half|a\s+half)\s+(?:an?\s+)?(hour|day)", t)
