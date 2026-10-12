@@ -3940,9 +3940,10 @@ class AgentOrchestrator:
         # reminders'. The model narrated 'nothing scheduled' over
         # live rows on these shapes too.
         r"|" + _REMINDER_POLITE +
-        r"(?:(?:do|did|does)\s+i\s+(?:have|got|set|made|created|"
-        r"put|booked)|have\s+i\s+(?:got|set|made|created|put|"
-        r"booked|scheduled)|got\s+any|have\s+any|any)\s+"
+        r"(?:(?:do|did|does)\s+i\s+(?:still\s+)?(?:have|got|set|"
+        r"made|created|put|booked)|have\s+i\s+(?:still\s+)?"
+        r"(?:got|set|made|created|put|booked|scheduled)|"
+        r"got\s+any|have\s+any|any)\s+"
         r"(?:any\s+|a\s+|an\s+|the\s+)?"
         r"(?:reminders?|alarms?|timers?|schedules?)\b"
         r"(?:\s+(?:about|regarding|for|on|of|at|to|set|made|"
@@ -4020,8 +4021,9 @@ class AgentOrchestrator:
         # same store the active forms do. 'did i miss any
         # reminders' is a fired-ask — last_run answers it.
         r"|" + _REMINDER_POLITE +
-        r"(?:am|are)\s+i\s+(?:still\s+)?reminded\b"
-        r"(?:\s+of\s+.+?)?"
+        r"(?:am|are)\s+i\s+(?:still\s+)?(?:getting\s+|being\s+)?"
+        r"reminded\b"
+        r"(?:\s+(?:of|about)\s+.+?)?"
         + _REMINDER_TRAIL +
         # Fired-inventory — 'which reminders have already fired',
         # 'what fired today', 'what went off this morning'. The
@@ -4409,7 +4411,8 @@ class AgentOrchestrator:
         r"(?:(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
         r"wipe|purge|un-?schedule|undo|axe?|ditch|forget|"
-        r"never\s*mind|un-?remind(?:\s+me)?)"
+        r"never\s*mind|un-?remind(?:\s+me)?|take\s+down|"
+        r"take\s+off|strike)"
         r"|(?:i\s+)?(?:don'?t|do\s+not|dont)\s+"
         r"(?:need|want|use|like))\s+"
         r"(?:(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
@@ -4437,7 +4440,7 @@ class AgentOrchestrator:
         r"(?P<verb>cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
         r"un-?schedule|undo|axe?|ditch|forget|never\s*mind|"
-        r"un-?remind(?:\s+me)?)\s+"
+        r"un-?remind(?:\s+me)?|take\s+down|take\s+off|strike)\s+"
         r"(?:(?:the|my|that|this|your|about|me|on|of|to)\s+)*"
         # File/object shapes stay with the action lanes —
         # 'delete junk.txt', 'remove the file', 'delete the folder'.
@@ -8899,6 +8902,40 @@ class AgentOrchestrator:
                             " — it repeats until you cancel; I "
                             f"can't hold an end bound like "
                             f"“until {tail_u}”")
+            if (spec is not None and noun == "alarm"
+                    and not re.search(
+                        r"(?:a\.?m|p\.?m)\b|morning|afternoon|"
+                        r"evening|tonight|tonite|noon|midnight",
+                        str(when_d or cand or ""), re.IGNORECASE)
+                    and re.search(r"\bat\b|\bto\b|past|quarter|"
+                                  r"half|o'?clock|for\s+\d|"
+                                  r"^\s*(?:at\s+)?\d{1,2}"
+                                  r"(?::\d{2})?\s*$",
+                                  str(when_d or cand or ""),
+                                  re.IGNORECASE)):
+                # 'set my alarm for 6' — an alarm on a bare clock
+                # reads AM like a wake call; the PM inference
+                # would ring it at dinner.
+                if (spec.get("kind") == "once" and spec.get("at")):
+                    _at = float(spec["at"])
+                    if time.localtime(_at).tm_hour >= 12:
+                        _at -= 12 * 3600
+                        if _at <= time.time():
+                            _at += 24 * 3600
+                        spec = dict(spec, at=_at)
+                elif (spec.get("kind") in ("daily", "weekly",
+                                           "monthly")
+                      and spec.get("hour") is not None
+                      and int(spec["hour"]) >= 12):
+                    spec = dict(spec, hour=int(spec["hour"]) - 12)
+                elif (spec.get("kind") == "interval"
+                      and spec.get("hour") is not None
+                      and int(spec["hour"]) >= 12):
+                    _at = float(spec["at"]) - 12 * 3600
+                    while _at <= time.time():
+                        _at += 24 * 3600
+                    spec = dict(
+                        spec, hour=int(spec["hour"]) - 12, at=_at)
             if (spec is not None and noun == "timer"
                     and (self._reminder_vague_delay(cand or "")
                          or self._reminder_vague_delay(

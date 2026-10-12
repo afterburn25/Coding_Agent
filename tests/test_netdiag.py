@@ -2675,6 +2675,36 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertEqual(iv["kind"], "interval")
         self.assertEqual(iv["hour"], 6)
 
+        # 'set my alarm for 6' — an alarm on a bare clock reads
+        # AM; the PM default would ring it at dinner. An explicit
+        # meridian stays untouched.
+        r = agent._reminder_reply(
+            "set my alarm for 6", "set my alarm for 6", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("06:00", r.content)
+        r = agent._reminder_reply(
+            "set my alarm for 6pm", "set my alarm for 6pm", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("18:00", r.content)
+
+        # 'am i getting reminded about X' — passive inventory over
+        # a real row; 'take down the X' is a cancel.
+        sup.scheduler.add(
+            "reminder: dentist", "once", at=time.time() + 86400,
+            action={"kind": "notify", "detail": "dentist"})
+        r = agent._reminder_reply(
+            "am i getting reminded about the dentist",
+            "am i getting reminded about the dentist", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("dentist", r.content)
+        r = agent._reminder_reply(
+            "take down the dentist reminder",
+            "take down the dentist reminder", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("dentist", r.content.lower())
+        self.assertFalse(
+            any("dentist" in s["name"] for s in sup.scheduler.rows))
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
