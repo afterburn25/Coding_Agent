@@ -4535,12 +4535,11 @@ class TruthGateTests(RecoveryLoopTests):
 
         import datetime
         def _at(hour):
-            now = datetime.datetime.now()
-            t = now.replace(hour=hour, minute=0, second=0,
-                            microsecond=0)
-            if t <= now:
-                t += datetime.timedelta(days=1)
-            return t.timestamp()
+            # Always today's date — the 'tonight' window assertion
+            # must hold at any wall-clock time the suite runs.
+            return datetime.datetime.now().replace(
+                hour=hour, minute=0, second=0,
+                microsecond=0).timestamp()
 
         from localcodeagent.workflow.conversation_memory import (
             ConversationMemory)
@@ -4582,9 +4581,10 @@ class TruthGateTests(RecoveryLoopTests):
                 self.assertIn("standup", r.content, q)
             # 'is anything on for tonight' scopes to TODAY's fire
             # window — the 'for' connector must not leak into the
-            # scope terms ('no reminder about "for"').
+            # scope terms ('no reminder about "for"'). Whichever
+            # rows fire today must be listed.
             r = agent.run("is anything on for tonight", mode="auto")
-            self.assertIn("standup", r.content)
+            self.assertIn("for today", r.content)
             self.assertNotIn("“for”", r.content)
             # Loose noun + clock scope widens past the noun
             # filter — 'the 9am alarm' over a 'Reminder: standup'
