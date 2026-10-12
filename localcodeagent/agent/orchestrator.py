@@ -3876,8 +3876,8 @@ class AgentOrchestrator:
         r"tonight|today|next|mon|tue|wed|thu|fri|sat|sun|week|minute|"
         r"hour|day|am\b|pm\b|later|soon|eventually|sometime|in\s+a\s+"
         r"(?:bit|while|moment|sec)|in\s+advance|ahead\s+of\s+time|"
-        r"beforehand|dawn|dusk|sunrise|sunset|daybreak|sundown",
-        re.IGNORECASE)
+        r"beforehand|dawn|dusk|sunrise|sunset|daybreak|sundown|"
+        r"twice|thrice|again", re.IGNORECASE)
     _REMINDER_EVENTISH_RE = re.compile(
         r"\b(?:when|once|if|as\s+soon\s+as|after|before|until|"
         r"whenever|every\s+time)\b", re.IGNORECASE)
@@ -4575,6 +4575,10 @@ class AgentOrchestrator:
         These are scheduler operations, never durable facts or
         rules; the learn lane banked 'at 6am wake me up' and
         'pay is rent reminder to friday at 10am' as facts live."""
+        text = re.sub(
+            r"\bi\s+(?:want|need|wanna|would\s+like|'?d\s+like)\s+"
+            r"to\s+be\s+reminded\b|\bto\s+be\s+reminded\b",
+            "remind me", text, flags=re.IGNORECASE)
         if any(rx.match(text) for rx in (
                 self._REMINDER_RE, self._REMINDER_RE_GREEDY,
                 self._REMINDER_CLARIFY_RE, self._REMINDER_CANCEL_RE,
@@ -5532,6 +5536,16 @@ class AgentOrchestrator:
         plan_text = (frame.masked_case
                      if frame is not None and frame.masked_case
                      else user_text)
+        # 'i want to be reminded every morning' — the passive has
+        # no 'me' for the verb phrase; normalize to the active.
+        # 'reminder: stand up every hour' — a colon-labelled create.
+        plan_text = re.sub(
+            r"\bi\s+(?:want|need|wanna|would\s+like|'?d\s+like)\s+"
+            r"to\s+be\s+reminded\b|\bto\s+be\s+reminded\b",
+            "remind me", plan_text, flags=re.IGNORECASE)
+        plan_text = re.sub(
+            r"\b(reminders?|alarms?|timers?)\s*:\s*", r"\1 ",
+            plan_text, flags=re.IGNORECASE)
         # Reminders are a bounded local action: 'remind me in 5
         # minutes to X' → a real once-schedule firing a notification.
         # Their own regexes are the tighter gate — 'remind me to X'

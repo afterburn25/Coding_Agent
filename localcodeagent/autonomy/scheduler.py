@@ -512,7 +512,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     # 'every N units' / 'every hour' / 'hourly' — interval cadence.
     m = re.fullmatch(
         r"(?:every\s+(\d+(?:\.\d+)?)\s*"
-        r"(minutes?|mins?|hours?|hrs?|days?|weeks?)"
+        r"(seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|"
+        r"weeks?)"
         r"|every\s+hour(?:\s+on\s+the\s+hour)?|hourly"
         r"|on\s+the\s+hour)", t)
     if m:
@@ -521,6 +522,7 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         else:
             unit = m.group(2)
             interval = float(m.group(1)) * (
+                1 if unit.startswith(("s", "sec")) else
                 60 if unit.startswith(("m", "min")) else
                 3600 if unit.startswith("h") else
                 86400 if unit.startswith("d") else 604800)

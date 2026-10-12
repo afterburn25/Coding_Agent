@@ -2902,6 +2902,40 @@ class TruthGateTests(RecoveryLoopTests):
                 _prw("in an hour and twenty minutes", now),
                 now + 4800, delta=2)
 
+            # 'i want to be reminded' — the passive had no
+            # 'me' for the verb phrase; the model false-refused
+            # 'no access to scheduling'. Normalizes to active.
+            result = agent.run(
+                "i want to be reminded every morning to stretch",
+                mode="auto")
+            self.assertIn("stretch", result.content)
+            self.assertEqual(
+                sup.scheduler.rows[-1]["kind"], "daily")
+
+            # 'reminder: stand up every hour' — a colon-labelled
+            # create; the model refused scheduling outright.
+            sup.scheduler.rows.clear()
+            result = agent.run("reminder: stand up every hour",
+                               mode="auto")
+            self.assertIn("stand up", result.content)
+            self.assertTrue(sup.scheduler.rows)
+            sup.scheduler.rows.clear()
+
+            # 'remind me twice' — 'twice' is timeish; honest
+            # pin-fail, not a model 'can't do that' refusal.
+            result = agent.run("remind me twice", mode="auto")
+            self.assertIn("couldn't pin", result.content)
+            self.assertFalse(sup.scheduler.rows)
+
+            # 'every 90 seconds' — seconds were missing from
+            # the interval units.
+            result = agent.run(
+                "remind me every 90 seconds to blink",
+                mode="auto")
+            self.assertIn("blink", result.content)
+            self.assertTrue(sup.scheduler.rows)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
