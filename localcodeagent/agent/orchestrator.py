@@ -10107,7 +10107,12 @@ class AgentOrchestrator:
             if spec is None and when_raw:
                 # 'weekly on saturdays' — a redundant cadence word
                 # glued to a parseable connector tail; the tail
-                # carries the real schedule.
+                # carries the real schedule. A dropped head with a
+                # fire-COUNT word ('twice on friday' → 'on friday')
+                # asks for N fires the row can't hold — pin-fail
+                # rather than silently creating a one-shot. Bare
+                # cadence words ('weekly on saturdays') duplicate
+                # the tail and still drop fine.
                 for bw in re.finditer(
                         r"\s+(?=(?:on|at|in|every)\s)", when_raw,
                         re.IGNORECASE):
@@ -10115,6 +10120,14 @@ class AgentOrchestrator:
                     spec_w = self._reminder_spec(
                         right_w, time.time())
                     if spec_w is not None:
+                        head_w = when_raw[:bw.start()]
+                        if re.search(
+                                r"\b(?:twice|thrice|"
+                                r"(?:two|three|four|five|six|"
+                                r"seven|\d+)\s+times?|a\s+"
+                                r"(?:couple|few)\s+times?)\b",
+                                head_w, re.IGNORECASE):
+                            continue
                         when_raw = right_w
                         spec = spec_w
                         forced_when = right_w
@@ -10236,7 +10249,7 @@ class AgentOrchestrator:
             r"years?)|(?:once|twice|thrice|(?:two|three|four|"
             r"five|six|\d+)\s+times?)\s+(?:a\s+|per\s+)?"
             r"(?:day|week|month|year|daily|weekly|monthly|"
-            r"yearly))"
+            r"yearly)|mornings?\s+and\s+evenings?)"
             r"(?:\s+(?:starting|beginning|from))?\s*$",
             task, re.IGNORECASE)
         if cad_t is not None:
@@ -10253,6 +10266,7 @@ class AgentOrchestrator:
                         joined_t, time.time()) is not None:
                     task = head_t
                     forced_when = joined_t
+                    clarify = None
         if cad_t is None and task:
             # 'water plants twice weekly' — the split left bare
             # 'twice' in the task and 'weekly' in the when;
@@ -10273,6 +10287,7 @@ class AgentOrchestrator:
                         joined_t, time.time()) is not None):
                     task = head_t
                     forced_when = joined_t
+                    clarify = None
         # 'remind me at the same time tomorrow' — a deictic time
         # reference isn't a task name; it asks "same time as what?"
         if re.fullmatch(

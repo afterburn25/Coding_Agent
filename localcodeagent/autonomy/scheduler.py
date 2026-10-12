@@ -1096,6 +1096,12 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         return {"kind": "interval", "interval_s": interval}
     # 'twice a day' / 'three times a week' — N fires spread over
     # the span becomes a fixed interval.
+    # 'morning and evening' / 'mornings and evenings' — two fires
+    # a day; the interval form spreads them 12h apart.
+    if re.fullmatch(
+            r"(?:every\s+)?mornings?\s+and\s+(?:every\s+)?"
+            r"evenings?", t):
+        return {"kind": "interval", "interval_s": 43200.0}
     m = re.fullmatch(
         r"(?:twice\s+(?:a\s+(day|week|month|year)|"
         r"(daily|weekly|monthly|yearly))|"
