@@ -5291,6 +5291,26 @@ class AppState:
                     + (f" and I'll set the reminder to "
                        f"{om.group(2).strip()}."
                        if om.group(2) else "."))}
+        # 'every 15 minutes for an hour' — a trailing duration is
+        # an end bound, not a task; strip it and say the bound
+        # isn't held.
+        fdm = re.search(
+            r"\s+for\s+((?:(?:a|an)\s+(?:couple|few)\s+|"
+            r"(?:a|an|one|two|three|four|five|six|seven|eight|nine|"
+            r"ten|couple|few|\d+(?:\.\d+)?)\s+)(?:second|minute|"
+            r"hour|day|week|month)s?|a\s+(?:bit|while|sec|moment|"
+            r"couple|few))(?:\s+to\s+(.+))?\s*$",
+            body, re.IGNORECASE)
+        if fdm is not None and re.match(
+                r"(?i)^(?:a|an|one|two|three|four|five|six|seven|"
+                r"eight|nine|ten|couple|few|\d)", desc):
+            body = body[:fdm.start()].strip()
+            spec, _ = self._parse_reminder_time(body, time.time())
+            desc = str(fdm.group(2) or "")
+            if spec is not None and spec["kind"] != "once":
+                end_note = (" — it repeats until you cancel; I "
+                            "can't hold an end bound like “for "
+                            f"{fdm.group(1)}”")
         desc = re.sub(r"^(?:about|of|that|to)\s+", "",
                       desc.strip())
         # 'remind me roughly at 6' — a hedge word left in the

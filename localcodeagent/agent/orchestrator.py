@@ -5564,6 +5564,39 @@ class AgentOrchestrator:
                                 nt_task = left
                                 wtxt = right
                                 break
+                    if spec_nt is None:
+                        # 'every 15 minutes for an hour' — 'for
+                        # <dur>' is a bound the scheduler can't
+                        # hold; 'for lunch' hands back the task.
+                        fdm_n = re.search(
+                            r"\s+for\s+((?:(?:a|an)\s+(?:couple|"
+                            r"few)\s+|(?:a|an|one|two|three|four|"
+                            r"five|six|seven|eight|nine|ten|couple|"
+                            r"few|\d+(?:\.\d+)?)\s+)(?:second|"
+                            r"minute|hour|day|week|month)s?|"
+                            r"a\s+(?:bit|while|sec|moment|couple|"
+                            r"few)|.+?)\s*$",
+                            wtxt, re.IGNORECASE)
+                        if fdm_n is not None:
+                            base_n = wtxt[:fdm_n.start()].strip()
+                            spec_f = self._reminder_spec(
+                                base_n, time.time())
+                            if spec_f is not None:
+                                tail_n = str(
+                                    fdm_n.group(1)).strip()
+                                bound_n = re.fullmatch(
+                                    r"(?:(?:a|an)\s+(?:couple|few)"
+                                    r"\s+|(?:a|an|one|two|three|"
+                                    r"four|five|six|seven|eight|"
+                                    r"nine|ten|couple|few|"
+                                    r"\d+(?:\.\d+)?)\s+)"
+                                    r"(?:second|minute|hour|day|"
+                                    r"week|month)s?|a\s+(?:bit|"
+                                    r"while|sec|moment|couple|few)",
+                                    tail_n, re.IGNORECASE)
+                                spec_nt, wtxt = spec_f, base_n
+                                if bound_n is None:
+                                    nt_task = tail_n
                     if spec_nt is not None and nt_task:
                         sup = (self._autonomy() if callable(
                             self._autonomy) else self._autonomy)
@@ -5797,6 +5830,53 @@ class AgentOrchestrator:
                             " — it repeats until you cancel; I "
                             f"can't hold an end bound like "
                             f"“until {tail_u}”")
+            if spec is None:
+                # 'every hour for 2 days [to X]' — a 'for <dur>'
+                # tail on the when is an end bound the scheduler
+                # can't hold; 'for <nondur>' ('for lunch') is the
+                # task the lazy split swallowed.
+                fdm_w = re.search(
+                    r"\s+for\s+((?:(?:a|an)\s+(?:couple|few)\s+|"
+                    r"(?:a|an|one|two|three|four|five|six|seven|"
+                    r"eight|nine|ten|couple|few|\d+(?:\.\d+)?)\s+)"
+                    r"(?:second|minute|hour|day|week|month)s?|"
+                    r"a\s+(?:bit|while|sec|moment|couple|few)|.+?)"
+                    r"(?:\s+to\s+(.+))?\s*$",
+                    when_raw, re.IGNORECASE)
+                if fdm_w is not None:
+                    base_w = when_raw[:fdm_w.start()].strip()
+                    spec_f = self._reminder_spec(base_w, time.time())
+                    if spec_f is not None:
+                        spec = spec_f
+                        forced_when = base_w
+                        tail_w = str(fdm_w.group(1) or "").strip()
+                        bound_w = re.fullmatch(
+                            r"(?:(?:a|an)\s+(?:couple|few)\s+|"
+                            r"(?:a|an|one|two|three|four|five|six|"
+                            r"seven|eight|nine|ten|couple|few|"
+                            r"\d+(?:\.\d+)?)\s+)"
+                            r"(?:second|minute|hour|day|week|"
+                            r"month)s?|a\s+(?:bit|while|sec|moment|"
+                            r"couple|few)", tail_w, re.IGNORECASE)
+                        if bound_w is None:
+                            forced_task = (
+                                str(fdm_w.group(2) or "").strip()
+                                or tail_w)
+                        elif fdm_w.group(2):
+                            forced_task = str(
+                                fdm_w.group(2)).strip()
+                        if bound_w is not None and (
+                                spec_f["kind"] != "once"):
+                            end_note = (
+                                " — it repeats until you cancel; "
+                                "I can't hold an end bound like "
+                                f"“for {tail_w}”")
+                        if (not str(m.group("task") or "").strip()
+                                and forced_task is None):
+                            return self._reminder_finish(
+                                f"Sure — remind you to do what "
+                                f"{base_w}?",
+                                user_text, task_id, event_callback)
             task_lazy = str(m.group("task") or "").strip()
             if spec is not None and task_lazy:
                 # 'on the 15th of each month' — the 'of each
@@ -5919,6 +5999,25 @@ class AgentOrchestrator:
         task = (clarify if clarify is not None
                 else forced_task if forced_task is not None
                 else str(m.group("task") or "")).strip().rstrip(".")
+        mfd = re.match(
+            r"^for\s+((?:a|an|one|two|three|four|five|six|seven|"
+            r"eight|nine|ten|\d+(?:\.\d+)?)\s+(?:second|minute|hour|"
+            r"day|week|month)s?)(?:\s+to\s+(.+))?\s*$",
+            task, re.IGNORECASE)
+        if mfd is not None:
+            # 'every 15 minutes for an hour' — a trailing duration
+            # is an end bound, not a task.
+            if mfd.group(2):
+                task = mfd.group(2).strip()
+            else:
+                return self._reminder_finish(
+                    f"Sure — remind you to do what "
+                    f"{str(m.group('when') or '').strip()}?",
+                    user_text, task_id, event_callback)
+            if spec is not None and spec["kind"] != "once":
+                end_note = (" — it repeats until you cancel; I "
+                            "can't hold an end bound like “for "
+                            f"{mfd.group(1)}”")
         if not task:
             return None
         if re.match(r"(?:at|in|on)\s+\d", task) or re.search(

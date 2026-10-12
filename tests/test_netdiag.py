@@ -3481,6 +3481,44 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("pin a time", r.content)
             self.assertNotIn("of the month of the month",
                              r.content)
+            # 'for <dur>' on a cadence is an end bound the
+            # scheduler can't hold — strip it, never bank 'an
+            # hour' as a task. 'for <nondur>' is the task itself.
+            r = agent._reminder_reply(
+                "remind me every 15 minutes for an hour",
+                "remind me every 15 minutes for an hour", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("do what", r.content)
+            self.assertFalse([
+                s for s in sup.scheduler.rows
+                if "an hour" in s["name"]])
+            r = agent._reminder_reply(
+                "remind me every hour for 2 days to drink water",
+                "remind me every hour for 2 days to drink water",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("can't hold", r.content)
+            self.assertEqual(
+                sup.scheduler.rows[-1]["kind"], "interval")
+            sup.scheduler.rows.clear()
+            r = agent._reminder_reply(
+                "remind me every sunday at noon for lunch",
+                "remind me every sunday at noon for lunch",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("lunch", r.content)
+            self.assertEqual(
+                sup.scheduler.rows[-1]["kind"], "weekly")
+            sup.scheduler.rows.clear()
+            # 'at 3 for a bit' — a vague bound still isn't a task.
+            r = agent._reminder_reply(
+                "remind me at 3 for a bit",
+                "remind me at 3 for a bit", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("do what", r.content)
+            self.assertFalse([
+                s for s in sup.scheduler.rows
+                if "a bit" in s["name"]])
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(
