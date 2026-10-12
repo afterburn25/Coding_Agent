@@ -5209,17 +5209,26 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   incident below. Promotion now lands exactly the reviewed set;
   post-review additions send the incident back through review.
   Regression: `test_undeclared_worktree_files_never_promote`.
-- **Bug-report lane** (`102fd70b` + `edfe4d98`): complaints naming
-  the agent's surface ("the api keeps timing out") file a real
-  `report_failure` incident (`source=user_report`, dedupe-bounded,
-  `recurred` counts occurrences) and ack in ~1s — "I logged it" only
-  when intake wrote a row; no intake → honest can't-file text.
-  Persona veto had silently dropped the ack (incident filed, reply
-  dropped → ~180s model stall) — the lane is now veto-exempt like
-  GitHub-status/identity facts. Live: `ri-75ef167720` reached
-  `patching` through the normal bounded pipeline. World complaints
-  ("my code keeps crashing") stay on the model path (verified:
-  real diagnostic reply, no incident).
+- **Bug-report lane** (`102fd70b`, `edfe4d98`, `92258602`,
+  `e2b593cd`, `89e48f09`, `f0a055f5`): complaints naming the agent's
+  surface ("the api keeps timing out", "the reminders didn't fire",
+  "image generation keeps failing") file a real `report_failure`
+  incident (`source=user_report`, dedupe-bounded, `recurred` counts
+  occurrences) and ack in ~1s — "I logged it" only when intake wrote
+  a row; no intake → honest can't-file text. Coverage: `didn't`/
+  `aren't`/`never`/`not V-ing` failure forms, `you're X`, `my X`,
+  determiner-less subsystem leads. Persona veto had silently dropped
+  the ack (incident filed, reply dropped → ~180s model stall) — the
+  lane is now veto-exempt like GitHub-status/identity facts. The
+  learn gate skips complaint acts so failure reports never bank as
+  "facts" (training directives still learn), and the server
+  readiness gate treats self-complaints as model-optional — verified
+  live with llm-runtime `starting` (0.7s ack). Live: six
+  user_report incidents filed, `ri-75ef167720` honestly escalated
+  `needs_human` after bounded attempts; the rest progress serially
+  (one repair mission at a time). World complaints ("my code keeps
+  crashing") stay on the model path (verified: real diagnostic
+  reply, no incident).
 - **Watch resolved**: the ~70 "Crash recovery" notifications on
   dogfood correlate with deliberate restart probes (restart*.txt),
   not spontaneous crashes; self-repair incidents on CI failures are
