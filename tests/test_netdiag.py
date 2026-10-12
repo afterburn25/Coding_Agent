@@ -3662,6 +3662,38 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(sup.scheduler.rows[0]["hour"], 9)
             self.assertEqual(sup.scheduler.rows[0]["minute"], 0)
 
+            # 'pause all reminders except X' — the exclusion tail
+            # scopes the flip pool; the named row stays enabled.
+            r = agent._local_action_reply(
+                "pause all reminders except the standup", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Turned off", r.content)
+            self.assertTrue(sup.scheduler.rows[0]["enabled"])
+            self.assertFalse(sup.scheduler.rows[1]["enabled"])
+            self.assertFalse(sup.scheduler.rows[2]["enabled"])
+            # 'the 9am one'/'the one at 9' — a clock referent names
+            # the row by fire time; misses say nothing fires there.
+            r = agent._local_action_reply("the 9am one", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("standup", r.content)
+            r = agent._local_action_reply(
+                "move the 9am one to 10", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Rescheduled", r.content)
+            self.assertEqual(sup.scheduler.rows[0]["hour"], 10)
+            self.assertEqual(sup.scheduler.rows[0]["minute"], 0)
+            r = agent._local_action_reply(
+                "the one at noon", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Nothing fires", r.content)
+            # 'for this weekend' — a day-window, not a topic; 'this'
+            # never echoed back as a scope word.
+            r = agent._local_action_reply(
+                "what's scheduled for this weekend", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("weekend", r.content)
+            self.assertNotIn("about “this”", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

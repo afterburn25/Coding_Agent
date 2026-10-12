@@ -4585,6 +4585,11 @@ class AgentOrchestrator:
         r"(?:\s+at\s+(?P<att>.+?))?"
         r"(?:\s+(?:until|till|for)\s+(?P<til>.+?))?"
         r"(?:\s+(?:while|when|if)\s+(?P<cond>.+?))?"
+        # 'pause all reminders except the standup' — the exclusion
+        # tail rides into body for the handler's _texm peel.
+        r"(?:\s+(?P<excl>(?:except|other\s+than|besides|"
+        r"but(?:\s+not)?)\s+(?:the\s+|my\s+|that\s+|those\s+|"
+        r"these\s+)?[\w'\s-]{1,40}))?"
         + _REMINDER_TRAIL +
         r"|" + _REMINDER_POLITE +
         r"(?P<noun2>reminders?|alarms?|timers?|schedules?)\s+"
@@ -4769,6 +4774,11 @@ class AgentOrchestrator:
         r"i\s+(?:just\s+|recently\s+|lately\s+)?"
         r"(?:made|set|created|added|scheduled|booked|asked\s+for|"
         r"gave\s+you|put)\b|"
+        # 'the one at 9'/'the 9am one' — a clock referent naming
+        # a row by its fire time.
+        r"(?:the|that|this)\s+one\s+(?:at|for|on)\s+"
+        r"(?:\d|noon\b|midnight\b)|"
+        r"(?:the|that|this)\s+\d[\d:]*\s*(?:am|pm)?\s+one\b|"
         r"(?:change|update|edit|set|rename)\s+"
         r"(?:[\w'-]+\s+){0,3}?'s\s+name\b|"
         r"(?:change|update|edit|set|rename)\s+"
@@ -5721,6 +5731,9 @@ class AgentOrchestrator:
             topic_terms = set()
         topic_terms, _ord_sel = self._reminder_ordinal_split(
             topic_terms)
+        # 'the 9am one' — 'one' is the referent word, not scope;
+        # the clock term alone picks the row.
+        topic_terms -= {"one", "ones"}
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
         if (not hits and noun and topic_terms
@@ -5773,13 +5786,20 @@ class AgentOrchestrator:
                 and not (topic_terms & {
                     "reminder", "reminders", "alarm", "alarms",
                     "timer", "timers", "schedule", "schedules",
-                    "appointment", "appointments"})):
+                    "appointment", "appointments"})
+                and not re.search(
+                    r"\d|\b(?:noon|midnight|first|second|third|"
+                    r"fourth|fifth|last|next|other|latest|"
+                    r"earliest|newest|oldest|one|ones)\b",
+                    str(body or ""), re.IGNORECASE)):
             # 'move the table'/'change the font' — a body that
             # resolves no reminder row isn't a schedule op. A
             # schedule noun inside the body ('change my alarm
-            # from 9 to 10') or a quantified time shift ('move the
-            # table an hour later') IS one — miss honestly instead
-            # of handing a fabricated reschedule to the model.
+            # from 9 to 10'), a clock/ordinal referent ('move the
+            # 9am one to 10'), or a quantified time shift ('move
+            # the table an hour later') IS one — miss honestly
+            # instead of handing a fabricated reschedule to the
+            # model.
             return None
         _wtxt = ("" if shift_txt
                  else _wtxt_from if _wtxt_from is not None
@@ -6903,6 +6923,14 @@ class AgentOrchestrator:
                        or mt.groupdict().get("body6")
                        or mt.groupdict().get("body7") or "")
             body = body.strip(" ,;—-")
+            # The noun-form exclusion tail ('pause all reminders
+            # except the standup') lands in its own group; folding
+            # it back into body lets the _texm peel scope it.
+            _exg = str(mt.groupdict().get("excl") or "").strip(
+                " ,;—-")
+            if _exg:
+                body = (body + " " + _exg).strip(" ,;—-") \
+                    if body else _exg
             if (verb in ("restart", "restore", "renew", "revive",
                          "resume", "suspend", "block", "freeze",
                          "hold", "bring back", "put back",
@@ -8475,7 +8503,8 @@ class AgentOrchestrator:
             "today", "tonight", "tomorrow", "weekend", "weekends",
             "week", "weeks", "monday", "tuesday", "wednesday",
             "thursday", "friday", "saturday", "sunday",
-            "first", "last", "latest", "earliest",
+            "first", "last", "latest", "earliest", "this",
+            "next", "coming",
             "morning", "afternoon", "evening"}
 
         def _in_window(s: dict) -> bool:
@@ -9808,6 +9837,45 @@ class AgentOrchestrator:
                     f"No reminder was created {_flabel or 'then'}"
                     + (f" — you've got: {_fnames}."
                        if _fnames else "."),
+                    user_text, task_id, event_callback)
+        # 'the one at 9'/'the 9am one' — a clock referent naming a
+        # row by its fire time; resolves through the same hay clock
+        # terms as 'the 9am reminder'.
+        _mone = re.match(
+            r"(?:the|that|this)\s+one\s+(?:at|for|on)\s+"
+            r"(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)\b"
+            r"\s*[.!?]?\s*$|"
+            r"(?:the|that|this)\s+"
+            r"(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)"
+            r"\s+one\b\s*[.!?]?\s*$",
+            plan_text, re.IGNORECASE)
+        if _mone is not None:
+            _ocs, _orws = self._reminder_rows(include_disabled=True)
+            if _ocs is not None:
+                _oclk = (_mone.group(1) or _mone.group(2) or ""
+                         ).strip()
+                _ot = self._reminder_terms(_oclk)
+                _oh = [s for s in _orws
+                       if _ot <= self._reminder_hay(s)]
+                if len(_oh) == 1:
+                    return self._reminder_finish(
+                        f"That's “{self._reminder_label(_oh[0])}” "
+                        f"— fires {self._reminder_when_text(_oh[0], time.time())}.",
+                        user_text, task_id, event_callback)
+                if _oh:
+                    _on = "; ".join(
+                        f"“{self._reminder_label(s)}”"
+                        for s in _oh[:4])
+                    return self._reminder_finish(
+                        f"That's {len(_oh)} reminders: {_on} — "
+                        "say which.",
+                        user_text, task_id, event_callback)
+                _on = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in _orws[:3])
+                return self._reminder_finish(
+                    f"Nothing fires at {_oclk}"
+                    + (f" — you've got: {_on}." if _on else "."),
                     user_text, task_id, event_callback)
         # A new mutation turn replaces the journal — but only once
         # it actually mutates, so read-only turns keep 'undo that'
