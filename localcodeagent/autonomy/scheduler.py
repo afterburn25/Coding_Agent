@@ -992,6 +992,16 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     clock_tail = (r"(?:\s+at\s+(\d{1,2})(?::(\d{2}))?"
                   r"\s*(a\.?m\.?|p\.?m\.?|am|pm)?)?")
 
+    def _anchor(m, gi):
+        """Interval cadence + 'at CLOCK' — the clock anchors the
+        first fire; last_run + interval resumes the cadence."""
+        hr, mn, mer = m.group(gi), m.group(gi + 1), m.group(gi + 2)
+        if hr is None:
+            return {}
+        hour = _meridian(int(hr), mer)
+        return {"at": _next_daily(hour, int(mn or 0), after=now),
+                "hour": hour, "minute": int(mn or 0)}
+
     # 'monthly [on the 15th]' / 'every month on the 1st' /
     # 'on the 15th of every month' — day-of-month cadence.
     m = re.fullmatch(
@@ -1066,13 +1076,18 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 "month": 30 * 86400.0,
                 "year": 365 * 86400.0}[unit]
         return {"kind": "interval", "interval_s": span / n_f}
-    if re.fullmatch(r"every\s+other\s+day|every\s+second\s+day", t):
-        return {"kind": "interval", "interval_s": 172800.0}
+    m = re.fullmatch(
+        r"(?:every\s+other\s+day|every\s+second\s+day)"
+        + clock_tail, t)
+    if m:
+        return {"kind": "interval", "interval_s": 172800.0,
+                **_anchor(m, 1)}
     # 'every third day' — an ordinal picks every Nth unit.
     m = re.fullmatch(
         r"every\s+(third|fourth|fifth|sixth|seventh|eighth|"
         r"ninth|tenth|(\d+)(?:st|nd|rd|th))\s+"
-        r"(minutes?|mins?|hours?|hrs?|days?|weeks?)", t)
+        r"(minutes?|mins?|hours?|hrs?|days?|weeks?)"
+        + clock_tail, t)
     if m:
         n_o = float({"third": 3, "fourth": 4, "fifth": 5,
                      "sixth": 6, "seventh": 7, "eighth": 8,
@@ -1083,33 +1098,39 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 "interval_s": n_o * (
                     60 if unit_o.startswith(("m", "min")) else
                     3600 if unit_o.startswith("h") else
-                    86400 if unit_o.startswith("d") else 604800)}
+                    86400 if unit_o.startswith("d") else 604800),
+                **_anchor(m, 4)}
     # 'every half hour' / 'every half a day' — fractional spans.
     m = re.fullmatch(
-        r"every\s+(?:half|a\s+half)\s+(?:an?\s+)?(hour|day)", t)
+        r"every\s+(?:half|a\s+half)\s+(?:an?\s+)?(hour|day)"
+        + clock_tail, t)
     if m:
         return {"kind": "interval",
                 "interval_s": 1800.0 if m.group(1) == "hour"
-                else 43200.0}
+                else 43200.0,
+                **_anchor(m, 2)}
     # 'every couple (of) hours' / 'every few hours' — informal
     # two/three-unit spans.
     m = re.fullmatch(
         r"every\s+(?:a\s+)?(couple|few)\s+(?:of\s+)?"
-        r"(minutes?|mins?|hours?|hrs?|days?)", t)
+        r"(minutes?|mins?|hours?|hrs?|days?)"
+        + clock_tail, t)
     if m:
         unit = m.group(2)
         n = 2.0 if m.group(1) == "couple" else 3.0
         return {"kind": "interval",
                 "interval_s": n * (
                     60 if unit.startswith(("m", "min")) else
-                    3600 if unit.startswith("h") else 86400)}
+                    3600 if unit.startswith("h") else 86400),
+                **_anchor(m, 3)}
     # 'every N units' / 'every hour' / 'hourly' — interval cadence.
     m = re.fullmatch(
         r"(?:every\s+(\d+(?:\.\d+)?)\s*"
         r"(seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|"
         r"weeks?)"
         r"|every\s+hour(?:\s+on\s+the\s+hour)?|hourly"
-        r"|on\s+the\s+hour)", t)
+        r"|on\s+the\s+hour)"
+        + clock_tail, t)
     if m:
         if m.group(1) is None:
             interval = 3600.0
@@ -1120,7 +1141,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 60 if unit.startswith(("m", "min")) else
                 3600 if unit.startswith("h") else
                 86400 if unit.startswith("d") else 604800)
-        return {"kind": "interval", "interval_s": max(60.0, interval)}
+        return {"kind": "interval", "interval_s": max(60.0, interval),
+                **_anchor(m, 3)}
     # 'every day except sunday [at T]' — all week minus the named
     # day(s), a real weekly spec rather than a narrated exception.
     m = re.fullmatch(
@@ -1412,7 +1434,12 @@ class Scheduler:
             at = row.get("at")
             return float(at) if at else None
         if kind == "interval":
-            last = row.get("last_run") or row.get("created_at") or now
+            last = row.get("last_run")
+            if last is None and row.get("at"):
+                # 'every other day at 9' — 'at' anchors the first
+                # fire; after it runs, last_run + interval resumes.
+                return float(row["at"])
+            last = last or row.get("created_at") or now
             return float(last) + float(row.get("interval_s") or 3600)
         if kind == "daily":
             return _next_daily(int(row.get("hour", 3)), int(row.get("minute", 0)),

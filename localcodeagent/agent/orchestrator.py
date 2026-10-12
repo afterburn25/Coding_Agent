@@ -4242,8 +4242,8 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
-        r"un-?schedule|undo|axe?|ditch|forget|never\s*mind|"
-        r"un-?remind(?:\s+me)?)"
+        r"wipe|purge|un-?schedule|undo|axe?|ditch|forget|"
+        r"never\s*mind|un-?remind(?:\s+me)?)"
         r"|(?:i\s+)?(?:don'?t|do\s+not|dont)\s+"
         r"(?:need|want|use|like))\s+"
         r"(?:(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
@@ -4412,6 +4412,15 @@ class AgentOrchestrator:
         r"(?:the\s+|my\s+|that\s+|this\s+|those\s+|these\s+)"
         r"(?P<body5>[\w'\s-]{1,40}?)\s+"
         r"(?P<dir5>back\s+on|off|on)\b"
+        + _REMINDER_TRAIL +
+        # 'turn off the last one' — the direction leads the body.
+        # Still noun-less-claim only on a row hit; 'turn off the
+        # oven' resolves no row and falls through.
+        r"|" + _REMINDER_POLITE +
+        r"(?P<verb6>turn|switch)\s+"
+        r"(?P<dir6>off|back\s+on|on)\s+"
+        r"(?:the\s+|my\s+|that\s+|this\s+|those\s+|these\s+)?"
+        r"(?P<body6>[\w'\s-]{1,40}?)"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_STOP_RE = re.compile(
@@ -4609,13 +4618,21 @@ class AgentOrchestrator:
                     f"{int(spec['minute']):02d} — I'll ping you "
                     f"to {task}.")
         secs = int(spec.get("interval_s") or 60)
-        if secs % 3600 == 0:
+        if secs % 86400 == 0:
+            span = (f"{secs // 86400} day"
+                    + ("s" if secs > 86400 else ""))
+        elif secs % 3600 == 0:
             span = f"{secs // 3600} hour" + ("s" if secs > 3600 else "")
         elif secs % 60 == 0:
             span = f"{secs // 60} minute" + ("s" if secs > 60 else "")
         else:
             span = f"{secs} seconds"
-        return f"every {span} — I'll ping you to {task}."
+        anchor = ""
+        if spec.get("at"):
+            anchor = (" starting "
+                      + time.strftime("%H:%M",
+                                      time.localtime(spec["at"])))
+        return f"every {span}{anchor} — I'll ping you to {task}."
 
     def _reminder_snooze_reply(self, user_text: str, ms: re.Match,
                                task_id: str, event_callback):
@@ -4705,6 +4722,8 @@ class AgentOrchestrator:
                     r"it)\b", " ", head_d,
                     flags=re.IGNORECASE))
                 dur = tail_d
+        topic_terms, _ord_sel = self._reminder_ordinal_split(
+            topic_terms)
         more = bool(ms.groupdict().get("dur2"))
         if more and not dur:
             # 'give me 5 more minutes' — 'more' sits inside the
@@ -4772,6 +4791,7 @@ class AgentOrchestrator:
             delta = 600.0  # bare 'snooze' — a default ten minutes.
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
+        hits = self._reminder_ordinal_pick(hits, _ord_sel, now)
         if more and len(hits) > 1:
             # 'give me 5 more minutes' — the imminent row is the
             # intent; snooze it rather than asking which.
@@ -4996,8 +5016,12 @@ class AgentOrchestrator:
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
             " ", body, flags=re.IGNORECASE))
+        topic_terms, _ord_sel = self._reminder_ordinal_split(
+            topic_terms)
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
+        hits = self._reminder_ordinal_pick(hits, _ord_sel,
+                                           time.time())
         if (verb_l in ("move", "change", "switch", "make", "push",
                     "bump", "shift")
                 and mr.groupdict().get("noun") is None
@@ -5226,6 +5250,33 @@ class AgentOrchestrator:
                     or stem in self._reminder_terms(
                         self._reminder_label(s))]
         return sched, rows
+
+    _ORDINAL_SCOPE = {"next", "first", "earliest", "last", "latest"}
+
+    def _reminder_ordinal_split(self, terms: set):
+        """'the first one'/'the last reminder' — ordinal selectors
+        pick an extreme-firing row, not a topic scope. Returns
+        (clean_terms, 'min'|'max'|None)."""
+        sel = set(terms) & self._ORDINAL_SCOPE
+        if not sel:
+            return set(terms), None
+        rest = set(terms) - self._ORDINAL_SCOPE - {"one", "ones"}
+        return rest, ("max" if sel & {"last", "latest"} else "min")
+
+    def _reminder_ordinal_pick(self, hits: list, sel: str | None,
+                             now: float):
+        """min → soonest-firing hit; max → latest-firing hit."""
+        if not sel or not hits:
+            return hits
+        latest = sel == "max"
+
+        def _fire(s):
+            try:
+                return float(self._reminder_next_fire(s, now)
+                             or (-1e18 if latest else 1e18))
+            except (TypeError, ValueError):
+                return -1e18 if latest else 1e18
+        return [(max if latest else min)(hits, key=_fire)]
 
     # Function-word-only scopes — 'cancel me'/'delete the' carry no
     # topic; the lane would claim and then honestly report a miss,
@@ -5754,14 +5805,17 @@ class AgentOrchestrator:
         else:
             verb = str(mt.group("verb")
                        or mt.groupdict().get("verb4")
-                       or mt.groupdict().get("verb5") or "").lower()
+                       or mt.groupdict().get("verb5")
+                       or mt.groupdict().get("verb6") or "").lower()
             dirw = str(mt.group("dir")
                        or mt.groupdict().get("dir4")
-                       or mt.groupdict().get("dir5") or "").lower()
+                       or mt.groupdict().get("dir5")
+                       or mt.groupdict().get("dir6") or "").lower()
             body = str(mt.group("body")
                        or mt.groupdict().get("body3")
                        or mt.groupdict().get("body4")
-                       or mt.groupdict().get("body5") or "")
+                       or mt.groupdict().get("body5")
+                       or mt.groupdict().get("body6") or "")
             body = body.strip(" ,;—-")
             if (verb in ("restart", "restore", "renew", "revive",
                          "resume", "suspend", "block", "freeze",
@@ -5821,9 +5875,13 @@ class AgentOrchestrator:
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
             " ", body, flags=re.IGNORECASE))
+        topic_terms, _ord_sel = self._reminder_ordinal_split(
+            topic_terms)
         _hay = self._reminder_hay
         hits = [s for s in pool
                 if not topic_terms or topic_terms <= _hay(s)]
+        hits = self._reminder_ordinal_pick(hits, _ord_sel,
+                                           time.time())
         state = "on" if want_on else "off"
         # 'silence the pay rent reminder on friday' / 'mute reminders
         # tomorrow' — the day narrows hits to rows actually firing
@@ -5849,7 +5907,8 @@ class AgentOrchestrator:
             hits = [s for s in hits
                     if self._reminder_fires_on(s, tgt_date)]
         if ((mt.groupdict().get("verb4") is not None
-                or mt.groupdict().get("verb5") is not None) and rows
+                or mt.groupdict().get("verb5") is not None
+                or mt.groupdict().get("verb6") is not None) and rows
                 and not any(topic_terms <= _hay(s) for s in rows)):
             # 'pause the movie' — a noun-less toggle that names no
             # reminder row belongs to the action lanes; claiming a
@@ -6068,10 +6127,10 @@ class AgentOrchestrator:
                 return any(st <= hay for st in and_sides)
             return topic_terms <= self._reminder_hay(s)
 
-        # 'cancel the next reminder' — 'next' is ordinal scope, not
-        # a topic term; it picks the soonest-firing hit.
-        want_next = "next" in topic_terms
-        topic_terms.discard("next")
+        # 'cancel the next reminder' — ordinal selectors pick an
+        # extreme-firing hit, not a topic term.
+        topic_terms, ord_sel = self._reminder_ordinal_split(
+            topic_terms)
         hits = [
             s for s in rows
             if _matches(s) and not (
@@ -6091,14 +6150,7 @@ class AgentOrchestrator:
                 and _matches(s) and not (
                     excl_terms
                     and excl_terms <= self._reminder_hay(s))]
-        if want_next and hits:
-            def _fire(s):
-                try:
-                    return float(
-                        s.get("next_run") or s.get("at") or 1e18)
-                except (TypeError, ValueError):
-                    return 1e18
-            hits = [min(hits, key=_fire)]
+        hits = self._reminder_ordinal_pick(hits, ord_sel, now)
         if not rows and not hits:
             text = self._reminder_none_text(
                 sched, noun)
@@ -6487,37 +6539,49 @@ class AgentOrchestrator:
                     r"reminds?|repeats?|recurs?|there|here|any|"
                     r"anything|something|everything|all)\b",
                     " ", cm.group(1), flags=re.IGNORECASE))
-        _cd_terms = scope_terms - {"next", "first"}
+        _cd_terms = scope_terms - {
+            "next", "first", "earliest", "last", "latest"}
         _cd_pool = ([s for s in rows
                      if _cd_terms <= self._reminder_hay(s)]
                     if _cd_terms else rows)
+        _cd_latest = bool(re.search(
+            r"\b(?:last|latest)\b(?!\s+(?:week|weeks|month|months|"
+            r"year|years|day|days|hour|hours|minute|minutes|"
+            r"monday|tuesday|wednesday|thursday|friday|saturday|"
+            r"sunday|few|couple|one|time|thing|night|night))",
+            plan_text, re.IGNORECASE))
         if ((re.search(
-                r"\b(?:next|first)\b(?!\s+(?:week|weeks|month|months|"
+                r"\b(?:next|first|earliest|last|latest)\b"
+                r"(?!\s+(?:week|weeks|month|months|"
                 r"year|years|day|days|hour|hours|minute|minutes|"
                 r"monday|tuesday|wednesday|thursday|friday|saturday|"
-                r"sunday|few|couple|one|time|thing))",
+                r"sunday|few|couple|one|time|thing|night))",
                 plan_text, re.IGNORECASE) or countdown_ask)
                 and _cd_pool):
             # 'when does my next reminder fire' — ordinal, not a
-            # scope term; pick the soonest-firing row like the
-            # cancel lane does. ('next week' stays a time scope.)
-            # A scoped countdown ('how long until the standup')
-            # counts down to THAT row; a scoped miss falls through
-            # to the honest no-reminder reply below.
-            soonest = min(_cd_pool, key=lambda s: float(
-                self._reminder_next_fire(s, now) or 1e18))
+            # scope term; pick the extreme-firing row like the
+            # cancel lane does. ('next week'/'last night' stay
+            # time scopes.) A scoped countdown ('how long until
+            # the standup') counts down to THAT row; a scoped miss
+            # falls through to the honest no-reminder reply below.
+            _sentinel = -1e18 if _cd_latest else 1e18
+            soonest = (max if _cd_latest else min)(
+                _cd_pool, key=lambda s: float(
+                    self._reminder_next_fire(s, now) or _sentinel))
             fire = float(self._reminder_next_fire(soonest, now)
                          or 0)
+            _ord_word = ("Your last reminder is"
+                         if _cd_latest else "Your next reminder is")
             if countdown_ask:
                 # 'how long until my next reminder' — answer the
                 # duration; the model guessed 'in 4 hours' when the
                 # row was 4 days out.
-                text = (f"Your next reminder is "
+                text = (f"{_ord_word} "
                         f"“{self._reminder_label(soonest)}” — "
                         f"{self._duration_text(fire - now)} "
                         f"({self._reminder_when_text(soonest, now)}).")
             else:
-                text = (f"Your next reminder is "
+                text = (f"{_ord_word} "
                         f"“{self._reminder_label(soonest)}” "
                         f"({self._reminder_when_text(soonest, now)}).")
         elif state_ask:

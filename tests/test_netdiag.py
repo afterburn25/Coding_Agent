@@ -4651,6 +4651,50 @@ class TruthGateTests(RecoveryLoopTests):
                 mode="auto")
             self.assertIn("is off", r.content)
             self.assertNotIn("No reminder", r.content)
+            # Ordinal selectors pick extreme-firing rows across
+            # every mutation lane — 'the first one'/'the latest
+            # one' are selection, not topic terms.
+            sup.scheduler.rows.clear()
+            sup.scheduler.add(
+                "reminder: standup", "daily", hour=9, minute=0,
+                next_run=time.time() + 3600,
+                action={"kind": "notify", "detail": "standup"})
+            sup.scheduler.add(
+                "reminder: stretch", "daily", hour=17, minute=30,
+                next_run=time.time() + 7200,
+                action={"kind": "notify", "detail": "stretch"})
+            r = agent.run(
+                "reschedule the first one to 5pm", mode="auto")
+            self.assertIn("Rescheduled", r.content)
+            self.assertEqual(sup.scheduler.rows[0]["hour"], 17)
+            r = agent.run(
+                "when is my last reminder", mode="auto")
+            self.assertIn("last reminder", r.content)
+            self.assertIn("stretch", r.content)
+            r = agent.run(
+                "cancel the earliest reminder", mode="auto")
+            self.assertIn("Cancel", r.content)
+            self.assertEqual(
+                [s["name"] for s in sup.scheduler.rows],
+                ["reminder: stretch"])
+            # 'turn off the last one' — the direction leads the
+            # body; the oven falls through to the action lanes.
+            r = agent.run("turn off the last one", mode="auto")
+            self.assertIn("off", r.content)
+            self.assertFalse(sup.scheduler.rows[0]["enabled"])
+            self.assertIsNone(agent._reminder_reply(
+                "turn off the oven", "turn off the oven", t.id))
+            # 'every other day at 9' — an interval row anchored to
+            # the clock, not a pin-fail or a fabricated daily.
+            r = agent.run(
+                "remind me every other day at 9 to water plants",
+                mode="auto")
+            self.assertIn("Reminder set", r.content)
+            self.assertIn("starting", r.content)
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(row["kind"], "interval")
+            self.assertEqual(row["interval_s"], 172800.0)
+            self.assertEqual((row["hour"], row["minute"]), (9, 0))
 
     def test_clock_scoped_inventory_asks(self):
         # Grammar sweep: 'what happens at 9am', 'whats at 9am',
