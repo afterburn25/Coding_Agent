@@ -965,6 +965,21 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 3600 if unit.startswith("h") else
                 86400 if unit.startswith("d") else 604800)
         return {"kind": "interval", "interval_s": max(60.0, interval)}
+    # 'every day except sunday [at T]' — all week minus the named
+    # day(s), a real weekly spec rather than a narrated exception.
+    m = re.fullmatch(
+        r"every\s+day\s+except\s+(\w+day)s?"
+        r"(?:\s+and\s+(\w+day)s?)?" + clock_tail, t)
+    if m:
+        excl = {d for d in (_WEEKDAY_NAMES.get(m.group(1)),
+                            _WEEKDAY_NAMES.get(m.group(2)))
+                if d is not None}
+        if excl:
+            hr, mn, mer = m.group(3), m.group(4), m.group(5)
+            return {"kind": "weekly",
+                    "weekday": [d for d in range(7) if d not in excl],
+                    "hour": _meridian(int(hr), mer) if hr else 9,
+                    "minute": int(mn or 0)}
     # 'every day/morning/evening/night [at T]' — daily cadence.
     m = re.fullmatch(
         r"(?:every\s+day|daily|every\s+morning|every\s+afternoon|"

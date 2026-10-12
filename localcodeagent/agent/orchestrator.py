@@ -4722,9 +4722,15 @@ class AgentOrchestrator:
                 "alarms", "timer", "timers", "thing", "things"}
             topic_src = topic_src[:exm.start()]
             all_flag = True
+        # 'cancel the reminder i set for tomorrow' — the relative
+        # clause describes how it got there, not what it's named.
+        topic_src = re.sub(
+            r"\bi\s+(?:set|made|created|scheduled|booked|put|"
+            r"asked\s+for|added|gave\s+you)\b",
+            " ", topic_src, flags=re.IGNORECASE)
         topic_src = re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
-            r"them|it|this|those|these|everything)\b",
+            r"them|it|this|those|these|everything|one|ones)\b",
             " ", topic_src, flags=re.IGNORECASE)
         topic_terms = self._reminder_terms(topic_src)
         if not topic_terms and re.search(
