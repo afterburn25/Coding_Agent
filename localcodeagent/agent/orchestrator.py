@@ -4134,6 +4134,15 @@ class AgentOrchestrator:
             else:
                 when = self._reminder_at_when(dur, now)
                 if when is None:
+                    # 'until morning'/'until evening' — a bare
+                    # daypart reads as its conventional hour and
+                    # rolls past like any clock.
+                    when = self._reminder_at_when(
+                        {"morning": "in the morning",
+                         "afternoon": "in the afternoon",
+                         "evening": "in the evening",
+                         "night": "tonight"}.get(dur, dur), now)
+                if when is None:
                     rel = self._reminder_at_when(f"in {dur}", now)
                     if rel is not None:
                         delta = rel - now
