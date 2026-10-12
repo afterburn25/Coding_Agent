@@ -6187,10 +6187,13 @@ class AgentOrchestrator:
         """User-side scope terms — a possessive ('tomorrow's') folds
         to its stem so it can match hay tokens, and stray 's
         residues ('what's') drop out instead of echoing as scope."""
+        # 'o'clock' is a clock particle — 'the 6 o'clock alarm'
+        # scopes on '6', and 'o'/'clock' are never label terms
+        # worth matching.
+        text = re.sub(r"\bo'?clock\b", " ", str(text or "").lower())
         return {w for w in (
             re.sub(r"'s$|'$", "", w)
-            for w in re.findall(r"[a-z0-9']+",
-                                str(text or "").lower()))
+            for w in re.findall(r"[a-z0-9']+", text))
             # 'from' is a connector ('change my alarm from 6 to
             # 7' scopes on '6'), never a topic token; 'already'
             # is a tense adverb ('which reminders have already
@@ -6419,10 +6422,10 @@ class AgentOrchestrator:
                 "a time bound like “until 3pm” or “for an hour” "
                 "I can hold.",
                 user_text, task_id, event_callback)
+        _noun = (mt.group("noun") or mt.groupdict().get("noun2")
+                 or mt.groupdict().get("noun3"))
         sched, rows = self._reminder_rows(
-            include_disabled=True,
-            noun=(mt.group("noun") or mt.groupdict().get("noun2")
-                  or mt.groupdict().get("noun3")))
+            include_disabled=True, noun=_noun)
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
@@ -6518,6 +6521,41 @@ class AgentOrchestrator:
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
             r"one|ones|this|these|those|them|it)\b",
             " ", body, flags=re.IGNORECASE))
+        # 'turn off reminders on saturdays' — the day is a fire
+        # window, not a name term; 'on'/'saturdays' must not gate
+        # the topic match for the rows it scopes. A day inside the
+        # 'until <when>' resume bound or the 'while <cond>' tail
+        # belongs to them, not to a fire window — mask it out.
+        now = time.time()
+        _day_src = user_text
+        _til_g = str(mt.groupdict().get("til") or "").strip()
+        _cond_g = str(mt.groupdict().get("cond") or "").strip()
+        for _g in (_til_g, _cond_g):
+            if _g:
+                _day_src = re.sub(
+                    r"(?:until|till|til|while|when|if)\s+"
+                    + re.escape(_g) + r"\b", " ", _day_src,
+                    flags=re.IGNORECASE)
+        day_dates, day_label = self._reminder_day_scope(
+            _day_src, now)
+        if day_dates:
+            _daywords = {
+                "today", "tonight", "tonite", "tomorrow",
+                "morning", "afternoon", "evening", "night",
+                "monday", "tuesday", "wednesday", "thursday",
+                "friday", "saturday", "sunday", "weekend",
+                "weekends", "week", "saturday", "sundays",
+                "mondays", "tuesdays", "wednesdays", "thursdays",
+                "fridays", "sundays"}
+            _nonday = {
+                t for t in topic_terms
+                if t.rstrip("s") not in _daywords
+                and t not in ("on", "in", "at", "reminders",
+                              "alarms", "timers", "reminder",
+                              "alarm", "timer")}
+            topic_terms &= _nonday if _nonday else topic_terms
+            if not _nonday:
+                topic_terms = set()
         topic_terms, _ord_sel = self._reminder_ordinal_split(
             topic_terms)
         if _just_made and _ord_sel is None:
@@ -6527,8 +6565,35 @@ class AgentOrchestrator:
                 if not topic_terms or topic_terms <= _hay(s)]
         hits = self._reminder_clock_narrow(hits, topic_terms,
                                            user_text)
-        hits = self._reminder_ordinal_pick(hits, _ord_sel,
-                                           time.time())
+        hits = self._reminder_ordinal_pick(hits, _ord_sel, now)
+        if day_dates and hits:
+            # A day scope is a fire-day class — 'reminders on
+            # saturdays' matches a daily row because it DOES fire
+            # Saturday, not because its next fire lands there.
+            hits = [
+                s for s in hits
+                if any(self._reminder_fires_on(s, d.timetuple()[:3])
+                       for d in day_dates)]
+        _day_scope_miss = bool(day_dates) and not hits
+        if not hits and _noun and topic_terms:
+            # 'my 6 o'clock alarm' — the noun filter emptied the
+            # pool but the scope pins exactly one row named
+            # otherwise ('reminder: wake' at 06:00). A single
+            # unfiltered match beats 'No alarm set'.
+            _, _all_rows = self._reminder_rows(
+                include_disabled=True)
+            cand = [
+                s for s in _all_rows
+                if s.get("enabled", True) != want_on
+                and not _resume_nudge(s)
+                and (not topic_terms or topic_terms <= _hay(s))]
+            if day_dates:
+                cand = [
+                    s for s in cand
+                    if any(self._reminder_fires_on(
+                        s, d.timetuple()[:3]) for d in day_dates)]
+            if len(cand) == 1:
+                hits = cand
         state = "on" if want_on else "off"
         if _firing_now and (not hits or len(hits) > 1):
             # 'that's going off' — the row ringing now is the one
@@ -6634,7 +6699,7 @@ class AgentOrchestrator:
             # reminder row belongs to the action lanes; claiming a
             # 'no reminder matching' reply would still hijack it.
             return None
-        if not rows:
+        if not rows and not hits:
             text = self._reminder_none_text(
                 sched, mt.group("noun")
                 or mt.groupdict().get("noun2")
@@ -6644,6 +6709,13 @@ class AgentOrchestrator:
                     f"for {day} — nothing to turn {state}."
                     if topic_terms else
                     f"Nothing fires {day} to turn {state}.")
+        elif _day_scope_miss:
+            # 'turn off reminders on saturdays' over rows that don't
+            # fire then — name what's there, don't claim done.
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rows[:3])
+            text = (f"Nothing fires {day_label}"
+                    + (f" — you've got: {names}." if rows else "."))
         elif (topic_terms and not hits
                 and any(topic_terms <= _hay(s) for s in rows)):
             text = (f"That reminder is already {state}.")
@@ -7274,7 +7346,8 @@ class AgentOrchestrator:
         for d, wd in {"monday": 0, "tuesday": 1, "wednesday": 2,
                       "thursday": 3, "friday": 4, "saturday": 5,
                       "sunday": 6}.items():
-            if re.search(rf"\b{d}\b", t):
+            # 'saturdays' = 'every saturday' — the same window.
+            if re.search(rf"\b{d}s?\b", t):
                 delta = (wd - today.weekday()) % 7
                 if delta == 0:
                     delta = 7 if "this " + d not in t else 0
@@ -9282,6 +9355,20 @@ class AgentOrchestrator:
                             spec_nt = dict(
                                 spec_nt,
                                 hour=int(spec_nt["hour"]) - 12)
+                        elif (spec_nt.get("kind") == "interval"
+                                and spec_nt.get("hour") is not None
+                                and int(spec_nt["hour"]) >= 12):
+                            # 'wake me every other day at 6' — the
+                            # interval spec bakes the PM-inferred
+                            # clock into both hour and the 'at'
+                            # anchor; both shift to the morning.
+                            _at = float(spec_nt["at"]) - 12 * 3600
+                            while _at <= time.time():
+                                _at += 24 * 3600
+                            spec_nt = dict(
+                                spec_nt,
+                                hour=int(spec_nt["hour"]) - 12,
+                                at=_at)
                     if spec_nt is None:
                         # 'remind me about the rent' — a connector
                         # lead means the whole when-slot is the

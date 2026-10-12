@@ -2630,6 +2630,51 @@ class TruthGateTests(RecoveryLoopTests):
             [s["name"] for s in sup.scheduler.rows],
             ["reminder: standup"])
 
+        # 'the 6 o'clock alarm' — 'o'clock' is a clock particle;
+        # '6' scopes the 06:00 row even though it's stored under a
+        # reminder name, not an 'alarm' name.
+        for s in list(sup.scheduler.rows):
+            sup.scheduler.remove(s["id"])
+        sup.scheduler.add(
+            "reminder: wake", "daily", hour=6, minute=0,
+            action={"kind": "notify", "detail": "wake"})
+        sup.scheduler.add(
+            "reminder: trash", "weekly", hour=7, minute=0,
+            weekday=4,
+            action={"kind": "notify", "detail": "trash"})
+        r = agent._reminder_reply(
+            "turn off my 6 o'clock alarm",
+            "turn off my 6 o'clock alarm", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        self.assertEqual(
+            {s["name"]: s["enabled"] for s in sup.scheduler.rows},
+            {"reminder: wake": False, "reminder: trash": True})
+        sup.scheduler.rows[0]["enabled"] = True
+
+        # 'reminders on saturdays' — a fire-day class, not a name;
+        # the daily row fires Saturday, the Friday weekly doesn't.
+        r = agent._reminder_reply(
+            "turn off reminders on saturdays",
+            "turn off reminders on saturdays", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        self.assertEqual(
+            {s["name"]: s["enabled"] for s in sup.scheduler.rows},
+            {"reminder: wake": False, "reminder: trash": True})
+        sup.scheduler.rows[0]["enabled"] = True
+
+        # 'every other day at 6' on a wake call — the interval
+        # spec's PM inference shifts to AM in both hour and the
+        # baked 'at' anchor.
+        r = agent._reminder_reply(
+            "wake me every other day at 6",
+            "wake me every other day at 6", task.id)
+        self.assertIsNotNone(r)
+        iv = sup.scheduler.rows[-1]
+        self.assertEqual(iv["kind"], "interval")
+        self.assertEqual(iv["hour"], 6)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
