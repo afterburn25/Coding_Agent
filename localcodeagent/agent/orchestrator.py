@@ -3701,12 +3701,16 @@ class AgentOrchestrator:
         r"(?:\s+(?:about|regarding|for|on|of|at)\s+.+?)?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
-    # State asks — 'are my reminders on', 'is the alarm paused'.
-    # The model claimed 'I don't have a system to check' over a
-    # live row; the answer is the inventory.
+    # State asks — 'are my reminders on', 'is the alarm paused',
+    # 'is my pay rent reminder on'. The model claimed 'I don't have
+    # a system to check' over a live row; the answer is the
+    # inventory. A short name phrase may sit between the
+    # determiner and the noun — it scopes the reply to that row.
     _REMINDER_STATEASK_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:are|is)\s+(?:(?:my|the|your|all|any|those|these)\s+)?"
+        r"(?:(?!reminders?\b|alarms?\b|timers?\b|schedules?\b)"
+        r"[\w'-]+\s+){0,4}?"
         r"(?:reminders?|alarms?|timers?|schedules?)\s+"
         r"(?:on|off|enabled|disabled|active|inactive|paused|"
         r"running|going|muted|back)\b" + _REMINDER_TRAIL,
@@ -5162,6 +5166,11 @@ class AgentOrchestrator:
                     " ", tm.group(1), flags=re.IGNORECASE))
         when_ask = bool(re.match(
             r"\s*(?:when|what\s+time)\b", plan_text, re.IGNORECASE))
+        # 'is my pay rent reminder on' — a state ask. Listing the
+        # row's fire time never answers the question; report the
+        # enabled flag from the persisted row instead.
+        state_ask = bool(
+            self._REMINDER_STATEASK_RE.match(plan_text))
         countdown_ask = bool(re.search(
             r"\bhow\s+(?:long|soon|much\s+time)\b|\btime\s+"
             r"(?:is\s+)?(?:left|remaining|until|till)\b|"
@@ -5191,6 +5200,63 @@ class AgentOrchestrator:
                 text = (f"Your next reminder is "
                         f"“{self._reminder_label(soonest)}” "
                         f"({self._reminder_when_text(soonest, now)}).")
+        elif state_ask:
+            # 'is my pay rent reminder on' — a disabled row is the
+            # answer ('it's off'), not a miss. The enabled-only
+            # pool would report 'no reminder' over a real row.
+            _, state_rows = self._reminder_rows(
+                include_disabled=True,
+                noun=nm.group(1).lower() if nm else None)
+            hits = ([s for s in state_rows
+                     if scope_terms <= self._reminder_hay(s)]
+                    if scope_terms else state_rows)
+            if scope_terms and not hits:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”" for s in rows[:3])
+                text = (f"No reminder about "
+                        f"“{' '.join(sorted(scope_terms))}”"
+                        + (f" — you've got: {names}." if rows else "."))
+            elif not hits:
+                # Noun-scoped empty ('is my alarm on' over a
+                # reminder pool) — say which rows DO exist; 'no
+                # alarms' would falsely imply the store is empty.
+                if nm is not None:
+                    _, others = self._reminder_rows()
+                    if others:
+                        noun_pl = nm.group(1).lower()
+                        if not noun_pl.endswith("s"):
+                            noun_pl += "s"
+                        names = "; ".join(
+                            f"“{self._reminder_label(s)}”"
+                            for s in others[:3])
+                        text = (f"No {noun_pl} set — you've got "
+                                f"{len(others)} reminder"
+                                f"{'s' if len(others) != 1 else ''}: "
+                                f"{names}.")
+                    else:
+                        text = ("No reminders set — say “remind me "
+                                "in 10 minutes to …” and I'll "
+                                "schedule it.")
+                else:
+                    text = ("No reminders set — say “remind me in 10 "
+                            "minutes to …” and I'll schedule it.")
+            elif len(hits) == 1:
+                s = hits[0]
+                if s.get("enabled"):
+                    text = (f"Yes — “{self._reminder_label(s)}” "
+                            f"is on "
+                            f"({self._reminder_when_text(s, now)}).")
+                else:
+                    text = (f"“{self._reminder_label(s)}” is off "
+                            "— say “turn on the reminder” "
+                            "to enable it.")
+            else:
+                on_ct = sum(1 for s in hits if s.get("enabled"))
+                bits = "; ".join(
+                    f"“{self._reminder_label(s)}” "
+                    f"({'on' if s.get('enabled') else 'off'})"
+                    for s in hits[:5])
+                text = f"{on_ct} of {len(hits)} on: {bits}."
         elif not rows and nm is not None:
             # 'any alarms' when only reminders exist — 'No reminders
             # set' would be a false claim about the store.

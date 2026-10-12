@@ -4209,6 +4209,26 @@ class TruthGateTests(RecoveryLoopTests):
             r = agent.run("cancel the timer", mode="auto")
             self.assertIn("“timer”", r.content)
             self.assertNotIn("Timer:", r.content)
+            # Scoped state asks — 'is my build reminder on' answers
+            # the row's enabled flag, never 'no reminder' over a
+            # disabled row and never a model guess (soak: the model
+            # replied 'No pay rent reminder found' over a live row).
+            r = agent.run("is my build reminder on", mode="auto")
+            self.assertIn("build", r.content)
+            self.assertIn("off", r.content)
+            self.assertNotIn("no reminder", r.content.lower())
+            sup.scheduler.rows[0]["enabled"] = True
+            r = agent.run("is the build reminder enabled",
+                          mode="auto")
+            self.assertIn("build", r.content)
+            self.assertIn("on", r.content)
+            # Unscoped state ask — count the pool incl. disabled.
+            sup.scheduler.rows[0]["enabled"] = False
+            r = agent.run("are my reminders on", mode="auto")
+            self.assertIn("of", r.content)
+            # Scoped miss stays honest.
+            r = agent.run("is my dentist reminder on", mode="auto")
+            self.assertIn("no reminder", r.content.lower())
             # Recall-miss topic drops a trailing copula — 'your
             # editor', not 'your editor is'.
             r = agent.run("remind me what my editor is",
