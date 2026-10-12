@@ -1147,11 +1147,14 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                         19 if part == "evening" else 20)
             return {"kind": "weekly", "weekday": wd,
                     "hour": hour, "minute": int(mn or 0)}
-    # 'every monday and friday' / 'every mon, wed and fri' —
-    # explicit multi-day list, comma- or 'and'-joined.
+    # 'every monday and friday' / 'every mon, wed and fri' /
+    # 'monday wednesday friday at 8' — explicit multi-day list;
+    # the lead and the joins are all optional. Single-day strings
+    # still fall through to the single-day branches.
     m = re.fullmatch(
-        r"(?:every|on|each)\s+(\w+(?:\s*,\s*\w+)*(?:\s*,?\s+and\s+\w+|"
-        r"\s+and\s+\w+)?)" + clock_tail, t)
+        r"(?:every|on|each)?\s*"
+        r"(\w+(?:(?![\s,]+at\s+\d)[\s,]+(?:and\s+)?\w+)*)"
+        + clock_tail, t)
     if m:
         tokens = [p.rstrip("s") if p not in _WEEKDAY_NAMES else p
                   for p in re.findall(

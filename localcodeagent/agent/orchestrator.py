@@ -3889,7 +3889,7 @@ class AgentOrchestrator:
         r"resume|unpause|unmute|unsilence|stop|mute|silence|"
         r"hold|freeze|suspend|quiet|block)\s+(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?|schedules?|"
-        r"it|that|this|them)\b"
+        r"it|that|this|them|everything|all)\b"
         + _REMINDER_ECHO +
         r"(?:\s+i\s+(?:set|made|created|scheduled|booked|put|"
         r"added|gave\s+you)\b(?:\s+(?:for|on|at)\s+"

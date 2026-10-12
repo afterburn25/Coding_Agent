@@ -3864,6 +3864,26 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertAlmostEqual(
                 float(sup.scheduler.rows[-1]["at"]),
                 before + 172800.0, delta=5)
+            # 'mute everything until tuesday' hit the VOICE-mute
+            # lane live — 'everything' is an all-scope reminder
+            # noun too; a timed mute schedules the re-enable
+            # nudge like 'silence until monday'.
+            sup.scheduler.rows.clear()
+            sup.scheduler.add(
+                "reminder: rent", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "rent"})
+            result = agent.run(
+                "mute everything until tuesday", mode="auto")
+            self.assertIn("Turned off", result.content)
+            self.assertFalse(sup.scheduler.rows[0]["enabled"])
+            # 'monday wednesday friday at 8' — a bare weekday list
+            # is the same weekly cadence as the 'and'-joined one.
+            spec = agent._reminder_spec(
+                "monday wednesday friday at 8", time.time())
+            self.assertIsNotNone(spec)
+            self.assertEqual(spec["kind"], "weekly")
+            self.assertEqual(spec["weekday"], [0, 2, 4])
 
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
