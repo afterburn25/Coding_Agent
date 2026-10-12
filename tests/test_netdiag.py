@@ -3220,6 +3220,16 @@ class TruthGateTests(RecoveryLoopTests):
             # 'i have a reminder at 5 right' — a confirmation
             # ask; the model guessed 'No reminder at 5 right now'
             # from narration. Confirm-tags lane to real inventory.
+            # The pool must not hold a floating-fire row here —
+            # 'at 5' legitimately scopes onto a row firing in the
+            # 5 o'clock hour, so seed one at a fixed clock instead.
+            sup.scheduler.rows.clear()
+            lt = time.localtime(time.time() + 86400)
+            sup.scheduler.add(
+                "Reminder: standup", "once",
+                at=time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday,
+                                10, 0, 0, 0, 0, -1)),
+                action={"kind": "notify", "detail": "standup"})
             r = agent._reminder_reply(
                 "i have a reminder at 5 right",
                 "i have a reminder at 5 right", task.id)
