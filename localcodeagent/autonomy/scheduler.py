@@ -274,6 +274,10 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     # 'the day after tomorrow' — a date anchor, not an event.
     t = re.sub(
         r"\b(?:the\s+)?day\s+after\s+tomorrow\b", "in 2 days", t)
+    # 'next weekend' — a one-shot anchor (the coming Saturday),
+    # not the recurring 'weekend' cadence; 'next' must not fall
+    # into the task slot.
+    t = re.sub(r"\bnext\s+weekend\b", "saturday", t)
     # 'a week from now' — 'X from now' is just 'in X'.
     t = re.sub(
         r"((?:a|an|one|two|three|four|five|six|seven|eight|nine|"
@@ -825,6 +829,10 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     # 'the day after tomorrow' — a date anchor, not an event.
     t = re.sub(
         r"\b(?:the\s+)?day\s+after\s+tomorrow\b", "in 2 days", t)
+    # 'next weekend' — a one-shot anchor (the coming Saturday),
+    # not the recurring 'weekend' cadence; 'next' must not fall
+    # into the task slot.
+    t = re.sub(r"\bnext\s+weekend\b", "saturday", t)
     # 'a week from now' — 'X from now' is just 'in X'.
     t = re.sub(
         r"((?:a|an|one|two|three|four|five|six|seven|eight|nine|"
