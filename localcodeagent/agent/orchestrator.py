@@ -4145,6 +4145,25 @@ class AgentOrchestrator:
         r"comes\s+up|triggers?|happens?|pops\s+up)?\s*"
         r"(?:next|first|earliest|last|latest)\b"
         + _REMINDER_TRAIL +
+        # 'which ones are disabled' / 'which of them are off' —
+        # state-filtered inventory over a pronoun scope.
+        r"|" + _REMINDER_POLITE +
+        r"(?:which|what)\s+(?:ones?|of\s+(?:them|those|these|"
+        r"my\s+reminders?|my\s+alarms?|my\s+timers?))\s+"
+        r"(?:are|is)\s+(?:still\s+)?"
+        r"(?:off|on|disabled|enabled|paused|muted|unmuted|"
+        r"active|inactive|turned\s+(?:off|on)|switched\s+"
+        r"(?:off|on)|set)\b"
+        + _REMINDER_TRAIL +
+        # 'list everything i have set' / 'show me all i
+        # scheduled' — whole-store inventory with a 'set'
+        # tail instead of a reminder noun.
+        r"|" + _REMINDER_POLITE +
+        r"(?:list|show(?:\s+me)?|tell\s+me|what'?s|what\s+is)\s+"
+        r"(?:everything|all|anything|what)\s+"
+        r"(?:i'?ve?|i\s+have|that'?s|there'?s)\s+"
+        r"(?:got|set|scheduled|booked|made|created|planned)\b"
+        + _REMINDER_TRAIL +
         # Clock/day-scoped inventory — 'whats at 9am', 'what
         # happens at noon', 'whats happening at 6', 'what am i
         # doing at 3', 'what do i have at 8pm', 'whats on friday'.
@@ -7642,7 +7661,10 @@ class AgentOrchestrator:
                 r"calendars?|scheduled|the|a|an|my|that|me|us|"
                 r"anything|something|everything|"
                 r"about|regarding|for|of|to|"
-                r"at|in|on|right|correct|yeah)\b",
+                r"at|in|on|right|correct|yeah|"
+                r"disabled?|enabled?|paused?|muted?|unmuted|"
+                r"active|inactive|turned|switched|off|"
+                r"are|is|was|were|them|those|these|ones?)\b",
                 " ", sm.group(1), flags=re.IGNORECASE))
         if sm is None:
             # No connector tail — 'when is the dentist reminder'
