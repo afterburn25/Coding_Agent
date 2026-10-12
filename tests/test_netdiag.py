@@ -3100,6 +3100,27 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("when", r.content.lower())
 
+            # 'reschedule pay rent to next monday' — noun-less body
+            # fell to the model which narrated 'no tool exists to
+            # modify reminders' while the lane mutates `at` fine.
+            sup.scheduler.rows.clear()
+            sup.scheduler.add(
+                "Reminder: pay rent", "once", at=time.time() + 86400,
+                action={"kind": "notify", "detail": "pay rent"})
+            r = agent._reminder_reply(
+                "reschedule pay rent to next monday",
+                "reschedule pay rent to next monday", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Rescheduled", r.content)
+            # Scoped miss on a noun-less body names the real pool.
+            r = agent._reminder_reply(
+                "reschedule my dentist appointment to friday",
+                "reschedule my dentist appointment to friday",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("pay rent", r.content)
+            sup.scheduler.rows.clear()
+
             # 'timer for 10' — the bare number is minutes, never
             # the 10:00 clock the 'at' fallback reached for.
             r = agent._reminder_reply(

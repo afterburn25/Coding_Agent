@@ -2998,6 +2998,7 @@ class AgentOrchestrator:
                 or self._REMINDER_TOGGLE_RE.match(match_text)
                 or self._REMINDER_STOP_RE.match(match_text)
                 or self._REMINDER_RESCHEDULE_RE.match(match_text)
+                or self._REMINDER_RESCHEDULE_BARE_RE.match(match_text)
                 or self._REMINDER_LEAD_WHEN_RE.match(match_text)
                 or self._REMINDER_BARE_RE.match(match_text)
                 or self._REMINDER_HELP_RE.match(match_text)
@@ -3890,6 +3891,17 @@ class AgentOrchestrator:
         r"(?:\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?))?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # 'reschedule pay rent to friday' — no schedule noun; the named
+    # body resolves against real rows like a scoped cancel. Only
+    # 'reschedule' (not move/change) — those bare forms are too
+    # generic without a noun.
+    _REMINDER_RESCHEDULE_BARE_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?P<verb>reschedule)\s+"
+        r"(?:(?:the|my|that)\s+)?(?P<body>.+?)"
+        r"(?:\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?))?"
+        + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(
         r"\breminders?\b|\balarms?\b|\btimers?\b|\bschedules?\b|"
         r"\bscheduled\b|\bcalendar\b|\b(?:comes?|coming)\s+up\b|"
@@ -4197,16 +4209,17 @@ class AgentOrchestrator:
                                    task_id: str, event_callback):
         """'reschedule the deploy reminder to friday at 3' — a real
         scheduler.update of at/kind fields."""
+        noun = mr.groupdict().get("noun")
         if (mr.group("when") is None
                 and str(mr.group("verb") or "").lower()
                     in ("move", "change")
-                and str(mr.group("noun") or "").lower()
+                and str(noun or "").lower()
                     in ("it", "that", "this")):
             # 'move it'/'change it' — a bare pronoun and no target
             # is a file/object turn, not a schedule op; let it fall
             # through to the action lanes.
             return None
-        sched, rows = self._reminder_rows(noun=mr.group("noun"))
+        sched, rows = self._reminder_rows(noun=noun)
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
@@ -4236,7 +4249,7 @@ class AgentOrchestrator:
                 or topic_terms <= self._reminder_hay(s)]
         if not rows:
             text = self._reminder_none_text(
-                sched, mr.group("noun"))
+                sched, noun)
         elif not hits:
             names = "; ".join(
                 f"“{self._reminder_label(s)}”" for s in rows[:3])
@@ -4706,6 +4719,7 @@ class AgentOrchestrator:
                 self._REMINDER_CLARIFY_RE, self._REMINDER_CANCEL_RE,
                 self._REMINDER_SNOOZE_RE, self._REMINDER_TOGGLE_RE,
                 self._REMINDER_STOP_RE, self._REMINDER_RESCHEDULE_RE,
+                self._REMINDER_RESCHEDULE_BARE_RE,
                 self._REMINDER_NOTASK_RE, self._REMINDER_BARE_RE,
                 self._REMINDER_HELP_RE,
                 self._REMINDER_LEAD_CADENCE_RE,
@@ -4912,6 +4926,8 @@ class AgentOrchestrator:
             return self._reminder_toggle_reply(
                 user_text, mt, task_id, event_callback)
         mr = self._REMINDER_RESCHEDULE_RE.match(plan_text)
+        if mr is None:
+            mr = self._REMINDER_RESCHEDULE_BARE_RE.match(plan_text)
         if mr is not None:
             return self._reminder_reschedule_reply(
                 user_text, mr, task_id, event_callback)
@@ -5886,6 +5902,8 @@ class AgentOrchestrator:
                          or self._REMINDER_TOGGLE_RE.match(plan_text)
                          or self._REMINDER_STOP_RE.match(plan_text)
                          or self._REMINDER_RESCHEDULE_RE.match(plan_text)
+                         or self._REMINDER_RESCHEDULE_BARE_RE.match(
+                             plan_text)
                          or self._REMINDER_NOTASK_RE.match(plan_text)
                          or self._REMINDER_LEAD_CADENCE_RE.match(
                              plan_text)
@@ -6337,6 +6355,7 @@ class AgentOrchestrator:
             cls._REMINDER_NOTASK_RE, cls._REMINDER_CANCEL_RE,
             cls._REMINDER_SNOOZE_RE, cls._REMINDER_TOGGLE_RE,
             cls._REMINDER_STOP_RE, cls._REMINDER_RESCHEDULE_RE,
+            cls._REMINDER_RESCHEDULE_BARE_RE,
             cls._REMINDER_LEAD_CADENCE_RE, cls._REMINDER_LEAD_WHEN_RE,
             cls._REMINDER_BARE_RE, cls._REMINDER_HELP_RE,
             cls._REMINDER_DECL_RE, cls._REMINDER_NOUNFIRST_RE,
@@ -12061,7 +12080,9 @@ class AgentOrchestrator:
                      or self._REMINDER_SNOOZE_RE.match(user_text)
                      or self._REMINDER_TOGGLE_RE.match(user_text)
                      or self._REMINDER_STOP_RE.match(user_text)
-                     or self._REMINDER_RESCHEDULE_RE.match(user_text))):
+                     or self._REMINDER_RESCHEDULE_RE.match(user_text)
+                     or self._REMINDER_RESCHEDULE_BARE_RE.match(
+                         user_text))):
             # A bare forget-miss ack must not outrank a real lane —
             # 'stop remembering things I tell you' is a memory-setting
             # command (self_knowledge already mutated it), and replying
