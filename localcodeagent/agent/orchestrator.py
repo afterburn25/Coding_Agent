@@ -9359,6 +9359,52 @@ class AgentOrchestrator:
                 "I can do one thing at a time — say the reminder "
                 "to set, then the reminder to change.",
                 user_text, task_id, event_callback)
+        # 'remind me to call mom in 30 minutes and to water
+        # plants in an hour' — two creates in one breath. The
+        # grammar silently merged them into one malformed row
+        # before; each half is a real request so refuse to pick —
+        # 'call mom and dad at 3pm' stays one reminder because
+        # only one side carries its own when.
+        if re.match(
+                r"\s*(?:please\s+)?(?:(?:can|could|would)\s+you\s+"
+                r"(?:please\s+)?)?"
+                r"(?:(?:remind|alert|notify|ping|wake|nudge|nag|"
+                r"buzz|beep|text|page|message)\s+me\b|"
+                r"set\s+(?:a|an|my|the|two|\d+)\s+"
+                r"(?:reminders?|alarms?|timers?))",
+                plan_text, re.IGNORECASE):
+            def _indep_create(seg: str) -> bool:
+                """Segment carries its own task AND parseable
+                when — an independent create clause."""
+                seg = re.sub(
+                    r"^(?:please\s+)?(?:(?:remind|alert|notify|"
+                    r"ping|wake|nudge|nag|buzz|beep|text|page|"
+                    r"message)\s+me|set\s+(?:a|an|my|the|two|\d+)"
+                    r"\s+(?:reminders?|alarms?|timers?))\s*",
+                    "", seg.strip(), flags=re.IGNORECASE)
+                for mm in re.finditer(
+                        r"\s+(at|in|on|every|next|tomorrow|today|"
+                        r"tonight|tonite|soon|shortly)(?=\s|$)",
+                        seg, re.IGNORECASE):
+                    left = re.sub(
+                        r"^(?:to|about|the|my|a|an)\s+", "",
+                        seg[:mm.start()].strip(" ,;—-"),
+                        flags=re.IGNORECASE)
+                    right = seg[mm.start():].strip(" ,;—-.")
+                    if (left
+                            and self._reminder_spec(
+                                right, time.time()) is not None):
+                        return True
+                return False
+            _segs = [s for s in re.split(
+                r"\s*(?:,|\band\b)\s*", plan_text,
+                flags=re.IGNORECASE) if s.strip()]
+            if sum(bool(_indep_create(s)) for s in _segs) >= 2:
+                return self._reminder_finish(
+                    "I can set one reminder at a time — give me "
+                    "each (“remind me to call mom in 30 minutes”, "
+                    "then “remind me to water plants in an hour”).",
+                    user_text, task_id, event_callback)
         mc = self._REMINDER_CANCEL_RE.match(plan_text)
         if mc is None:
             mc = self._reminder_bare_cancel(plan_text)
@@ -11038,6 +11084,12 @@ class AgentOrchestrator:
             task, re.IGNORECASE)
         if cad_t is not None:
             head_t = task[:cad_t.start()].strip(" ,;—-")
+            # 'pills in the morning and evening' — the splice
+            # head can end on a connector the cadence tail owned.
+            head_t = re.sub(
+                r"\s+(?:in\s+the|at\s+the|of\s+the|before|after|"
+                r"by|until|till|on|at|for|and|or|to|about|of|in|"
+                r"the|a|an)$", "", head_t, flags=re.IGNORECASE)
             if head_t:
                 cad_txt = re.sub(
                     r"\s+(?:starting|beginning|from)$", "",

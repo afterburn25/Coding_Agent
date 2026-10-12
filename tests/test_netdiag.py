@@ -3169,6 +3169,47 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertEqual(row["kind"], "weekly")
         self.assertEqual(sorted(row["weekday"]), [0, 2, 3, 4])
 
+        # Compound creates — two task+when clauses refuse
+        # 'one at a time' rather than minting one malformed
+        # merged row; 'call mom and dad at 3pm' is still one
+        # reminder since only one side carries a when.
+        for s in list(sup.scheduler.rows):
+            sup.scheduler.remove(s["id"])
+        r = agent._reminder_reply(
+            "remind me to call mom in 30 minutes and to water "
+            "plants in an hour",
+            "remind me to call mom in 30 minutes and to water "
+            "plants in an hour", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("one reminder at a time", r.content)
+        self.assertFalse(sup.scheduler.rows)
+        r = agent._reminder_reply(
+            "remind me about the dentist on monday and the "
+            "pills on tuesday",
+            "remind me about the dentist on monday and the "
+            "pills on tuesday", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("one reminder at a time", r.content)
+        self.assertFalse(sup.scheduler.rows)
+        r = agent._reminder_reply(
+            "remind me to call mom and dad at 3pm",
+            "remind me to call mom and dad at 3pm", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("mom and dad", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 1)
+        # 'take pills in the morning and evening' — the
+        # cadence splice must not strand 'in the' on the name.
+        for s in list(sup.scheduler.rows):
+            sup.scheduler.remove(s["id"])
+        r = agent._reminder_reply(
+            "remind me to take pills in the morning and evening",
+            "remind me to take pills in the morning and evening",
+            task.id)
+        self.assertIsNotNone(r)
+        self.assertEqual(
+            sup.scheduler.rows[-1]["name"],
+            "reminder: take pills")
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
