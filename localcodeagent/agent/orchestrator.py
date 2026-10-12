@@ -3037,7 +3037,8 @@ class AgentOrchestrator:
         # the shaped probe can't see ('did my stretch reminder go
         # off' term-matched 'stretch' into a memory miss live).
         if (self._reminder_inventory_shaped(match_text)
-                or self._REMINDER_INV_LEAD_RE.match(match_text)):
+                or self._REMINDER_INV_LEAD_RE.match(match_text)
+                or self._REMINDER_STATEASK_RE.match(match_text)):
             out = self._reminder_inventory_reply(user_text, match_text)
             if out is not None:
                 return out
@@ -3852,16 +3853,28 @@ class AgentOrchestrator:
         r"(?:\s+.+?)?)?"
         r"(?:\s+(?:set|made|created|scheduled|due)\b)?"
         + _REMINDER_TRAIL +
+        # 'anything coming up tonight', 'is there something
+        # coming up' — the same coming-up surface in
+        # existential form. 'what fires next' is the same
+        # next-reminder ordinal ask without the noun.
+        r"|" + _REMINDER_POLITE +
+        r"(?:(?:is|are)\s+(?:there\s+)?)?"
+        r"(?:anything|something|everything)\s+"
+        r"(?:coming\s+up|scheduled|on\s+(?:the|my)\s+"
+        r"(?:schedule|agenda|calendar|docket))\b"
+        r"(?:\s+.+?)?"
+        r"(?:\s+(?:this|next|today|tonight|tomorrow|tonite)\b"
+        r"(?:\s+.+?)?)?"
+        r"(?:\s+(?:set|made|created|scheduled|due)\b)?"
+        + _REMINDER_TRAIL +
         # Past-fire asks — 'did my reminder go off', 'did the alarm
         # fire', 'did any reminders ring'. last_run answers these
         # honestly; a model guess can't.
         r"|" + _REMINDER_POLITE +
         r"did\s+(?:(?:the|my|that|this|any)\s+)?[\w'\s-]{0,30}?"
         r"(?:reminders?|alarms?|timers?)\s+"
-        r"(?:go|went)\s+off\b|\bdid\s+(?:(?:the|my|that|this|any)"
-        r"\s+)?[\w'\s-]{0,30}?"
-        r"(?:reminders?|alarms?|timers?)\s+"
-        r"(?:fire|fires|fired|ring|rang|happen|trigger|pop\s+up)\b"
+        r"(?:(?:go|went)\s+off|fire|fires|fired|ring|rang|happen|"
+        r"trigger|pop\s+up)\b(?:\s+.+?)?"
         + _REMINDER_TRAIL +
         # Present-perfect fire asks — 'has my reminder fired yet',
         # 'has the alarm gone off' — last_run answers these too.
@@ -3870,7 +3883,7 @@ class AgentOrchestrator:
         r"[\w'\s-]{0,30}?"
         r"(?:reminders?|alarms?|timers?)\s+"
         r"(?:fired|gone\s+off|rang|rung|happened|triggered|"
-        r"popped\s+up)\b(?:\s+(?:yet|already|just|still))?"
+        r"popped\s+up)\b(?:\s+.+?)?"
         + _REMINDER_TRAIL +
         # Passive inventory — 'am i reminded of anything' asks the
         # same store the active forms do. 'did i miss any
@@ -3923,6 +3936,12 @@ class AgentOrchestrator:
         r"(?:(?:my|the|your|that|this)\s+)?[\w'\s-]{0,40}?\s+"
         r"(?:goes?\s+off|go\s+off|fires?|rings?|hits?|triggers?|"
         r"happens?|pops?\s+up)\b"
+        + _REMINDER_TRAIL +
+        # 'what fires next' / 'which rings next' — fire-verb
+        # ordinal asks with no noun at all.
+        r"|" + _REMINDER_POLITE +
+        r"(?:what|which)\s+(?:fires?|rings?|goes\s+off|go\s+off|"
+        r"comes\s+up|triggers?|happens?|pops\s+up)\s+next\b"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     # State asks — 'are my reminders on', 'is the alarm paused',
@@ -3938,14 +3957,24 @@ class AgentOrchestrator:
         r"(?:reminders?|alarms?|timers?|schedules?)\s+"
         r"(?:still|currently|actually|really)?\s*"
         r"(?:on|off|enabled|disabled|active|inactive|paused|"
-        r"running|going|muted|back)\b" + _REMINDER_TRAIL +
+        r"running|going|muted|back|work(?:ing|s)?|functional|"
+        r"okay|ok|fine|good)\b" + _REMINDER_TRAIL +
         # 'did i disable/turn off the stretch reminder' — a state
         # ask about the row's current enabled flag; the persisted
         # row answers it.
         r"|" + _REMINDER_POLITE +
         r"did\s+i\s+(?:disable|turn\s+off|switch\s+off|mute|"
         r"pause)\s+(?:(?:the|my|that|this)\s+)?[\w'\s-]{0,30}?"
-        r"(?:reminders?|alarms?|timers?)\b" + _REMINDER_TRAIL,
+        r"(?:reminders?|alarms?|timers?)\b" + _REMINDER_TRAIL +
+        # 'do my reminders still work' — the same enabled-flag ask
+        # in do-form.
+        r"|" + _REMINDER_POLITE +
+        r"(?:do|does)\s+(?:(?:my|the|your|all|any|those|these)\s+)?"
+        r"(?:(?!reminders?\b|alarms?\b|timers?\b|schedules?\b)"
+        r"[\w'-]+\s+){0,4}?"
+        r"(?:reminders?|alarms?|timers?|schedules?)\s+"
+        r"(?:still|currently|actually|really)?\s*"
+        r"(?:work|working|fire|go\s+off)\b" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
@@ -5582,7 +5611,8 @@ class AgentOrchestrator:
                     r"paus(?:e|ing)|mut(?:e|ing)|off|on|"
                     r"often|frequently|daily|weekly|monthly|hourly|"
                     r"yearly|recurring|repeating|repeat|recur|recurs|"
-                    r"come|comes|hit|hits|rings|every|"
+                    r"come|comes|hit|hits|rings|every|there|here|"
+                    r"work|works|working|functional|okay|ok|fine|good|"
                     r"view|run|through|walk|read|out)\b",
                     " ", tm.group(1), flags=re.IGNORECASE))
         when_ask = bool(re.match(
