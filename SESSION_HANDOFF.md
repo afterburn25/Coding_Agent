@@ -5284,3 +5284,38 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   truth lanes under `mode=chat`, image lane honest failures
   (`unsupported_workflow`, `insufficient_resources` with real VRAM
   accounting), all 18 UI pages + API 200s.
+
+### 2026-10-12 — reminder inventory surface: temporal scope + gate parity
+- **Model-down gate parity for inventory asks** (`c2528c3a`,
+  `624f6d1d`, `b9d5023f`, `b7726c4f`): question-form inventory
+  ('have i set any reminders', 'got any reminders set', bare 'any
+  reminders due'), coming-up asks ('what's coming up this
+  weekend'), passive asks ('am i reminded of anything'), 'upcoming
+  events', and present-perfect fire asks ('has my reminder fired
+  yet', 'has the alarm gone off') all claim the scheduler lane and
+  pass `can_run_without_coding_model`.
+- **Past-fire answers from last_run** (`c92e6593`, `b7726c4f`):
+  'did my reminder go off' / 'did the dentist reminder fire' /
+  'has my reminder fired yet' answer specific fired/pending/aggregate
+  counts from persisted `last_run`/`next_run` — a fired once-row
+  still resolves via the include-disabled pool.
+- **Temporal-scope filtering** (`b9d5023f`): 'reminders for today',
+  'anything tomorrow', 'this weekend', day names, this/next week
+  filter rows by fire DATE instead of matching the words as topic
+  ('No reminder about «today»' over a due row was the old bug).
+  Pending adjectives (upcoming/pending/later/soon/scheduled)
+  describe the pool and scope nothing.
+- **HAVE_RE create order** (`b7726c4f`): 'i have a dentist
+  appointment tomorrow at 2' is a CREATE — 'appointment'/'event'
+  nouns joined the inventory set, so the have-block must run before
+  the inventory dispatch or the declarative event got a scoped
+  miss. It still falls through on unparseable times.
+- **`_Sched.remove` live error was a harness artifact**: the probe
+  stub lacked `remove`; real `Scheduler.remove` exists and
+  'cancel the timer' on a real `timer:` row verified working.
+- **CI flake hardened**: `test_exact_trusted_lookup_bypasses`
+  latency bound 100ms → 1000ms (exact-kind assertion already proves
+  the bypass; loaded CI VM pushed cold SQLite open to 108ms —
+  the `c92e6593` red run).
+- Verified: targeted suites green (81 netdiag + semantic/conversation/
+  AM files), full suite running at push time.
