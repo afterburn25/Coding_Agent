@@ -476,10 +476,10 @@ def parse_reminder_when(when: str, now: float) -> float | None:
                     return cand
             return None
     m = re.fullmatch(
-        r"tomorrow(?:\s+(morning|afternoon|evening|night))?"
+        r"(tomorrow|today)(?:\s+(morning|afternoon|evening|night))?"
         + clock_tail, t)
     if m:
-        part, hr, mn, mer = m.groups()
+        day_w, part, hr, mn, mer = m.groups()
         minute = 0
         if hr is not None:
             hour = _meridian(int(hr), mer)
@@ -489,6 +489,10 @@ def parse_reminder_when(when: str, now: float) -> float | None:
                     "evening": 19, "night": 21}[part]
         else:
             hour = 9
+        # 'today at noon' — same-day anchor; a passed clock rolls
+        # to tomorrow like any bare 'at T'.
+        if day_w == "today":
+            return _clock(hour, minute, 0)
         return _clock(hour, minute, 1, roll=False)
     if re.fullmatch(r"(?:this\s+night|tonight|this\s+evening)", t):
         return _clock(21 if "night" in t else 19, 0)
@@ -579,7 +583,7 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     m = re.fullmatch(
         r"(at\s+)?(\d{1,2})(?::(\d{2}))?\s*"
         r"(a\.?m\.?|p\.?m\.?|am|pm)?"
-        r"(?:\s+(tomorrow|tonight))?", t)
+        r"(?:\s+(tomorrow|tonight|today))?", t)
     if m and (m.group(1) or m.group(3) or m.group(4)):
         hour = _meridian(int(m.group(2)), m.group(4))
         offset = 1 if m.group(5) == "tomorrow" else 0

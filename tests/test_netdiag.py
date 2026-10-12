@@ -3454,6 +3454,12 @@ class TruthGateTests(RecoveryLoopTests):
                     "in 2 and a half hours", time.time()))
             self.assertIsNotNone(
                 agent._reminder_spec("at 8 and a half", time.time()))
+            # 'at noon today' / 'today at noon' — 'today' joins
+            # 'tomorrow' as a day anchor in both positions.
+            self.assertIsNotNone(
+                agent._reminder_spec("at noon today", time.time()))
+            self.assertIsNotNone(
+                agent._reminder_spec("today at 3", time.time()))
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —
