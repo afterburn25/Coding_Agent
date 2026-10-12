@@ -3881,7 +3881,19 @@ class AgentOrchestrator:
         r"(?P<noun4>reminders?|alarms?|timers?|it|that|this|them|"
         r"everything|all)\s+"
         r"(?P<way4>up|down)\b"
-        r"(?:\s+(?:by\s+)?(?P<dur4>.+?))?" + _REMINDER_TRAIL,
+        r"(?:\s+(?:by\s+)?(?P<dur4>.+?))?" + _REMINDER_TRAIL +
+        # 'the 10am reminder, push it to 4' — a leading-scope
+        # snooze; the model narrated 'pushed it to 4' over an
+        # unchanged row live.
+        r"|" + _REMINDER_POLITE +
+        r"(?P<lead>(?:the|my|that|this)\s+.+?\s+"
+        r"(?:reminders?|alarms?|timers?|schedules?))\s*,?\s*"
+        r"(?:snooze|postpone|delay|push\s+back|push|bump|shift|"
+        r"put\s+off|hold\s+off|move|reschedule|change|set)\s+"
+        r"(?:it|them)\s+"
+        r"(?:(?P<way5>for|until|till|til|to|by|up|down|back|"
+        r"forward)\s+)?"
+        r"(?P<dur5>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_TOGGLE_RE = re.compile(
         _REMINDER_POLITE +
@@ -4079,8 +4091,16 @@ class AgentOrchestrator:
             " ", body, flags=re.IGNORECASE))
         dur = str(ms.groupdict().get("dur")
                   or ms.groupdict().get("dur3")
-                  or ms.groupdict().get("dur4") or "")
+                  or ms.groupdict().get("dur4")
+                  or ms.groupdict().get("dur5") or "")
         dur = dur.strip(" ,;—-")
+        if ms.groupdict().get("lead"):
+            # 'the 10am reminder, push it to 4' — the scope is the
+            # leading noun phrase, not the body slot.
+            topic_terms |= self._reminder_terms(re.sub(
+                r"\b(?:the|my|that|this|these|those|reminders?|"
+                r"alarms?|timers?|schedules?)\b", " ",
+                ms.group("lead"), flags=re.IGNORECASE))
         # 'snooze pay rent by an hour' — the noun group never
         # matched so scope+dur landed in one capture; split at
         # the connector whose tail parses as a time.
@@ -4248,7 +4268,8 @@ class AgentOrchestrator:
                     base = float(hits[0].get("at") or now)
                     way = str(ms.groupdict().get("way")
                               or ms.groupdict().get("way2")
-                              or ms.groupdict().get("way4") or "")
+                              or ms.groupdict().get("way4")
+                              or ms.groupdict().get("way5") or "")
                     if way.lower() in (
                             "earlier", "sooner", "up"):
                         when = max(now, base - delta)

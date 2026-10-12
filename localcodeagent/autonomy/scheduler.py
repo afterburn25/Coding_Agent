@@ -1115,6 +1115,16 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         hr, mn, mer = m.group(1), m.group(2), m.group(3)
         if hr is not None:
             hour = _meridian(int(hr), mer)
+            if not mer:
+                # 'every evening at 7' — the daypart implies the
+                # meridiem for a bare hour ('nightly' counts as
+                # 'night'); without this 7 pinned 07:00.
+                pm = re.search(
+                    r"morning|afternoon|evening|night", t)
+                if pm is not None:
+                    hour = (int(hr) if pm.group(0) == "morning"
+                            else int(hr) + 12 if int(hr) < 12
+                            else int(hr))
         else:
             hour = (9 if "morning" in t else
                     15 if "afternoon" in t else

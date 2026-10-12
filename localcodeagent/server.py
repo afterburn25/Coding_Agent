@@ -5262,6 +5262,25 @@ class AppState:
         else:
             spec, desc = self._parse_reminder_time(
                 body, time.time())
+        # 'every half hour starting at 2' — the lazy split banks
+        # 'at 2' as the when and 'every half hour starting' as the
+        # task. A start bound can't be held either: the interval
+        # applies from now, honestly noted.
+        sm = re.search(
+            r"\s+(?:starting|beginning|start|from)\s+"
+            r"(?:at\s+|on\s+|in\s+)?(.+?)\s*$",
+            body.strip(), re.IGNORECASE)
+        if sm is not None and spec is not None \
+                and spec.get("kind") == "once":
+            base_s = body[:sm.start()].strip()
+            spec_s, desc_s = self._parse_reminder_time(
+                base_s, time.time())
+            if spec_s is not None and spec_s["kind"] != "once":
+                spec, desc = spec_s, desc_s
+                end_note = (
+                    " — it repeats until you cancel; I can't hold "
+                    "a start bound like “"
+                    + sm.group(0).strip() + "”")
         # 'on the 5th of each week to check in' — the split took
         # 'on the 5th' as the when and 'each week …' as the task;
         # the 'of each <period>' tail belongs to the when.
