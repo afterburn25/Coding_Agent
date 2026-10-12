@@ -5229,6 +5229,30 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   (one repair mission at a time). World complaints ("my code keeps
   crashing") stay on the model path (verified: real diagnostic
   reply, no incident).
+- **State-recall empty-ledger + fragment fixes** (`d2775d5b`,
+  `46d16993`, `83bbcf0c`, `540a56df`): 'what did we settle on
+  earlier' matched the decision-recall regex but an empty ledger
+  produced no reply -> model path -> ~90s stall (and a model free
+  to invent history). Every recall branch now answers honestly on
+  an empty ledger ('nothing on record', 'no spec on record', 'no
+  active topic'); a scoped miss names what IS on record rather than
+  claiming nothing exists; an UNSCOPED ask ('settle' is lane
+  vocabulary, not a scope term) summarizes the ledger instead of
+  miss-matching it. 'any update on that' classified as an
+  assertion-fragment and the memory_recall act-gate vetoed the lane
+  -> fragments now count as request-shaped for the recall/read
+  lanes (the lane regex still decides the claim). Bare 'any update'
+  added to the loop regex. State asks are model-optional in the
+  server readiness gate. Live: 0.2-0.9s answers while llm-runtime
+  was still `starting`.
+- **Repair mission-dispatch gate** (`fd3f694c`): the planning
+  needs_human gate only caught NEW signal-free incidents - a
+  persisted `patching` incident (restart mid-flight, lost-worktree
+  rewind) resumed straight into mission dispatch with an empty
+  repair_kind and spawned a blind patch mission. repair_kind is now
+  a hard precondition at the dispatch point too. Verified live: the
+  seven stranded dogfood incidents all converged to `needs_human`
+  after redeploy; no new blind missions.
 - **Watch resolved**: the ~70 "Crash recovery" notifications on
   dogfood correlate with deliberate restart probes (restart*.txt),
   not spontaneous crashes; self-repair incidents on CI failures are
