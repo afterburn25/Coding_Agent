@@ -4843,16 +4843,37 @@ class AgentOrchestrator:
                    or ms.groupdict().get("body6")
                    or ms.groupdict().get("body7") or "")
         body = body.strip(" ,;—-")
-        topic_terms = self._reminder_terms(re.sub(
-            r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
-            r"one|ones|this|these|those|them|it)\b", " ", body,
-            flags=re.IGNORECASE))
         dur = str(ms.groupdict().get("dur")
                   or ms.groupdict().get("dur3")
                   or ms.groupdict().get("dur4")
                   or ms.groupdict().get("dur5")
                   or ms.groupdict().get("dur6") or "")
         dur = dur.strip(" ,;—-")
+        # 'snooze the one i just made by an hour' — the provenance
+        # clause is provenance, not topic; 'i just made' keeps its
+        # recency meaning through the cmax ordinal.
+        _just_made = bool(re.search(
+            r"\bi\s+(?:just|recently|lately)\s+"
+            r"(?:set|made|created|scheduled|booked|put|added|"
+            r"asked\s+for|gave\s+you)\b",
+            body + " " + dur, re.IGNORECASE))
+        _prov = re.compile(
+            r"\bi\s+(?:just\s+|recently\s+|lately\s+)?"
+            r"(?:set|made|created|scheduled|booked|put|added|"
+            r"gave\s+you|asked\s+for|turned|switched|disabled|"
+            r"muted|paused|silenced|stopped|deactivated|"
+            r"cancelled|canceled|deleted|removed|snoozed|"
+            r"rescheduled|moved|renamed)"
+            r"(?:\s+(?:it\s+)?(?:off|on|down|up))?"
+            r"(?:\s+(?!(?:by|for|until|till|til|to|at|in|on|"
+            r"back|forward|earlier|later)\b)\S+)*",
+            re.IGNORECASE)
+        body = _prov.sub(" ", body)
+        dur = _prov.sub(" ", dur).strip(" ,;—-")
+        topic_terms = self._reminder_terms(re.sub(
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
+            r"one|ones|this|these|those|them|it)\b", " ", body,
+            flags=re.IGNORECASE))
         if ms.groupdict().get("lead"):
             # 'the 10am reminder, push it to 4' — the scope is the
             # leading noun phrase, not the body slot.
@@ -4912,6 +4933,8 @@ class AgentOrchestrator:
                 dur = tail_d
         topic_terms, _ord_sel = self._reminder_ordinal_split(
             topic_terms)
+        if _just_made and _ord_sel is None:
+            _ord_sel = "cmax"
         more = bool(ms.groupdict().get("dur2"))
         if more and not dur:
             # 'give me 5 more minutes' — 'more' sits inside the
@@ -5619,8 +5642,14 @@ class AgentOrchestrator:
                     return float(s.get("created_at") or 0)
                 except (TypeError, ValueError):
                     return 0.0
-            return [sorted(hits, key=_ckey,
-                           reverse=sel == "cmax")[0]]
+            ranked = sorted(hits, key=_ckey,
+                            reverse=sel == "cmax")
+            if len(ranked) > 1 and _ckey(ranked[0]) == _ckey(ranked[1]):
+                # equal/absent created_at can't say which is
+                # newest — return the pool for an honest
+                # "say which" rather than an arbitrary pick.
+                return hits
+            return ranked[:1]
         if str(sel).startswith(("minn:", "maxn:")):
             n = int(str(sel)[5:])
             latest = str(sel).startswith("maxn")
@@ -6291,11 +6320,33 @@ class AgentOrchestrator:
         pool = [s for s in rows
                 if s.get("enabled", True) != want_on
                 and not _resume_nudge(s)]
+        # 'turn on the reminder i turned off' — the provenance
+        # clause says WHICH state it came from, not what it's
+        # named; the pool already restricts to that state. 'i just
+        # made' keeps its recency meaning — the newest-created row.
+        _just_made = bool(re.search(
+            r"\bi\s+(?:just|recently|lately)\s+"
+            r"(?:set|made|created|scheduled|booked|put|added|"
+            r"asked\s+for|gave\s+you)\b",
+            body, re.IGNORECASE))
+        body = re.sub(
+            r"\bi\s+(?:just\s+|recently\s+|lately\s+)?"
+            r"(?:set|made|created|scheduled|booked|put|added|"
+            r"gave\s+you|asked\s+for|turned|switched|disabled|"
+            r"muted|paused|silenced|stopped|deactivated|"
+            r"cancelled|canceled|deleted|removed|snoozed|"
+            r"rescheduled|moved|renamed)"
+            r"(?:\s+(?:it\s+)?(?:off|on|down|up))?"
+            r"(?:\s+(?!(?:by|for|until|till|til|to|at|in|on|"
+            r"back|forward|earlier|later)\b)\S+)*",
+            " ", body, flags=re.IGNORECASE)
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
             " ", body, flags=re.IGNORECASE))
         topic_terms, _ord_sel = self._reminder_ordinal_split(
             topic_terms)
+        if _just_made and _ord_sel is None:
+            _ord_sel = "cmax"
         _hay = self._reminder_hay
         hits = [s for s in pool
                 if not topic_terms or topic_terms <= _hay(s)]

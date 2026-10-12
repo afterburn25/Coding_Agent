@@ -2353,6 +2353,45 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIsNotNone(r)
         self.assertIn("reminder", r.content.lower())
 
+        # Provenance clauses — 'turn on the reminder i turned off'
+        # selects from the disabled pool rather than treating
+        # 'i turned off' as label terms; 'i just made' resolves to
+        # the newest-created row; equal/unknown created_at can't
+        # rank, so it says 'say which' instead of guessing.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: wake", "daily", hour=6, minute=0,
+            enabled=False,
+            action={"kind": "notify", "detail": "wake"})
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            action={"kind": "notify", "detail": "standup"})
+        r = agent._reminder_reply(
+            "turn on the reminder i turned off",
+            "turn on the reminder i turned off", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        self.assertTrue(sup.scheduler.rows[0]["enabled"])
+        # created_at absent → newest can't be told apart.
+        r = agent._reminder_reply(
+            "turn off the reminder i just made",
+            "turn off the reminder i just made", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("say which", r.content)
+        self.assertTrue(all(
+            s["enabled"] for s in sup.scheduler.rows))
+        # With distinct created_at the newest row flips.
+        now0 = time.time()
+        sup.scheduler.rows[0]["created_at"] = now0 - 100
+        sup.scheduler.rows[1]["created_at"] = now0 - 50
+        r = agent._reminder_reply(
+            "turn off the reminder i just made",
+            "turn off the reminder i just made", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("standup", r.content)
+        self.assertFalse(sup.scheduler.rows[1]["enabled"])
+        self.assertTrue(sup.scheduler.rows[0]["enabled"])
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
