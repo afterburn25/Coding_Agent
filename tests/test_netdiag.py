@@ -4599,6 +4599,97 @@ class TruthGateTests(RecoveryLoopTests):
                 self.assertIsNone(
                     agent._reminder_reply(q, q, t.id), q)
 
+    def test_push_repeat_again_forms(self):
+        # Grammar sweep: 'push the standup to 10am' fell to the
+        # model (push/bump/shift weren't reschedule verbs); 'push
+        # to origin' is a git command and must never even gate-
+        # pass. 'remind me again about X' garbled the task into
+        # 'again of the X'; 'repeat the X reminder' had no claim.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+                self._n = 0
+
+            def add(self, name, kind, **kw):
+                self._n += 1
+                row = {"id": f"sc-{self._n}", "name": name,
+                       "kind": kind, "enabled": kw.pop("enabled", True),
+                       **kw}
+                self.rows.append(row)
+                return row
+
+            def list(self):
+                return list(self.rows)
+
+            def update(self, sid, **kw):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r.update(kw)
+                        return r
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        import datetime
+        def _at(hour):
+            now = datetime.datetime.now()
+            t = now.replace(hour=hour, minute=0, second=0,
+                            microsecond=0)
+            if t <= now:
+                t += datetime.timedelta(days=1)
+            return t.timestamp()
+
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            sup.scheduler.add(
+                "Reminder: standup", "daily", at=_at(9),
+                action={"kind": "notify", "detail": "standup"})
+            # Real cadence-preserving reschedule — kind stays
+            # 'daily', the clock moves to 10:00.
+            r = agent.run("push the standup to 10am", mode="auto")
+            self.assertIn("standup", r.content)
+            row = sup.scheduler.rows[0]
+            self.assertEqual("daily", row["kind"])
+            self.assertEqual(10, row["hour"])
+            # Git/deploy pushes never claim — connector-lead
+            # forms can't even match the pattern (gate stays
+            # False); bare-noun forms match but the handler
+            # declines them on the row miss.
+            for q in ("push to origin", "push to main",
+                      "bump the version", "shift the release"):
+                self.assertIsNone(
+                    agent._reminder_reply(q, q, "t"), q)
+            for q in ("push to origin", "push to main"):
+                self.assertFalse(
+                    AgentOrchestrator.can_answer_locally(q), q)
+            # Re-fire asks normalize onto the create grammar —
+            # 'again' is stripped, 'repeat' needs the noun.
+            r = agent.run("remind me again about the standup",
+                          mode="auto")
+            self.assertIn("standup", r.content.lower())
+            self.assertNotIn("again", r.content.lower())
+            r = agent.run("repeat the standup reminder", mode="auto")
+            self.assertIn("standup", r.content)
+            r = agent.run("remind me again at 3pm to call",
+                          mode="auto")
+            self.assertIn("15:00", r.content)
+            t = agent.tasks.create("x", "auto")
+            for q in ("repeat the command", "repeat the message"):
+                self.assertIsNone(
+                    agent._reminder_reply(q, q, t.id), q)
+            # 'how much longer till' is a countdown ask.
+            r = agent.run("how much longer till my reminder",
+                          mode="auto")
+            self.assertIn("standup", r.content)
+            self.assertIn("in ", r.content)
+
     def test_ever_tell_and_fact_count(self):
         # Live: "did I ever tell you my editor" got a self-contradictory
         # model reply ("No — ... You told me that") because 'ever'

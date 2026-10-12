@@ -4402,6 +4402,15 @@ class AgentOrchestrator:
         r"(?:\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?))?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # 'repeat the standup reminder' — noun-anchored re-arm ask;
+    # _reminder_reply normalizes it onto the create grammar. The
+    # noun requirement keeps 'repeat the command' out.
+    _REMINDER_REPEAT_RE = re.compile(
+        _REMINDER_POLITE +
+        r"repeat\s+(?:the\s+|my\s+|that\s+|this\s+)?"
+        r"(?P<what>.+?\s+)?(?:reminders?|alarms?|timers?)\b"
+        r"\s*[.!?]?\s*$",
+        re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(
         r"\breminders?\b|\balarms?\b|\btimers?\b|\bschedules?\b|"
         r"\bscheduled\b|\bcalendar\b|\bevents?\b|\bappointments?\b|"
@@ -5817,6 +5826,7 @@ class AgentOrchestrator:
                 self._REMINDER_STOP_RE, self._REMINDER_RESCHEDULE_RE,
                 self._REMINDER_RESCHEDULE_BARE_RE,
                 self._REMINDER_RESCHEDULE_PUSH_RE,
+                self._REMINDER_REPEAT_RE,
                 self._REMINDER_NOTASK_RE, self._REMINDER_BARE_RE,
                 self._REMINDER_HELP_RE, self._REMINDER_HAVE_RE,
                 self._REMINDER_LEAD_CADENCE_RE,
@@ -6432,11 +6442,7 @@ class AgentOrchestrator:
         # 'repeat the standup reminder' — noun-anchored re-arm ask;
         # normalize onto the create grammar so a real row or an
         # honest clarify comes back. 'repeat the command' declines.
-        rp = re.match(
-            r"^\s*(?:can\s+you\s+|could\s+you\s+|please\s+)?"
-            r"repeat\s+(?:the\s+|my\s+|that\s+|this\s+)?"
-            r"(?P<what>.+?\s+)?(?:reminders?|alarms?|timers?)\b"
-            r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
+        rp = self._REMINDER_REPEAT_RE.match(plan_text)
         if rp is not None:
             what = str(rp.group("what") or "").strip(" ,;—-")
             plan_text = (f"remind me about {what}" if what
@@ -7907,6 +7913,7 @@ class AgentOrchestrator:
                              plan_text)
                          or self._REMINDER_RESCHEDULE_PUSH_RE.match(
                              plan_text)
+                         or self._REMINDER_REPEAT_RE.match(plan_text)
                          or self._REMINDER_NOTASK_RE.match(plan_text)
                          or self._REMINDER_LEAD_CADENCE_RE.match(
                              plan_text)
@@ -8388,7 +8395,7 @@ class AgentOrchestrator:
             cls._REMINDER_SNOOZE_RE, cls._REMINDER_TOGGLE_RE,
             cls._REMINDER_STOP_RE, cls._REMINDER_RESCHEDULE_RE,
             cls._REMINDER_RESCHEDULE_BARE_RE,
-            cls._REMINDER_RESCHEDULE_PUSH_RE,
+            cls._REMINDER_RESCHEDULE_PUSH_RE, cls._REMINDER_REPEAT_RE,
             cls._REMINDER_LEAD_CADENCE_RE, cls._REMINDER_LEAD_WHEN_RE,
             cls._REMINDER_BARE_RE, cls._REMINDER_HELP_RE,
             cls._REMINDER_DECL_RE, cls._REMINDER_NOUNFIRST_RE,
