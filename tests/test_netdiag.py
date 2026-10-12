@@ -2704,6 +2704,19 @@ class TruthGateTests(RecoveryLoopTests):
                 project_id="x")
             self.assertTrue(learned.get("forgotten_miss"))
 
+            # 'at 5 tomorrow evening' — the trailing daypart is
+            # the meridiem; the model pin-failed 'at 5 tomorrow
+            # evening' over a real grammar gap.
+            sup.scheduler.rows.clear()
+            result = agent.run(
+                "ping me at 5 tomorrow evening to stretch",
+                mode="auto")
+            self.assertIn("stretch", result.content)
+            row = sup.scheduler.rows[-1]
+            lt = time.localtime(row["at"])
+            self.assertEqual(lt.tm_hour, 17)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

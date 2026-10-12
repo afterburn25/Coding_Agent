@@ -331,6 +331,37 @@ def parse_reminder_when(when: str, now: float) -> float | None:
                 cand = _clock(hour, int(mn or 0), delta + 7,
                               roll=False)
             return cand
+    # 'at 5 tomorrow evening' — the trailing daypart supplies
+    # the meridiem for a bare hour.
+    m = re.fullmatch(
+        r"at\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?"
+        r"\s+(tomorrow|tonight|today|\w+day)\s+"
+        r"(morning|afternoon|evening|night)", t)
+    if m:
+        hr, mn, mer = int(m.group(1)), int(m.group(2) or 0), m.group(3)
+        if mer:
+            hour = _meridian(hr, mer)
+        elif m.group(5) == "morning":
+            hour = hr          # 'at 5 tomorrow morning' → 05:00
+        elif hr < 12:
+            hour = hr + 12     # 'at 5 tomorrow evening' → 17:00
+        else:
+            hour = hr
+        dayword = m.group(4)
+        wd = _WEEKDAY_NAMES.get(dayword)
+        if dayword == "tomorrow":
+            return _clock(hour, mn, 1, roll=False)
+        if dayword == "tonight":
+            if hour < 12:
+                hour += 12
+            return _clock(hour, mn, 0)
+        if dayword == "today":
+            return _clock(hour, mn, 0)
+        delta = (wd - lt.tm_wday) % 7
+        cand = _clock(hour, mn, delta, roll=False)
+        if cand <= now:
+            cand = _clock(hour, mn, delta + 7, roll=False)
+        return cand
     m = re.fullmatch(
         r"(at\s+)?(\d{1,2})(?::(\d{2}))?\s*"
         r"(a\.?m\.?|p\.?m\.?|am|pm)?"
