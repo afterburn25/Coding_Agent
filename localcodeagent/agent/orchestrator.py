@@ -3845,6 +3845,17 @@ class AgentOrchestrator:
         r"(?:\s+(?:this|next|today|tonight|tomorrow|tonite)\b"
         r"(?:\s+.+?)?)?"
         r"(?:\s+(?:set|made|created|scheduled|due)\b)?"
+        + _REMINDER_TRAIL +
+        # Past-fire asks — 'did my reminder go off', 'did the alarm
+        # fire', 'did any reminders ring'. last_run answers these
+        # honestly; a model guess can't.
+        r"|" + _REMINDER_POLITE +
+        r"did\s+(?:(?:the|my|that|this|any)\s+)?[\w'\s-]{0,30}?"
+        r"(?:reminders?|alarms?|timers?)\s+"
+        r"(?:go|went)\s+off\b|\bdid\s+(?:(?:the|my|that|this|any)"
+        r"\s+)?[\w'\s-]{0,30}?"
+        r"(?:reminders?|alarms?|timers?)\s+"
+        r"(?:fire|fires|fired|ring|rang|happen|trigger|pop\s+up)\b"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     # State asks — 'are my reminders on', 'is the alarm paused',
@@ -5367,8 +5378,11 @@ class AgentOrchestrator:
                 re.IGNORECASE)
             if tm is not None:
                 scope_terms = self._reminder_terms(re.sub(
-                    r"\b(?:what|which|when|does|do|is|are|have|has|any|"
-                    r"anything|go|goes|going|off|fire|fires|firing|set|"
+                    r"\b(?:what|which|when|does|do|did|is|are|have|has|"
+                    r"had|any|"
+                    r"anything|go|goes|going|gone|went|off|fire|fires|"
+                    r"firing|fired|ring|rang|happen|happened|trigger|"
+                    r"triggered|pop|popped|set|"
                     r"the|a|an|my|that|next|time|day|date|hour|i|me|we|"
                     r"you|your|got|still|really|actually|don'?t|dont|"
                     r"not|no|more|longer|anymore|list|show|see|how|"
@@ -5386,6 +5400,12 @@ class AgentOrchestrator:
             r"\bhow\s+(?:long|soon|much\s+time)\b|\btime\s+"
             r"(?:is\s+)?(?:left|remaining|until|till)\b|"
             r"\bleft\s+on\b", plan_text, re.IGNORECASE))
+        fired_ask = bool(re.search(
+            r"\bdid\b.{0,40}\b(?:reminders?|alarms?|timers?)\b"
+            r".{0,20}\b(?:go|went)\s+off\b|\bdid\b.{0,40}\b"
+            r"(?:reminders?|alarms?|timers?)\b.{0,20}\b"
+            r"(?:fire|fires|fired|ring|rang|happen|trigger|"
+            r"pop\s+up)\b", plan_text, re.IGNORECASE))
         if ((re.search(
                 r"\bnext\b(?!\s+(?:week|weeks|month|months|year|"
                 r"years|day|days|hour|hours|minute|minutes|monday|"
@@ -5468,6 +5488,43 @@ class AgentOrchestrator:
                     f"({'on' if s.get('enabled') else 'off'})"
                     for s in hits[:5])
                 text = f"{on_ct} of {len(hits)} on: {bits}."
+        elif fired_ask:
+            # 'did my stretch reminder go off' — the row's last_run
+            # is the honest answer; a fired once-row may already be
+            # disabled, so the pool includes disabled rows.
+            _, f_rows = self._reminder_rows(
+                include_disabled=True,
+                noun=nm.group(1).lower() if nm else None)
+            fhits = ([s for s in f_rows
+                      if scope_terms <= self._reminder_hay(s)]
+                     if scope_terms else f_rows)
+            if not fhits:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”" for s in rows[:3])
+                text = (f"No reminder about "
+                        f"“{' '.join(sorted(scope_terms))}”"
+                        + (f" — you've got: {names}."
+                           if rows else "."))
+            elif len(fhits) == 1:
+                s = fhits[0]
+                lr = s.get("last_run")
+                if lr:
+                    when_f = time.strftime(
+                        "%H:%M", time.localtime(float(lr)))
+                    text = (f"Yes — “{self._reminder_label(s)}” "
+                            f"fired at {when_f}.")
+                else:
+                    text = (f"Not yet — "
+                            f"“{self._reminder_label(s)}” is set "
+                            f"for {self._reminder_when_text(s, now)}.")
+            else:
+                fired_n = sum(1 for s in fhits if s.get("last_run"))
+                bits = "; ".join(
+                    f"“{self._reminder_label(s)}” "
+                    f"({'fired' if s.get('last_run') else 'pending'})"
+                    for s in fhits[:5])
+                text = (f"{fired_n} of {len(fhits)} have fired: "
+                        f"{bits}.")
         elif not rows and nm is not None:
             # 'any alarms' when only reminders exist — 'No reminders
             # set' would be a false claim about the store.
