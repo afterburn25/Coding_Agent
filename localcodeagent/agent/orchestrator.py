@@ -4517,6 +4517,12 @@ class AgentOrchestrator:
                 text += " noon midday"
             elif clock == (0, 0):
                 text += " midnight"
+            # 'the morning reminders' — a daypart scopes by fire
+            # hour like a weekday scopes by fire day.
+            text += " " + (
+                "morning" if h24 < 12 else
+                "afternoon" if h24 < 17 else
+                "evening" if h24 < 21 else "night")
         # Date-relative scope — 'any reminders for tomorrow' resolves
         # rows whose next fire lands on that date; weekday names
         # follow the fire day too, not just the weekly spec.
