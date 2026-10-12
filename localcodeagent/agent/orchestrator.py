@@ -8234,13 +8234,37 @@ class AgentOrchestrator:
                             " ,;—-")
             if spec is None and when_raw.lower() == "not":
                 # 'remind me not to forget' — the negation is the
-                # task, not a when. Ask for the time rather than
-                # letting the model invent a 'scheduled for now'.
-                return self._reminder_finish(
-                    f"When should I remind you not to "
-                    f"{task_lazy}? — e.g. “in 10 minutes”, "
-                    "“at 3pm”, “tomorrow at 9”.",
-                    user_text, task_id, event_callback)
+                # task, not a when. A trailing boundary word may
+                # still carry the real when ('the meeting
+                # tomorrow'); peel it and create. Otherwise ask
+                # for the time rather than letting the model
+                # invent a 'scheduled for now'.
+                for mm in re.finditer(
+                        r"\s+(at|in|on|every|next|tomorrow|today|"
+                        r"tonight|tonite|soon|shortly)(?=\s|$)",
+                        task_lazy, re.IGNORECASE):
+                    right = task_lazy[mm.start():].strip()
+                    left = task_lazy[:mm.start()].strip(" ,;—-")
+                    spec_r = self._reminder_spec(right, time.time())
+                    if (left and spec_r is not None
+                            and not re.fullmatch(
+                                r"(?:early|earlier|late|later|"
+                                r"soon|shortly|tonight|tonite|"
+                                r"tomorrow|today|morning|"
+                                r"afternoon|evening|night|noon|"
+                                r"midnight|this|next)\s*",
+                                left, re.IGNORECASE)):
+                        when_raw = right
+                        spec = spec_r
+                        forced_when = right
+                        forced_task = "to " + left
+                        break
+                if spec is None:
+                    return self._reminder_finish(
+                        f"When should I remind you not to "
+                        f"{task_lazy}? — e.g. “in 10 minutes”, "
+                        "“at 3pm”, “tomorrow at 9”.",
+                        user_text, task_id, event_callback)
             if (spec is None and task_lazy
                     and (re.match(r"(?:the|a|an)\s", task_lazy)
                          or re.search(
