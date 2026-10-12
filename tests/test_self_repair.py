@@ -560,6 +560,39 @@ class DestructivePatchReviewTests(unittest.TestCase):
             self.assertIn("guts", notes)
             self.assertIn("repo-root", notes)
 
+    def test_undeclared_worktree_files_never_promote(self):
+        """A file written into the worktree but absent from the
+        declared patch set must never reach the stable tree. The
+        promote path used to re-scan the whole worktree (git diff base
+        + untracked copies) — anything a repair mission or diagnosis
+        dropped there promoted unreviewed (observed live: a scratch
+        stub gutted the deployed server.py)."""
+        def undeclared_generator(incident, wt: Path):
+            (wt / "mod" / "calc.py").write_text(GOOD_PATCH,
+                                                encoding="utf-8")
+            # Scratch artifact — never declared in the patch set.
+            (wt / "diagnosis_helper.py").write_text(
+                "X = 1\n", encoding="utf-8")
+            return {"files": ["mod/calc.py"],
+                    "test": "tests/test_calc_repair.py"}
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            coord = make_coord(td, repo,
+                               patch_generator=undeclared_generator,
+                               canary=Canary(lambda i, w, **k:
+                                             {"ok": True, "port": 1}))
+            inc = report_bug(coord, repo)
+            coord.process_incident(inc["id"])
+            final = coord.get(inc["id"])
+            # The drift triggers a re-review, which rejects the
+            # repo-root scratch file — the incident must not resolve.
+            self.assertNotEqual(final["state"], "resolved")
+            self.assertFalse((repo / "diagnosis_helper.py").exists())
+            # The good fix stays unpromoted alongside the rejection —
+            # no partial payload lands.
+            self.assertNotIn("if b == 0",
+                             (repo / "mod" / "calc.py").read_text())
+
 
 class ProductionCanaryTests(unittest.TestCase):
     """The real candidate launcher — boots the repo's Nexus from the

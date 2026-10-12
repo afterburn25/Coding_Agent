@@ -177,7 +177,7 @@ class Patcher:
                 return f
         return None
 
-    def promote(self, wt: Path) -> str:
+    def promote(self, wt: Path, files: list[str] | None = None) -> str:
         """Apply the candidate to the stable tree. Returns a description
         of how it was applied (for the audit trail).
 
@@ -185,12 +185,16 @@ class Patcher:
         lands as one diff against the worktree's merge-base, plus copies
         of untracked additions. If the primary moved any candidate file
         since the worktree was cut, promotion refuses loudly: wholesale
-        copying would silently revert newer primary-tree changes."""
+        copying would silently revert newer primary-tree changes.
+
+        `files` bounds the payload to the reviewed set — the diff
+        pathspec and the untracked-copy loop both honor it, so a
+        worktree file the reviewer never saw can never promote."""
         if not (self.is_git_repo() and (wt / ".git").exists()):
-            self._copy_changed(wt)
+            self._copy_changed(wt, files)
             return "copy-sandbox"
         base = self.worktree_base(wt)
-        files = self.changed_files(wt)
+        files = files or self.changed_files(wt)
         if base:
             drifted = self._drifted(wt, base, files)
             if drifted:
@@ -198,9 +202,12 @@ class Patcher:
                     f"primary checkout moved {drifted} since the repair "
                     "worktree was cut — promotion aborted "
                     "(conflict, never clobbered)")
+        diff_cmd = ["git", "-C", str(wt), "diff", base or "HEAD",
+                    "--binary"]
+        if files:
+            diff_cmd += ["--", *files]
         r = subprocess.run(
-            ["git", "-C", str(wt), "diff", base or "HEAD", "--binary"],
-            capture_output=True, timeout=30,
+            diff_cmd, capture_output=True, timeout=30,
             creationflags=no_window_flags())
         if r.returncode == 0 and r.stdout.strip():
             ap = subprocess.run(
@@ -223,8 +230,9 @@ class Patcher:
                 shutil.copy2(src, dst)
         return "git-apply"
 
-    def _copy_changed(self, wt: Path) -> None:
-        for f in self.changed_files(wt):
+    def _copy_changed(self, wt: Path,
+                      files: list[str] | None = None) -> None:
+        for f in (files or self.changed_files(wt)):
             src, dst = wt / f, self.repo_root / f
             if not src.is_file():
                 continue

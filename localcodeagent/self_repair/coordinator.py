@@ -669,7 +669,18 @@ class SelfRepairCoordinator:
             wt = Path(inc["worktree"])
             if not wt.exists():
                 return "patching" if self._lost_worktree(inc) else ""
-            files = self.patcher.changed_files(wt) or inc["patch_files"]
+            reviewed = list(inc.get("patch_files") or [])
+            current = self.patcher.changed_files(wt)
+            if set(current) - set(reviewed):
+                # The worktree carries files the review never saw — a
+                # scratch helper or late write would promote unreviewed
+                # (observed live: a diagnosis stub gutted the deployed
+                # server.py). Re-review the set the tree actually
+                # carries. A *missing* reviewed file is the safe
+                # direction — promoting it is a byte-identical no-op.
+                inc["patch_files"] = current
+                return "reviewing"
+            files = reviewed
             if not files:
                 self._fail_open(
                     inc, "rollback snapshot failed: no changed files recorded")
@@ -685,7 +696,7 @@ class SelfRepairCoordinator:
                                "files": [f["path"] for f in
                                          manifest["files"]]}
             try:
-                how = self.patcher.promote(wt)
+                how = self.patcher.promote(wt, files)
                 inc["promotion"] = {"method": how, "ts": time.time(),
                                     "files": files}
             except Exception as exc:
