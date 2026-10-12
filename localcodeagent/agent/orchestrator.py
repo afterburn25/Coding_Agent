@@ -3768,7 +3768,7 @@ class AgentOrchestrator:
         low = str(masked_text or "").lower()
         return any(re.search(rf"\b{re.escape(v)}\b", low) for v in verbs)
 
-    _REMINDER_POLITE = (r"^\s*(?:please\s+)?"
+    _REMINDER_POLITE = (r"^\s*(?:(?:please|pls|plz)\s+)?"
                         r"(?:(?:can|could|would|will)\s+you\s+)?"
                         r"(?:please\s+)?")
     # Trailing courtesy — 'cancel the cat reminder please' carries the
@@ -3837,7 +3837,7 @@ class AgentOrchestrator:
     # lane answers the reference from real rows instead.
     _REMINDER_REFER_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:that|the|this|my|your)\s+"
+        r"(?:that|the|this|my|your|next|first|last)\s+"
         r"(?:[\w:'-]+\s+)?"
         r"(?:reminders?|alarms?|timers?|schedules?)"
         r"(?:\s+(?:at|for|on|about)\s+.+?)?" + _REMINDER_TRAIL,
@@ -4041,6 +4041,14 @@ class AgentOrchestrator:
         r"tonight|tonite|tomorrow|today|morning|afternoon|evening|"
         r"monday|tuesday|wednesday|thursday|friday|saturday|"
         r"sunday)\b"
+        + _REMINDER_TRAIL +
+        # 'reminders coming up', 'alarms due' — noun + coming-up
+        # tail with no verb lead at all.
+        r"|" + _REMINDER_POLITE +
+        r"(?:my\s+|the\s+|all\s+(?:my\s+|the\s+)?)?"
+        r"(?:reminders?|alarms?|timers?|meetings?|events?|"
+        r"appointments?)\s+"
+        r"(?:coming\s+up|due|scheduled|pending|left)\b"
         + _REMINDER_TRAIL +
         # 'any meetings at 10', 'any events on friday' — calendar
         # nouns with a temporal tail; the honest row answer beats
@@ -6029,7 +6037,7 @@ class AgentOrchestrator:
                     r"come|comes|hit|hits|rings|every|there|here|"
                     r"will|gonna|going|due|"
                     r"work|works|working|functional|okay|ok|fine|good|"
-                    r"till|until|til|"
+                    r"till|until|til|all|"
                     r"view|run|through|walk|read|out)\b",
                     " ", tm.group(1), flags=re.IGNORECASE))
         if sm is None and not scope_terms:
@@ -6055,6 +6063,7 @@ class AgentOrchestrator:
             "today", "tonight", "tomorrow", "weekend", "weekends",
             "week", "weeks", "monday", "tuesday", "wednesday",
             "thursday", "friday", "saturday", "sunday",
+            "first", "last", "latest", "earliest",
             "morning", "afternoon", "evening"}
 
         def _in_window(s: dict) -> bool:
@@ -6143,10 +6152,10 @@ class AgentOrchestrator:
                     r"anything|something|everything|all)\b",
                     " ", cm.group(1), flags=re.IGNORECASE))
         if ((re.search(
-                r"\bnext\b(?!\s+(?:week|weeks|month|months|year|"
-                r"years|day|days|hour|hours|minute|minutes|monday|"
-                r"tuesday|wednesday|thursday|friday|saturday|sunday|"
-                r"few|couple|one|time))",
+                r"\b(?:next|first)\b(?!\s+(?:week|weeks|month|months|"
+                r"year|years|day|days|hour|hours|minute|minutes|"
+                r"monday|tuesday|wednesday|thursday|friday|saturday|"
+                r"sunday|few|couple|one|time|thing))",
                 plan_text, re.IGNORECASE) or countdown_ask) and rows):
             # 'when does my next reminder fire' — ordinal, not a
             # scope term; pick the soonest-firing row like the
