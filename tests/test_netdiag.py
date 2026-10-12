@@ -3669,6 +3669,18 @@ class TruthGateTests(RecoveryLoopTests):
                 "remind me on the 5th of the month", mode="auto")
             self.assertIn("do what", result.content)
             sup.scheduler.rows.clear()
+
+            # 'in 2 days at 3pm' — one anchor, not two times:
+            # the duration picks the date, the clock its time.
+            result = agent.run(
+                "remind me in 2 days at 3pm to submit",
+                mode="auto")
+            sub = [s for s in sup.scheduler.rows
+                   if "submit" in s["name"]][0]
+            self.assertEqual(sub["kind"], "once")
+            lt = time.localtime(sub["at"])
+            self.assertEqual((lt.tm_hour, lt.tm_min), (15, 0))
+            sup.scheduler.rows.clear()
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(

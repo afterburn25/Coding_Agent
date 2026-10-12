@@ -395,7 +395,9 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
         r"half\s+an?|an?\s+half)\s*"
         r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
-        r"days?|d|weeks?|w|months?)(?:\s+or\s+so)?", t)
+        r"days?|d|weeks?|w|months?)(?:\s+or\s+so)?"
+        + clock_tail
+        + r"(?:\s+at\s+(noon|midnight))?", t)
     if m:
         n_raw = m.group(1)
         n = (0.5 if "half" in n_raw else
@@ -412,14 +414,29 @@ def parse_reminder_when(when: str, now: float) -> float | None:
             mon0 = lt2.tm_mon - 1 + int(n)
             yr, mon = lt2.tm_year + mon0 // 12, mon0 % 12 + 1
             day = min(lt2.tm_mday, _cal.monthrange(yr, mon)[1])
-            return time.mktime(
+            ts = time.mktime(
                 (yr, mon, day, lt2.tm_hour, lt2.tm_min, 0,
                  -1, -1, -1))
-        scale = {"s": 1, "sec": 1, "second": 1, "m": 60, "min": 60,
-                 "minute": 60, "h": 3600, "hr": 3600, "hour": 3600,
-                 "d": 86400, "day": 86400, "w": 604800,
-                 "week": 604800}[unit]
-        return now + n * scale
+        else:
+            scale = {"s": 1, "sec": 1, "second": 1, "m": 60,
+                     "min": 60, "minute": 60, "h": 3600, "hr": 3600,
+                     "hour": 3600, "d": 86400, "day": 86400,
+                     "w": 604800, "week": 604800}[unit]
+            ts = now + n * scale
+        if m.group(3) or m.group(6):
+            # 'in 2 days at 3pm' — the duration picks the date,
+            # the clock picks the time on it.
+            lt3 = time.localtime(ts)
+            if m.group(6):
+                hr2, mn2 = (12, 0) if m.group(6) == "noon" else (0, 0)
+            else:
+                hr2 = _meridian(int(m.group(3)), m.group(5))
+                mn2 = int(m.group(4) or 0)
+            ts2 = time.mktime(
+                (lt3.tm_year, lt3.tm_mon, lt3.tm_mday,
+                 hr2, mn2, 0, -1, -1, -1))
+            return ts2 + 86400 if ts2 <= now else ts2
+        return ts
     # 'in 15' / 'in about 20' — a bare number counts down minutes;
     # 'in 2015' (4+ digits) is not a delay.
     m = re.fullmatch(
