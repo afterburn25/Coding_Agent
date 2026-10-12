@@ -5253,6 +5253,27 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   a hard precondition at the dispatch point too. Verified live: the
   seven stranded dogfood incidents all converged to `needs_human`
   after redeploy; no new blind missions.
+- **Model-down gate completed for recall/git lanes** (`c13ab6ea`):
+  `can_answer_locally` now declares facts/rules recall, single-fact
+  recall ('what's my editor'), repeat-asks ('what did you say') and
+  git repo-state questions ('is the repo clean') model-optional —
+  the lane still decides the claim, a decline degrades to the same
+  honest model-down error the 409 gave. Self-knowledge control/nav
+  turns were already covered via `can_answer_self_knowledge`
+  (would_answer probe) + `has_memory_answer` + brain fast-path.
+- **Collision-verb sweep in scheduler lanes** (`c13ab6ea`,
+  `1800a437`, `e9443010`): 'push to origin' parsed as
+  snooze(verb=push, dur='origin') and claimed a git command; the
+  ambiguous verbs push/bump/shift now require a reminder noun.
+  'push it to origin' (pronoun + non-time tail) declines at the
+  handler; 'kill the task'/'end the process'/'cancel the job' lose
+  bare-cancel claims to hard-software object nouns; 'kill it' +
+  'restart it'/'suspend it'/'restore it'/'put it back' decline on
+  software-dominant verb + bare pronoun — mirrors reschedule's
+  existing move/change pronoun precedent. 'push it to 4pm',
+  'cancel my netflix subscription', 'restart my reminders',
+  'mute everything' all verified still claiming; live-verified
+  reminder/state/loop lanes intact on dogfood.
 - **Watch resolved**: the ~70 "Crash recovery" notifications on
   dogfood correlate with deliberate restart probes (restart*.txt),
   not spontaneous crashes; self-repair incidents on CI failures are
