@@ -4251,7 +4251,8 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:are|is)\s+(?:(?:my|the|your|that|this|all|any|"
         r"those|these)\s+)?[a-z0-9][a-z0-9'\s-]{0,40}?\s+"
-        r"(?:on|off|paused|muted|enabled|disabled|active|"
+        r"(?:(?:still\s+)(?:set|scheduled|booked)|"
+        r"on|off|paused|muted|enabled|disabled|active|"
         r"inactive)\b" + _REMINDER_TRAIL,
         re.IGNORECASE)
     # Clock-confirm asks — 'is my alarm set for 6'. The topic and
@@ -4892,11 +4893,18 @@ class AgentOrchestrator:
             r"gave\s+you|asked\s+for|turned|switched|disabled|"
             r"muted|paused|silenced|stopped|deactivated|"
             r"cancelled|canceled|deleted|removed|snoozed|"
-            r"rescheduled|moved|renamed)"
+            r"rescheduled|moved|renamed|toggled|enabled|"
+            r"changed|adjusted|shifted|bumped|pushed|delayed|"
+            r"postponed|dismissed|brought\s+back|resumed)"
             r"(?:\s+(?:it\s+)?(?:off|on|down|up))?"
             r"(?:\s+(?!(?:by|for|until|till|til|to|at|in|on|"
-            r"back|forward|earlier|later)\b)\S+)*",
+            r"back|forward|earlier|later|more)\b|\d)\S+)*",
             re.IGNORECASE)
+        # 'snooze the one i just toggled' — the provenance clause
+        # names a row by what was done to it; the journal's last
+        # touched row is that referent.
+        _prov_row = (self._reminder_last_touched()
+                     if _prov.search(body + " " + dur) else None)
         body = _prov.sub(" ", body)
         dur = _prov.sub(" ", dur).strip(" ,;—-")
         # 'snooze the alarm that's ringing' — the clause says the
@@ -4994,12 +5002,31 @@ class AgentOrchestrator:
         delta = None
         now = time.time()
         if dur:
+            # 'this one 5 more minutes' — 'more' is the request's
+            # framing, never unit text.
+            dur = re.sub(r"\s*\bmore\b\s*", " ", dur).strip()
             dm = re.fullmatch(
                 r"(?:(?:in|by)\s+)?(\d+(?:\.\d+)?|a|an|one|two|"
                 r"three|four|five|six|seven|eight|nine|ten|couple|"
                 r"few)\s*"
                 r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
                 r"days?|d)", dur)
+            if dm is None:
+                # 'one 5 minutes' — a leading referent word isn't
+                # unit text; retry without it ('one hour' already
+                # matched above and never reaches here).
+                _dur_s = re.sub(
+                    r"^(?:this\s+|that\s+|the\s+|it\s+|one\s+|a\s+|"
+                    r"an\s+)+", "", dur, flags=re.IGNORECASE)
+                if _dur_s != dur:
+                    dm = re.fullmatch(
+                        r"(?:(?:in|by)\s+)?(\d+(?:\.\d+)?|a|an|one|"
+                        r"two|three|four|five|six|seven|eight|nine|"
+                        r"ten|couple|few)\s*"
+                        r"(seconds?|secs?|s|minutes?|mins?|m|"
+                        r"hours?|hrs?|h|days?|d)", _dur_s)
+                    if dm is not None:
+                        dur = _dur_s
             if dm:
                 scale = {"s": 1, "m": 60, "h": 3600, "d": 86400}[
                     dm.group(2)[0]]
@@ -5053,6 +5080,11 @@ class AgentOrchestrator:
         hits = self._reminder_clock_narrow(hits, topic_terms,
                                            user_text)
         hits = self._reminder_ordinal_pick(hits, _ord_sel, now)
+        if _prov_row is not None and len(hits) != 1:
+            # 'snooze the one i just toggled' — the clause points
+            # at the journaled row; the topic pin wins when it
+            # already resolved exactly one.
+            hits = [_prov_row]
         if _firing_now:
             # 'that's ringing' asserts a recent last_run — even a
             # single hit must actually have fired within the hour,
@@ -5076,6 +5108,17 @@ class AgentOrchestrator:
             # intent; snooze it rather than asking which.
             hits = [min(hits, key=lambda s: float(
                 s.get("next_run") or s.get("at") or now))]
+        if (not topic_terms and _ord_sel is None
+                and _prov_row is None and not _firing_now
+                and str(ms.groupdict().get("noun")
+                        or "").strip().lower()
+                in ("it", "this", "that", "one")):
+            # 'snooze this one' — singular anaphora resolves to
+            # the last journaled row like 'move it to 6'; 'them'
+            # stays the all-scope it already is.
+            lt = self._reminder_last_touched()
+            if lt is not None:
+                hits = [lt]
         all_scope = (not topic_terms
                      and (str(ms.groupdict().get("noun")
                               or ms.groupdict().get("noun3")
@@ -5357,6 +5400,24 @@ class AgentOrchestrator:
                            flags=re.IGNORECASE)
                     + " " + _wfm.group(1).strip())
             _wtxt_from = _wfm.group(2).strip()
+        # 'reschedule the reminder i changed to 5pm' — the 'i
+        # changed' clause is provenance, not topic; it resolves
+        # through the journal's last-touched row.
+        _prov_m = re.search(
+            r"\bi\s+(?:just\s+|recently\s+|lately\s+)?"
+            r"(?:changed|moved|rescheduled|snoozed|adjusted|"
+            r"shifted|bumped|pushed|delayed|postponed|dismissed|"
+            r"turned|switched|toggled|disabled|enabled|muted|"
+            r"paused|stopped|silenced|deactivated|cancelled|"
+            r"canceled|deleted|removed|renamed|resumed|"
+            r"brought\s+back|set|made|created|scheduled|booked|"
+            r"added|put|asked\s+for|gave\s+you)\b", body,
+            re.IGNORECASE)
+        _prov_row = (self._reminder_last_touched()
+                     if _prov_m is not None else None)
+        if _prov_m is not None:
+            body = (body[:_prov_m.start()] + " "
+                    + body[_prov_m.end():]).strip(" ,;—-")
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
             " ", body, flags=re.IGNORECASE))
@@ -5369,6 +5430,18 @@ class AgentOrchestrator:
             topic_terms)
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
+        if (not hits and noun and topic_terms
+                and str(noun).lower() in
+                ("alarm", "alarms", "timer", "timers")):
+            # 'change the wake alarm to weekdays' — the row lives
+            # under a 'reminder:' name, so the noun filter emptied
+            # the pool; a single unfiltered scope hit still
+            # resolves it.
+            _, _rall = self._reminder_rows(include_disabled=True)
+            _rc = [s for s in _rall
+                   if topic_terms <= self._reminder_hay(s)]
+            if len(_rc) == 1:
+                hits = _rc
         hits = self._reminder_clock_narrow(hits, topic_terms,
                                            user_text)
         hits = self._reminder_ordinal_pick(hits, _ord_sel,
@@ -5384,6 +5457,8 @@ class AgentOrchestrator:
             lt = self._reminder_last_touched()
             if lt is not None:
                 hits = [lt]
+        elif _prov_row is not None and len(hits) != 1:
+            hits = [_prov_row]
         if (verb_l in ("move", "change", "switch", "make", "push",
                     "bump", "shift")
                 and mr.groupdict().get("noun") is None
@@ -5418,6 +5493,9 @@ class AgentOrchestrator:
                  else str(mr.groupdict().get("when") or "").strip())
         _wtxt = re.sub(r"\s+(?:instead|actually)\s*$", "",
                        _wtxt, flags=re.IGNORECASE).strip()
+        # 'to weekdays only' — 'only' is emphasis, not a time.
+        _wtxt = re.sub(r"\s+only\s*$", "", _wtxt,
+                       flags=re.IGNORECASE).strip()
         if not shift_txt:
             # 'move the standup 30 minutes earlier' — the amount
             # leads the direction here; the tail peel only catches
@@ -5530,7 +5608,7 @@ class AgentOrchestrator:
                 "Reschedule to when? — e.g. “to friday at 3pm” "
                 "or “to every morning”.",
                 user_text, task_id, event_callback)
-        if not rows:
+        if not rows and not hits:
             text = self._reminder_none_text(
                 sched, noun)
         elif not hits:
@@ -5554,6 +5632,17 @@ class AgentOrchestrator:
         else:
             try:
                 fields = spec
+                if (spec.get("hour") is not None
+                        and spec.get("kind") != "once"
+                        and not re.search(
+                            r"\d|noon|midnight|morning|afternoon|"
+                            r"evening|tonight|quarter|half|o'?clock",
+                            _wtxt, re.IGNORECASE)):
+                    # 'to weekdays' names a cadence, not a clock —
+                    # the parser's 9:00 default would silently
+                    # retime a 06:00 row; keep the row's hour.
+                    fields = {k: v for k, v in spec.items()
+                              if k not in ("hour", "minute", "at")}
                 if (spec.get("kind") == "once"
                         and hits[0].get("kind")
                             in ("daily", "weekly", "monthly")):
@@ -5570,8 +5659,12 @@ class AgentOrchestrator:
                 text = f"I couldn't reschedule the reminder ({exc})."
             else:
                 label = self._reminder_label(hits[0])
+                _disp = dict(fields)
+                for _k in ("hour", "minute"):
+                    if _k not in _disp and hits[0].get(_k) is not None:
+                        _disp[_k] = hits[0][_k]
                 text = (f"Rescheduled “{label}” — "
-                        + self._reminder_spec_text(fields, label)
+                        + self._reminder_spec_text(_disp, label)
                         + (f" (merged {merged} duplicate"
                            + ("s.)" if merged != 1 else ".)")
                            if merged else "")
@@ -6889,14 +6982,17 @@ class AgentOrchestrator:
         _pmade = re.search(
             r"\bi\s+(?:(?:just|recently|lately)\s+)?"
             r"(?:set|made|created|scheduled|booked|put|"
-            r"asked\s+for|added|gave\s+you)\b((?:\s+\S+){0,3})",
+            r"asked\s+for|added|gave\s+you)\b"
+            r"(\s+(?:yesterday|today|tonight|tonite|this\s+"
+            r"(?:morning|afternoon|evening)|last\s+night|"
+            r"last\s+week))?",
             " ".join(str(g) for g in (
                 mc.groupdict().get("ctime"),
                 mc.groupdict().get("tail"),
                 mc.groupdict().get("tail2"), body) if g),
             re.IGNORECASE)
         _made_dates = _made_label = None
-        if _pmade is not None:
+        if _pmade is not None and _pmade.group(1):
             _made_dates, _made_label = self._reminder_created_scope(
                 _pmade.group(1))
         if re.fullmatch(
@@ -7386,6 +7482,9 @@ class AgentOrchestrator:
         if re.search(r"\btomorrow\b", t):
             dates.add(today + dt.timedelta(days=1))
             label = label or "tomorrow"
+        if re.search(r"\byesterday\b|\blast\s+night\b", t):
+            dates.add(today - dt.timedelta(days=1))
+            label = label or "yesterday"
         if re.search(r"\bnext\s+week\b", t):
             base = today + dt.timedelta(
                 days=(7 - today.weekday()) % 7 or 7)
@@ -7593,7 +7692,9 @@ class AgentOrchestrator:
                 r"\b(?:is|are)\s+(?:the\s+|my\s+|your\s+|that\s+|"
                 r"this\s+)?[a-z0-9][a-z0-9'\s-]{0,40}?\s+"
                 r"(?:on|off|paused|muted|enabled|disabled|active|"
-                r"inactive|still\s+on|still\s+off)\s*[.!?]?\s*$",
+                r"inactive|still\s+on|still\s+off|still\s+set|"
+                r"still\s+scheduled|still\s+booked)"
+                r"\s*[.!?]?\s*$",
                 plan_text, re.IGNORECASE)
             and not re.search(
                 r"\b(?:reminders?|alarms?|timers?|schedules?)\b",
@@ -7637,7 +7738,11 @@ class AgentOrchestrator:
             # next-fire.
             r"\blast\b.{0,25}\b(?:to\s+fire|to\s+go\s+off|fired|"
             r"rang|went\s+off)\b|\b(?:did|was|were)\b.{0,25}"
-            r"\blast\b.{0,25}\b(?:go\s+off|fire|ring|fires)\b",
+            r"\blast\b.{0,25}\b(?:go\s+off|fire|ring|fires)\b|"
+            # 'how many reminders fired yesterday' — a fired
+            # count over the last_run window, not a row listing.
+            r"\bhow\s+(?:many|much)\b.{0,40}\b(?:fired|went\s+off|"
+            r"gone\s+off|rang|rung|have\s+fired|has\s+fired)\b",
             plan_text, re.IGNORECASE))
         _last_fired = bool(re.search(
             r"\blast\b.{0,25}\b(?:to\s+fire|to\s+go\s+off|fired|"
@@ -7679,7 +7784,9 @@ class AgentOrchestrator:
                 r"pops?\s+up|reminds?|repeats?|recurs?|daily|"
                 r"weekly|monthly|hourly|yearly|recurring|"
                 r"repeating|on|off|paused|muted|enabled|disabled|"
-                r"active|inactive)\b", plan_text, re.IGNORECASE)
+                r"active|inactive|still\s+set|still\s+scheduled|"
+                r"still\s+booked|still\s+on|still\s+off)\b",
+                plan_text, re.IGNORECASE)
             if cm is None:
                 # 'how often is THE STANDUP' — no terminal vocab
                 # word; the name runs to end-of-line.

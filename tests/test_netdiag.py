@@ -2744,6 +2744,72 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIn("ringing", r.content.lower())
         self.assertTrue(sup.scheduler.rows[1]["enabled"])
 
+        # 'change the wake alarm to weekdays only' — a clockless
+        # cadence target keeps the row's own clock (06:00) and only
+        # rewrites the day set; 'only' is emphasis, not a time.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: wake", kind="daily", hour=6, minute=0)
+        sup.scheduler.add(
+            "reminder: trash", kind="weekly", weekday=4,
+            hour=7, minute=0)
+        r = agent._reminder_reply(
+            "change the wake alarm to weekdays only",
+            "change the wake alarm to weekdays only", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        self.assertEqual(sup.scheduler.rows[0]["hour"], 6)
+        self.assertEqual(sup.scheduler.rows[0]["minute"], 0)
+        self.assertIn(
+            sup.scheduler.rows[0].get("weekday"),
+            ([0, 1, 2, 3, 4], "weekdays", None))
+        # 'the reminder i changed' — provenance binds through the
+        # journal's last-touched row (wake, just rescheduled), not
+        # a 'say which' or a model guess.
+        r = agent._reminder_reply(
+            "reschedule the reminder i changed to 5pm",
+            "reschedule the reminder i changed to 5pm", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        self.assertEqual(sup.scheduler.rows[0]["hour"], 17)
+        # 'the one i just toggled' — a mutation-provenance clause
+        # plus a 'more'-style duration resolves through the journal
+        # and parses the trailing minutes.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: nap", kind="once",
+            at=time.time() + 3600)
+        sup.scheduler.add(
+            "reminder: wake", kind="daily", hour=6, minute=0)
+        r = agent._reminder_reply(
+            "turn the nap reminder off",
+            "turn the nap reminder off", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("nap", r.content)
+        r = agent._reminder_reply(
+            "turn the nap reminder on",
+            "turn the nap reminder on", task.id)
+        self.assertIsNotNone(r)
+        at0 = sup.scheduler.rows[0]["at"]
+        r = agent._reminder_reply(
+            "snooze the one i just toggled 20 more minutes",
+            "snooze the one i just toggled 20 more minutes",
+            task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("nap", r.content)
+        self.assertAlmostEqual(
+            sup.scheduler.rows[0]["at"], at0 + 1200, delta=5)
+        # 'snooze this one' — singular anaphora binds the last
+        # journaled row (nap, just snoozed).
+        at1 = sup.scheduler.rows[0]["at"]
+        r = agent._reminder_reply(
+            "snooze this one 5 more minutes",
+            "snooze this one 5 more minutes", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("nap", r.content)
+        self.assertAlmostEqual(
+            sup.scheduler.rows[0]["at"], at1 + 300, delta=5)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
