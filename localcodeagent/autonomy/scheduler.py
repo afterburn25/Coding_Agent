@@ -389,6 +389,11 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         and 1 <= int(m.group(2)) <= 31 else m.group(0), t)
     t = re.sub(r"\b(\d{1,2})\s*([ap])\.?(?=\s|$|[?,;])",
                r"\1 \2m", t)
+    # 'at 7.30' — the decimal clock separator reads as a colon;
+    # 'in 1.5 hours' stays a duration (the minute side is two
+    # digits exactly).
+    t = re.sub(r"\b(at|by)\s+(\d{1,2})\.(\d{2})\b",
+               r"\1 \2:\3", t)
     t = re.sub(
         r"\bmonday\s*(?:-\s*|\s+(?:through|thru|to|-)\s+)friday\b",
         "weekdays", t)
@@ -982,6 +987,11 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         and 1 <= int(m.group(2)) <= 31 else m.group(0), t)
     t = re.sub(r"\b(\d{1,2})\s*([ap])\.?(?=\s|$|[?,;])",
                r"\1 \2m", t)
+    # 'at 7.30' — the decimal clock separator reads as a colon;
+    # 'in 1.5 hours' stays a duration (the minute side is two
+    # digits exactly).
+    t = re.sub(r"\b(at|by)\s+(\d{1,2})\.(\d{2})\b",
+               r"\1 \2:\3", t)
     t = re.sub(
         r"\bmonday\s*(?:-\s*|\s+(?:through|thru|to|-)\s+)friday\b",
         "weekdays", t)

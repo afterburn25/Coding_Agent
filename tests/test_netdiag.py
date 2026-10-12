@@ -3461,6 +3461,142 @@ class TruthGateTests(RecoveryLoopTests):
         for _su in _su_rows:
             _su["enabled"] = True
 
+    def test_reminder_misc_rename_keep_forms(self):
+        # Noun-less reminder ops — 'keep it'/'call X Y'/'what's X
+        # called'/"change X's name" carry no reminder noun, so
+        # every claim gate let them fall to the model, which
+        # narrated state it never touched. The misc claim routes
+        # them into the lane where real rows resolve.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+                self._n = 0
+
+            def add(self, name, kind, **kw):
+                self._n += 1
+                row = {"id": f"sc-{self._n}", "name": name,
+                       "kind": kind, "enabled": True, **kw}
+                self.rows.append(row)
+                return row
+
+            def list(self):
+                return list(self.rows)
+
+            def remove(self, sid):
+                n = len(self.rows)
+                self.rows = [r for r in self.rows
+                             if r["id"] != sid]
+                return len(self.rows) < n
+
+            def update(self, sid, **fields):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r.update(fields)
+                        return dict(r)
+                return None
+
+            def set_enabled(self, sid, enabled):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r["enabled"] = bool(enabled)
+                        return True
+                return False
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            task = agent.tasks.create("x", "auto")
+            sup.scheduler.add(
+                "reminder: standup", "daily", hour=9, minute=30,
+                action={"kind": "notify", "detail": "standup"})
+            sup.scheduler.add(
+                "reminder: tea", "once", at=time.time() + 3600,
+                action={"kind": "notify", "detail": "tea"})
+
+            # keep/leave no-op asks report the row's real state —
+            # never a narrated 'done'.
+            r = agent._local_action_reply(
+                "keep the standup where it is", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("left alone", r.content)
+            self.assertIn("standup", r.content)
+            r = agent._local_action_reply(
+                "leave the tea timer alone", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("left alone", r.content)
+
+            # 'change X's name to Y' / 'call X Y' rename through
+            # real updates — the journal's last-touched row binds
+            # bare pronouns.
+            r = agent._local_action_reply(
+                "change the standup's name to daily sync", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Renamed", r.content)
+            self.assertEqual(
+                sup.scheduler.rows[0]["name"],
+                "reminder: daily sync")
+            r = agent._local_action_reply(
+                "what's the daily sync called", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("daily sync", r.content)
+            r = agent._local_action_reply(
+                "call the tea timer brew", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Renamed", r.content)
+            self.assertEqual(
+                sup.scheduler.rows[1]["name"], "reminder: brew")
+            # 'call it X' binds the journaled row; a vague target
+            # asks rather than renaming.
+            r = agent._local_action_reply(
+                "call it something else", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("what instead", r.content)
+            r = agent._local_action_reply(
+                "what's it called", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("brew", r.content)
+            # 'keep it' — journal-bound no-op report.
+            r = agent._local_action_reply(
+                "keep it", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("left alone", r.content)
+
+            # 'back 5 more minutes' — 'more' is emphasis inside
+            # the amount; the shift lands on the row's own fire.
+            # (The noun-ful form 'push the X reminder back …'
+            # takes the snooze lane — same real shift.)
+            before = float(sup.scheduler.rows[1]["at"])
+            r = agent._local_action_reply(
+                "push the brew back 5 more minutes", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Rescheduled", r.content)
+            self.assertAlmostEqual(
+                float(sup.scheduler.rows[1]["at"]), before + 300,
+                delta=2)
+            # 'keep reminding me' is a create lead, never a no-op.
+            r = agent._local_action_reply(
+                "keep reminding me every friday", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("do what", r.content)
+
+            # 'at 7.30' — the decimal clock reads as a colon.
+            r = agent._local_action_reply(
+                "remind me at 7.30 to wake", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Reminder set", r.content)
+            wrow = sup.scheduler.rows[-1]
+            lt = time.localtime(wrow["at"])
+            self.assertEqual((lt.tm_hour, lt.tm_min), (7, 30))
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

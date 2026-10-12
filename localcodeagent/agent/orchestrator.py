@@ -4733,6 +4733,24 @@ class AgentOrchestrator:
         r"(?:\s+(?:to|for|onto)\s+(?P<cp_when>.+?))?"
         r"\s*[.!?]?\s*$",
         re.IGNORECASE)
+    # 'keep it where it is'/'leave the tea timer alone', 'call the
+    # standup the sync', 'what's the tea called', 'change the
+    # standup's name' — reminder ops with no reminder noun for the
+    # other gates to catch. The mk/mcn/mna/mrn handlers inside
+    # _reminder_reply resolve real rows or fall through honestly.
+    _REMINDER_MISC_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:keep|leave)\s+(?:the|my|that|this|it|them|those|"
+        r"these|reminders?|alarms?|timers?|all|everything)\b|"
+        r"call\s+(?:the|my|that|this|it|them)\s+[\w'-]|"
+        r"what'?s\s+(?:the\s+|my\s+|that\s+|this\s+)?"
+        r"[\w'-]+(?:\s+[\w'-]+){0,3}\s+(?:called|named)\b|"
+        r"(?:change|update|edit|set|rename)\s+"
+        r"(?:[\w'-]+\s+){0,3}?'s\s+name\b|"
+        r"(?:change|update|edit|set|rename)\s+"
+        r"(?:its|their|the\s+reminders?|the\s+alarms?|"
+        r"the\s+timers?)\s+name\b",
+        re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
     # noun requirement keeps 'repeat the command' out.
@@ -4877,10 +4895,13 @@ class AgentOrchestrator:
         """Trailing repeat markers — 'remind me about the dentist
         again' names 'the dentist'; 'again' is a re-fire request,
         not part of the row's label."""
+        task = re.sub(
+            r"(?:,\s*|\s+)it'?s\s*$", "", str(task or "").strip(),
+            flags=re.IGNORECASE)
         return re.sub(
             r"\s+(?:again|once\s+more|a\s+second\s+time|"
             r"one\s+more\s+time)\s*[.!?]?\s*$",
-            "", str(task or "").strip(), flags=re.IGNORECASE)
+            "", task, flags=re.IGNORECASE)
 
     @staticmethod
     def _reminder_until_split(when: str):
@@ -5558,17 +5579,21 @@ class AgentOrchestrator:
             shm = re.search(
                 r"\s+(back|forward|earlier|later|up|down|sooner)"
                 r"(?:\s+by)?$", body, re.IGNORECASE)
+            # 'back 5 more minutes' — 'more' is emphasis inside the
+            # amount, not unit text; normalize before the shape
+            # check and carry the clean duration into the shift.
+            _wn = re.sub(
+                r"\s*\bmore\b\s*", " ",
+                str(mr.groupdict().get("when")).strip(),
+                flags=re.IGNORECASE).strip()
             if (re.fullmatch(
                     r"(?:a|an|one|two|three|four|five|six|seven|"
                     r"eight|nine|ten|couple|few|\d+(?:\.\d+)?)\s*"
                     r"(?:seconds?|secs?|minutes?|mins?|hours?|"
                     r"hrs?|days?|weeks?)",
-                    str(mr.groupdict().get("when")).strip(),
-                    re.IGNORECASE)):
+                    _wn, re.IGNORECASE)):
                 if shm is not None:
-                    shift_txt = (
-                        shm.group(1) + " "
-                        + str(mr.groupdict().get("when")).strip())
+                    shift_txt = shm.group(1) + " " + _wn
                     body = body[:shm.start()].strip(" ,;—-")
                 elif verb_l in ("advance", "shorten", "extend",
                                 "lengthen"):
@@ -5578,8 +5603,7 @@ class AgentOrchestrator:
                     _vd = ("earlier" if verb_l in ("advance",
                                                  "shorten")
                            else "later")
-                    shift_txt = (_vd + " " + str(
-                        mr.groupdict().get("when")).strip())
+                    shift_txt = _vd + " " + _wn
                     body = re.sub(r"\s+by$", "", body,
                                   flags=re.IGNORECASE).strip(
                                       " ,;—-")
@@ -5762,6 +5786,26 @@ class AgentOrchestrator:
             # 'change my alarm to 7' — a bare clock target.
             spec = self._reminder_spec(
                 "at " + _wtxt, time.time())
+        if spec is None and not shift_txt:
+            # 'push the tea back 5 more minutes' — the tail is a
+            # direction shift the when-parsers can't read; 'more'
+            # is emphasis, not unit text.
+            _wsh = re.fullmatch(
+                r"(back|forward|earlier|later|up|down|sooner)\s+"
+                r"(?:by\s+)?(.+)", _wtxt.strip(), re.IGNORECASE)
+            if _wsh is not None and re.search(
+                    r"(?:a|an|one|two|three|four|five|six|seven|"
+                    r"eight|nine|ten|couple|few|half\s+an?|"
+                    r"\d+(?:\.\d+)?)\s*"
+                    r"(?:seconds?|secs?|s|minutes?|mins?|m|"
+                    r"hours?|hrs?|h|days?|d|weeks?|w)\b"
+                    r"(?:\s+more)?\s*$",
+                    _wsh.group(2), re.IGNORECASE):
+                shift_txt = re.sub(
+                    r"\s*\bmore\b\s*", " ", _wtxt.strip(),
+                    flags=re.IGNORECASE)
+                shift_txt = " ".join(shift_txt.split())
+                _shift_q = True
         if spec is None and shift_txt and hits:
             # 'back an hour'/'up 30 minutes' — offset the hit row's
             # own fire time; recur_merge retimes a recurring row's
@@ -8081,7 +8125,8 @@ class AgentOrchestrator:
                 self._REMINDER_INV_LEAD_RE,
                 self._REMINDER_STATEASK_RE,
                 self._REMINDER_WHENLEAD_RE,
-                self._REMINDER_COPY_RE)):
+                self._REMINDER_COPY_RE,
+                self._REMINDER_MISC_RE)):
             return True
         if self._reminder_bare_cancel(text) is not None:
             return True
@@ -9744,6 +9789,132 @@ class AgentOrchestrator:
         if mre is not None:
             return self._reminder_rename_reply(
                 user_text, mre, task_id, event_callback)
+        # 'change the standup's name [to X]' / 'change its name' —
+        # the same mutation spelled differently; a missing target
+        # asks rather than dropping.
+        class _M:
+            def __init__(s, b, n):
+                s._g = {"body": b, "new": n}
+            def group(s, k):
+                return s._g.get(k)
+            def groupdict(s):
+                return dict(s._g)
+        mrn = re.match(
+            self._REMINDER_POLITE +
+            r"(?:change|update|set|edit)\s+"
+            r"(?P<body>[\w'\s-]{0,40}?)(?:'s)?\s+name\b"
+            r"(?:\s+to\s+(?P<new>.+?))?\s*[.!?]?\s*$",
+            plan_text, re.IGNORECASE)
+        if (mrn is not None and re.search(
+                r"(?:'s\s+name|\b(?:its|their|the\s+reminders?|"
+                r"the\s+alarms?|the\s+timers?)\s+name)\b",
+                plan_text, re.IGNORECASE)):
+            _rn_body = str(mrn.group("body") or "").strip(" ,;—-")
+            _rn_new = str(mrn.group("new") or "").strip(" ,;—-")
+            if self._reminder_terms(_rn_body) <= {
+                    "it", "its", "their", "them", "the", "my",
+                    "that", "this", "reminder", "reminders",
+                    "alarm", "alarms", "timer", "timers"}:
+                _rn_lt = self._reminder_last_touched()
+                _rn_body = (self._reminder_label(_rn_lt)
+                            if _rn_lt is not None else _rn_body)
+            if not _rn_new:
+                return self._reminder_finish(
+                    f"Rename "
+                    f"“{self._reminder_task_clean(_rn_body) or 'it'}”"
+                    " to what?",
+                    user_text, task_id, event_callback)
+            return self._reminder_rename_reply(
+                user_text, _M(_rn_body, _rn_new),
+                task_id, event_callback)
+        # 'call the standup the daily sync' — 'call X Y' is a
+        # rename when X resolves a real row; a bare noun keeps
+        # the journal referent or asks.
+        mcn = re.match(
+            self._REMINDER_POLITE +
+            r"call\s+(?:the\s+|my\s+|that\s+|this\s+)?"
+            r"(?P<body>[\w'\s-]{0,40}?)\s+"
+            r"(?P<new>[\w'\s-]{1,40}?)\s*[.!?]?\s*$",
+            plan_text, re.IGNORECASE)
+        if mcn is not None:
+            _cb = str(mcn.group("body") or "").strip(" ,;—-")
+            _cn2 = str(mcn.group("new") or "").strip(" ,;—-")
+            # 'call the tea timer brew' — the lazy split left the
+            # noun word on the new name ('timer brew'); the object
+            # owns it. A leading article on the target ('call X
+            # the daily sync') is decoration, not name text.
+            _cnl = re.match(
+                r"(?i)(reminders?|alarms?|timers?)\s+(.+)", _cn2)
+            if _cnl is not None:
+                _cb = (_cb + " " + _cnl.group(1)).strip()
+                _cn2 = _cnl.group(2).strip()
+            _cn2 = re.sub(r"^(?:the|a|an)\s+", "", _cn2,
+                          flags=re.IGNORECASE)
+            _ct = self._reminder_terms(re.sub(
+                r"\b(?:the|my|that|this|reminders?|alarms?|"
+                r"timers?|to|as)\b", " ", _cb,
+                flags=re.IGNORECASE))
+            _, _crows = self._reminder_rows(include_disabled=True)
+            _ch = [s for s in _crows
+                   if _ct and _ct <= self._reminder_hay(s)]
+            if _ct <= {"it", "that", "this", "reminder",
+                       "reminders", "alarm", "alarms", "timer",
+                       "timers"}:
+                _clt = self._reminder_last_touched()
+                _ch = [_clt] if _clt is not None else []
+            if len(_ch) == 1:
+                if re.fullmatch(
+                        r"(?:something\s+else|anything|whatever|"
+                        r"it|that|this)", _cn2, re.IGNORECASE):
+                    return self._reminder_finish(
+                        f"Call “{self._reminder_label(_ch[0])}” "
+                        "what instead?",
+                        user_text, task_id, event_callback)
+                return self._reminder_rename_reply(
+                    user_text,
+                    _M(self._reminder_label(_ch[0]), _cn2),
+                    task_id, event_callback)
+            if re.search(r"\b(?:reminders?|alarms?|timers?)\b",
+                         plan_text, re.IGNORECASE):
+                return self._reminder_finish(
+                    "I don't see a reminder matching that — "
+                    "say which one you want to rename.",
+                    user_text, task_id, event_callback)
+            # 'call mom' — a task verb, not a rename; fall through.
+        # 'what's the standup called' — report the row's real
+        # label, never an invented one.
+        mna = re.match(
+            r"(?:what'?s|what\s+is)\s+(?:the\s+|my\s+|that\s+)?"
+            r"(?P<body>[\w'\s-]{1,40}?)\s+"
+            r"(?:called|named)\s*[.!?]?\s*$",
+            plan_text, re.IGNORECASE)
+        if mna is not None:
+            _nt = self._reminder_terms(re.sub(
+                r"\b(?:the|my|that|this|reminders?|alarms?|"
+                r"timers?)\b", " ",
+                str(mna.group("body") or ""),
+                flags=re.IGNORECASE))
+            _, _nrows = self._reminder_rows(include_disabled=True)
+            _nh = [s for s in _nrows
+                   if _nt and _nt <= self._reminder_hay(s)]
+            if _nt <= {"it", "that", "this", "one"}:
+                # 'what's it called' — the journal's last-touched
+                # row is the referent.
+                _nlt = self._reminder_last_touched()
+                _nh = [_nlt] if _nlt is not None else []
+            if len(_nh) == 1:
+                return self._reminder_finish(
+                    f"It's called "
+                    f"“{self._reminder_label(_nh[0])}” — fires "
+                    f"{self._reminder_when_text(_nh[0], time.time())}.",
+                    user_text, task_id, event_callback)
+            if _nh:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”" for s in _nh[:5])
+                return self._reminder_finish(
+                    f"That matches {len(_nh)} reminders: {names} "
+                    "— say which.",
+                    user_text, task_id, event_callback)
         msw = self._REMINDER_SWAP_RE.match(plan_text)
         if msw is not None:
             return self._reminder_swap_reply(
@@ -9757,10 +9928,14 @@ class AgentOrchestrator:
             # 'copy the file' resolved no reminder row — the
             # generic action lane owns it.
         mk = re.match(
-            r"^\s*(?:please\s+)?(?:keep|leave)\s+"
-            r"(?:the\s+|my\s+|that\s+|this\s+)?(?P<k_t>.+?)\s+"
-            r"(?:where\s+it\s+is|as\s+is|alone|be|as\s+they\s+are)"
-            r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
+            r"^\s*(?:(?:please|actually|just|okay)\s+)?"
+            r"(?:keep|leave)\s+"
+            r"(?!me\b|(?:remind|alert|notify|ping|wak|nudg|buzz|"
+            r"beep|text|pag|messag|nagg)ing\b)"
+            r"(?:the\s+|my\s+|that\s+|this\s+)?(?P<k_t>.+?)"
+            r"(?:\s+(?:where\s+it\s+is|as\s+is|alone|be|"
+            r"as\s+they\s+are))?\s*[.!?]?\s*$",
+            plan_text, re.IGNORECASE)
         if mk is not None:
             # 'keep the standup where it is' — a no-op ask; claim
             # it and report the row's real state, never narrate.
@@ -9769,17 +9944,30 @@ class AgentOrchestrator:
             if sched is not None:
                 _kt = self._reminder_terms(re.sub(
                     r"\b(?:the|my|that|this|reminders?|alarms?|"
-                    r"timers?)\b", " ",
+                    r"timers?|is|it)\b", " ",
                     str(mk.group("k_t") or ""),
                     flags=re.IGNORECASE))
-                _kh = [s for s in _k_rows
-                       if _kt and _kt <= self._reminder_hay(s)]
-                if not _kh and _kt:
+                if _kt <= {"it", "that", "this", "them", "one"}:
+                    # 'keep it' — the journal's last-touched row
+                    # is the referent; no journal means the whole
+                    # pool stays as it is.
+                    _klt = self._reminder_last_touched()
+                    _kh = ([_klt] if _klt is not None
+                           else list(_k_rows))
+                else:
                     _kh = [s for s in _k_rows
-                           if self._reminder_terms(
-                               self._reminder_label(s))
-                           and self._reminder_terms(
-                               self._reminder_label(s)) <= _kt]
+                           if _kt and _kt <= self._reminder_hay(s)]
+                    if not _kh and _kt:
+                        _kh = [s for s in _k_rows
+                               if self._reminder_terms(
+                                   self._reminder_label(s))
+                               and self._reminder_terms(
+                                   self._reminder_label(s)) <= _kt]
+                if len(_kh) > 1 and _kt <= {
+                        "it", "that", "this", "them", "one"}:
+                    return self._reminder_finish(
+                        f"Left {len(_kh)} reminders as they are.",
+                        user_text, task_id, event_callback)
                 if len(_kh) == 1:
                     s = _kh[0]
                     return self._reminder_finish(
@@ -9804,7 +9992,9 @@ class AgentOrchestrator:
                         "I don't see a reminder matching "
                         f"“{' '.join(sorted(_kt))}”.",
                         user_text, task_id, event_callback)
-                return None
+                # Not a reminder op after all ('keep the couch') —
+                # fall through to the remaining dispatch rather
+                # than starving the create/generic lanes.
         mr = self._REMINDER_RESCHEDULE_RE.match(plan_text)
         if mr is None:
             mr = self._REMINDER_RESCHEDULE_BARE_RE.match(plan_text)
@@ -10699,7 +10889,8 @@ class AgentOrchestrator:
                                 # must pin-fail, never create a row
                                 # named 'at 5 then again'.
                                 spec_nt = spec_r
-                                nt_task = left
+                                nt_task = self._reminder_task_clean(
+                                    left)
                                 wtxt = right
                                 break
                     if spec_nt is None:
@@ -11406,7 +11597,8 @@ class AgentOrchestrator:
             head_t = re.sub(
                 r"\s+(?:in\s+the|at\s+the|of\s+the|before|after|"
                 r"by|until|till|on|at|for|and|or|to|about|of|in|"
-                r"the|a|an)$", "", head_t, flags=re.IGNORECASE)
+                r"the|a|an|it'?s|it\s+is|its)$", "",
+                head_t, flags=re.IGNORECASE)
             if head_t:
                 cad_txt = re.sub(
                     r"\s+(?:starting|beginning|from)$", "",
@@ -11738,6 +11930,7 @@ class AgentOrchestrator:
                          or self._REMINDER_RESTORE_RE.match(plan_text)
                          or self._REMINDER_SWAP_RE.match(plan_text)
                          or self._REMINDER_COPY_RE.match(plan_text)
+                         or self._REMINDER_MISC_RE.match(plan_text)
                          or self._reminder_inventory_shaped(
                              plan_text)
                          or self._reminder_pending(
