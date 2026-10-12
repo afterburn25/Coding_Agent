@@ -8222,6 +8222,12 @@ class AgentOrchestrator:
             r"\b(?:anything|something)\s+(?:on|ringing|firing|"
             r"going\s+off)\s+(?:right\s+)?(?:now|currently)\b",
             plan_text, re.IGNORECASE))
+        _clk_m = re.search(
+            r"\b(?:fires?|goes?\s+off|hits?|rings?|pops?\s+up|"
+            r"happens?|triggers?|scheduled|set|anything|"
+            r"something)\s+(?:at|for|around)\s+"
+            r"(\d{1,2}(?::\d{2})?(?:\s*[ap]\.?m\.?)?|noon|"
+            r"midnight|midday)\b", plan_text, re.IGNORECASE)
         sched, rows = self._reminder_rows(
             include_disabled=off_ask,
             noun=nm.group(1).lower() if nm else None)
@@ -8427,6 +8433,9 @@ class AgentOrchestrator:
             r"\blast\b.{0,25}\b(?:to\s+fire|to\s+go\s+off|fired|"
             r"rang|went\s+off)\b|\b(?:did|was|were)\b.{0,25}"
             r"\blast\b.{0,25}\b(?:go\s+off|fire|ring|fires)\b|"
+            # 'the last time X went off' — 'time' is padding.
+            r"\blast\s+time\b.{0,25}\b(?:went\s+off|go\s+off|"
+            r"fire|fires|fired|ring|rang)\b|"
             # 'how many reminders fired yesterday' — a fired
             # count over the last_run window, not a row listing.
             r"\bhow\s+(?:many|much)\b.{0,40}\b(?:fired|went\s+off|"
@@ -8435,7 +8444,11 @@ class AgentOrchestrator:
         _last_fired = bool(re.search(
             r"\blast\b.{0,25}\b(?:to\s+fire|to\s+go\s+off|fired|"
             r"rang|went\s+off)\b|\b(?:did|was|were)\b.{0,25}"
-            r"\blast\b.{0,25}\b(?:go\s+off|fire|ring|fires)\b",
+            r"\blast\b.{0,25}\b(?:go\s+off|fire|ring|fires)\b|"
+            # 'the last time X went off' — 'time' is padding;
+            # it's still the last_run ask.
+            r"\blast\s+time\b.{0,25}\b(?:went\s+off|go\s+off|"
+            r"fire|fires|fired|ring|rang)\b",
             plan_text, re.IGNORECASE))
         _set_ask = re.search(
             r"\b(?:first|earliest|last|latest|newest|most\s+"
@@ -8545,6 +8558,16 @@ class AgentOrchestrator:
                     r"your\s+|that\s+|this\s+)?"
                     r"([a-z0-9][a-z0-9'\s-]{0,40}?)"
                     r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
+            if cm is None and _last_fired:
+                # 'when was the last time THE STANDUP went off' —
+                # the name sits between 'time' and the fire verb.
+                cm = re.search(
+                    r"\blast\s+(?:time\s+)?(?:did\s+|was\s+|"
+                    r"were\s+)?(?:the\s+|my\s+|your\s+|that\s+|"
+                    r"this\s+)?([a-z0-9][a-z0-9'\s-]{0,40}?)\s+"
+                    r"(?:(?:go|went)\s+off|fire|fires|fired|"
+                    r"ring|rang|rung)\b",
+                    plan_text, re.IGNORECASE)
             if cm is None and _count_ask:
                 # 'how many more times will THE STANDUP fire' —
                 # the name sits between 'will' and the verb.
@@ -9162,6 +9185,45 @@ class AgentOrchestrator:
                             f"fires {_twt} — nothing "
                             f"{'after' if _after else 'before'} it"
                             f"{' (it fires last)' if _after else ' (it fires first)'}.")
+        elif _clk_m is not None:
+            # 'what reminder fires at 9:30' / 'does anything fire
+            # at noon' — a clock-existential ask; the row whose
+            # cadence/next-fire clock matches is the answer.
+            _cw = str(_clk_m.group(1)).strip()
+            _cs = (self._reminder_spec("at " + _cw, now)
+                   or self._reminder_spec(_cw, now))
+            _asked = None
+            if _cs is not None and _cs.get("at"):
+                _cl = time.localtime(float(_cs["at"]))
+                _asked = (_cl.tm_hour, _cl.tm_min)
+            elif _cs is not None and _cs.get("hour") is not None:
+                _asked = (int(_cs["hour"]),
+                          int(_cs.get("minute") or 0))
+            # A bare hour ('at 9am') scopes the whole clock
+            # hour — 09:30 counts; 'at 9:30' is exact.
+            _exact = ":" in _cw
+            _clk_rows = ([
+                s for s in rows
+                if self._reminder_clock(s)
+                and (self._reminder_clock(s) == _asked
+                     if _exact else
+                     self._reminder_clock(s)[0] == _asked[0])]
+                if _asked else [])
+            if _clk_rows:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in _clk_rows[:5])
+                text = (f"{names} "
+                        f"{'fires' if len(_clk_rows) == 1 else 'fire'}"
+                        f" at {_cw}.")
+            else:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}” "
+                    f"({self._reminder_when_text(s, now)})"
+                    for s in rows[:4])
+                text = (f"No reminder fires at {_cw}"
+                        + (f" — you've got: {names}."
+                           if rows else "."))
         elif scope_terms or day_dates:
             hits = [s for s in rows
                     if (not scope_terms
@@ -9501,6 +9563,13 @@ class AgentOrchestrator:
         plan_text = re.sub(
             r"\b(remind|alert|notify|ping|wake)\s+me\s+again\b",
             r"\1 me", plan_text, flags=re.IGNORECASE)
+        # 'i want to be reminded to call mom at 5pm' — the
+        # passive lead is the create ask; the same normalization
+        # the shaped-check runs, applied to plan_text itself.
+        plan_text = re.sub(
+            r"\bi\s+(?:want|need|wanna|would\s+like|'?d\s+like)"
+            r"\s+to\s+be\s+reminded\b|\bto\s+be\s+reminded\b",
+            "remind me", plan_text, flags=re.IGNORECASE)
         # 'repeat the standup reminder' — noun-anchored re-arm ask;
         # normalize onto the create grammar so a real row or an
         # honest clarify comes back. 'repeat the command' declines.

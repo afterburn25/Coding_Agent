@@ -3319,6 +3319,40 @@ class TruthGateTests(RecoveryLoopTests):
             any("dentist" in s["name"]
                 for s in sup.scheduler.rows))
 
+        # 'the last time X went off' — 'time' is padding; it's
+        # the last_run ask, never a 'standup time went' scope.
+        sup.scheduler.rows[0]["last_run"] = time.time() - 3600
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            last_run=time.time() - 90,
+            action={"kind": "notify", "detail": "standup"})
+        r = agent._reminder_reply(
+            "when was the last time the standup went off",
+            "when was the last time the standup went off",
+            task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("standup", r.content)
+        self.assertIn("fired", r.content)
+        # Clock-existential asks — 'fires at 9:30' names the row;
+        # a bare hour scopes the whole clock hour ('9am' covers
+        # 09:30), and a miss names the real pool.
+        r = agent._reminder_reply(
+            "what reminder fires at 9:30",
+            "what reminder fires at 9:30", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("standup", r.content)
+        r = agent._reminder_reply(
+            "does anything fire at noon",
+            "does anything fire at noon", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("no reminder", r.content.lower())
+        # 'i want to be reminded' — the passive create lead.
+        r = agent._reminder_reply(
+            "i want to be reminded to call mom at 5pm",
+            "i want to be reminded to call mom at 5pm", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("call mom", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
