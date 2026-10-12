@@ -3170,6 +3170,31 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertTrue(sup.scheduler.rows)
             sup.scheduler.rows.clear()
 
+            # 'cancel everything except X' — the tail was treated
+            # as a topic ('I don't see a reminder matching
+            # "except pay rent"'). The except-clause is exclusion
+            # scope: cancel every other row.
+            sup.scheduler.add(
+                'Reminder: pay rent', 'once',
+                at=time.time() + 86400)
+            sup.scheduler.add(
+                'Reminder: call mom', 'once',
+                at=time.time() + 86400)
+            r = agent._reminder_reply(
+                "cancel everything except pay rent",
+                "cancel everything except pay rent", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("call mom", r.content)
+            self.assertEqual(
+                [s["name"] for s in sup.scheduler.rows],
+                ["Reminder: pay rent"])
+            # Excluding the only row names the dead end honestly.
+            r = agent._reminder_reply(
+                "cancel everything except pay rent",
+                "cancel everything except pay rent", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("nothing else", r.content)
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

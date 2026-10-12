@@ -4564,6 +4564,19 @@ class AgentOrchestrator:
             in ("them", "everything", "all"))
         topic_src = (mc.groupdict().get("ctime") or mc.group("tail")
                      or mc.groupdict().get("tail2") or body)
+        # 'cancel everything except pay rent' — the tail after
+        # 'except' is an exclusion scope, not the match topic.
+        excl_terms = set()
+        exm = re.search(
+            r"\b(?:except|other\s+than|besides|but(?:\s+not)?)"
+            r"\s+(?:the\s+|my\s+|that\s+|those\s+|these\s+)?(.+)$",
+            topic_src, re.IGNORECASE)
+        if exm is not None:
+            excl_terms = self._reminder_terms(exm.group(1)) - {
+                "one", "ones", "reminder", "reminders", "alarm",
+                "alarms", "timer", "timers", "thing", "things"}
+            topic_src = topic_src[:exm.start()]
+            all_flag = True
         topic_src = re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
             r"them|it|this|those|these|everything)\b",
@@ -4585,7 +4598,10 @@ class AgentOrchestrator:
         # a topic term; it picks the soonest-firing hit.
         want_next = "next" in topic_terms
         topic_terms.discard("next")
-        hits = [s for s in rows if _matches(s)]
+        hits = [
+            s for s in rows
+            if _matches(s) and not (
+                excl_terms and excl_terms <= self._reminder_hay(s))]
         if want_next and hits:
             def _fire(s):
                 try:
@@ -4597,6 +4613,9 @@ class AgentOrchestrator:
         if not rows:
             text = self._reminder_none_text(
                 sched, mc.group("noun"))
+        elif not hits and excl_terms:
+            text = ("That's all of them — nothing else to "
+                    "cancel.")
         elif not hits:
             names = "; ".join(
                 f"“{self._reminder_label(s)}”" for s in rows[:3])
