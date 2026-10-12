@@ -4800,6 +4800,11 @@ class AgentOrchestrator:
         r"(?:the|that|this)\s+one\s+(?:at|for|on)\s+"
         r"(?:\d|noon\b|midnight\b)|"
         r"(?:the|that|this)\s+\d[\d:]*\s*(?:am|pm)?\s+one\b|"
+        # 'the standup can go' — a dismissive cancel idiom; the
+        # lane normalizes it onto the cancel grammar and claims
+        # only on a row hit.
+        r"(?:the|my|that|this)\s+[\w'-]+(?:\s+[\w'-]+){0,3}\s+"
+        r"can\s+go\b(?:\s+now)?|"
         r"(?:change|update|edit|set|rename)\s+"
         r"(?:[\w'-]+\s+){0,3}?'s\s+name\b|"
         r"(?:change|update|edit|set|rename)\s+"
@@ -4866,6 +4871,11 @@ class AgentOrchestrator:
         r"\bwhat\s+did\s+i\s+(?:set|make|create|add|schedule)\s+"
         r"(?:first|earliest|last|latest|newest|most\s+"
         r"recent(?:ly)?|oldest|recently)\b|"
+        # 'did i set anything for tonight' — a scoped set ask
+        # with no schedule noun; the 'for' tail is a fire
+        # window, not a creation day.
+        r"\bdid\s+i\s+(?:set|make|create|add|schedule|put|book)"
+        r"\s+(?:anything|something|any|a|an|the)\b|"
         r"\b(?:which|what)\s+(?:was|is)\s+the\s+(?:oldest|newest|"
         r"first|last|latest|earliest)\s+(?:one|reminders?|"
         r"alarms?|timers?)\s+i\s+(?:set|made|created|added|"
@@ -7515,6 +7525,14 @@ class AgentOrchestrator:
         topic_src = (mc.groupdict().get("ctime")
                      or mc.groupdict().get("tail")
                      or mc.groupdict().get("tail2") or body)
+        if (topic_src and topic_src != body
+                and not self._reminder_terms(re.sub(
+                    r"\b(?:anymore|any\s+more|any\s+longer|"
+                    r"at\s+all)\b", " ", topic_src,
+                    flags=re.IGNORECASE))):
+            # 'i don't need the pills reminder anymore' — tail2
+            # caught pure emphasis; the real scope is the body.
+            topic_src = body
         _just_made = bool(re.search(
             r"\bi\s+(?:just|recently|lately)\s+"
             r"(?:set|made|created|scheduled|booked|put|"
@@ -7611,7 +7629,8 @@ class AgentOrchestrator:
             " ", topic_src, flags=re.IGNORECASE)
         topic_src = re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
-            r"them|it|this|those|these|everything|one|ones)\b",
+            r"them|it|this|those|these|everything|one|ones|"
+            r"anymore|any\s+more|any\s+longer|at\s+all)\b",
             " ", topic_src, flags=re.IGNORECASE)
         topic_terms = self._reminder_terms(topic_src)
         skip_verb = bool(re.match(
@@ -8620,8 +8639,21 @@ class AgentOrchestrator:
             r"\bi\s+(?:set|made|created|added|scheduled)\b"
             r"(.{0,40})$", plan_text, re.IGNORECASE)
         if _made_tail is not None:
-            _created_dates, _created_label = (
-                self._reminder_created_scope(_made_tail.group(1)))
+            # 'did i set anything FOR tonight' — the 'for' names
+            # the fire window; only the pre-for words could be a
+            # creation day. No day there → the ask is fire-scoped.
+            _mt_for = re.search(r"\bfor\s+",
+                                _made_tail.group(1), re.IGNORECASE)
+            if _mt_for is not None:
+                _created_dates, _created_label = (
+                    self._reminder_created_scope(
+                        _made_tail.group(1)[:_mt_for.start()]))
+                if _created_dates is None:
+                    _made_tail = None
+            else:
+                _created_dates, _created_label = (
+                    self._reminder_created_scope(
+                        _made_tail.group(1)))
         if _created_dates:
             day_dates, day_label = None, None
             scope_terms -= {
@@ -10126,6 +10158,13 @@ class AgentOrchestrator:
             r"(?:please\s+)?)put\s+((?:the|my|that|this|those|"
             r"these)\s+[\w'\s-]{1,40}?)\s+on\s+snooze\b",
             r"\1snooze \2", plan_text, flags=re.IGNORECASE)
+        # 'the standup can go' — a dismissive cancel; normalize
+        # onto the cancel grammar so the row resolves or the
+        # honest miss names what it couldn't find.
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)((?:the|my|that|this)\s+"
+            r"[\w'\s-]{1,40}?)\s+can\s+go\b(?:\s+now)?",
+            r"\1cancel \2", plan_text, flags=re.IGNORECASE)
         if re.search(
                 r"\band\s+(?:cancel|delete|remove|snooze|pause|"
                 r"reschedule|disable|mute|silence|block|clear|"

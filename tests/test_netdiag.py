@@ -3710,6 +3710,12 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("weekend", r.content)
             self.assertNotIn("about “this”", r.content)
+            # 'did i set anything FOR tonight' — the 'for' names
+            # the fire window, not the creation day.
+            r = agent._local_action_reply(
+                "did i set anything for tonight", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("for today", r.content)
 
             # 'the Nth reminder i made' — the ordinal ranks
             # created_at inside the fragment lane.
@@ -3775,6 +3781,24 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(
                 [r2["name"] for r2 in sup.scheduler.rows],
                 ["reminder: brew", "reminder: wake"])
+
+            # 'i don't need X anymore' — 'anymore' is emphasis,
+            # never the topic; tail2 gives the body back.
+            r = agent._local_action_reply(
+                "i don't need the brew reminder anymore", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            # 'the X can go' — a dismissive cancel on a real row;
+            # an unresolvable name misses honestly.
+            r = agent._local_action_reply(
+                "the wake can go", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            self.assertEqual(sup.scheduler.rows, [])
+            r = agent._local_action_reply(
+                "the garbage can go", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("reminders set", r.content)
 
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
