@@ -2855,6 +2855,42 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertTrue(sup.scheduler.rows)
             sup.scheduler.rows.clear()
 
+            # 'in an hour or so' — the 'or so' tail broke the
+            # duration fullmatch into a pin-fail.
+            result = agent.run(
+                "remind me in an hour or so to check",
+                mode="auto")
+            self.assertIn("check", result.content)
+            self.assertTrue(sup.scheduler.rows)
+            sup.scheduler.rows.clear()
+
+            # 'start a timer' — 'start' wasn't a DECL lead; it
+            # fell to the app-launch lane ('needs approval').
+            result = agent.run("start a timer for 10 minutes",
+                               mode="auto")
+            self.assertIn("Timer set", result.content)
+            self.assertTrue(sup.scheduler.rows)
+
+            # 'how much time left on my timer' — countdown
+            # phrasing without 'next' skipped the soonest
+            # answer; the model claimed no timer over a live row.
+            result = agent.run(
+                "how much time is left on my timer",
+                mode="auto")
+            self.assertIn("timer", result.content.lower())
+            self.assertIn("in ", result.content)
+
+            # 'at 6 tomorrow morning to get up' — the connector
+            # tail kept 'to get up' inside the when; the 'to'
+            # split now resolves clock vs task.
+            result = agent.run(
+                "i'll need a reminder at 6 tomorrow morning to "
+                "get up", mode="auto")
+            self.assertIn("get up", result.content)
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(time.localtime(row["at"]).tm_hour, 6)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

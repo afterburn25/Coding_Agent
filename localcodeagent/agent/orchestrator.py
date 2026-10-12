@@ -3643,7 +3643,7 @@ class AgentOrchestrator:
         r"(?:i\s+(?:want|need|wanna|'?d\s+like|would\s+like|could\s+use)"
         r"|i'?ll\s+(?:need|want)|can\s+i\s+(?:get|have)"
         r"|(?:give|get|make|set\s+up)\s+me|gimme"
-        r"|set|make|create|add|schedule)\s+"
+        r"|set|make|create|add|schedule|start|begin)\s+"
         r"(?:a\s+|an\s+|me\s+a\s+)?"
         r"(?:(?P<dur>\d[\w\s]*?(?:seconds?|secs?|minutes?|mins?|"
         r"hours?|hrs?|days?|weeks?))\s+)?"
@@ -4600,8 +4600,8 @@ class AgentOrchestrator:
             self._SCHEDULE_INVENTORY_RE.search(text)
             and re.search(
                 r"\b(?:what|which|any|anything|how\s+many|"
-                r"how\s+long|how\s+soon|time\s+(?:left|until|"
-                r"till)|list|"
+                r"how\s+much|how\s+long|how\s+soon|"
+                r"time\s+(?:left|until|till)|left|list|"
                 r"show|do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
                 r"are\s+there|got|active|pending|upcoming|when|"
                 r"tell\s+me|run\s+through|go\s+through|"
@@ -4679,12 +4679,16 @@ class AgentOrchestrator:
                     " ", tm.group(1), flags=re.IGNORECASE))
         when_ask = bool(re.match(
             r"\s*(?:when|what\s+time)\b", plan_text, re.IGNORECASE))
-        if (re.search(
+        countdown_ask = bool(re.search(
+            r"\bhow\s+(?:long|soon|much\s+time)\b|\btime\s+"
+            r"(?:is\s+)?(?:left|remaining|until|till)\b|"
+            r"\bleft\s+on\b", plan_text, re.IGNORECASE))
+        if ((re.search(
                 r"\bnext\b(?!\s+(?:week|weeks|month|months|year|"
                 r"years|day|days|hour|hours|minute|minutes|monday|"
                 r"tuesday|wednesday|thursday|friday|saturday|sunday|"
                 r"few|couple|one|time))",
-                plan_text, re.IGNORECASE) and rows):
+                plan_text, re.IGNORECASE) or countdown_ask) and rows):
             # 'when does my next reminder fire' — ordinal, not a
             # scope term; pick the soonest-firing row like the
             # cancel lane does. ('next week' stays a time scope.)
@@ -4692,9 +4696,7 @@ class AgentOrchestrator:
                 s.get("next_run") or s.get("at") or 1e18))
             fire = float(soonest.get("next_run")
                          or soonest.get("at") or 0)
-            if re.search(
-                    r"\bhow\s+(?:long|soon)\b|time\s+(?:left|"
-                    r"until|till)\b", plan_text, re.IGNORECASE):
+            if countdown_ask:
                 # 'how long until my next reminder' — answer the
                 # duration; the model guessed 'in 4 hours' when the
                 # row was 4 days out.
@@ -4986,6 +4988,23 @@ class AgentOrchestrator:
                 # duration, not a clock.
                 spec = self._reminder_spec("in " + when_d,
                                            time.time())
+            if spec is None and when_d:
+                # 'a reminder at 6 tomorrow morning to get up' —
+                # the connector tail swallows the task; split at
+                # the last 'to' whose left side parses as a time.
+                for mm in reversed(list(re.finditer(
+                        r"\s+to\s+", when_d))):
+                    left = when_d[:mm.start()].strip(" ,;—-")
+                    right = re.sub(r"^to\s+", "",
+                                   when_d[mm.start():].strip(),
+                                   flags=re.IGNORECASE)
+                    spec_l = (self._reminder_spec(left, time.time())
+                              or self._reminder_spec("at " + left,
+                                                     time.time()))
+                    if left and right and spec_l is not None:
+                        when_d, task_d = left, right or task_d
+                        spec = spec_l
+                        break
             if sched is None:
                 return self._reminder_finish(
                     "I can't set reminders — the scheduler isn't "

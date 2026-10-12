@@ -188,7 +188,7 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
         r"half\s+an?)\s*"
         r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
-        r"days?|d|weeks?|w|months?)", t)
+        r"days?|d|weeks?|w|months?)(?:\s+or\s+so)?", t)
     if m:
         n_raw = m.group(1)
         n = (0.5 if n_raw.startswith("half") else
@@ -351,7 +351,8 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     # 'at 5 tomorrow evening' — the trailing daypart supplies
     # the meridiem for a bare hour.
     m = re.fullmatch(
-        r"at\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?"
+        r"(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*"
+        r"(a\.?m\.?|p\.?m\.?|am|pm)?"
         r"\s+(tomorrow|tonight|today|\w+day)\s+"
         r"(morning|afternoon|evening|night)", t)
     if m:
