@@ -4273,9 +4273,13 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:are|is)\s+(?:(?:my|the|your|that|this|all|any|"
         r"those|these)\s+)?[a-z0-9][a-z0-9'\s-]{0,40}?\s+"
-        r"(?:(?:still\s+)(?:set|scheduled|booked)|"
-        r"on|off|paused|muted|enabled|disabled|active|"
-        r"inactive)\b" + _REMINDER_TRAIL,
+        r"(?:(?:still\s+)?(?:on|off|paused|muted|enabled|"
+        r"disabled|active|inactive)|still\s+(?:set|scheduled|"
+        r"booked))\b"
+        # 'still on for tomorrow' — a day-scope tail after the
+        # state word is still a state ask.
+        r"(?:\s+(?:for|on|until|till|til|through)\s+"
+        r"[a-z0-9'\s]{0,20})?" + _REMINDER_TRAIL,
         re.IGNORECASE)
     # Clock-confirm asks — 'is my alarm set for 6'. The topic and
     # the asked clock both resolve against persisted rows: a hit
@@ -4316,7 +4320,7 @@ class AgentOrchestrator:
     # still reaches non-reminder owners.
     _REMINDER_WHATDID_RE = re.compile(
         _REMINDER_POLITE +
-        r"what\s+(?:did|have)\s+you\s+(?:just\s+)?"
+        r"what\s+(?:did|have)\s+(?:you|i)\s+(?:just\s+)?"
         r"(?:do(?:ne)?|change[ds]?|updat(?:e|ed)|edit(?:ed)?|move[ds]?|"
         r"schedule[ds]?|re-?schedule[ds]?|set|cancel(?:led|ed)?|"
         r"delete[ds]?|remove[ds]?|turn(?:ed)?\s+(?:off|on)|"
@@ -8444,12 +8448,16 @@ class AgentOrchestrator:
         # matches; 'is the server off' still belongs elsewhere.
         nounless_state = bool(
             re.search(
-                r"\b(?:is|are)\s+(?:the\s+|my\s+|your\s+|that\s+|"
+                r"\b(?:is|are)\s+(?!(?:the\s+|my\s+|your\s+|"
+                r"that\s+|this\s+)?(?:anything|everything|"
+                r"something|nothing|what)\b)"
+                r"(?:the\s+|my\s+|your\s+|that\s+|"
                 r"this\s+)?[a-z0-9][a-z0-9'\s-]{0,40}?\s+"
                 r"(?:on|off|paused|muted|enabled|disabled|active|"
                 r"inactive|still\s+on|still\s+off|still\s+set|"
                 r"still\s+scheduled|still\s+booked)"
-                r"\s*[.!?]?\s*$",
+                r"(?:\s+(?:for|on|until|till|til|through)\s+"
+                r"[a-z0-9'\s]{0,20})?\s*[.!?]?\s*$",
                 plan_text, re.IGNORECASE)
             and not re.search(
                 r"\b(?:reminders?|alarms?|timers?|schedules?)\b",
@@ -8752,14 +8760,22 @@ class AgentOrchestrator:
                             "minutes to …” and I'll schedule it.")
             elif len(hits) == 1:
                 s = hits[0]
-                if s.get("enabled"):
-                    text = (f"Yes — “{self._reminder_label(s)}” "
-                            f"is on "
+                # 'is the standup off' over an enabled row — the
+                # honest answer is 'No, it's on', never 'Yes'.
+                _asked_off = bool(re.search(
+                    r"\b(?:off|disabled|paused|muted|inactive|"
+                    r"down)\b", plan_text, re.IGNORECASE))
+                on = bool(s.get("enabled"))
+                if on:
+                    text = (f"{'No' if _asked_off else 'Yes'} — "
+                            f"“{self._reminder_label(s)}” is on "
                             f"({self._reminder_when_text(s, now)}).")
                 else:
-                    text = (f"“{self._reminder_label(s)}” is off "
-                            "— say “turn on the reminder” "
-                            "to enable it.")
+                    text = (
+                        f"{'Yes' if _asked_off else 'No'} — "
+                        f"“{self._reminder_label(s)}” is off "
+                        "— say “turn on the reminder” "
+                        "to enable it.")
             else:
                 on_ct = sum(1 for s in hits if s.get("enabled"))
                 bits = "; ".join(
@@ -11375,7 +11391,9 @@ class AgentOrchestrator:
             r"seven|eight|nine|ten|couple|few|other|second|third|"
             r"fourth|\d+(?:\.\d+)?)\s+)?(?:seconds?|secs?|minutes?|"
             r"mins?|hours?|hrs?|days?|weeks?|fortnights?|months?|"
-            r"years?)|(?:once|twice|thrice|(?:two|three|four|"
+            r"years?|mondays?|tuesdays?|wednesdays?|thursdays?|"
+            r"fridays?|saturdays?|sundays?|weekdays?|weekends?)|"
+            r"(?:once|twice|thrice|(?:two|three|four|"
             r"five|six|\d+)\s+times?)\s+(?:a\s+|per\s+)?"
             r"(?:day|week|month|year|daily|weekly|monthly|"
             r"yearly)|mornings?\s+and\s+evenings?)"

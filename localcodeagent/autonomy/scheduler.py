@@ -1080,6 +1080,27 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                     r"bi\s*-?\s*weekly|semi\s*-?\s*weekly|"
                     r"every\s+(?:other|second|two|2)\s+weeks?", t):
         return {"kind": "interval", "interval_s": 1209600.0}
+    # 'every other friday' — a fortnight anchored to that weekday;
+    # 'every 2 weeks on friday' the same with an explicit count.
+    m = re.fullmatch(
+        r"every\s+(?:(other)|(\d+|two|three|four|couple|few)\s+"
+        r"weeks?\s+on)\s*(\w+day)s?" + clock_tail, t)
+    if m:
+        wd = _WEEKDAY_NAMES.get(m.group(3))
+        if wd is None:
+            return None
+        hr, mn, mer = m.group(4), m.group(5), m.group(6)
+        hour = _meridian(int(hr), mer) if hr else 9
+        n_w = (2 if m.group(1)
+               else {"two": 2, "couple": 2, "three": 3,
+                     "four": 4, "few": 3}.get(
+                         m.group(2) or "2")
+               or int(m.group(2)))
+        return {"kind": "interval",
+                "interval_s": n_w * 604800.0,
+                "at": _next_daily(hour, int(mn or 0),
+                                  weekday=wd, after=now),
+                "hour": hour, "minute": int(mn or 0)}
     # 'annual' / 'quarterly' / 'biannual' — fixed-span intervals
     # (the model fake-set 'annual reminder for taxes' over zero
     # rows).

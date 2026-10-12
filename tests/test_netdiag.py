@@ -3417,6 +3417,50 @@ class TruthGateTests(RecoveryLoopTests):
             any("wake up" in s["name"]
                 for s in sup.scheduler.rows))
 
+        # 'every other friday' — a fortnight interval anchored to
+        # the next Friday, not a narrated 'every other week'.
+        r = agent._reminder_reply(
+            "remind me to call mom every other friday at 3pm",
+            "remind me to call mom every other friday at 3pm",
+            task.id)
+        self.assertIsNotNone(r)
+        fr_row = next(s for s in sup.scheduler.rows
+                      if "call mom" in s["name"])
+        self.assertEqual(fr_row["kind"], "interval")
+        self.assertEqual(fr_row["interval_s"], 1209600.0)
+        self.assertEqual(
+            time.localtime(fr_row["at"]).tm_wday, 4)
+        self.assertEqual(
+            time.localtime(fr_row["at"]).tm_hour, 15)
+        # 'what did i just do' — first-person journal read.
+        r = agent._reminder_reply(
+            "what did i just do", "what did i just do", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("call mom", r.content)
+        # 'is X still on for tomorrow' — a day-scoped state ask
+        # answers the enabled flag, never the listing shape.
+        r = agent._reminder_reply(
+            "is the standup still on for tomorrow",
+            "is the standup still on for tomorrow", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("on", r.content)
+        # Polarity — 'is X off' over an enabled row says 'No'.
+        r = agent._reminder_reply(
+            "is the standup off", "is the standup off", task.id)
+        self.assertIsNotNone(r)
+        self.assertTrue(r.content.startswith("No"))
+        self.assertIn("is on", r.content)
+        _su_rows = [s for s in sup.scheduler.rows
+                    if "standup" in s["name"]]
+        for _su in _su_rows:
+            _su["enabled"] = False
+        r = agent._reminder_reply(
+            "is the standup off", "is the standup off", task.id)
+        self.assertIsNotNone(r)
+        self.assertTrue(r.content.startswith("Yes"))
+        for _su in _su_rows:
+            _su["enabled"] = True
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
