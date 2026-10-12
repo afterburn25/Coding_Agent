@@ -3032,8 +3032,12 @@ class AgentOrchestrator:
                 return None
         # Reminder inventory — "what reminders do i have" asks the
         # scheduler, not conversational facts; a memory recall can only
-        # term-match the word 'reminders' against trivia.
-        if self._reminder_inventory_shaped(match_text):
+        # term-match the word 'reminders' against trivia. The lead
+        # regex covers the past-fire/'did i disable' inventory asks
+        # the shaped probe can't see ('did my stretch reminder go
+        # off' term-matched 'stretch' into a memory miss live).
+        if (self._reminder_inventory_shaped(match_text)
+                or self._REMINDER_INV_LEAD_RE.match(match_text)):
             out = self._reminder_inventory_reply(user_text, match_text)
             if out is not None:
                 return out
@@ -5781,8 +5785,21 @@ class AgentOrchestrator:
                         + (f" for {day_label}" if day_dates else "")
                         + f": {bits}.")
         elif not rows:
-            text = ("No reminders set — say “remind me in 10 minutes "
-                    "to …” and I'll schedule it.")
+            # All-disabled pool — 'what reminders do i have' over
+            # one off row isn't 'no reminders set'.
+            _, off_rows = self._reminder_rows(
+                include_disabled=True,
+                noun=nm.group(1).lower() if nm else None)
+            if off_rows:
+                bits = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in off_rows[:3])
+                text = (f"Nothing's on — {len(off_rows)} reminder"
+                        f"{'s are' if len(off_rows) != 1 else ' is'}"
+                        f" off: {bits}.")
+            else:
+                text = ("No reminders set — say “remind me in 10 "
+                        "minutes to …” and I'll schedule it.")
         else:
             bits = "; ".join(
                 f"“{self._reminder_label(s)}” "
