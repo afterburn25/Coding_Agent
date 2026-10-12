@@ -5294,7 +5294,12 @@ class AppState:
             # 'set a timer for 5 minutes' — the duration is the
             # whole ask; 'in <dur>' reads it as a countdown, 'at T'
             # covers a bare clock ('alarm for 7am' → body '7am').
-            for prefix in ("in ", "at ", ""):
+            # A bare number is the clock, never 'in 7' minutes.
+            prefixes = (("in ", "at ", "")
+                        if not re.fullmatch(r"\d+(?:\.\d+)?",
+                                            body.strip())
+                        else ("at ", "", "in "))
+            for prefix in prefixes:
                 spec, _ = self._parse_reminder_time(
                     prefix + body, time.time())
                 if spec is not None:

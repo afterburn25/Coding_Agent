@@ -362,6 +362,13 @@ def parse_reminder_when(when: str, now: float) -> float | None:
                  "d": 86400, "day": 86400, "w": 604800,
                  "week": 604800}[unit]
         return now + n * scale
+    # 'in 15' / 'in about 20' — a bare number counts down minutes;
+    # 'in 2015' (4+ digits) is not a delay.
+    m = re.fullmatch(
+        r"in\s+(?:(?:about|around|roughly|like)\s+)?"
+        r"(\d{1,3}(?:\.\d+)?)", t)
+    if m:
+        return now + float(m.group(1)) * 60
     # 'in a bit' / 'in a moment' / 'in a while' — vague small
     # delays; pin conventional spans rather than narrate.
     m = re.fullmatch(

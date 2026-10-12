@@ -1970,6 +1970,25 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("remind me in a bit about the deploy",
                                mode="auto")
             self.assertIn("deploy", result.content)
+
+            # 'in 15' — a bare number counts down minutes; 'in
+            # 2015' is not a delay.
+            self.assertIsNotNone(
+                agent._reminder_spec("in 15", time.time()))
+            self.assertIsNone(
+                agent._reminder_spec("in 2015", time.time()))
+            # 'about the meeting in 15' — the when slot held a
+            # trailing 'in <dur>'; the left is the task. Fell to a
+            # pin-fail before the in-boundary retry.
+            n0 = len(sup.scheduler.rows)
+            result = agent.run("remind me about the meeting in 15",
+                               mode="auto")
+            self.assertIn("meeting", result.content)
+            self.assertGreater(len(sup.scheduler.rows), n0)
+            # 'another reminder for 4' — 'for 4' is still a bare
+            # clock, never 'in 4' minutes.
+            result = agent.run("another reminder for 4", mode="auto")
+            self.assertIn("do what at 4", result.content)
             # 'wake me up early tomorrow' — the NOTASK when parsed
             # ('early tomorrow') but spec failed → the model answered
             # 'just say “set wake-up for 6am”' instead of asking.

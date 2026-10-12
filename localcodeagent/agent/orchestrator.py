@@ -5066,10 +5066,13 @@ class AgentOrchestrator:
                     # number is minutes, never the 10:00 clock the
                     # 'at' fallback reached for first.
                     when_d = "in " + rest + " minutes"
-                elif self._reminder_spec("in " + rest,
-                                         now_d) is not None:
+                elif (self._reminder_spec("in " + rest,
+                                          now_d) is not None
+                      and not re.fullmatch(
+                          r"\d+(?:\.\d+)?", rest)):
                     # 'a timer for 5 minutes' — 'for' leads a
-                    # duration, not a task.
+                    # duration, not a task. A bare number is the
+                    # clock ('reminder for 4'), never 'in 4'.
                     when_d = "in " + rest
                 elif self._reminder_spec("at " + rest,
                                          now_d) is not None:
@@ -5189,6 +5192,20 @@ class AgentOrchestrator:
                                                  time.time()))
                 if spec_j is not None:
                     when_d, task_d, spec = joined, "", spec_j
+            if spec is None and when_d and not task_d:
+                # 'about the meeting in 15' — the when slot held a
+                # trailing 'in <dur>'; its left side is the task.
+                for mm in reversed(list(re.finditer(
+                        r"\s+in\s+", when_d, re.IGNORECASE))):
+                    right = "in " + when_d[mm.end():].strip()
+                    left = re.sub(
+                        r"^(?:about|of|that|to)\s+", "",
+                        when_d[:mm.start()].strip(" ,;—-"),
+                        flags=re.IGNORECASE)
+                    spec_r = self._reminder_spec(right, time.time())
+                    if left and spec_r is not None:
+                        when_d, task_d, spec = right, left, spec_r
+                        break
             end_note = ""
             if spec is None and cand:
                 # 'every hour until 10pm' — the end bound made the
@@ -5331,6 +5348,7 @@ class AgentOrchestrator:
                 f"When should I remind you to {task2}? — e.g. "
                 "“in 10 minutes”, “at 3pm”, “tomorrow at 9”.",
                 user_text, task_id, event_callback)
+        forced_when = forced_task = None
         m = self._REMINDER_RE.match(plan_text)
         if m is None:
             m = self._REMINDER_LEAD_CADENCE_RE.match(plan_text)
@@ -5364,13 +5382,31 @@ class AgentOrchestrator:
                     wtxt = "in " + wtxt
                     spec_lw = self._reminder_spec(wtxt, time.time())
                 if spec_lw is None:
+                    # 'about the meeting in 15' — the when slot
+                    # held a trailing 'in <dur>'; the left side is
+                    # the task.
+                    for mm in reversed(list(re.finditer(
+                            r"\s+in\s+", wtxt, re.IGNORECASE))):
+                        right = "in " + wtxt[mm.end():].strip()
+                        left = re.sub(
+                            r"^(?:about|of|that|to)\s+", "",
+                            wtxt[:mm.start()].strip(" ,;—-"),
+                            flags=re.IGNORECASE)
+                        spec_r = self._reminder_spec(
+                            right, time.time())
+                        if left and spec_r is not None:
+                            spec_lw = spec_r
+                            forced_task, forced_when = left, right
+                            wtxt = right
+                            break
+                if spec_lw is None:
                     if self._REMINDER_TIMEISH_RE.search(wtxt):
                         return self._reminder_finish(
                             f"I couldn't pin a time from “{wtxt}” "
                             "— say “at 6am”, “in 30 minutes”, or "
                             "“tomorrow at 9”.",
                             user_text, task_id, event_callback)
-                elif not str(
+                elif forced_task is None and not str(
                         mlw.groupdict().get("task") or "").strip():
                     _selfverb = re.search(
                         r"\b(wake|waking|nudge|nudging|nag|nagging|"
@@ -5429,7 +5465,6 @@ class AgentOrchestrator:
                     m = mlw
         clarify = None
         end_note = ""
-        forced_when = forced_task = None
         if m is None:
             m2 = self._REMINDER_CLARIFY_RE.match(plan_text)
             if m2 is None:
@@ -5467,6 +5502,56 @@ class AgentOrchestrator:
                             "“remind me in 10 minutes to stretch”.",
                             user_text, task_id, event_callback)
                     spec_nt = self._reminder_spec(wtxt, time.time())
+                    nt_task = ""
+                    if spec_nt is None:
+                        # 'about the meeting in 15' — the when tail
+                        # held a trailing 'in <dur>'; its left side
+                        # is the task.
+                        for mm in reversed(list(re.finditer(
+                                r"\s+in\s+", wtxt, re.IGNORECASE))):
+                            right = "in " + wtxt[mm.end():].strip()
+                            left = re.sub(
+                                r"^(?:about|of|that|to)\s+", "",
+                                wtxt[:mm.start()].strip(" ,;—-"),
+                                flags=re.IGNORECASE)
+                            spec_r = self._reminder_spec(
+                                right, time.time())
+                            if left and spec_r is not None:
+                                spec_nt = spec_r
+                                nt_task = left
+                                wtxt = right
+                                break
+                    if spec_nt is not None and nt_task:
+                        sup = (self._autonomy() if callable(
+                            self._autonomy) else self._autonomy)
+                        sched = getattr(sup, "scheduler", None)
+                        if sched is None:
+                            return self._reminder_finish(
+                                "I can't set reminders — the "
+                                "scheduler isn't running in this "
+                                "session.",
+                                user_text, task_id, event_callback)
+                        try:
+                            fields = {k: v for k, v in
+                                      spec_nt.items()
+                                      if k != "kind"}
+                            sched.add(
+                                f"reminder: {nt_task}",
+                                spec_nt["kind"],
+                                action={"kind": "notify",
+                                        "title": "Reminder",
+                                        "detail": nt_task},
+                                created_by="user", **fields)
+                        except Exception as exc:
+                            return self._reminder_finish(
+                                f"I couldn't set the reminder "
+                                f"({exc}).",
+                                user_text, task_id, event_callback)
+                        return self._reminder_finish(
+                            "Reminder set "
+                            + self._reminder_spec_text(
+                                spec_nt, nt_task) + end_note,
+                            user_text, task_id, event_callback)
                     if spec_nt is None:
                         # 'every hour until 10pm' — strip the end
                         # bound; the base cadence still resolves.
