@@ -7528,19 +7528,33 @@ class AgentOrchestrator:
                     spec_nt = self._reminder_spec(wtxt, time.time())
                     nt_task = ""
                     if spec_nt is None:
-                        # 'about the meeting in 15' — the when tail
-                        # held a trailing 'in <dur>'; its left side
-                        # is the task.
-                        for mm in reversed(list(re.finditer(
-                                r"\s+in\s+", wtxt, re.IGNORECASE))):
-                            right = "in " + wtxt[mm.end():].strip()
+                        # 'about the meeting in 15', 'about the
+                        # deploy at 6', 'about the rent on friday' —
+                        # the when tail follows a boundary word; the
+                        # earliest boundary whose tail parses gives
+                        # the longest when, its left side the task.
+                        for mm in re.finditer(
+                                r"\s+(at|in|on|every|next|tomorrow|"
+                                r"today|tonight|tonite)\s+",
+                                wtxt, re.IGNORECASE):
+                            right = wtxt[mm.start():].strip()
                             left = re.sub(
                                 r"^(?:about|of|that|to)\s+", "",
                                 wtxt[:mm.start()].strip(" ,;—-"),
                                 flags=re.IGNORECASE)
                             spec_r = self._reminder_spec(
                                 right, time.time())
-                            if left and spec_r is not None:
+                            if (left and spec_r is not None
+                                    and not re.match(
+                                        r"(?:at|in|on|every|next|"
+                                        r"tomorrow|today|tonight|"
+                                        r"tonite)\b", left,
+                                        re.IGNORECASE)):
+                                # A left side that still leads with
+                                # a time word is a SECOND when, not
+                                # a task — 'at 5 then again at 7'
+                                # must pin-fail, never create a row
+                                # named 'at 5 then again'.
                                 spec_nt = spec_r
                                 nt_task = left
                                 wtxt = right
