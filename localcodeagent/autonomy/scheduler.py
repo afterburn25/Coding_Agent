@@ -776,6 +776,7 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 "minute": int(mn or 0)}
     # 'fortnightly' / 'every other week' — a fixed 14-day interval.
     if re.fullmatch(r"fortnightly|every\s+fortnight|a\s+fortnight|"
+                    r"bi\s*-?\s*weekly|semi\s*-?\s*weekly|"
                     r"every\s+(?:other|second|two|2)\s+weeks?", t):
         return {"kind": "interval", "interval_s": 1209600.0}
     # 'annual' / 'quarterly' / 'biannual' — fixed-span intervals
