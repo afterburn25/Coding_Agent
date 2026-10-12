@@ -3446,6 +3446,14 @@ class TruthGateTests(RecoveryLoopTests):
                 "every fortnight", time.time())
             self.assertIsNotNone(spec)
             self.assertEqual(spec["kind"], "interval")
+            # 'in 2 and a half hours' — the 'and a half' → :30
+            # clock normalization fired inside the duration and
+            # made 'in 2:30 hours'; guarded for 'in'-lead strings.
+            self.assertIsNotNone(
+                agent._reminder_spec(
+                    "in 2 and a half hours", time.time()))
+            self.assertIsNotNone(
+                agent._reminder_spec("at 8 and a half", time.time()))
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —

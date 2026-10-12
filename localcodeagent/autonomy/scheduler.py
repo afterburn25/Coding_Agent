@@ -206,8 +206,10 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"noon|midnight)", "", t)
     # 'at 7ish' — the colloquial -ish suffix on a digit clock.
     t = re.sub(r"\b(\d{1,2})\s*ish\b", r"\1", t)
-    # 'at 8 and a half' — 'and a half' is the :30.
-    t = re.sub(r"\b(\d{1,2})\s+and\s+a\s+half\b", r"\1:30", t)
+    # 'at 8 and a half' — 'and a half' is the :30. Inside an
+    # 'in <dur>' it's a compound duration, not a clock.
+    if not re.match(r"in\b", t):
+        t = re.sub(r"\b(\d{1,2})\s+and\s+a\s+half\b", r"\1:30", t)
     # 'on school days' / 'work days' — weekday cadence names.
     t = re.sub(r"\b(?:school|work|business)\s+days\b",
                "weekdays", t)
@@ -623,8 +625,10 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         r"noon|midnight)", "", t)
     # 'at 7ish' — the colloquial -ish suffix on a digit clock.
     t = re.sub(r"\b(\d{1,2})\s*ish\b", r"\1", t)
-    # 'at 8 and a half' — 'and a half' is the :30.
-    t = re.sub(r"\b(\d{1,2})\s+and\s+a\s+half\b", r"\1:30", t)
+    # 'at 8 and a half' — 'and a half' is the :30. Inside an
+    # 'in <dur>' it's a compound duration, not a clock.
+    if not re.match(r"in\b", t):
+        t = re.sub(r"\b(\d{1,2})\s+and\s+a\s+half\b", r"\1:30", t)
     # 'on school days' / 'work days' — weekday cadence names.
     t = re.sub(r"\b(?:school|work|business)\s+days\b",
                "weekdays", t)
