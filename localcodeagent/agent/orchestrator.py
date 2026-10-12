@@ -3913,6 +3913,7 @@ class AgentOrchestrator:
         r"monday|tuesday|wednesday|thursday|friday|saturday|"
         r"sunday))?"
         r"(?:\s+(?:until|till|for)\s+(?P<til>.+?))?"
+        r"(?:\s+(?:while|when|if)\s+(?P<cond>.+?))?"
         + _REMINDER_TRAIL +
         r"|" + _REMINDER_POLITE +
         r"(?P<noun2>reminders?|alarms?|timers?|schedules?)\s+"
@@ -4714,6 +4715,18 @@ class AgentOrchestrator:
             return self._reminder_finish(
                 "Turn them on or off? — e.g. “turn off "
                 "my reminders”.",
+                user_text, task_id, event_callback)
+        cond = str(mt.groupdict().get("cond") or "").strip(" ,;—-.")
+        if cond:
+            # 'pause reminders while i'm in the meeting' — a
+            # condition can't be watched and a flip can't be
+            # scheduled; the model invented 'no active meeting
+            # context' over this shape live. Only 'until <time>'
+            # bounds are holdable.
+            return self._reminder_finish(
+                f"I can't watch for a condition like “{cond}” — "
+                "a time bound like “until 3pm” or “for an hour” "
+                "I can hold.",
                 user_text, task_id, event_callback)
         sched, rows = self._reminder_rows(
             include_disabled=True,
