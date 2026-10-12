@@ -5282,7 +5282,14 @@ class AgentOrchestrator:
             # 'remind me not to run' + 'at 3pm' — the grammar wants
             # infinitive-negation after the when: 'to not run'.
             return f"remind me {t} to not {ask[7:]}"
-        return f"remind me {t} {ask}"
+        frag_t = t
+        if re.match(r"for\s+\d", t, re.IGNORECASE):
+            # 'for 20 minutes' — 'for' is a task/dur connector in
+            # the create grammar, not a when; 'in' carries the
+            # duration.
+            frag_t = re.sub(r"^for\s+", "in ", t,
+                            flags=re.IGNORECASE)
+        return f"remind me {frag_t} {ask}"
 
     def _reminder_none_text(self, sched, noun=None) -> str:
         """A scoping noun ('move my alarm…') filtered the pool to
