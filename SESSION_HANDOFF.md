@@ -5319,3 +5319,40 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   the `c92e6593` red run).
 - Verified: targeted suites green (81 netdiag + semantic/conversation/
   AM files), full suite running at push time.
+
+### 2026-10-12 (cont.) — reminder inventory: cadence/miss/work/state asks + recall-lane intercepts
+- **Memory-lane interception** (`149598fa`): the fact-recall lane
+  claimed reminder asks BEFORE the reminder lane — 'did my
+  stretch reminder go off' term-matched 'stretch' into "haven't
+  told me about stretch reminder go off". The intercept inside
+  recall now delegates on `inventory_shaped OR INV_LEAD OR
+  STATEASK` — 'do my reminders still work' hit the same gap via
+  the do-form state ask.
+- **All-disabled pool honesty** (`149598fa`): 'what reminders do
+  i have' over one off row said "No reminders set" — the empty
+  branch now reports "Nothing's on — 1 reminder is off: «x»".
+- **Cadence asks** (`ac515841`): 'how often does the standup
+  fire', 'is the standup daily or weekly', 'what day does the
+  rent reminder hit', 'when does the standup go off' — noun-less
+  forms scope via a verb-to-fire-word object extraction; the
+  cad_ask branch answers from kind/hour/day via spec_text with an
+  off-tail for disabled rows. Cadence vocabulary joins the scope
+  strip so 'daily'/'often' never pollute term matching.
+- **Miss-asks + count** (`11d0fabc`): 'did i miss any reminders'
+  is a fired-ask (last_run), not a topic miss on 'miss'; 'count
+  my reminders' joins the lead verbs; just/already/yet strip.
+- **Fire-verb tails + state work-words** (`bd5e5820`): 'did the
+  alarm ring this morning' missed INV_LEAD — TRAIL demanded
+  end-of-input after the verb; did- and has/have-alternatives take
+  optional tails. 'is there a reminder tonight' — 'there/here'
+  strip. 'are reminders working'/'do my reminders still work' —
+  STATEASK gains work/functional/okay words + a do/does lead.
+  'anything coming up' existential leads and 'what fires next'
+  noun-less ordinal asks.
+- **'still set'** (`66c9cea6`): 'is my 9am alarm still set' —
+  'set'/'scheduled' join STATEASK state words.
+- Verified: `agent.run` end-to-end claims `builtin-local` on the
+  whole expanded surface with real mutations (create/snooze/
+  reschedule-cadence-preserving/toggle/cancel verified post-change);
+  collision set (push to origin, kill the task, restart it) still
+  declines; reminder suite 81 green each round.
