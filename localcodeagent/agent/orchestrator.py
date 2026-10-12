@@ -2994,6 +2994,7 @@ class AgentOrchestrator:
         if (self._REMINDER_RE.match(match_text)
                 or self._REMINDER_CLARIFY_RE.match(match_text)
                 or self._REMINDER_CANCEL_RE.match(match_text)
+                or self._REMINDER_CANCEL_BARE_RE.match(match_text)
                 or self._REMINDER_SNOOZE_RE.match(match_text)
                 or self._REMINDER_TOGGLE_RE.match(match_text)
                 or self._REMINDER_STOP_RE.match(match_text)
@@ -3819,6 +3820,24 @@ class AgentOrchestrator:
         r"\d{1,2}\s*(?:am|pm)\b|noon|midnight))"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # 'cancel my pay rent' — no schedule noun; the body resolves
+    # against real rows like a scoped cancel. Without it the model
+    # narrated a fake 'no permission' refusal over a live row.
+    _REMINDER_CANCEL_BARE_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
+        r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
+        r"undo|axe?|ditch|forget|never\s*mind)\s+"
+        r"(?:(?:the|my|that|this|your)\s+)?"
+        # File/object shapes stay with the action lanes —
+        # 'delete junk.txt', 'remove the file', 'delete the folder'.
+        r"(?P<body>(?!.*(?:\bfiles?\b|\bfolders?\b|\w*dirs?\b|"
+        r"\bdirector\w*\b|\bdocs?\b|\bdocuments?\b|\bphotos?\b|"
+        r"\bimages?\b|\bvideos?\b|\bdownloads?\b|\bbackups?\b|"
+        r"\bscripts?\b|\bconfigs?\b|\blogs?\b|\w+\.\w{1,5}\b))"
+        r"\D\S[\w' .-]*?)"
+        + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _REMINDER_SNOOZE_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:snooze|postpone|delay|push\s+back|push|bump|shift)"
@@ -4603,7 +4622,8 @@ class AgentOrchestrator:
                                task_id: str, event_callback):
         """'cancel the deploy reminder' — a real scheduler removal by
         topic match, with ambiguity listed rather than guessed."""
-        sched, rows = self._reminder_rows(noun=mc.group("noun"))
+        noun = mc.groupdict().get("noun")
+        sched, rows = self._reminder_rows(noun=noun)
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
@@ -4613,9 +4633,10 @@ class AgentOrchestrator:
         all_flag = bool(
             re.search(r"\b(?:all|every|each|everything)\b", body,
                       re.IGNORECASE)
-            or str(mc.group("noun") or "").lower()
+            or str(noun or "").lower()
             in ("them", "everything", "all"))
-        topic_src = (mc.groupdict().get("ctime") or mc.group("tail")
+        topic_src = (mc.groupdict().get("ctime")
+                     or mc.groupdict().get("tail")
                      or mc.groupdict().get("tail2") or body)
         # 'cancel everything except pay rent' — the tail after
         # 'except' is an exclusion scope, not the match topic.
@@ -4665,7 +4686,7 @@ class AgentOrchestrator:
             hits = [min(hits, key=_fire)]
         if not rows:
             text = self._reminder_none_text(
-                sched, mc.group("noun"))
+                sched, noun)
         elif not hits and excl_terms:
             text = ("That's all of them — nothing else to "
                     "cancel.")
@@ -4717,6 +4738,7 @@ class AgentOrchestrator:
         if any(rx.match(text) for rx in (
                 self._REMINDER_RE, self._REMINDER_RE_GREEDY,
                 self._REMINDER_CLARIFY_RE, self._REMINDER_CANCEL_RE,
+                self._REMINDER_CANCEL_BARE_RE,
                 self._REMINDER_SNOOZE_RE, self._REMINDER_TOGGLE_RE,
                 self._REMINDER_STOP_RE, self._REMINDER_RESCHEDULE_RE,
                 self._REMINDER_RESCHEDULE_BARE_RE,
@@ -4914,6 +4936,8 @@ class AgentOrchestrator:
         Falls through (None) for 'remind me the tag' recall asks —
         those belong to memory lanes."""
         mc = self._REMINDER_CANCEL_RE.match(plan_text)
+        if mc is None:
+            mc = self._REMINDER_CANCEL_BARE_RE.match(plan_text)
         if mc is not None:
             return self._reminder_cancel_reply(
                 user_text, mc, task_id, event_callback)
@@ -5983,6 +6007,8 @@ class AgentOrchestrator:
                 and not (self._REMINDER_RE.match(plan_text)
                          or self._REMINDER_CLARIFY_RE.match(plan_text)
                          or self._REMINDER_CANCEL_RE.match(plan_text)
+                         or self._REMINDER_CANCEL_BARE_RE.match(
+                             plan_text)
                          or self._REMINDER_SNOOZE_RE.match(plan_text)
                          or self._REMINDER_TOGGLE_RE.match(plan_text)
                          or self._REMINDER_STOP_RE.match(plan_text)
@@ -6438,6 +6464,7 @@ class AgentOrchestrator:
         return any(rx.match(t) for rx in (
             cls._REMINDER_RE, cls._REMINDER_CLARIFY_RE,
             cls._REMINDER_NOTASK_RE, cls._REMINDER_CANCEL_RE,
+            cls._REMINDER_CANCEL_BARE_RE,
             cls._REMINDER_SNOOZE_RE, cls._REMINDER_TOGGLE_RE,
             cls._REMINDER_STOP_RE, cls._REMINDER_RESCHEDULE_RE,
             cls._REMINDER_RESCHEDULE_BARE_RE,
@@ -12162,6 +12189,7 @@ class AgentOrchestrator:
                     "hedged", "superseded"))
                 and (builtin_response is not None
                      or self._REMINDER_CANCEL_RE.match(user_text)
+                     or self._REMINDER_CANCEL_BARE_RE.match(user_text)
                      or self._REMINDER_SNOOZE_RE.match(user_text)
                      or self._REMINDER_TOGGLE_RE.match(user_text)
                      or self._REMINDER_STOP_RE.match(user_text)

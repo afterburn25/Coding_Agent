@@ -3138,6 +3138,30 @@ class TruthGateTests(RecoveryLoopTests):
                 task.id)
             self.assertIsNotNone(r)
             self.assertIn("pay rent", r.content)
+
+            # 'cancel my pay rent' — noun-less cancel fell to the
+            # model which narrated a fake 'no permission' refusal
+            # (invented a lease excuse) over a live row.
+            r = agent._reminder_reply(
+                "cancel my pay rent", "cancel my pay rent", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            self.assertFalse(sup.scheduler.rows)
+            # Scoped miss on a noun-less body names the real pool;
+            # file/object shapes stay with the action lanes.
+            sup.scheduler.add(
+                "Reminder: pay rent", "once", at=time.time() + 86400,
+                action={"kind": "notify", "detail": "pay rent"})
+            r = agent._reminder_reply(
+                "cancel my netflix subscription",
+                "cancel my netflix subscription", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("pay rent", r.content)
+            self.assertIsNone(
+                agent._REMINDER_CANCEL_BARE_RE.match("delete junk.txt"))
+            self.assertIsNone(
+                agent._REMINDER_CANCEL_BARE_RE.match(
+                    "delete the folder"))
             sup.scheduler.rows.clear()
 
             # 'timer for 10' — the bare number is minutes, never
