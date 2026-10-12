@@ -5220,7 +5220,11 @@ class AgentOrchestrator:
             stem = noun.rstrip("s").lower()
             rows = [s for s in rows
                     if str(s.get("name") or "").lower()
-                       .startswith(stem)]
+                       .startswith(stem)
+                    or self._reminder_label(s).lower()
+                       .startswith(stem)
+                    or stem in self._reminder_terms(
+                        self._reminder_label(s))]
         return sched, rows
 
     # Function-word-only scopes — 'cancel me'/'delete the' carry no
@@ -5978,6 +5982,10 @@ class AgentOrchestrator:
         topic_src = (mc.groupdict().get("ctime")
                      or mc.groupdict().get("tail")
                      or mc.groupdict().get("tail2") or body)
+        if (noun and re.match(r"\s*and\b", topic_src, re.IGNORECASE)):
+            # 'cancel the alarm and the lunch' — the noun word is
+            # the first conjunct ('alarm …'), not a kind filter.
+            topic_src = f"{noun} {topic_src}"
         # 'cancel everything except pay rent' — the tail after
         # 'except' is an exclusion scope, not the match topic.
         excl_terms = set()
@@ -6009,9 +6017,55 @@ class AgentOrchestrator:
             all_flag = True
         now = time.time()
 
+        # 'cancel the standup and the dentist' — 'and' joins two
+        # scopes, not a topic. Each side resolves on its own — a
+        # unique subset hit or an exact label match; sides that
+        # ALL land on the same row are a conjunct-named row
+        # ('lock and load'), sides that land on different rows are
+        # the user's explicit targets.
+        and_sides = []
+        and_hits = None
+        if re.search(r"\s+and\s+", topic_src, re.IGNORECASE):
+            topic_terms = set()
+            for side in re.split(r"\s+and\s+", topic_src,
+                                 flags=re.IGNORECASE):
+                st = self._reminder_terms(side)
+                if st:
+                    and_sides.append(st)
+                    topic_terms |= st
+            if len(and_sides) > 1:
+                if noun and str(noun).lower() not in (
+                        "reminder", "reminders", "schedule",
+                        "schedules"):
+                    # A conjunct carrying the noun word needs the
+                    # full pool — 'cancel the alarm and the lunch'
+                    # can't resolve 'lunch' inside the alarm pool.
+                    _, rows = self._reminder_rows()
+                    _, rows_d = self._reminder_rows(
+                        include_disabled=True)
+                resolved = {}
+                for st in and_sides:
+                    cand = [s for s in rows
+                            if st <= self._reminder_hay(s)]
+                    if len(cand) != 1:
+                        exact = [s for s in cand
+                                 if self._reminder_terms(
+                                     self._reminder_label(s)) == st]
+                        if len(exact) == 1:
+                            cand = exact
+                    if len(cand) != 1:
+                        resolved = {}
+                        break
+                    resolved[str(cand[0]["id"])] = cand[0]
+                if resolved:
+                    and_hits = list(resolved.values())
+
         def _matches(s: dict) -> bool:
             if not topic_terms:
                 return True
+            if len(and_sides) > 1:
+                hay = self._reminder_hay(s)
+                return any(st <= hay for st in and_sides)
             return topic_terms <= self._reminder_hay(s)
 
         # 'cancel the next reminder' — 'next' is ordinal scope, not
@@ -6022,6 +6076,10 @@ class AgentOrchestrator:
             s for s in rows
             if _matches(s) and not (
                 excl_terms and excl_terms <= self._reminder_hay(s))]
+        if and_hits is not None:
+            hits = [s for s in and_hits
+                    if not (excl_terms
+                            and excl_terms <= self._reminder_hay(s))]
         if not hits:
             # 'unschedule the rent reminder' on a paused row —
             # a disabled-only match still cancels; enabled hits
@@ -6054,6 +6112,7 @@ class AgentOrchestrator:
                     f"“{' '.join(sorted(topic_terms)) or 'next'}” — "
                     f"you have: {names}.")
         elif (len(hits) > 1 and not all_flag
+                and and_hits is None
                 and not self._reminder_identical(hits)):
             names = "; ".join(
                 f"“{self._reminder_label(s)}” "

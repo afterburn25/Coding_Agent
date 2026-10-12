@@ -1751,6 +1751,83 @@ class TruthGateTests(RecoveryLoopTests):
                 "remind me my editor",
                 "remind me my editor", task.id))
 
+    def test_reminder_cancel_conjuncts_and_noun_labels(self):
+        # 'cancel the standup and the dentist' — 'and' joins two
+        # scopes; each named side is an explicit target and cancels,
+        # while a row literally named 'lock and load' is one row,
+        # not two. 'cancel the alarm' must hit rows named
+        # 'reminder: alarm …' — the noun was a startswith filter on
+        # the raw name, so reminder-kind alarm rows were invisible.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+                self._n = 0
+
+            def add(self, name, kind, **kw):
+                self._n += 1
+                row = {"id": f"sc-{self._n}", "name": name,
+                       "kind": kind, "enabled": True, **kw}
+                self.rows.append(row)
+                return row
+
+            def list(self):
+                return list(self.rows)
+
+            def remove(self, sid):
+                n = len(self.rows)
+                self.rows = [r for r in self.rows
+                             if r["id"] != sid]
+                return len(self.rows) < n
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            task = agent.tasks.create("x", "auto")
+            self._run_cancel_checks(agent, sup, task)
+
+    def _run_cancel_checks(self, agent, sup, task):
+        for name in ("reminder: standup", "reminder: the dentist",
+                     "reminder: lock and load", "reminder: alarm a",
+                     "reminder: alarm b"):
+            sup.scheduler.add(
+                name, "once", at=time.time() + 3600,
+                action={"kind": "notify", "detail": name})
+        r = agent._reminder_reply(
+            "cancel the standup and the dentist",
+            "cancel the standup and the dentist", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("2", r.content)
+        self.assertEqual(
+            [s["name"] for s in sup.scheduler.rows],
+            ["reminder: lock and load", "reminder: alarm a",
+             "reminder: alarm b"])
+        # A stored title containing 'and' is one row, not a join.
+        r = agent._reminder_reply(
+            "cancel the lock and load",
+            "cancel the lock and load", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("lock and load", r.content)
+        self.assertEqual(
+            [s["name"] for s in sup.scheduler.rows],
+            ["reminder: alarm a", "reminder: alarm b"])
+        # Bare noun objects scope by label — 'cancel the alarm'
+        # names the two alarm rows, not 'no alarms set'.
+        r = agent._reminder_reply(
+            "cancel the alarm", "cancel the alarm", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("matches 2 reminders", r.content)
+        self.assertIn("alarm a", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 2)
+        r = agent._reminder_reply(
+            "cancel my alarms", "cancel my alarms", task.id)
+        self.assertIsNotNone(r)
+        self.assertFalse(sup.scheduler.rows)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
