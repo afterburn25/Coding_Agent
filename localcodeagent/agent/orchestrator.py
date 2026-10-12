@@ -5295,14 +5295,15 @@ class AgentOrchestrator:
             return True
         return self._reminder_inventory_shaped(text)
 
-    def _reminder_inventory_shaped(self, text: str) -> bool:
+    @classmethod
+    def _reminder_inventory_shaped(cls, text: str) -> bool:
         """Inventory-shaped asks — 'what reminders do i have',
         'anything scheduled for tonight'. Shared by the recall gate
         and the learn-site skip: banking 'anything scheduled for
         tonight' as a fact let the restate-ack outrank the real
         schedule answer."""
         return bool(
-            self._SCHEDULE_INVENTORY_RE.search(text)
+            cls._SCHEDULE_INVENTORY_RE.search(text)
             and re.search(
                 r"\b(?:what|which|any|anything|how\s+many|"
                 r"how\s+much|how\s+long|how\s+soon|"
@@ -5340,6 +5341,51 @@ class AgentOrchestrator:
             parts.append(
                 f"{minutes} minute{'s' if minutes != 1 else ''}")
         return "in " + " ".join(parts[:2])
+
+    @staticmethod
+    def _reminder_day_scope(plan_text: str, now):
+        """(dates, label) when the ask carries a day-window —
+        'reminders for today', 'coming up this weekend', 'on friday'.
+        Returns (None, None) when there's no temporal scope."""
+        import datetime as dt
+        t = str(plan_text or "").lower()
+        today = dt.date.fromtimestamp(now)
+        dates, label = set(), None
+        if re.search(r"\b(?:today|tonight|tonite|this\s+morning|"
+                     r"this\s+afternoon|this\s+evening)\b", t):
+            dates.add(today)
+            label = "today"
+        if re.search(r"\btomorrow\b", t):
+            dates.add(today + dt.timedelta(days=1))
+            label = label or "tomorrow"
+        if re.search(r"\bnext\s+week\b", t):
+            base = today + dt.timedelta(
+                days=(7 - today.weekday()) % 7 or 7)
+            dates.update(base + dt.timedelta(days=i)
+                         for i in range(7))
+            label = label or "next week"
+        elif re.search(r"\bthis\s+week\b", t):
+            dates.update(today + dt.timedelta(days=i)
+                         for i in range(7 - today.weekday()))
+            label = label or "this week"
+        if re.search(r"\b(?:the\s+|this\s+|on\s+the\s+)?weekends?\b",
+                     t):
+            delta = (5 - today.weekday()) % 7
+            dates.update((today + dt.timedelta(days=delta),
+                          today + dt.timedelta(days=delta + 1)))
+            label = label or "the weekend"
+        for d, wd in {"monday": 0, "tuesday": 1, "wednesday": 2,
+                      "thursday": 3, "friday": 4, "saturday": 5,
+                      "sunday": 6}.items():
+            if re.search(rf"\b{d}\b", t):
+                delta = (wd - today.weekday()) % 7
+                if delta == 0:
+                    delta = 7 if "this " + d not in t else 0
+                dates.add(today + dt.timedelta(days=delta))
+                label = label or d
+        if not dates:
+            return None, None
+        return dates, label
 
     def _reminder_inventory_reply(self, user_text: str,
                                   plan_text: str):
@@ -5392,6 +5438,30 @@ class AgentOrchestrator:
                     " ", tm.group(1), flags=re.IGNORECASE))
         when_ask = bool(re.match(
             r"\s*(?:when|what\s+time)\b", plan_text, re.IGNORECASE))
+        # Temporal scope — 'reminders for today', 'anything tomorrow',
+        # 'coming up this weekend' scope by fire DATE, not topic.
+        # Matched as topic text they produced 'no reminder about
+        # "today"' over a due row. Pending-state adjectives
+        # ('upcoming') describe the pool itself — they scope nothing.
+        day_dates, day_label = self._reminder_day_scope(
+            plan_text, now)
+        scope_terms -= {
+            "upcoming", "pending", "later", "soon", "scheduled",
+            "today", "tonight", "tomorrow", "weekend", "weekends",
+            "week", "weeks", "monday", "tuesday", "wednesday",
+            "thursday", "friday", "saturday", "sunday",
+            "morning", "afternoon", "evening"}
+
+        def _in_window(s: dict) -> bool:
+            if not day_dates:
+                return True
+            fire = s.get("next_run") or s.get("at")
+            if not fire:
+                return False
+            import datetime as _dt
+            return (_dt.date.fromtimestamp(float(fire))
+                    in day_dates)
+
         # 'is my pay rent reminder on' — a state ask. Listing the
         # row's fire time never answers the question; report the
         # enabled flag from the persisted row instead.
@@ -5544,15 +5614,20 @@ class AgentOrchestrator:
             else:
                 text = (f"No {noun_pl} set — say “remind me in 10 "
                         "minutes to …” and I'll schedule it.")
-        elif scope_terms:
+        elif scope_terms or day_dates:
             hits = [s for s in rows
-                    if scope_terms <= self._reminder_hay(s)]
+                    if (not scope_terms
+                        or scope_terms <= self._reminder_hay(s))
+                    and _in_window(s)]
             if not hits:
                 names = "; ".join(
                     f"“{self._reminder_label(s)}”" for s in rows[:3])
-                text = (f"No reminder about "
-                        f"“{' '.join(sorted(scope_terms))}”"
-                        + (f" — you've got: {names}." if rows else "."))
+                what = (f"about “{' '.join(sorted(scope_terms))}”"
+                        if scope_terms
+                        else f"for {day_label or 'then'}")
+                text = ("No reminder " + what
+                        + (f" — you've got: {names}."
+                           if rows else "."))
             elif when_ask and len(hits) == 1:
                 text = (f"Your “{self._reminder_label(hits[0])}” "
                         f"reminder fires "
@@ -5562,9 +5637,12 @@ class AgentOrchestrator:
                     f"“{self._reminder_label(s)}” "
                     f"({self._reminder_when_text(s, now)})"
                     for s in hits[:5])
+                what = (f" about “{' '.join(sorted(scope_terms))}”"
+                        if scope_terms else "")
                 text = (f"{len(hits)} reminder"
-                        f"{'s' if len(hits) != 1 else ''} about "
-                        f"“{' '.join(sorted(scope_terms))}”: {bits}.")
+                        f"{'s' if len(hits) != 1 else ''}{what}"
+                        + (f" for {day_label}" if day_dates else "")
+                        + f": {bits}.")
         elif not rows:
             text = ("No reminders set — say “remind me in 10 minutes "
                     "to …” and I'll schedule it.")
@@ -7529,7 +7607,8 @@ class AgentOrchestrator:
             # State-graph asks answer from the ledger — 'what did we
             # settle on', 'what happened with that' — no model needed.
             cls._STATE_DECISION_Q_RE, cls._STATE_LOOP_Q_RE,
-            cls._STATE_TOPIC_Q_RE, cls._STATE_SPEC_Q_RE))
+            cls._STATE_TOPIC_Q_RE, cls._STATE_SPEC_Q_RE)) \
+            or cls._reminder_inventory_shaped(t)
 
     @staticmethod
     def direct_image_generation_intent(user_text: str) -> bool:

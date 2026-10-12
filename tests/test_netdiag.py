@@ -1645,6 +1645,43 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(inv)
             self.assertIn("plumber", inv.text)
             self.assertIn("No reminder", inv.text)
+
+            # Temporal scope — 'for today'/'this weekend' filter by
+            # fire date, never match the words as topic ('no reminder
+            # about "today"' over a due row was nonsense live).
+            sup.scheduler.add(
+                "reminder: lunch", "once", at=time.time() + 600,
+                action={"kind": "notify", "detail": "lunch"})
+            inv = agent._reminder_inventory_reply(
+                "are there reminders for today",
+                "are there reminders for today")
+            self.assertIsNotNone(inv)
+            self.assertIn("lunch", inv.text)
+            self.assertNotIn("timesheets", inv.text)
+            inv = agent._reminder_inventory_reply(
+                "any reminders for tomorrow",
+                "any reminders for tomorrow")
+            self.assertIsNotNone(inv)
+            self.assertIn("check the build", inv.text)
+            self.assertNotIn("lunch", inv.text)
+            # 'upcoming'/'scheduled' describe the pool itself —
+            # they scope nothing instead of missing as a topic.
+            inv = agent._reminder_inventory_reply(
+                "show me upcoming reminders",
+                "show me upcoming reminders")
+            self.assertIsNotNone(inv)
+            self.assertIn("check the build", inv.text)
+            # The whole inventory surface is model-optional — the
+            # lane claims these, so the readiness gate must too.
+            from localcodeagent.agent.orchestrator import (
+                AgentOrchestrator)
+            for q in ("show me upcoming reminders",
+                      "are there reminders for today",
+                      "list everything scheduled",
+                      "any alarms tomorrow"):
+                self.assertTrue(
+                    AgentOrchestrator.can_run_without_coding_model(q),
+                    q)
             # A parseable time with no task clarifies, never guesses.
             r = agent._reminder_reply(
                 "remind me in 5 minutes",

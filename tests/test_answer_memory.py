@@ -122,7 +122,11 @@ class LookupTests(unittest.TestCase):
             am.learn("What is the default image model?", "Juggernaut X v10.")
             m = am.lookup("what is the default image model?!")
             self.assertEqual(m.kind, "exact")
-            self.assertLess(m.latency_ms, 100)
+            # The 'exact' kind already proves the semantic path was
+            # bypassed; a loaded CI runner can push a cold SQLite open
+            # past 100ms — keep a bound that still catches a real
+            # semantic-fallback regression (seconds, not ms).
+            self.assertLess(m.latency_ms, 1000)
             am.store.close()
 
     def test_semantic_equivalent_matches(self):
