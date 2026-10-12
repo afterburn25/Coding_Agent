@@ -3857,6 +3857,21 @@ class AgentOrchestrator:
         r"\s+)?[\w'\s-]{0,30}?"
         r"(?:reminders?|alarms?|timers?)\s+"
         r"(?:fire|fires|fired|ring|rang|happen|trigger|pop\s+up)\b"
+        + _REMINDER_TRAIL +
+        # Present-perfect fire asks — 'has my reminder fired yet',
+        # 'has the alarm gone off' — last_run answers these too.
+        r"|" + _REMINDER_POLITE +
+        r"(?:has|have)\s+(?:(?:the|my|that|this|any)\s+)?"
+        r"[\w'\s-]{0,30}?"
+        r"(?:reminders?|alarms?|timers?)\s+"
+        r"(?:fired|gone\s+off|rang|rung|happened|triggered|"
+        r"popped\s+up)\b(?:\s+(?:yet|already|just|still))?"
+        + _REMINDER_TRAIL +
+        # Passive inventory — 'am i reminded of anything' asks the
+        # same store the active forms do.
+        r"|" + _REMINDER_POLITE +
+        r"(?:am|are)\s+i\s+(?:still\s+)?reminded\b"
+        r"(?:\s+of\s+.+?)?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     # State asks — 'are my reminders on', 'is the alarm paused',
@@ -4156,7 +4171,8 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(
         r"\breminders?\b|\balarms?\b|\btimers?\b|\bschedules?\b|"
-        r"\bscheduled\b|\bcalendar\b|\b(?:comes?|coming)\s+up\b|"
+        r"\bscheduled\b|\bcalendar\b|\bevents?\b|\bappointments?\b|"
+        r"\b(?:comes?|coming)\s+up\b|"
         r"\bdue\b|"
         r"\b(?:anything|something)\s+(?:at|for|on|around)\s+\d|"
         r"\bwhat'?s\s+(?:at|for|on|around)\s+\d|"
@@ -5411,6 +5427,7 @@ class AgentOrchestrator:
             scope_terms = self._reminder_terms(re.sub(
                 r"\b(?:reminders?|alarms?|timers?|schedules?|"
                 r"calendars?|scheduled|the|a|an|my|that|me|us|"
+                r"anything|something|everything|"
                 r"at|in|on|right|correct|yeah)\b",
                 " ", sm.group(1), flags=re.IGNORECASE))
         if sm is None:
@@ -5476,7 +5493,10 @@ class AgentOrchestrator:
             r".{0,20}\b(?:go|went)\s+off\b|\bdid\b.{0,40}\b"
             r"(?:reminders?|alarms?|timers?)\b.{0,20}\b"
             r"(?:fire|fires|fired|ring|rang|happen|trigger|"
-            r"pop\s+up)\b", plan_text, re.IGNORECASE))
+            r"pop\s+up)\b|\b(?:has|have)\b.{0,40}\b"
+            r"(?:reminders?|alarms?|timers?)\b.{0,20}\b"
+            r"(?:fired|gone\s+off|rang|rung|happened|triggered|"
+            r"popped\s+up)\b", plan_text, re.IGNORECASE))
         if ((re.search(
                 r"\bnext\b(?!\s+(?:week|weeks|month|months|year|"
                 r"years|day|days|hour|hours|minute|minutes|monday|"
@@ -5572,10 +5592,31 @@ class AgentOrchestrator:
             if not fhits:
                 names = "; ".join(
                     f"“{self._reminder_label(s)}”" for s in rows[:3])
-                text = (f"No reminder about "
-                        f"“{' '.join(sorted(scope_terms))}”"
-                        + (f" — you've got: {names}."
-                           if rows else "."))
+                if scope_terms:
+                    text = (f"No reminder about "
+                            f"“{' '.join(sorted(scope_terms))}”"
+                            + (f" — you've got: {names}."
+                               if rows else "."))
+                elif nm is not None:
+                    # 'has the alarm gone off' over a reminder-only
+                    # pool — name what exists, don't echo «».
+                    _s, others = self._reminder_rows()
+                    noun_pl = nm.group(1).lower()
+                    if not noun_pl.endswith("s"):
+                        noun_pl += "s"
+                    if others:
+                        names_o = "; ".join(
+                            f"“{self._reminder_label(s)}”"
+                            for s in others[:3])
+                        text = (f"No {noun_pl} set — you've got "
+                                f"{len(others)} reminder"
+                                f"{'s' if len(others) != 1 else ''}"
+                                f": {names_o}.")
+                    else:
+                        text = f"No {noun_pl} set."
+                else:
+                    text = ("No reminders set — nothing could "
+                            "have fired.")
             elif len(fhits) == 1:
                 s = fhits[0]
                 lr = s.get("last_run")
@@ -5797,23 +5838,15 @@ class AgentOrchestrator:
                 "reminders need a clock time (“in 30 minutes”, "
                 "“at 3pm”, “tomorrow at 9”).",
                 user_text, task_id, event_callback)
-        if (self._REMINDER_REFER_RE.match(plan_text)
-                or self._REMINDER_INV_LEAD_RE.match(plan_text)
-                or self._REMINDER_STATEASK_RE.match(plan_text)
-                or self._reminder_inventory_shaped(plan_text)):
-            # 'that reminder at 3' / 'tell me about my reminders' —
-            # referential or imperative inventory asks, not creates;
-            # the model narrated fake sets and empty schedules.
-            inv = self._reminder_inventory_reply(user_text, plan_text)
-            if inv is not None:
-                return self._reminder_finish(
-                    inv.text, user_text, task_id, event_callback)
         mh = self._REMINDER_HAVE_RE.match(plan_text)
         if mh is not None:
             # 'i have a dentist appointment tomorrow at 2' — the
             # event names the task; the temporal tail parses at
             # the earliest boundary. No parseable time → fall
-            # through ('i have a question' isn't scheduling).
+            # through ('i have a question' isn't scheduling). Must
+            # run before the inventory dispatch — 'appointment'/
+            # 'event' are inventory nouns too, and a declarative
+            # event is a create, never an inventory answer.
             body_h = str(mh.group("thing") or "").strip(" ,;—-")
             parts_h = re.split(
                 r"\s+(?=(?:at|in|on|every|next|tomorrow|today|"
@@ -5856,6 +5889,17 @@ class AgentOrchestrator:
                     "Reminder set "
                     + self._reminder_spec_text(spec_h, task_h),
                     user_text, task_id, event_callback)
+        if (self._REMINDER_REFER_RE.match(plan_text)
+                or self._REMINDER_INV_LEAD_RE.match(plan_text)
+                or self._REMINDER_STATEASK_RE.match(plan_text)
+                or self._reminder_inventory_shaped(plan_text)):
+            # 'that reminder at 3' / 'tell me about my reminders' —
+            # referential or imperative inventory asks, not creates;
+            # the model narrated fake sets and empty schedules.
+            inv = self._reminder_inventory_reply(user_text, plan_text)
+            if inv is not None:
+                return self._reminder_finish(
+                    inv.text, user_text, task_id, event_callback)
         md = (self._REMINDER_DECL_RE.match(plan_text)
               or self._REMINDER_NOUNFIRST_RE.match(plan_text)
               or self._REMINDER_NOUNADJ_RE.match(plan_text))
