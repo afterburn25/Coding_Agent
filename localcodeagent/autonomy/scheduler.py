@@ -767,8 +767,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 "hour": _meridian(int(hr), mer) if hr else 9,
                 "minute": int(mn or 0)}
     # 'fortnightly' / 'every other week' — a fixed 14-day interval.
-    if re.fullmatch(r"fortnightly|every\s+(?:other|second|two|2)\s+"
-                    r"weeks?", t):
+    if re.fullmatch(r"fortnightly|every\s+fortnight|a\s+fortnight|"
+                    r"every\s+(?:other|second|two|2)\s+weeks?", t):
         return {"kind": "interval", "interval_s": 1209600.0}
     # 'annual' / 'quarterly' / 'biannual' — fixed-span intervals
     # (the model fake-set 'annual reminder for taxes' over zero

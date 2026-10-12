@@ -3440,6 +3440,12 @@ class TruthGateTests(RecoveryLoopTests):
                 agent._reminder_spec("in a bit", time.time()))
             self.assertIsNotNone(
                 agent._reminder_spec("in a while", time.time()))
+            # 'every fortnight' — pin-failed; resolves a 14d
+            # interval like 'fortnightly'.
+            spec = agent._reminder_spec(
+                "every fortnight", time.time())
+            self.assertIsNotNone(spec)
+            self.assertEqual(spec["kind"], "interval")
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —
