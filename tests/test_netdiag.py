@@ -4576,6 +4576,27 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertNotIn("model should not run", r.content)
             self.assertEqual(len(sup.repair.calls), 1)
 
+    def test_empty_state_asks_answer_from_ledger_not_model(self):
+        # 'What did we settle on' with an empty decision ledger must
+        # answer 'nothing on record' deterministically — punting to
+        # the model lets it invent a settlement (or stall 180s on a
+        # cold load — observed live).
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            from localcodeagent.workflow.conversation_manager import (
+                ConversationManager)
+            agent.conversation_manager = ConversationManager(
+                Path(td) / "cm.json")
+            provider = _ScriptedProvider([{
+                "role": "assistant", "content": "We chose Postgres."}])
+            agent._provider_for = lambda p, **kw: provider
+            r = agent.run("what did we settle on earlier", mode="chat")
+            self.assertIn("nothing", r.content.lower())
+            self.assertNotIn("Postgres", r.content)
+            self.assertTrue(
+                AgentOrchestrator.can_run_without_coding_model(
+                    "what did we settle on earlier"))
+
     def test_world_complaint_stays_on_model_path(self):
         # 'my code keeps crashing' is a help-me request, not a product
         # complaint — the lane must not claim it or file an incident.

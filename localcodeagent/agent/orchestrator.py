@@ -3595,6 +3595,22 @@ class AgentOrchestrator:
                            if top.get("subject") else "")
                         + ".")
                     sid = "state:decision_recall"
+            if not canonical:
+                # Empty-ledger honesty — 'what did we settle on' must
+                # answer from the ledger, never punt to a model that
+                # could invent a decision. No decisions at all → say
+                # so; decisions exist but none match the scope → name
+                # what IS on record.
+                if not act:
+                    canonical = ("Nothing on record — we haven't "
+                                 "settled anything this session.")
+                else:
+                    named = [str(d.get("value") or d.get("subject"))
+                             for d in act[:3]]
+                    canonical = ("Nothing matching that — on record "
+                                 "we settled: " + "; ".join(named)
+                                 + ".")
+                sid = "state:decision_recall"
         elif self._STATE_LOOP_Q_RE.search(text):
             # Open-loop query — one prominent unresolved loop answers
             # 'what happened with that'.
@@ -3611,6 +3627,9 @@ class AgentOrchestrator:
                     getattr(state_ctx, "active_error", "")
                 if err:
                     canonical = f"Last thing on record — {err}."
+                    sid = "state:loop_recall"
+                else:
+                    canonical = "Nothing open on record."
                     sid = "state:loop_recall"
         elif self._STATE_SPEC_Q_RE.search(text):
             # Spec recall — 'what's the spec so far' answers from the
@@ -3634,6 +3653,9 @@ class AgentOrchestrator:
                 canonical = (f"Spec for {label} — "
                              + "; ".join(reqs[:8]) + ".")
                 sid = "state:spec_recall"
+            else:
+                canonical = "No spec on record yet."
+                sid = "state:spec_recall"
         elif self._STATE_TOPIC_Q_RE.search(text):
             topic = getattr(state_ctx, "active_topic", "")
             if topic:
@@ -3641,6 +3663,9 @@ class AgentOrchestrator:
                 if open_loops:
                     canonical += (f" Still open: "
                                   f"{open_loops[-1].get('text')}")
+                sid = "state:topic_recall"
+            else:
+                canonical = "No active topic on record."
                 sid = "state:topic_recall"
 
         if not canonical:
@@ -7308,7 +7333,11 @@ class AgentOrchestrator:
             cls._REMINDER_DECL_RE, cls._REMINDER_NOUNFIRST_RE,
             cls._REMINDER_NOUNADJ_RE, cls._REMINDER_REFER_RE,
             cls._REMINDER_WHENONLY_RE, cls._REMINDER_INV_LEAD_RE,
-            cls._REMINDER_STATEASK_RE, cls._REMINDER_WHENLEAD_RE))
+            cls._REMINDER_STATEASK_RE, cls._REMINDER_WHENLEAD_RE,
+            # State-graph asks answer from the ledger — 'what did we
+            # settle on', 'what happened with that' — no model needed.
+            cls._STATE_DECISION_Q_RE, cls._STATE_LOOP_Q_RE,
+            cls._STATE_TOPIC_Q_RE, cls._STATE_SPEC_Q_RE))
 
     @staticmethod
     def direct_image_generation_intent(user_text: str) -> bool:
