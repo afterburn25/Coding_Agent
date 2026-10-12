@@ -4331,6 +4331,14 @@ class AgentOrchestrator:
                     if rel is not None:
                         delta = rel - now
             if when is None and delta is None:
+                if (str(ms.groupdict().get("noun6") or "").lower()
+                        in ("it", "that", "this", "them")
+                        and not topic_terms):
+                    # 'push it to origin' — collision verb + bare
+                    # pronoun + a tail that isn't a time: most likely
+                    # a git/software command, not a snooze. Decline
+                    # so the action lanes get the turn.
+                    return None
                 return self._reminder_finish(
                     f"Snooze until when? — e.g. “for 20 minutes” "
                     f"or “until 3pm”.",

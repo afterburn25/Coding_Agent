@@ -4576,6 +4576,41 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertNotIn("model should not run", r.content)
             self.assertEqual(len(sup.repair.calls), 1)
 
+    def test_git_verbs_never_claim_the_snooze_lane(self):
+        # 'push to origin' parsed as snooze(verb=push, way=to,
+        # dur='origin') — a repo command hijacked by the scheduler
+        # lane and a false pass in the model-down gate. The bare
+        # verbs push/bump/shift now require a reminder noun.
+        for text in ("push to origin", "push to prod",
+                     "bump the version", "shift the release"):
+            self.assertIsNone(
+                AgentOrchestrator._REMINDER_SNOOZE_RE.match(text),
+                f"{text!r} must not claim the snooze lane")
+        for text in ("push it to 4pm", "push the rent reminder to 4pm",
+                     "bump my alarm an hour", "shift it forward"):
+            self.assertIsNotNone(
+                AgentOrchestrator._REMINDER_SNOOZE_RE.match(text),
+                f"{text!r} should still snooze")
+        self.assertFalse(
+            AgentOrchestrator.can_answer_locally("push to origin"))
+        # 'push it to origin' — pronoun + unparseable tail declines at
+        # the handler so the git lane gets the turn.
+        class _Sched:
+            def list(self):
+                return [{"id": "s1", "name": "reminder: x",
+                         "enabled": True, "at": 9999999999.0,
+                         "kind": "once"}]
+
+        class _Sup:
+            scheduler = _Sched()
+
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            self.assertIsNone(agent._reminder_reply(
+                "push it to origin", "push it to origin", "t"))
+
     def test_empty_state_asks_answer_from_ledger_not_model(self):
         # 'What did we settle on' with an empty decision ledger must
         # answer 'nothing on record' deterministically — punting to
