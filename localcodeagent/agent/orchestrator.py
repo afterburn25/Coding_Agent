@@ -3880,7 +3880,7 @@ class AgentOrchestrator:
         r"move\s+(?:(?P<body4>.+?)\s+)?"
         r"(?P<noun4>reminders?|alarms?|timers?|it|that|this|them|"
         r"everything|all)\s+"
-        r"(?P<way4>up|down)\b"
+        r"(?P<way4>up|down|forward|back)\b"
         r"(?:\s+(?:by\s+)?(?P<dur4>.+?))?" + _REMINDER_TRAIL +
         # 'the 10am reminder, push it to 4' — a leading-scope
         # snooze; the model narrated 'pushed it to 4' over an
