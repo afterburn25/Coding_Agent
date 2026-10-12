@@ -2148,6 +2148,88 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIn("No", r.content)
         self.assertEqual(len(sup.scheduler.rows), 2)
 
+        # Creation-order ordinals — 'newest'/'oldest' sort by
+        # created_at, distinct from fire-order 'first'/'last';
+        # 'the reminder i just made' is the same newest-created
+        # selector through the relative clause.
+        sup.scheduler.rows.clear()
+        base = time.time()
+        for name, at, created in (
+                ("reminder: alpha", base + 3600, base - 1000),
+                ("reminder: beta", base + 7200, base - 500),
+                ("reminder: gamma", base + 10800, base - 100)):
+            sup.scheduler.add(
+                name, "once", at=at, created_at=created,
+                action={"kind": "notify", "detail": name})
+        r = agent._reminder_reply(
+            "delete my newest reminder",
+            "delete my newest reminder", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("gamma", r.content)
+        self.assertEqual(
+            [s["name"] for s in sup.scheduler.rows],
+            ["reminder: alpha", "reminder: beta"])
+        r = agent._reminder_reply(
+            "cancel the reminder i just made",
+            "cancel the reminder i just made", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("beta", r.content)
+        r = agent._reminder_reply(
+            "delete my oldest reminder",
+            "delete my oldest reminder", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("alpha", r.content)
+        self.assertFalse(sup.scheduler.rows)
+
+        # Clock-scoped existence asks — 'do i have a 6am' names
+        # the matching row; a miss lists what's really there.
+        # A non-clock object ('a cat') still falls through.
+        sup.scheduler.add(
+            "reminder: wake", "daily", hour=6, minute=0,
+            action={"kind": "notify", "detail": "wake"})
+        r = agent._reminder_reply(
+            "do i have a 6am", "do i have a 6am", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        r = agent._reminder_reply(
+            "do i have a 6pm", "do i have a 6pm", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("No reminder", r.content)
+        self.assertIn("wake", r.content)
+        self.assertIsNone(agent._reminder_reply(
+            "do i have a cat", "do i have a cat", task.id))
+
+        # Mass shifts — 'push everything back'/'delay all by'
+        # retime once-rows AND recurring clocks, with a real count.
+        sup.scheduler.rows.clear()
+        at0 = time.time() + 3600
+        sup.scheduler.add(
+            "reminder: once-row", "once", at=at0,
+            action={"kind": "notify", "detail": "once-row"})
+        sup.scheduler.add(
+            "reminder: daily-row", "daily", hour=9, minute=0,
+            action={"kind": "notify", "detail": "daily-row"})
+        r = agent._reminder_reply(
+            "push everything back an hour",
+            "push everything back an hour", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("2", r.content)
+        self.assertAlmostEqual(
+            float(sup.scheduler.rows[0]["at"]), at0 + 3600,
+            delta=30)
+        self.assertEqual(sup.scheduler.rows[1]["hour"], 10)
+        r = agent._reminder_reply(
+            "delay all reminders by 30 minutes",
+            "delay all reminders by 30 minutes", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("2", r.content)
+        self.assertAlmostEqual(
+            float(sup.scheduler.rows[0]["at"]), at0 + 5400,
+            delta=30)
+        self.assertEqual(
+            (sup.scheduler.rows[1]["hour"],
+             sup.scheduler.rows[1]["minute"]), (10, 30))
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

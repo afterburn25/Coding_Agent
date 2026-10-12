@@ -4177,6 +4177,17 @@ class AgentOrchestrator:
         r"(?P<ctopic>[a-z0-9][a-z0-9'\s-]{0,40}?)\s+set\s+"
         r"(?:for|at|to|on)\s+(?P<cclock>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # Clock-scoped existence asks — 'do i have a 6am', 'have i got
+    # a 9:30'. The noun is absent; the clock itself IS the scope.
+    # Spec validation inside _reminder_inventory_reply keeps 'do i
+    # have a cat' falling through.
+    _REMINDER_CLOCKHAVE_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:(?:do|did|does)\s+i\s+(?:have|got)|"
+        r"have\s+i\s+(?:got|set|made)|got)\s+(?:a|an|any)\s+"
+        r"(?P<clock>\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?|"
+        r"noon|midnight)" + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
@@ -4877,26 +4888,32 @@ class AgentOrchestrator:
             # intent; snooze it rather than asking which.
             hits = [min(hits, key=lambda s: float(
                 s.get("next_run") or s.get("at") or now))]
-        all_scope = (str(ms.groupdict().get("noun")
-                         or ms.groupdict().get("noun3")
-                         or ms.groupdict().get("noun4")
-                         or "").lower()
-                     in ("them", "everything", "all")
-                     and not topic_terms)
+        all_scope = (not topic_terms
+                     and (str(ms.groupdict().get("noun")
+                              or ms.groupdict().get("noun3")
+                              or ms.groupdict().get("noun4")
+                              or ms.groupdict().get("noun6")
+                              or "").lower()
+                          in ("them", "everything", "all")
+                          or re.search(
+                              r"\ball\s+(?:my\s+)?(?:reminders?|"
+                              r"alarms?|timers?|schedules?)\b|"
+                              r"\ball\s*$",
+                              str(ms.groupdict().get("body")
+                                  or ms.groupdict().get("body6")
+                                  or ""),
+                              re.IGNORECASE) is not None))
         if all_scope:
             hits = list(rows)
         if all_scope:
             # 'snooze everything' — each one-shot's own fire time +
-            # delta. Recurring kinds ignore 'at', so they keep their
-            # cadence and get named honestly rather than fake-moved.
+            # delta. A quantified shift retimes a recurring row's
+            # cadence clock too ('push everything back an hour'
+            # moves the daily standup to +1h); an unquantified
+            # snooze leaves it, named honestly.
             moved, skipped = 0, 0
             try:
                 for s in hits:
-                    if s.get("kind") in ("daily", "weekly",
-                                         "interval"):
-                        skipped += 1
-                        continue
-                    base = float(s.get("at") or now)
                     way_all = str(
                         ms.groupdict().get("way")
                         or ms.groupdict().get("way2")
@@ -4904,9 +4921,31 @@ class AgentOrchestrator:
                         or ms.groupdict().get("way5")
                         or ms.groupdict().get("way6") or "").lower()
                     back = way_all in ("earlier", "sooner", "up")
+                    sign = -delta if back else delta
+                    if (s.get("kind") in ("daily", "weekly",
+                                          "monthly")
+                            and s.get("hour") is not None):
+                        if when is not None:
+                            skipped += 1
+                            continue
+                        # Retiming the cadence clock — the same
+                        # shift a single-row 'push X back an hour'
+                        # applies through recur_merge.
+                        mins = (int(s["hour"]) * 60
+                                + int(s.get("minute") or 0)
+                                + int(round(sign / 60))) % 1440
+                        sched.update(str(s["id"]),
+                                     hour=mins // 60,
+                                     minute=mins % 60)
+                        moved += 1
+                        continue
+                    if s.get("kind") in ("daily", "weekly",
+                                         "interval"):
+                        skipped += 1
+                        continue
+                    base = float(s.get("at") or now)
                     tgt = (when if when is not None
-                           else (max(now, base - delta) if back
-                                 else max(now, base) + delta))
+                           else max(now, base + sign))
                     sched.update(str(s["id"]), at=tgt)
                     moved += 1
             except Exception as exc:
@@ -5415,7 +5454,8 @@ class AgentOrchestrator:
 
     _ORDINAL_SCOPE = {"next", "first", "earliest", "last",
                       "latest", "second", "2nd", "third", "3rd",
-                      "fourth", "4th", "fifth", "5th"}
+                      "fourth", "4th", "fifth", "5th",
+                      "newest", "oldest"}
     _ORDINAL_POS = {"second": 1, "2nd": 1, "third": 2, "3rd": 2,
                     "fourth": 3, "4th": 3, "fifth": 4, "5th": 4}
 
@@ -5439,6 +5479,12 @@ class AgentOrchestrator:
             rest -= _cnt
             return rest, ("maxn:" if sel & {"last", "latest"}
                           else "minn:") + str(_cntw[sorted(_cnt)[0]])
+        if sel & {"newest"}:
+            # 'the newest reminder' — created_at order, not fire
+            # order ('the latest one' stays fire-order).
+            return rest, "cmax"
+        if sel & {"oldest"}:
+            return rest, "cmin"
         if sel & {"last", "latest"}:
             return rest, "max"
         pos = sel & set(self._ORDINAL_POS)
@@ -5450,9 +5496,19 @@ class AgentOrchestrator:
                              now: float):
         """min → soonest-firing hit; max → latest-firing hit;
         idx:N → the Nth hit by fire order ('the second one');
-        minn:K/maxn:K → the K soonest/latest ('the first two')."""
+        minn:K/maxn:K → the K soonest/latest ('the first two');
+        cmax/cmin → newest/oldest by created_at."""
         if not sel or not hits:
             return hits
+        if str(sel) in ("cmax", "cmin"):
+
+            def _ckey(s):
+                try:
+                    return float(s.get("created_at") or 0)
+                except (TypeError, ValueError):
+                    return 0.0
+            return [sorted(hits, key=_ckey,
+                           reverse=sel == "cmax")[0]]
         if str(sel).startswith(("minn:", "maxn:")):
             n = int(str(sel)[5:])
             latest = str(sel).startswith("maxn")
@@ -6305,8 +6361,16 @@ class AgentOrchestrator:
             all_flag = True
         # 'cancel the reminder i set for tomorrow' — the relative
         # clause describes how it got there, not what it's named.
+        # 'i just made' is a recency selector — the newest-created
+        # row, resolved through the cmax ordinal below.
+        _just_made = bool(re.search(
+            r"\bi\s+(?:just|recently|lately)\s+"
+            r"(?:set|made|created|scheduled|booked|put|"
+            r"asked\s+for|added|gave\s+you)\b",
+            topic_src, re.IGNORECASE))
         topic_src = re.sub(
-            r"\bi\s+(?:set|made|created|scheduled|booked|put|"
+            r"\bi\s+(?:(?:just|recently|lately)\s+)?"
+            r"(?:set|made|created|scheduled|booked|put|"
             r"asked\s+for|added|gave\s+you)\b",
             " ", topic_src, flags=re.IGNORECASE)
         topic_src = re.sub(
@@ -6390,6 +6454,8 @@ class AgentOrchestrator:
         # extreme-firing hit, not a topic term.
         topic_terms, ord_sel = self._reminder_ordinal_split(
             topic_terms)
+        if _just_made and ord_sel is None:
+            ord_sel = "cmax"
         hits = [
             s for s in rows
             if _matches(s) and not (
@@ -6749,7 +6815,7 @@ class AgentOrchestrator:
             # 'did i miss the 9am', 'what happened at noon' — a
             # bare trailing clock scopes like a connector tail.
             clk = re.search(
-                r"\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)|noon|midnight)"
+                r"\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)"
                 r"\b[.!?]?\s*$", plan_text, re.IGNORECASE)
             if clk is not None:
                 scope_terms = self._reminder_terms(clk.group(1))
@@ -7628,6 +7694,7 @@ class AgentOrchestrator:
                 or self._REMINDER_NOUNLESS_STATEASK_RE.match(
                     plan_text)
                 or self._REMINDER_CONFIRMASK_RE.match(plan_text)
+                or self._REMINDER_CLOCKHAVE_RE.match(plan_text)
                 or self._reminder_inventory_shaped(plan_text)):
             # 'that reminder at 3' / 'tell me about my reminders' —
             # referential or imperative inventory asks, not creates;
