@@ -3957,7 +3957,8 @@ class AgentOrchestrator:
         r"(?:reminders?|alarms?|timers?|schedules?)\s+"
         r"(?:still|currently|actually|really)?\s*"
         r"(?:on|off|enabled|disabled|active|inactive|paused|"
-        r"running|going|muted|back|work(?:ing|s)?|functional|"
+        r"running|going|muted|back|set|scheduled|"
+        r"work(?:ing|s)?|functional|"
         r"okay|ok|fine|good)\b" + _REMINDER_TRAIL +
         # 'did i disable/turn off the stretch reminder' — a state
         # ask about the row's current enabled flag; the persisted
