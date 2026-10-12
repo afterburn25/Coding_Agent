@@ -3908,7 +3908,8 @@ class AgentOrchestrator:
         r"(?:bit|while|moment|sec)|in\s+advance|ahead\s+of\s+time|"
         r"beforehand|dawn|dusk|sunrise|sunset|daybreak|sundown|"
         r"someday|occasionally|sometimes|periodically|"
-        r"irregularly|randomly|twice|thrice|again", re.IGNORECASE)
+        r"irregularly|randomly|end\s+of\s+the\s+(?:day|week|month|"
+        r"year)|eod|eow|twice|thrice|again", re.IGNORECASE)
     # 'when the meeting starts remind me' — a leading event
     # trigger. The model fabricated 'The meeting is at 3 — I'll
     # remind you then'; we can't watch triggers, refuse honestly.
@@ -4007,6 +4008,28 @@ class AgentOrchestrator:
                   or ms.groupdict().get("dur3")
                   or ms.groupdict().get("dur4") or "")
         dur = dur.strip(" ,;—-")
+        # 'snooze pay rent by an hour' — the noun group never
+        # matched so scope+dur landed in one capture; split at
+        # the connector whose tail parses as a time.
+        dsm = re.search(
+            r"\s+(?:by|for|until|till|to)\s+(.+)$", dur)
+        if dsm is not None:
+            head_d = dur[:dsm.start()].strip(" ,;—-")
+            tail_d = dsm.group(1).strip(" ,;—-")
+            if head_d and (
+                    re.fullmatch(
+                        r"(?:in|by\s+)?\d+(?:\.\d+)?\s*"
+                        r"(?:seconds?|secs?|s|minutes?|mins?|m|"
+                        r"hours?|hrs?|h|days?|d)", tail_d)
+                    or self._reminder_at_when(
+                        tail_d, time.time())
+                    or self._reminder_at_when(
+                        f"in {tail_d}", time.time())):
+                topic_terms |= self._reminder_terms(re.sub(
+                    r"\b(?:the|my|that|all|every|each|any|of|to|"
+                    r"for|about)\b", " ", head_d,
+                    flags=re.IGNORECASE))
+                dur = tail_d
         more = bool(ms.groupdict().get("dur2"))
         if more and not dur:
             # 'give me 5 more minutes' — 'more' sits inside the
@@ -5073,7 +5096,8 @@ class AgentOrchestrator:
             if task_d and re.fullmatch(
                     r"me|you|it|that|this|them|us|something|"
                     r"anything|only|just|roughly|about|around|"
-                    r"like|basically|maybe|probably|kinda|sorta",
+                    r"like|basically|maybe|probably|kinda|sorta|"
+                    r"first\s+thing",
                     task_d, re.IGNORECASE):
                 # 'reminders for me' — a pronoun isn't a task; let
                 # the when-side ask fail honestly instead. When the
@@ -5614,6 +5638,15 @@ class AgentOrchestrator:
                         joined, time.time()) is not None:
                     return self._reminder_finish(
                         f"Sure — remind you to do what {joined}?",
+                        user_text, task_id, event_callback)
+                if self._REMINDER_TIMEISH_RE.search(joined):
+                    # 'at the end | of the day' — still temporal
+                    # when whole; pin-fail on the joined text, not
+                    # the fragment.
+                    return self._reminder_finish(
+                        f"I couldn't pin a time from “{joined}” "
+                        "— say “at 3pm”, “in 30 minutes”, or "
+                        "“tomorrow at 9”.",
                         user_text, task_id, event_callback)
             if spec is None:
                 if self._REMINDER_EVENTISH_RE.search(when_raw):

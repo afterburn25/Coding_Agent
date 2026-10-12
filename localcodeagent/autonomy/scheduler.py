@@ -211,6 +211,11 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     # 'on school days' / 'work days' — weekday cadence names.
     t = re.sub(r"\b(?:school|work|business)\s+days\b",
                "weekdays", t)
+    # 'first thing [tomorrow/in the morning]' — the start of the
+    # next day, pinned at 7:00.
+    t = re.sub(
+        r"\bfirst\s+thing(?:\s+tomorrow|\s+in\s+the\s+morning|"
+        r"\s+in\s+the\s+am)?\b", "tomorrow at 7", t)
     # 'at 5pm on the 20th' — a leading clock belongs after the
     # date phrase, matching 'on the 20th at 5pm'.
     t = re.sub(
@@ -365,6 +370,14 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     if m:
         scale = {"m": 60, "h": 3600, "d": 86400}[m.group(1)[0]]
         return now + 1.5 * scale
+    # 'in a quarter of an hour' / 'in three quarters of an hour'.
+    m = re.fullmatch(
+        r"in\s+(?:an?\s+)?(quarter|three\s+quarters?)\s+"
+        r"(?:of\s+an?\s+)?(minutes?|mins?|hours?|hrs?)", t)
+    if m:
+        frac = 0.25 if m.group(1) == "quarter" else 0.75
+        scale = {"m": 60, "h": 3600}[m.group(2)[0]]
+        return now + frac * scale
     # '(the) day after tomorrow' — a single +2d anchor; without
     # it the splitter banked 'day after' as the task.
     if re.fullmatch(
@@ -569,6 +582,11 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     # 'on school days' / 'work days' — weekday cadence names.
     t = re.sub(r"\b(?:school|work|business)\s+days\b",
                "weekdays", t)
+    # 'first thing [tomorrow/in the morning]' — the start of the
+    # next day, pinned at 7:00.
+    t = re.sub(
+        r"\bfirst\s+thing(?:\s+tomorrow|\s+in\s+the\s+morning|"
+        r"\s+in\s+the\s+am)?\b", "tomorrow at 7", t)
     # '6 am weekdays' — a leading clock belongs inside the
     # cadence's 'at T' tail.
     t = re.sub(

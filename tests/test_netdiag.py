@@ -3282,6 +3282,40 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("do what", r.content)
             sup.scheduler.rows.clear()
 
+            # 'in a quarter of an hour' — the model echoed 'Got it —
+            # remind you in 15 minutes' over zero rows.
+            spec = agent._reminder_spec(
+                "in a quarter of an hour", time.time())
+            self.assertIsNotNone(spec)
+            spec = agent._reminder_spec(
+                "in three quarters of an hour", time.time())
+            self.assertIsNotNone(spec)
+            # 'first thing tomorrow' → next-day 07:00, not a task
+            # named 'first thing'.
+            spec = agent._reminder_spec(
+                "first thing tomorrow", time.time())
+            self.assertIsNotNone(spec)
+            # 'end of the day/week' — vague boundaries pin-fail on
+            # the joined text rather than narrating 'I'll remind
+            # you at the end of the day'.
+            r = agent._reminder_reply(
+                "remind me at the end of the day",
+                "remind me at the end of the day", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("end of the day", r.content)
+            # 'snooze pay rent by an hour' — scope+dur captured as
+            # one blob; the 'by <dur>' tail splits off as delta.
+            sup.scheduler.add(
+                'Reminder: pay rent', 'once',
+                at=time.time() + 86400)
+            r = agent._reminder_reply(
+                "snooze pay rent by an hour",
+                "snooze pay rent by an hour", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Snoozed", r.content)
+            self.assertIn("pay rent", r.content)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
