@@ -4509,6 +4509,16 @@ class TruthGateTests(RecoveryLoopTests):
                 self.assertEqual(len(sup.repair.calls), 1, text)
                 self.assertEqual(
                     sup.repair.calls[0]["source"], "user_report")
+                # Model-down is exactly when failures get reported —
+                # the server readiness gate must let the lane through.
+                self.assertTrue(
+                    AgentOrchestrator.can_run_without_coding_model(
+                        text), text)
+            for text in ("my code keeps crashing",
+                         "the build is not working"):
+                self.assertFalse(
+                    AgentOrchestrator.can_run_without_coding_model(
+                        text), text)
 
     def test_agent_complaint_recurrence_reports_recurred(self):
         class _Repair:

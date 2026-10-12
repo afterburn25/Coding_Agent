@@ -7997,7 +7997,18 @@ class AgentOrchestrator:
         if cls.can_answer_locally(user_text):
             return True
         from ..context.intent import understand_turn
-        return understand_turn(user_text).direct_image()
+        env = understand_turn(user_text)
+        if env.direct_image():
+            return True
+        # Agent-directed complaints claim the bug-report lane — a real
+        # incident + honest ack needs no model, and model-down is
+        # exactly when the user reports failures.
+        frame = getattr(env, "semantic", None)
+        if (frame is not None and frame.speech_act == "complaint"
+                and cls._AGENT_SELF_TARGET_RE.search(
+                    frame.masked_case or user_text)):
+            return True
+        return False
 
     def has_memory_answer(self, user_text: str) -> bool:
         """A trusted Answer Memory hit or memory command needs no model.
