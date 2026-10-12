@@ -2933,6 +2933,55 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIsNotNone(r)
         self.assertTrue(sup.scheduler.rows[1]["enabled"])
 
+        # A plural scope ('my reminders') is a mass shift — each
+        # row's own cadence clock moves by the same delta, not a
+        # collapsed single target.
+        sup.scheduler.set_enabled(
+            str(sup.scheduler.rows[1]["id"]), True)
+        r = agent._reminder_reply(
+            "delay my reminders by 30 minutes",
+            "delay my reminders by 30 minutes", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("Snoozed", r.content)
+        self.assertEqual(sup.scheduler.rows[0]["hour"], 8)
+        self.assertEqual(sup.scheduler.rows[0]["minute"], 30)
+        self.assertEqual(sup.scheduler.rows[1]["hour"], 7)
+        self.assertEqual(sup.scheduler.rows[1]["minute"], 30)
+
+        # 'swap A and B' exchanges the rows' timing fields through
+        # real updates; the undo journal restores both.
+        r = agent._reminder_reply(
+            "swap the standup and the trash reminders",
+            "swap the standup and the trash reminders", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("Swapped", r.content)
+        self.assertEqual(sup.scheduler.rows[0]["kind"], "weekly")
+        self.assertEqual(sup.scheduler.rows[0]["weekday"], 2)
+        self.assertEqual(sup.scheduler.rows[1]["kind"], "daily")
+        self.assertEqual(sup.scheduler.rows[1]["hour"], 8)
+        r = agent._reminder_reply(
+            "swap the standup and the dentist",
+            "swap the standup and the dentist", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("which two", r.content)
+        r = agent._reminder_reply(
+            "undo that", "undo that", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("Undone", r.content)
+        self.assertEqual(sup.scheduler.rows[0]["kind"], "daily")
+        self.assertEqual(sup.scheduler.rows[0]["hour"], 8)
+        self.assertEqual(sup.scheduler.rows[1]["kind"], "weekly")
+        self.assertEqual(sup.scheduler.rows[1]["weekday"], 2)
+
+        # 'what time is the trash run' — extra scope words ride
+        # along but the row's whole label still resolves.
+        r = agent._reminder_reply(
+            "what time is the trash run",
+            "what time is the trash run", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("trash", r.content)
+        self.assertNotIn("No reminder", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

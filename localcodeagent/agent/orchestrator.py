@@ -4705,6 +4705,16 @@ class AgentOrchestrator:
         r"(?:\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?))?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # 'swap the standup and the trash reminders' — exchange the
+    # two rows' timing fields. Both sides must resolve exactly
+    # one row; anything less is a 'say which'.
+    _REMINDER_SWAP_RE = re.compile(
+        _REMINDER_POLITE +
+        r"swap\s+(?:(?:the|my|those|these)\s+)?"
+        r"(?P<sw_a>.+?)\s+(?:and|with)\s+"
+        r"(?:(?:the|my|those|these)\s+)?"
+        r"(?P<sw_b>.+?)" + _REMINDER_TRAIL,
+        re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
     # noun requirement keeps 'repeat the command' out.
@@ -5147,10 +5157,14 @@ class AgentOrchestrator:
                               or ms.groupdict().get("noun4")
                               or ms.groupdict().get("noun6")
                               or "").lower()
-                          in ("them", "everything", "all")
+                          in ("them", "everything", "all",
+                              "reminders", "alarms", "timers",
+                              "schedules")
                           or re.search(
                               r"\ball\s+(?:my\s+)?(?:reminders?|"
                               r"alarms?|timers?|schedules?)\b|"
+                              r"\b(?:my\s+|the\s+)?(?:reminders|"
+                              r"alarms|timers|schedules)\b|"
                               r"\ball\s*$",
                               str(ms.groupdict().get("body")
                                   or ms.groupdict().get("body6")
@@ -5158,6 +5172,22 @@ class AgentOrchestrator:
                               re.IGNORECASE) is not None))
         if all_scope:
             hits = list(rows)
+            _n_m = re.search(
+                r"\b(?:all\s+(?:my\s+)?|my\s+|the\s+)?"
+                r"(reminders|alarms|timers|schedules)\b",
+                str(ms.groupdict().get("body")
+                    or ms.groupdict().get("body6") or ""),
+                re.IGNORECASE)
+            if (_n_m is not None
+                    and _n_m.group(1).lower()
+                        in ("alarms", "timers")):
+                # 'delay my timers 5m' — a noun'd plural mass only
+                # shifts rows of that noun; 'reminders'/'schedules'
+                # stay the generic all.
+                _stem = _n_m.group(1).rstrip("s").lower()
+                hits = [s for s in hits
+                        if str(s.get("name") or "")
+                            .lower().startswith(_stem)]
         if all_scope:
             # 'snooze everything' — each one-shot's own fire time +
             # delta. A quantified shift retimes a recurring row's
@@ -5482,6 +5512,13 @@ class AgentOrchestrator:
             # schedule noun, not a topic token; a row literally
             # named 'appointment' keeps it when it's all there is.
             topic_terms -= {"appointment", "appointments"}
+        if topic_terms <= {
+                "reminder", "reminders", "alarm", "alarms",
+                "timer", "timers", "schedule", "schedules"}:
+            # 'push all my reminders back an hour' — the plural
+            # noun is the mass scope itself, not a topic; the
+            # pool is every row.
+            topic_terms = set()
         topic_terms, _ord_sel = self._reminder_ordinal_split(
             topic_terms)
         hits = [s for s in rows if not topic_terms
@@ -5637,20 +5674,8 @@ class AgentOrchestrator:
                     delta = -delta
                 row0 = hits[0]
                 if (delta and abs(delta) % 86400 == 0
-                        and row0.get("kind") == "weekly"
-                        and row0.get("weekday") is not None):
-                    # 'advance the trash run 2 days' — a weekly
-                    # cadence's whole-day shift moves the weekday,
-                    # not the clock.
-                    d_sh = int(round(delta / 86400))
-                    wds = row0["weekday"]
-                    spec = {"kind": "weekly", "weekday": (
-                        sorted({(int(w) + d_sh) % 7 for w in wds})
-                        if isinstance(wds, list)
-                        else (int(wds) + d_sh) % 7)}
-                    _wtxt = shift_txt
-                elif (delta and abs(delta) % 86400 == 0
-                        and row0.get("kind") == "daily"):
+                        and row0.get("kind") == "daily"
+                        and len(hits) == 1):
                     # A daily row fires every day — a whole-day
                     # shift is a no-op; claiming 'Rescheduled'
                     # would lie.
@@ -5659,25 +5684,40 @@ class AgentOrchestrator:
                         "every day — a whole-day shift doesn't "
                         "change a daily cadence.",
                         user_text, task_id, event_callback)
-                elif (row0.get("kind") in ("daily", "weekly", "monthly")
-                        and row0.get("hour") is not None):
-                    # A recurring row's shift base is its cadence
-                    # clock, not next_run — 9:00 daily +1h retimes
-                    # to 10:00 daily. No clamp: recur_merge only
-                    # reads the clock off spec.at, so a past
-                    # timestamp is fine.
-                    lt0 = time.localtime()
-                    base = time.mktime((
-                        lt0.tm_year, lt0.tm_mon, lt0.tm_mday,
-                        int(row0.get("hour") or 0),
-                        int(row0.get("minute") or 0),
-                        0, lt0.tm_wday, lt0.tm_yday, lt0.tm_isdst))
-                    spec = {"kind": "once", "at": base + delta}
-                else:
-                    base = float(row0.get("next_run")
-                                 or row0.get("at") or time.time())
-                    spec = {"kind": "once",
-                            "at": max(time.time(), base + delta)}
+                if (not topic_terms and len(hits) > 1
+                        and not self._reminder_identical(hits)):
+                    # 'push all my reminders back an hour' — a
+                    # quantified mass shift retimes each row's own
+                    # base. An absolute 'to 3pm' mass stays 'say
+                    # which' — it would collapse distinct clocks.
+                    _chg, _skip = [], []
+                    for _s in hits:
+                        if (abs(delta) % 86400 == 0
+                                and _s.get("kind") == "daily"):
+                            _skip.append(_s)
+                            continue
+                        _f = self._reminder_shift_fields(
+                            _s, delta, shift_txt)
+                        try:
+                            sched.update(str(_s["id"]), **_f)
+                            _chg.append(_s)
+                        except Exception:
+                            _skip.append(_s)
+                    _amt = (sm2.group(2) + " " + sm2.group(3))
+                    _wdir = "earlier" if delta < 0 else "later"
+                    text = (
+                        f"Shifted {len(_chg)} reminder"
+                        + ("s" if len(_chg) != 1 else "")
+                        + f" {_amt} {_wdir}."
+                        + (" Skipped " + ", ".join(
+                            f"“{self._reminder_label(x)}”"
+                            for x in _skip)
+                           + " — daily rows can't move by whole "
+                             "days." if _skip else ""))
+                    return self._reminder_finish(
+                        text, user_text, task_id, event_callback)
+                spec = self._reminder_shift_fields(
+                    row0, delta, shift_txt)
                 _wtxt = shift_txt
         if spec is None and not (shift_txt and not hits):
             # A quantified shift IS the 'when' — 'move the table an
@@ -5713,6 +5753,7 @@ class AgentOrchestrator:
                 fields = spec
                 if (spec.get("hour") is not None
                         and spec.get("kind") != "once"
+                        and not _shift_q
                         and not re.search(
                             r"\d|noon|midnight|morning|afternoon|"
                             r"evening|tonight|quarter|half|o'?clock",
@@ -5739,7 +5780,14 @@ class AgentOrchestrator:
             else:
                 label = self._reminder_label(hits[0])
                 _disp = dict(fields)
-                for _k in ("hour", "minute"):
+                # A field-only patch (anchor shift) keeps the row's
+                # kind/clock — the display spec must reflect them.
+                _disp.setdefault(
+                    "kind", hits[0].get("kind") or "once")
+                if _disp["kind"] == "once" and "at" not in _disp:
+                    _disp["at"] = hits[0].get("at") or time.time()
+                for _k in ("hour", "minute", "weekday", "day",
+                           "interval_s"):
                     if _k not in _disp and hits[0].get(_k) is not None:
                         _disp[_k] = hits[0][_k]
                 text = (f"Rescheduled “{label}” — "
@@ -5753,6 +5801,41 @@ class AgentOrchestrator:
                            else ""))
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
+
+    def _reminder_shift_fields(self, row: dict, delta: float,
+                               wtxt: str) -> dict:
+        """Spec fields for a quantified shift of this row's own
+        base: a weekly whole-day shift moves the weekday, a
+        recurring row retimes its cadence clock through
+        recur_merge, a once/interval row slides its anchor."""
+        if (delta and abs(delta) % 86400 == 0
+                and row.get("kind") == "weekly"
+                and row.get("weekday") is not None):
+            # 'advance the trash run 2 days' — a weekly cadence's
+            # whole-day shift moves the weekday, not the clock.
+            d_sh = int(round(delta / 86400))
+            wds = row["weekday"]
+            return {"kind": "weekly", "weekday": (
+                sorted({(int(w) + d_sh) % 7 for w in wds})
+                if isinstance(wds, list)
+                else (int(wds) + d_sh) % 7)}
+        if (row.get("kind") in ("daily", "weekly", "monthly")
+                and row.get("hour") is not None):
+            # A recurring row's shift base is its cadence clock,
+            # not next_run — 9:00 daily +1h retimes to 10:00 daily.
+            # No clamp: recur_merge only reads the clock off
+            # spec.at, so a past timestamp is fine.
+            lt0 = time.localtime()
+            base = time.mktime((
+                lt0.tm_year, lt0.tm_mon, lt0.tm_mday,
+                int(row.get("hour") or 0),
+                int(row.get("minute") or 0), 0,
+                lt0.tm_wday, lt0.tm_yday, lt0.tm_isdst))
+            return self._reminder_recur_merge(
+                row, {"kind": "once", "at": base + delta}, wtxt)
+        base = float(row.get("next_run")
+                     or row.get("at") or time.time())
+        return {"at": max(time.time(), base + delta)}
 
     def _reminder_recur_merge(self, row: dict, spec: dict,
                               wtxt: str) -> dict:
@@ -7506,6 +7589,68 @@ class AgentOrchestrator:
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
+    def _reminder_swap_reply(self, user_text: str, ms: re.Match,
+                             task_id: str, event_callback):
+        """'swap the standup and the trash reminders' — exchange
+        the two rows' timing fields through real updates. Both
+        sides must resolve exactly one row."""
+        sched, rows = self._reminder_rows(include_disabled=True)
+        if sched is None:
+            return self._reminder_finish(
+                "I can't manage reminders — the scheduler isn't "
+                "running in this session.",
+                user_text, task_id, event_callback)
+
+        def _resolve(side: str) -> list:
+            terms = self._reminder_terms(re.sub(
+                r"\b(?:the|my|that|all|every|each|any|of|to|for|"
+                r"about|reminders?|alarms?|timers?|schedules?)\b",
+                " ", str(side or ""), flags=re.IGNORECASE))
+            pool = ([s for s in rows
+                     if terms <= self._reminder_hay(s)]
+                    if terms else [])
+            if not pool and terms:
+                pool = [s for s in rows
+                        if self._reminder_terms(
+                            self._reminder_label(s))
+                        and self._reminder_terms(
+                            self._reminder_label(s)) <= terms]
+            return pool
+
+        a_rows = _resolve(ms.group("sw_a"))
+        b_rows = _resolve(ms.group("sw_b"))
+        if len(a_rows) != 1 or len(b_rows) != 1:
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rows[:4])
+            text = ("Say which two reminders to swap"
+                    + (f" — you've got: {names}." if names else "."))
+        elif str(a_rows[0].get("id")) == str(b_rows[0].get("id")):
+            text = ("That's the same reminder — nothing to swap.")
+        else:
+            a0, b0 = a_rows[0], b_rows[0]
+            _TIMING = ("at", "interval_s", "hour", "minute",
+                       "weekday", "day")
+            fa = {"kind": a0.get("kind")}
+            fb = {"kind": b0.get("kind")}
+            fa.update({k: a0[k] for k in _TIMING
+                       if a0.get(k) is not None})
+            fb.update({k: b0[k] for k in _TIMING
+                       if b0.get(k) is not None})
+            try:
+                sched.update(str(b0["id"]), **fa)
+                sched.update(str(a0["id"]), **fb)
+            except Exception as exc:
+                text = f"I couldn't swap the reminders ({exc})."
+            else:
+                now = time.time()
+                text = (
+                    f"Swapped — “{self._reminder_label(a0)}” now "
+                    f"fires {self._reminder_when_text(a0, now)}, "
+                    f"“{self._reminder_label(b0)}” now fires "
+                    f"{self._reminder_when_text(b0, now)}.")
+        return self._reminder_finish(text, user_text, task_id,
+                                     event_callback)
+
     def _reminder_shaped(self, text: str) -> bool:
         """Any reminder-lane command — creates, controls, inventory.
         These are scheduler operations, never durable facts or
@@ -7803,6 +7948,15 @@ class AgentOrchestrator:
             hits = ([s for s in pool
                      if scope_terms <= self._reminder_hay(s)]
                     if scope_terms else pool)
+            if not hits and scope_terms:
+                # 'what time is the trash run' — 'run' rides the
+                # scope, but the row's whole label still sits
+                # inside it; the relaxed direction resolves.
+                hits = [s for s in pool
+                        if self._reminder_terms(
+                            self._reminder_label(s))
+                        and self._reminder_terms(
+                            self._reminder_label(s)) <= scope_terms]
             if not hits and scope_terms and nm is not None:
                 _, wide = self._reminder_rows(include_disabled=True)
                 hits = [s for s in wide
@@ -8407,6 +8561,16 @@ class AgentOrchestrator:
                     if (not scope_terms
                         or scope_terms <= self._reminder_hay(s))
                     and _in_window(s)]
+            if not hits and scope_terms:
+                # 'what time is the trash run' — extra scope words
+                # ride along but the row's whole label still sits
+                # inside them; the relaxed direction resolves.
+                hits = [s for s in rows
+                        if self._reminder_terms(
+                            self._reminder_label(s))
+                        and self._reminder_terms(
+                            self._reminder_label(s)) <= scope_terms
+                        and _in_window(s)]
             if not hits:
                 # A named row that's OFF is the honest answer, not
                 # 'no reminder' — 'when does the build reminder
@@ -8418,6 +8582,14 @@ class AgentOrchestrator:
                          if (not scope_terms
                              or scope_terms <= self._reminder_hay(s))
                          and _in_window(s)]
+                if not dhits and scope_terms:
+                    dhits = [s for s in d_rows
+                             if self._reminder_terms(
+                                 self._reminder_label(s))
+                             and self._reminder_terms(
+                                 self._reminder_label(s))
+                                 <= scope_terms
+                             and _in_window(s)]
                 if len(dhits) == 1:
                     s = dhits[0]
                     text = (
@@ -8763,6 +8935,10 @@ class AgentOrchestrator:
         if mre is not None:
             return self._reminder_rename_reply(
                 user_text, mre, task_id, event_callback)
+        msw = self._REMINDER_SWAP_RE.match(plan_text)
+        if msw is not None:
+            return self._reminder_swap_reply(
+                user_text, msw, task_id, event_callback)
         mr = self._REMINDER_RESCHEDULE_RE.match(plan_text)
         if mr is None:
             mr = self._REMINDER_RESCHEDULE_BARE_RE.match(plan_text)
@@ -10639,6 +10815,7 @@ class AgentOrchestrator:
                          or self._REMINDER_WHATDID_RE.match(
                              plan_text)
                          or self._REMINDER_RESTORE_RE.match(plan_text)
+                         or self._REMINDER_SWAP_RE.match(plan_text)
                          or self._reminder_inventory_shaped(
                              plan_text)
                          or self._reminder_pending(
@@ -11116,6 +11293,7 @@ class AgentOrchestrator:
             cls._REMINDER_UNDO_RE,
             cls._REMINDER_WHATDID_RE,
             cls._REMINDER_RESTORE_RE,
+            cls._REMINDER_SWAP_RE,
             cls._REMINDER_WHENLEAD_RE,
             # Bare duration/clock fragments may be pending-clarify
             # replies — the resolver checks the convo at reply time.
