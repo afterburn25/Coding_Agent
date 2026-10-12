@@ -3597,6 +3597,71 @@ class TruthGateTests(RecoveryLoopTests):
             lt = time.localtime(wrow["at"])
             self.assertEqual((lt.tm_hour, lt.tm_min), (7, 30))
 
+            # Negative keeps — 'don't touch X'/'don't change
+            # anything' got banked as operating RULES over zero
+            # state; they're the same leave-alone report.
+            r = agent._local_action_reply(
+                "don't touch the daily sync", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("left alone", r.content)
+            r = agent._local_action_reply(
+                "don't change anything", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Left", r.content)
+            # Mass keeps take the whole pool — never just the
+            # journal's last-touched row.
+            r = agent._local_action_reply(
+                "leave my reminders alone", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Left", r.content)
+            # 'name X Y' is the same rename 'call X Y' is — the
+            # learn lane banked 'standup is scrum' as a FACT.
+            r = agent._local_action_reply(
+                "name the daily sync standup", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Renamed", r.content)
+            # 'rename it' — a bare target-less rename clarifies
+            # through the journal, never narrates.
+            r = agent._local_action_reply("rename it", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("to what", r.content)
+            # 'what do you call X' — the same label ask.
+            r = agent._local_action_reply(
+                "what do you call the standup", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("standup", r.content)
+            # Ringing-now asks answer from last_run, not a guess.
+            r = agent._local_action_reply(
+                "what's firing right now", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("ringing", r.content)
+            r = agent._local_action_reply(
+                "that alarm going off", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("ringing", r.content)
+            # 'the reminder i made this morning' — a bare created-
+            # scope fragment identifies rows or says none match.
+            r = agent._local_action_reply(
+                "the reminder i made this morning", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("created", r.content)
+            # Compound/article amounts — 'an hour and a half',
+            # 'a couple days', 'a half hour earlier' all parse.
+            before = float(sup.scheduler.rows[1]["at"])
+            r = agent._local_action_reply(
+                "postpone the brew an hour and a half", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Snoozed", r.content)
+            self.assertAlmostEqual(
+                float(sup.scheduler.rows[1]["at"]),
+                before + 5400, delta=2)
+            r = agent._local_action_reply(
+                "move the standup a half hour earlier", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Rescheduled", r.content)
+            self.assertEqual(sup.scheduler.rows[0]["hour"], 9)
+            self.assertEqual(sup.scheduler.rows[0]["minute"], 0)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
