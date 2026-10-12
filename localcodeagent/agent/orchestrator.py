@@ -4089,7 +4089,9 @@ class AgentOrchestrator:
             tail_d = dsm.group(1).strip(" ,;—-")
             if head_d and (
                     re.fullmatch(
-                        r"(?:in|by\s+)?\d+(?:\.\d+)?\s*"
+                        r"(?:in|by\s+)?(?:\d+(?:\.\d+)?|a|an|one|"
+                        r"two|three|four|five|six|seven|eight|nine|"
+                        r"ten|couple|few)\s*"
                         r"(?:seconds?|secs?|s|minutes?|mins?|m|"
                         r"hours?|hrs?|h|days?|d)", tail_d)
                     or self._reminder_at_when(
@@ -4113,13 +4115,22 @@ class AgentOrchestrator:
         now = time.time()
         if dur:
             dm = re.fullmatch(
-                r"(?:(?:in|by)\s+)?(\d+(?:\.\d+)?)\s*"
+                r"(?:(?:in|by)\s+)?(\d+(?:\.\d+)?|a|an|one|two|"
+                r"three|four|five|six|seven|eight|nine|ten|couple|"
+                r"few)\s*"
                 r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
                 r"days?|d)", dur)
             if dm:
                 scale = {"s": 1, "m": 60, "h": 3600, "d": 86400}[
                     dm.group(2)[0]]
-                delta = float(dm.group(1)) * scale
+                n_tok = dm.group(1)
+                delta = float(
+                    n_tok if n_tok.replace(".", "").isdigit()
+                    else {"a": 1, "an": 1, "one": 1, "two": 2,
+                          "three": 3, "four": 4, "five": 5,
+                          "six": 6, "seven": 7, "eight": 8,
+                          "nine": 9, "ten": 10, "couple": 2,
+                          "few": 3}[n_tok]) * scale
             else:
                 when = self._reminder_at_when(dur, now)
                 if when is None:

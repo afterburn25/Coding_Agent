@@ -3851,6 +3851,19 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(spec)
             self.assertEqual(spec["kind"], "interval")
             self.assertEqual(spec["interval_s"], 259200.0)
+            # Worded snooze deltas — 'push back X two days' asked
+            # 'until when?' live; worded numbers map like digits.
+            sup.scheduler.add(
+                "reminder: nap", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "nap"})
+            before = float(sup.scheduler.rows[-1]["at"])
+            result = agent.run(
+                "push back the nap reminder two days", mode="auto")
+            self.assertIn("Snoozed", result.content)
+            self.assertAlmostEqual(
+                float(sup.scheduler.rows[-1]["at"]),
+                before + 172800.0, delta=5)
 
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
