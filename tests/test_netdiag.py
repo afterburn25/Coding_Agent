@@ -2280,6 +2280,44 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIsNone(agent._reminder_reply(
             "undo that", "undo that", task.id))
 
+        # 'bring back X' — a disabled row re-enables through the
+        # toggle convention, a journaled deletion re-adds the row,
+        # an enabled row says 'already on', and a scope that
+        # resolves nothing misses honestly instead of narrating a
+        # resurrection.
+        r = agent._reminder_reply(
+            "turn off the wake", "turn off the wake", task.id)
+        self.assertIsNotNone(r)
+        r = agent._reminder_reply(
+            "bring back the wake", "bring back the wake", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("Turned on", r.content)
+        self.assertTrue(sup.scheduler.rows[0]["enabled"])
+        r = agent._reminder_reply(
+            "cancel the wake", "cancel the wake", task.id)
+        self.assertIsNotNone(r)
+        self.assertFalse(sup.scheduler.rows)
+        r = agent._reminder_reply(
+            "bring back the wake", "bring back the wake", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 1)
+        r = agent._reminder_reply(
+            "restore the wake", "restore the wake", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("already on", r.content)
+        agent._sched_undo = []
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: other", "daily", hour=8, minute=0,
+            action={"kind": "notify", "detail": "other"})
+        r = agent._reminder_reply(
+            "bring back the dentist reminder",
+            "bring back the dentist reminder", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("don't see", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 1)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

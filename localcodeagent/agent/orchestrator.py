@@ -4271,6 +4271,15 @@ class AgentOrchestrator:
         r"alarm|timer|one|update|move)|what\s+you\s+(?:just\s+)?"
         r"did|my\s+last\s+(?:reminder|alarm|timer)))?[.!?]?\s*$",
         re.IGNORECASE)
+    # 'bring back the wake' / 'restore the standup' — re-enables a
+    # disabled row or re-adds a journaled deletion; a miss must
+    # say so rather than narrate a resurrection.
+    _REMINDER_RESTORE_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:(?:bring|put)\s+back|restore|reinstate|re-?add|"
+        r"undelete|un-?delete|resurrect)\s+"
+        r"(?P<rest>.+?)" + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
@@ -7573,6 +7582,100 @@ class AgentOrchestrator:
             "Undone — " + "; ".join(notes) + ".",
             user_text, task_id, event_callback)
 
+    def _reminder_restore_reply(self, user_text: str, mr: re.Match,
+                                task_id: str, event_callback):
+        """'bring back the wake' — re-enables a matching disabled
+        row, or re-adds a row the journal recorded as deleted this
+        session. A live match says 'already on'; a scope that
+        resolves nothing falls through unless a schedule noun
+        anchors it."""
+        sched, rows = self._reminder_rows(include_disabled=True)
+        if sched is None:
+            return self._reminder_finish(
+                "I can't manage reminders — the scheduler isn't "
+                "running in this session.",
+                user_text, task_id, event_callback)
+        rest = str(mr.groupdict().get("rest") or "")
+        rest = re.sub(r"\s+(?:back|again)\s*$", "", rest,
+                      flags=re.IGNORECASE)
+        noun_hit = bool(re.search(
+            r"\b(?:reminders?|alarms?|timers?|schedules?)\b",
+            rest, re.IGNORECASE))
+        scope = self._reminder_terms(re.sub(
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
+            r"everything|everyone|them|"
+            r"reminders?|alarms?|timers?|schedules?)\b", " ", rest,
+            flags=re.IGNORECASE))
+        scope, _ord = self._reminder_ordinal_split(scope)
+        all_scope = (not scope and bool(re.search(
+            r"\b(?:all|everything|them|everyone)\b", rest,
+            re.IGNORECASE)))
+        disabled = [s for s in rows if not s.get("enabled", True)]
+        hits_d = [s for s in disabled
+                  if all_scope or not scope
+                  or scope <= self._reminder_hay(s)]
+        hits_l = [s for s in rows
+                  if s.get("enabled", True) and scope
+                  and scope <= self._reminder_hay(s)]
+        journal = getattr(self, "_sched_undo", None) or []
+        jents = [e for e in journal
+                 if e[0] == "readd"
+                 and (all_scope or not scope
+                      or scope <= self._reminder_hay(e[1]))]
+        # Consume the readd entries this turn replays BEFORE any
+        # mutation. The turn's own writes then form a fresh journal
+        # batch, so 'undo that' reverses only the restore — never
+        # surprise-restores an unrelated deleted row.
+        for e in jents:
+            journal.remove(e)
+        on_labels, back_labels = [], []
+        for s in hits_d:
+            if sched.set_enabled(str(s["id"]), True):
+                on_labels.append(self._reminder_label(s))
+        for e in jents:
+            row = e[1]
+            kw = {k: row.get(k) for k in (
+                "at", "interval_s", "hour", "minute", "weekday",
+                "day", "action", "enabled", "created_by")
+                if k in row}
+            try:
+                sched.add(row.get("name"), row.get("kind"), **kw)
+            except Exception:
+                continue
+            back_labels.append(str(e[2]))
+        if on_labels or back_labels:
+            # Re-enable replies match the toggle lane's convention;
+            # journal re-adds name the row that's back.
+            parts = []
+            if on_labels:
+                parts.append(
+                    f"Turned on the reminder “{on_labels[0]}”"
+                    if len(on_labels) == 1 else
+                    f"Turned on {len(on_labels)} reminders")
+            parts += [f"“{lbl}” is back" for lbl in back_labels]
+            text = "; ".join(parts) + "."
+        elif hits_l:
+            text = (f"“{self._reminder_label(hits_l[0])}” is "
+                    "already on.")
+        elif scope:
+            # 'restore the database' is not a schedule op unless a
+            # schedule noun or a restorable pool anchors it.
+            if not (noun_hit or disabled or journal):
+                return None
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rows[:3])
+            text = (f"I don't see a deleted or paused reminder "
+                    f"matching “{' '.join(sorted(scope))}” — "
+                    f"you have: {names or 'none'}. "
+                    "I can set it again if you tell me when.")
+        elif all_scope or noun_hit:
+            text = ("There's nothing off or deleted to bring "
+                    "back.")
+        else:
+            return None
+        return self._reminder_finish(text, user_text, task_id,
+                                     event_callback)
+
     def _reminder_reply(self, user_text: str, plan_text: str,
                         task_id: str, *, event_callback=None):
         """'remind me in 5 minutes to X' — a real once-schedule with a
@@ -7646,6 +7749,12 @@ class AgentOrchestrator:
         if mc is not None:
             return self._reminder_cancel_reply(
                 user_text, mc, task_id, event_callback)
+        mrest = self._REMINDER_RESTORE_RE.match(plan_text)
+        if mrest is not None:
+            _rrest = self._reminder_restore_reply(
+                user_text, mrest, task_id, event_callback)
+            if _rrest is not None:
+                return _rrest
         ms = self._REMINDER_SNOOZE_RE.match(plan_text)
         if ms is not None:
             return self._reminder_snooze_reply(
@@ -9353,6 +9462,7 @@ class AgentOrchestrator:
                          or self._REMINDER_CLOCKHAVE_RE.match(
                              plan_text)
                          or self._REMINDER_UNDO_RE.match(plan_text)
+                         or self._REMINDER_RESTORE_RE.match(plan_text)
                          or self._reminder_inventory_shaped(
                              plan_text)
                          or self._reminder_pending(
@@ -9828,6 +9938,7 @@ class AgentOrchestrator:
             cls._REMINDER_CONFIRMASK_RE,
             cls._REMINDER_CLOCKHAVE_RE,
             cls._REMINDER_UNDO_RE,
+            cls._REMINDER_RESTORE_RE,
             cls._REMINDER_WHENLEAD_RE,
             # Bare duration/clock fragments may be pending-clarify
             # replies — the resolver checks the convo at reply time.
