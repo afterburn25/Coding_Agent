@@ -4485,6 +4485,27 @@ class TruthGateTests(RecoveryLoopTests):
                           mode="auto")
             self.assertIn("your editor", r.content)
             self.assertNotIn("editor is", r.content)
+            # Noun-less determiner toggles — 'unpause the standup'
+            # names the row without a schedule noun; the lane
+            # claims on a row hit and falls through on a miss so
+            # 'pause the movie'/'stop the car' stay action turns.
+            sup.scheduler.rows[0]["enabled"] = False
+            r = agent.run("unpause the build", mode="auto")
+            self.assertIn("build", r.content)
+            self.assertTrue(sup.scheduler.rows[0]["enabled"])
+            sup.scheduler.rows[0]["enabled"] = True
+            r = agent.run("pause the build", mode="auto")
+            self.assertFalse(sup.scheduler.rows[0]["enabled"])
+            t = agent.tasks.create("x", "auto")
+            for q in ("pause the movie", "stop the car",
+                      "mute the tv"):
+                self.assertIsNone(
+                    agent._reminder_reply(q, q, t.id), q)
+            # 'set my alarm for 7' — the DECL article group lacked
+            # 'my'/'the'; the create fell through to the model.
+            for q in ("set my alarm for 7", "set the alarm for 8"):
+                r = agent.run(q, mode="auto")
+                self.assertIn("Alarm set", r.content, q)
 
     def test_clock_scoped_inventory_asks(self):
         # Grammar sweep: 'what happens at 9am', 'whats at 9am',

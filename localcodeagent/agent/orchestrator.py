@@ -3812,7 +3812,8 @@ class AgentOrchestrator:
         r"|i'?ll\s+(?:need|want)|can\s+i\s+(?:get|have)"
         r"|(?:give|get|make|set\s+up)\s+me|gimme"
         r"|set|make|create|add|schedule|start|begin)\s+"
-        r"(?:a\s+|an\s+|me\s+a\s+)?"
+        r"(?:a\s+|an\s+|me\s+a\s+|my\s+|me\s+my\s+|the\s+|"
+        r"another\s+)?"
         r"(?:(?P<dur>\d[\w\s]*?(?:seconds?|secs?|minutes?|mins?|"
         r"hours?|hrs?|days?|weeks?))\s+)?"
         r"(?P<noun>reminders?|alarms?|timers?)\b"
@@ -4345,7 +4346,20 @@ class AgentOrchestrator:
         r"put\s+(?P<body3>(?:(?:the|my|that|this|those|these|"
         r"all|any)\s+)?[\w'\s-]{0,30}?)\s*"
         r"\b(?P<noun3>reminders?|alarms?|timers?|schedules?)\b"
-        r"\s+on\s+hold\b" + _REMINDER_TRAIL,
+        r"\s+on\s+hold\b" + _REMINDER_TRAIL +
+        # 'unpause the standup' — determiner + name, no schedule
+        # noun. The handler claims only on a row hit; 'pause the
+        # movie'/'stop the car' fall through to the action lanes.
+        r"|" + _REMINDER_POLITE +
+        r"(?P<verb4>disable|enable|re-?enable|pause|resume|"
+        r"unpause|unmute|unsilence|stop|mute|silence|hold|"
+        r"freeze|suspend|quiet|block|un-?block|unfreeze|thaw|"
+        r"bring\s+back|put\s+back|restore|restart|re-?activate|"
+        r"renew|revive)\s+"
+        r"(?:the\s+|my\s+|that\s+|this\s+|those\s+|these\s+)"
+        r"(?P<body4>[\w'\s-]{1,40}?)"
+        r"(?:\s+(?P<dir4>back\s+on|off|on))?"
+        + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_STOP_RE = re.compile(
         _REMINDER_POLITE +
@@ -5488,10 +5502,13 @@ class AgentOrchestrator:
             want_on = (str(mt.group("dir2") or "").lower() != "off")
             body = ""
         else:
-            verb = str(mt.group("verb") or "").lower()
-            dirw = str(mt.group("dir") or "").lower()
+            verb = str(mt.group("verb")
+                       or mt.groupdict().get("verb4") or "").lower()
+            dirw = str(mt.group("dir")
+                       or mt.groupdict().get("dir4") or "").lower()
             body = str(mt.group("body")
-                       or mt.groupdict().get("body3") or "")
+                       or mt.groupdict().get("body3")
+                       or mt.groupdict().get("body4") or "")
             body = body.strip(" ,;—-")
             if (verb in ("restart", "restore", "renew", "revive",
                          "resume", "suspend", "block", "freeze",
@@ -5578,6 +5595,12 @@ class AgentOrchestrator:
             tgt_date = self._reminder_day_date(day, time.time())
             hits = [s for s in hits
                     if self._reminder_fires_on(s, tgt_date)]
+        if (mt.groupdict().get("verb4") is not None and rows
+                and not any(topic_terms <= _hay(s) for s in rows)):
+            # 'pause the movie' — a noun-less toggle that names no
+            # reminder row belongs to the action lanes; claiming a
+            # 'no reminder matching' reply would still hijack it.
+            return None
         if not rows:
             text = self._reminder_none_text(
                 sched, mt.group("noun")
