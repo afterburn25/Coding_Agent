@@ -252,6 +252,18 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"\b(?:at|around|during)?\s*midday\b", "at 12:00 pm", t)
     t = re.sub(
         r"\b(?:at|around|during)?\s*mid-morning\b", "at 10 am", t)
+    # 'end of day' / 'eod' / 'close of business' — the work-day
+    # daypart pins at 5pm like 'dinner' pins 6.
+    t = re.sub(
+        r"\b(?:at|around|by|before|during)?\s*(?:the\s+)?"
+        r"(?:end\s+of\s+(?:the\s+)?(?:day|work\s*day)|eod|"
+        r"close\s+of\s+(?:business|(?:the\s+)?day))\b",
+        "at 5 pm", t)
+    # 'start of day' / 'beginning of the day' — 9am convention.
+    t = re.sub(
+        r"\b(?:at|around|by|before|during)?\s*(?:the\s+)?"
+        r"(?:start|beginning)\s+of\s+(?:the\s+)?day\b",
+        "at 9 am", t)
     # 'sometime tonight' / 'at some point tomorrow' — the vague
     # qualifier isn't part of the time.
     t = re.sub(r"\bat\s+some\s+point\s+(?:in\s+)?", "", t)
@@ -825,6 +837,18 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         r"\b(?:at|around|during)?\s*midday\b", "at 12:00 pm", t)
     t = re.sub(
         r"\b(?:at|around|during)?\s*mid-morning\b", "at 10 am", t)
+    # 'end of day' / 'eod' / 'close of business' — the work-day
+    # daypart pins at 5pm like 'dinner' pins 6.
+    t = re.sub(
+        r"\b(?:at|around|by|before|during)?\s*(?:the\s+)?"
+        r"(?:end\s+of\s+(?:the\s+)?(?:day|work\s*day)|eod|"
+        r"close\s+of\s+(?:business|(?:the\s+)?day))\b",
+        "at 5 pm", t)
+    # 'start of day' / 'beginning of the day' — 9am convention.
+    t = re.sub(
+        r"\b(?:at|around|by|before|during)?\s*(?:the\s+)?"
+        r"(?:start|beginning)\s+of\s+(?:the\s+)?day\b",
+        "at 9 am", t)
     # 'sometime tonight' / 'at some point tomorrow' — the vague
     # qualifier isn't part of the time.
     t = re.sub(r"\bat\s+some\s+point\s+(?:in\s+)?", "", t)
