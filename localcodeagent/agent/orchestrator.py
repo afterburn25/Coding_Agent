@@ -3971,6 +3971,19 @@ class AgentOrchestrator:
         r"(?P<body>(?!.*(?:\bfiles?\b|\bfolders?\b|\w*dirs?\b|"
         r"\bdirector\w*\b|\bdocs?\b|\bdocuments?\b|\bphotos?\b|"
         r"\bimages?\b|\bvideos?\b|\bdownloads?\b|\bbackups?\b|"
+        # Software objects — 'kill the task', 'end the process',
+        # 'cancel the job' are task/process control, not reminder
+        # cancels; they fall through to the action lanes. Kept to
+        # hard-software nouns: 'subscription'/'test' stay claimable —
+        # 'cancel my netflix subscription' is a reminder topic.
+        r"\btasks?\b|\bjobs?\b|\bprocess(?:es)?\b|\bservices?\b|"
+        r"\bservers?\b|\bmissions?\b|\bapps?\b|\bcontainers?\b|"
+        r"\bdaemons?\b|\bworkers?\b|\bthreads?\b|\bbuilds?\b|"
+        r"\bdeploys?\b|\bpipelines?\b|\bbranches?\b|\bcommits?\b|"
+        r"\bendpoints?\b|\bpods?\b|\binstances?\b|\bvms?\b|"
+        r"\bnodes?\b|\bqueues?\b|\bcrons?\b|\bwebhooks?\b|"
+        r"\bmigrations?\b|\bclusters?\b|\bdatabases?\b|\btables?\b|"
+        r"\bports?\b|\bsockets?\b|"
         r"\bscripts?\b|\bconfigs?\b|\blogs?\b|\w+\.\w{1,5}\b))"
         r"\D\S[\w' .-]*?)"
         + _REMINDER_TRAIL,
@@ -4899,6 +4912,18 @@ class AgentOrchestrator:
             verb = str(mt.group("verb") or "").lower()
             dirw = str(mt.group("dir") or "").lower()
             body = str(mt.group("body") or "").strip(" ,;—-")
+            if (verb in ("restart", "restore", "renew", "revive",
+                         "resume", "suspend", "block", "freeze",
+                         "hold", "bring back", "put back",
+                         "re-activate", "reactivate", "unfreeze",
+                         "thaw")
+                    and str(mt.group("noun") or "").lower()
+                        in ("it", "that", "this", "them")
+                    and not body):
+                # 'restart it'/'suspend it' — a software-dominant
+                # verb on a bare pronoun is a service/process op,
+                # not a reminder toggle; the action lanes take it.
+                return None
             if verb in ("turn", "switch"):
                 dm = re.match(r"(off|on|back\s+on)\b", body,
                               re.IGNORECASE)
@@ -5067,6 +5092,19 @@ class AgentOrchestrator:
         """'cancel the deploy reminder' — a real scheduler removal by
         topic match, with ambiguity listed rather than guessed."""
         noun = mc.groupdict().get("noun")
+        if (str(noun or "").lower() in ("it", "that", "this", "them")
+                and re.match(
+                    r"\s*(?:please\b|pls\b|plz\b|can\s+you\b|"
+                    r"could\s+you\b|would\s+you\b|hey\b|ok(?:ay)?\b|"
+                    r"so\b|now\b|just\b|\s)*"
+                    r"(?:kill|end|stop|clear|drop|skip|scratch|"
+                    r"trash|toss|dump|bin|nuke|ditch|axe|forget|"
+                    r"undo|terminate|abort|halt)\b",
+                    user_text, re.IGNORECASE)):
+            # 'kill it'/'end it' — software-dominant verb + bare
+            # pronoun is process/task control, not a reminder
+            # cancel; the action lanes take it.
+            return None
         sched, rows = self._reminder_rows(noun=noun)
         _, rows_d = self._reminder_rows(
             include_disabled=True, noun=noun)
