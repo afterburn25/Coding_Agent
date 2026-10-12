@@ -3210,6 +3210,56 @@ class TruthGateTests(RecoveryLoopTests):
             sup.scheduler.rows[-1]["name"],
             "reminder: take pills")
 
+        # Fire-day windows include recurring rows whose next
+        # fire is sooner — a daily row DOES fire Saturday, and
+        # 'what fires this week' claims the window ask.
+        for s in list(sup.scheduler.rows):
+            sup.scheduler.remove(s["id"])
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            action={"kind": "notify", "detail": "standup"})
+        r = agent._reminder_reply(
+            "do i have a reminder set for the weekend",
+            "do i have a reminder set for the weekend", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("standup", r.content)
+        r = agent._reminder_reply(
+            "what fires this week", "what fires this week",
+            task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("standup", r.content)
+        # 'is anything on right now' — nothing has a fresh
+        # last_run; the honest answer names the next fire.
+        r = agent._reminder_reply(
+            "is anything on right now", "is anything on right now",
+            task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("ringing", r.content.lower())
+        self.assertIn("standup", r.content)
+        # 'clear todays reminders' — possessive day words scope
+        # the window; a once-row firing today cancels.
+        sup.scheduler.add(
+            "reminder: tea", "once", at=time.time() + 600,
+            action={"kind": "notify", "detail": "tea"})
+        r = agent._reminder_reply(
+            "clear todays reminders",
+            "clear todays reminders", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("tea", r.content)
+        self.assertTrue(
+            any(s["name"] == "reminder: standup"
+                for s in sup.scheduler.rows))
+        # 'at noon and midnight' — two clocks for one reminder
+        # refuse instead of minting a garbled name.
+        r = agent._reminder_reply(
+            "remind me to call mom at noon and midnight",
+            "remind me to call mom at noon and midnight", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("two times", r.content)
+        self.assertFalse(
+            any("mom" in s["name"]
+                for s in sup.scheduler.rows))
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
@@ -6196,11 +6246,15 @@ class TruthGateTests(RecoveryLoopTests):
             # the real pool, never 'no reminders set'.
             for q in ("do i have anything at noon",
                       "what happens at noon",
-                      "what do i have at 8pm",
-                      "whats on friday"):
+                      "what do i have at 8pm"):
                 r = agent.run(q, mode="auto")
                 self.assertIn("no reminder", r.content.lower(), q)
                 self.assertIn("standup", r.content, q)
+            # 'whats on friday' — daily rows DO fire Friday;
+            # the fire-day window must name them, not miss.
+            r = agent.run("whats on friday", mode="auto")
+            self.assertIn("standup", r.content)
+            self.assertIn("stretch", r.content)
             # 'is anything on for tonight' scopes to TODAY's fire
             # window — the 'for' connector must not leak into the
             # scope terms ('no reminder about "for"'). Whichever

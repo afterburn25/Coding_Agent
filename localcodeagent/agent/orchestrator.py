@@ -4773,7 +4773,16 @@ class AgentOrchestrator:
         r"\bhow\s+many\s+fires?\b|"
         # 'what's overdue' / 'which reminders are overdue' —
         # missed one-shot inventory.
-        r"\boverdue\b|\bmissed\b",
+        r"\boverdue\b|\bmissed\b|"
+        # 'is anything on right now' — a ringing-now ask with
+        # the schedule noun implied.
+        r"\b(?:anything|something)\s+(?:on|ringing|firing|"
+        r"going\s+off)\s+(?:right\s+)?(?:now|currently)\b|"
+        # 'what fires this week' / 'which goes off tonight' —
+        # verb-led scoped asks without the schedule noun.
+        r"\b(?:what|which)\s+(?:fires?|goes?\s+off|hits?|rings?|"
+        r"pops?\s+up|triggers?)\s+"
+        r"(?:today|tonight|tonite|tomorrow|this|next|on|in)\b",
         re.IGNORECASE)
     # Temporal tokens in a failed when-clause → ask when, don't claim.
     _REMINDER_TIMEISH_RE = re.compile(
@@ -7445,8 +7454,11 @@ class AgentOrchestrator:
                 "weekends", "week"}
             # Day words are window scope, never name terms; 'on',
             # 'in', 'at' only attach to them ('cancel the dentist
-            # on thursday' → 'dentist').
-            _nonday = topic_terms - _daywords - {"on", "in", "at"}
+            # on thursday' → 'dentist'). 'todays'/'tomorrows'
+            # possessives rstrip to the same day word.
+            _nonday = {t for t in topic_terms
+                       if t.rstrip("s") not in _daywords
+                       and t not in ("on", "in", "at")}
             if _nonday:
                 topic_terms &= _nonday
             elif (topic_terms
@@ -8029,6 +8041,11 @@ class AgentOrchestrator:
         Returns (None, None) when there's no temporal scope."""
         import datetime as dt
         t = str(plan_text or "").lower()
+        # 'todays reminders' / 'tonight's fire' — the possessive
+        # is the same day-window.
+        t = re.sub(r"\b(today|tonight|tonite|tomorrow|monday|"
+                   r"tuesday|wednesday|thursday|friday|saturday|"
+                   r"sunday)'?s\b", r"\1", t)
         today = dt.date.fromtimestamp(now)
         dates, label = set(), None
         if re.search(r"\b(?:today|tonight|tonite|this\s+morning|"
@@ -8128,6 +8145,10 @@ class AgentOrchestrator:
             plan_text, re.IGNORECASE)))
         overdue_ask = bool(re.search(
             r"\boverdue\b|\bmissed\b", plan_text, re.IGNORECASE))
+        now_ask = bool(re.search(
+            r"\b(?:anything|something)\s+(?:on|ringing|firing|"
+            r"going\s+off)\s+(?:right\s+)?(?:now|currently)\b",
+            plan_text, re.IGNORECASE))
         sched, rows = self._reminder_rows(
             include_disabled=off_ask,
             noun=nm.group(1).lower() if nm else None)
@@ -8219,13 +8240,19 @@ class AgentOrchestrator:
                 return True
             # next_run/at for one-shots; a recurring row's next
             # cadence occurrence so 'anything tomorrow' includes
-            # the daily standup, not just dated rows.
-            fire = self._reminder_next_fire(s, now)
-            if not fire:
-                return False
+            # the daily standup, not just dated rows. A wider
+            # window ('this weekend') also qualifies a recurring
+            # row whose next fire is sooner but which still fires
+            # on a window date — the daily standup DOES fire
+            # Saturday.
             import datetime as _dt
-            return (_dt.date.fromtimestamp(float(fire))
-                    in day_dates)
+            fire = self._reminder_next_fire(s, now)
+            if fire and (_dt.date.fromtimestamp(float(fire))
+                         in day_dates):
+                return True
+            return any(
+                self._reminder_fires_on(s, d.timetuple()[:3])
+                for d in day_dates)
 
         def _scoped_hits(pool: list) -> list:
             # Loose noun + specific scope — 'the 9am alarm' over a
@@ -8922,6 +8949,31 @@ class AgentOrchestrator:
             else:
                 text = ("No reminders set — say “remind me in 10 "
                         "minutes to …” and I'll schedule it.")
+        elif now_ask:
+            # 'is anything on right now' — 'on' means ringing:
+            # a fresh last_run within the hour. Otherwise the
+            # next scheduled fire is the honest answer.
+            ringing = [s for s in rows
+                       if s.get("last_run")
+                       and now - float(s["last_run"]) < 3600]
+            if ringing:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in ringing[:3])
+                text = (f"{names} {'is' if len(ringing) == 1 else 'are'}"
+                        " ringing right now.")
+            else:
+                nxt = min(
+                    (s for s in rows
+                     if self._reminder_next_fire(s, now)),
+                    key=lambda s: self._reminder_next_fire(
+                        s, now), default=None)
+                text = (
+                    "Nothing's ringing right now"
+                    + (f" — the next is "
+                       f"“{self._reminder_label(nxt)}” "
+                       f"({self._reminder_when_text(nxt, now)})."
+                       if nxt else "."))
         elif overdue_ask:
             # 'what's overdue' — an enabled one-shot whose fire
             # time passed without a last_run missed its beat.
@@ -9061,10 +9113,16 @@ class AgentOrchestrator:
                         f"reminder fires "
                         f"{self._reminder_when_text(hits[0], now)}.")
             else:
+                hits = sorted(
+                    hits,
+                    key=lambda s: self._reminder_next_fire(s, now)
+                    or float("inf"))
                 bits = "; ".join(
                     f"“{self._reminder_label(s)}” "
                     f"({self._reminder_when_text(s, now)})"
-                    for s in hits[:5])
+                    for s in hits[:6])
+                if len(hits) > 6:
+                    bits += f" +{len(hits) - 6} more"
                 what = (f" about “{' '.join(sorted(scope_terms))}”"
                         if scope_terms else "")
                 text = (f"{len(hits)} reminder"
@@ -11189,11 +11247,14 @@ class AgentOrchestrator:
                 "I can do one thing at a time — say the reminder "
                 "to set, then the reminder to change.",
                 user_text, task_id, event_callback)
-        if re.match(r"(?:at|in|on)\s+\d", task) or re.search(
+        if (re.match(r"(?:at|in|on)\s+\d", task) or re.search(
                 r"\b(?:then|again|and|or)\s+(?:at|in|on)\s+\d|"
-                r"\bthen\s+again\b", task):
-            # 'at 5 then again at 7' — the task slot held a second
-            # clock; two times for one reminder is ambiguous.
+                r"\bthen\s+again\b|"
+                r"\band\s+(?:noon|midnight|midday|\d{1,2}"
+                r"(?::\d{2})?(?:\s*(?:a\.?m|p\.?m))?)\b", task)):
+            # 'at 5 then again at 7' / 'at noon and midnight' —
+            # the task slot held a second clock; two times for
+            # one reminder is ambiguous.
             return self._reminder_finish(
                 "That's two times for one reminder — say “at 5” "
                 "or “at 7” and I'll set it.",
