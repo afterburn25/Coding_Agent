@@ -206,6 +206,11 @@ class SemanticFrame:
             # "show me the settings" is action-shaped AND navigation —
             # keep the slot; the lane itself decides which screen.
             return act in (QUESTION, COMMAND, REQUEST, ASSERTION)
+        if lane == "bug_report":
+            # Only complaint-shaped turns may take the bug-report
+            # lane — a command like "fix the crash" still belongs to
+            # the action lanes.
+            return act == COMPLAINT
         if lane == "identity":
             return act in (QUESTION, ASSERTION, COMMAND, REQUEST)
         return True

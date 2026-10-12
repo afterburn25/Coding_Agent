@@ -3475,6 +3475,75 @@ class AgentOrchestrator:
         r"\b(?:current|full|whole|entire)\s+spec\b",
         re.IGNORECASE)
 
+    # Complaints naming the agent's own surface — 'the api times out',
+    # 'your reminders didn't fire', 'the ui freezes'. A complaint about
+    # the user's world ('my code keeps crashing') stays on the model
+    # path — they want help, not a logged incident.
+    _AGENT_SELF_TARGET_RE = re.compile(
+        r"\b(?:you|your|u|nexus|this|the)\s+(?:app(?:lication)?|"
+        r"ui|interface|backend|server|model|models|voice|chat|agent|"
+        r"reminders?|notifications?|timers?|alarms?|responses?|"
+        r"replies|answers?|recommendations?|suggestions?|"
+        r"recommendation|reply|latency|speed|performance|api|"
+        r"image(?:\s+(?:gen(?:eration|erator)?|s))?|generation|"
+        r"install(?:er|ation)?|update(?:s)?|voice\s+output)\b|"
+        r"\b(?:you|your|nexus)\s+(?:keep|kept|stop|are|is|were|was|"
+        r"got|just|didn'?t|don'?t|won'?t|can'?t|never|always|"
+        r"still)\b|\bnexus\s+(?:is|keeps?|stopped|won'?t|doesn'?t|"
+        r"isn'?t)\b|\b(?:the|this|my)\s+(?:api|ui|backend|frontend|"
+        r"installer|updater|voice\s+engine)\s+(?:is|keeps?|stopped|"
+        r"won'?t|doesn'?t|isn'?t|timed?|hangs?|crash|freeze|lag)",
+        re.IGNORECASE)
+
+    def _complaint_reply(self, user_text: str, env=None):
+        """User-reported failure about the agent's own surface —
+        'the api times out', 'your reminders didn't fire'. Files a
+        real self-repair incident (dedupe-bounded, reversible via the
+        repairs store) and acknowledges it honestly — the reply only
+        claims 'logged' when the intake actually wrote a row. A
+        complaint the store rejects (suppressed/no intake) still gets
+        an empathize+answer, never 'I logged it' over nothing."""
+        frame = self._utterance_frame(env, user_text)
+        if frame is None or frame.speech_act != "complaint":
+            return None
+        if not frame.allows("bug_report"):
+            return None
+        text = (frame.masked_case if frame.masked_case else str(
+            user_text or ""))
+        if not self._AGENT_SELF_TARGET_RE.search(text):
+            return None
+        sup = (self._autonomy() if callable(self._autonomy)
+               else self._autonomy)
+        repair = getattr(sup, "repair", None)
+        inc = disp = None
+        if repair is not None:
+            try:
+                inc, disp = repair.report_failure(
+                    source="user_report", subsystem="chat",
+                    error_message=str(user_text or "")[:300],
+                    exc_type="UserReport")
+            except Exception:
+                inc = disp = None
+        symptom = str(user_text or "").strip()[:80]
+        from ..context.realize import RenderedReply
+        if inc is not None:
+            if disp == "recurred":
+                return RenderedReply(
+                    text=(f"That's on me — “{symptom}” already has "
+                          "an open issue, so I added another "
+                          "occurrence to it for the repair pipeline."),
+                    speech_act="answer")
+            return RenderedReply(
+                text=(f"That's on me — I logged “{symptom}” as an "
+                      "issue for the repair pipeline to investigate."),
+                speech_act="answer")
+        return RenderedReply(
+            text=(f"That's frustrating — “{symptom}”. "
+                  "I can't file an issue in this session, but the "
+                  "report is worth flagging to whoever runs the "
+                  "install."),
+            speech_act="answer")
+
     def _state_recall_reply(self, user_text: str, state_ctx,
                             env=None):
         """Conversation-state recall — 'what did we settle on', 'what
@@ -12888,7 +12957,15 @@ class AgentOrchestrator:
                 and sk_reply is None and facts_reply is None
                 and recall_reply is None)
             else None)
-        builtin_reply = github_reply or recall_reply or sk_reply or facts_reply or state_reply or (
+        complaint_reply = (
+            self._complaint_reply(user_text, env=env)
+            if (str(mode or "auto") not in self._INTERNAL_MODES
+                and github_reply is None and sk_reply is None
+                and facts_reply is None and recall_reply is None
+                and state_reply is None and not mission_id
+                and not attach["image_paths"])
+            else None)
+        builtin_reply = github_reply or recall_reply or sk_reply or facts_reply or state_reply or complaint_reply or (
             self._builtin_reply(user_text)
             if str(mode or "auto") not in self._INTERNAL_MODES and (
                 not env.suppresses_canned() or identity_lane_hit)

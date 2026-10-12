@@ -4473,6 +4473,88 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertNotIn("all green", sent)
             self.assertIn("withheld", sent)
 
+    def test_agent_complaint_files_repair_incident(self):
+        # A complaint about the agent's own surface takes the
+        # bug-report lane: real report_failure intake, honest ack —
+        # no model wait.
+        class _Repair:
+            def __init__(self):
+                self.calls = []
+
+            def report_failure(self, **kw):
+                self.calls.append(kw)
+                return ({"id": "ri-9", "state": "detected"}, "new")
+
+        class _Sup:
+            def __init__(self):
+                self.repair = _Repair()
+
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            for text in ("the api keeps timing out",
+                         "the ui freezes every time i open it",
+                         "nexus is too slow today"):
+                sup.repair.calls.clear()
+                r = agent.run(text, mode="chat")
+                self.assertIn("logged", r.content)
+                self.assertEqual(len(sup.repair.calls), 1, text)
+                self.assertEqual(
+                    sup.repair.calls[0]["source"], "user_report")
+
+    def test_agent_complaint_recurrence_reports_recurred(self):
+        class _Repair:
+            def report_failure(self, **kw):
+                return ({"id": "ri-9", "occurrences": 3}, "recurred")
+
+        class _Sup:
+            repair = _Repair()
+
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent._autonomy = lambda: _Sup()
+            r = agent.run("the api keeps timing out", mode="chat")
+            self.assertIn("another occurrence", r.content)
+
+    def test_complaint_without_intake_acks_without_claiming(self):
+        # No repair intake → the ack must NOT claim it logged anything.
+        class _Sup:
+            repair = None
+
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent._autonomy = lambda: _Sup()
+            r = agent.run("the api keeps timing out", mode="chat")
+            self.assertNotIn("logged", r.content)
+            self.assertIn("can't file", r.content)
+
+    def test_world_complaint_stays_on_model_path(self):
+        # 'my code keeps crashing' is a help-me request, not a product
+        # complaint — the lane must not claim it or file an incident.
+        class _Repair:
+            def __init__(self):
+                self.calls = []
+
+            def report_failure(self, **kw):
+                self.calls.append(kw)
+                return ({"id": "ri-9"}, "new")
+
+        class _Sup:
+            def __init__(self):
+                self.repair = _Repair()
+
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            provider = _ScriptedProvider([{
+                "role": "assistant",
+                "content": "Tell me the error message."}])
+            agent._provider_for = lambda p, **kw: provider
+            agent.run("my code keeps crashing", mode="chat")
+            self.assertEqual(sup.repair.calls, [])
+
 
 class _DeadProcess:
     def poll(self):
