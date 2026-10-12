@@ -2318,6 +2318,41 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIn("don't see", r.content)
         self.assertEqual(len(sup.scheduler.rows), 1)
 
+        # Clock-scoped retime — 'change the 6am alarm to 6:30'
+        # keeps the row's meridian; the bare-clock default would
+        # flip it to 18:30. A clock-less scope keeps the default.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "alarm: wake", "daily", hour=6, minute=0,
+            action={"kind": "notify", "detail": "wake"})
+        r = agent._reminder_reply(
+            "change the 6am alarm to 6:30",
+            "change the 6am alarm to 6:30", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("06:30", r.content)
+        self.assertEqual(
+            (sup.scheduler.rows[0]["hour"],
+             sup.scheduler.rows[0]["minute"]), (6, 30))
+
+        # Day-scoped inventory includes recurring rows — 'do i
+        # have anything tomorrow' lists the daily rows whose next
+        # fire lands in the window, not just dated once-rows.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            action={"kind": "notify", "detail": "standup"})
+        r = agent._reminder_reply(
+            "do i have anything tomorrow",
+            "do i have anything tomorrow", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("standup", r.content)
+        # 'what's left today' / 'what's on tonight' — noun-less
+        # day-scoped remaining asks claim, never model-narrate.
+        r = agent._reminder_reply(
+            "what's on tonight", "what's on tonight", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("reminder", r.content.lower())
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

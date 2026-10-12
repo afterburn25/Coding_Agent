@@ -4672,6 +4672,11 @@ class AgentOrchestrator:
         r"\b(?:anything|something)\s+(?:tomorrow|today|tonight|"
         r"tonite|this|next|monday|tuesday|wednesday|thursday|"
         r"friday|saturday|sunday|morning|afternoon|evening)\b|"
+        # 'what's left today' / 'anything still on tonight' —
+        # day-scoped remaining-schedule asks with no noun.
+        r"\b(?:left|remaining|still\s+on|still\s+due|on|due)\s+"
+        r"(?:for\s+)?(?:today|tonight|tonite|tomorrow|"
+        r"this\s+(?:morning|afternoon|evening|week))\b|"
         # Noun-less countdown asks — 'how much longer', 'time
         # left', 'how long until the standup'. Bare 'how long'
         # stays out ('how long is a marathon' isn't a countdown).
@@ -5320,24 +5325,38 @@ class AgentOrchestrator:
             if _smw is not None:
                 shift_txt = (_smw.group(2) + " " + _smw.group(1))
                 _shift_q = True
-        spec = self._reminder_spec(_wtxt, time.time())
+        # 'change the 6am alarm to 6:30' — a bare-clock target
+        # keeps the matched row's meridian when the SCOPE carried
+        # a clock ('6am', 'from 6') — the generic ≤6→PM inference
+        # would move a 06:00 alarm to 18:30. A clock-less scope
+        # ('to 11') takes the default parse.
+        _bare_clk = re.fullmatch(
+            r"(\d{1,2})(?::\d{2})?", _wtxt.strip())
+        _scope_clk = bool(_wtxt_from) or any(
+            re.fullmatch(
+                r"\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)|"
+                r"\d{1,2}:\d{2}|noon|midnight", t)
+            for t in topic_terms)
+        _mer = ""
+        if (_bare_clk is not None
+                and int(_bare_clk.group(1)) <= 12
+                and len(hits) == 1 and _scope_clk):
+            _hh = hits[0].get("hour")
+            if _hh is None and hits[0].get("at"):
+                _hh = time.localtime(
+                    float(hits[0]["at"])).tm_hour
+            if _hh is not None:
+                _mer = "am" if int(_hh) < 12 else "pm"
+        if _mer:
+            spec = self._reminder_spec(
+                "at " + _wtxt + _mer, time.time())
+        else:
+            spec = self._reminder_spec(_wtxt, time.time())
         if spec is None:
             # 'change the timer to 30 minutes' — a duration target,
             # not a clock. A bare number is the clock first —
             # 'to 11' is 11:00, not 'in 11 minutes'.
             if re.fullmatch(r"\d{1,4}", _wtxt):
-                # A 'from 6 to 7' source clock hands the bare-digit
-                # target its meridian — a 6am alarm moves to 7am, a
-                # 6pm one to 19:00, not the inferred default.
-                _mer = ""
-                if (_wtxt_from is not None and hits
-                        and int(_wtxt) <= 12):
-                    _hh = hits[0].get("hour")
-                    if _hh is None and hits[0].get("at"):
-                        _hh = time.localtime(
-                            float(hits[0]["at"])).tm_hour
-                    if _hh is not None:
-                        _mer = ("am" if int(_hh) < 12 else "pm")
                 spec = self._reminder_spec(
                     "at " + _wtxt + _mer, time.time())
                 if spec is None:
@@ -6933,7 +6952,10 @@ class AgentOrchestrator:
         def _in_window(s: dict) -> bool:
             if not day_dates:
                 return True
-            fire = s.get("next_run") or s.get("at")
+            # next_run/at for one-shots; a recurring row's next
+            # cadence occurrence so 'anything tomorrow' includes
+            # the daily standup, not just dated rows.
+            fire = self._reminder_next_fire(s, now)
             if not fire:
                 return False
             import datetime as _dt
