@@ -1076,7 +1076,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         r"(?:twice\s+(?:a\s+(day|week|month|year)|"
         r"(daily|weekly|monthly|yearly))|"
         r"two\s+times\s+a\s+(day|week|month|year)|"
-        r"(three|four|five|six|\d+)\s+times\s+a\s+"
+        r"((?:a\s+)?couple|(?:a\s+)?few|three|four|five|six|"
+        r"\d+)\s+times?\s+a\s+"
         r"(day|week|month|year))" + clock_tail, t)
     if m:
         unit = (m.group(1) or m.group(2) or m.group(3)
@@ -1084,9 +1085,11 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         unit = {"daily": "day", "weekly": "week",
                 "monthly": "month", "yearly": "year"}.get(
                     unit, unit)
-        n_f = float({"three": 3, "four": 4, "five": 5,
-                     "six": 6}.get(m.group(4) or "",
-                                   m.group(4) or 2) or 2)
+        n_f = float({"couple": 2, "a couple": 2, "few": 3,
+                     "a few": 3, "three": 3, "four": 4,
+                     "five": 5, "six": 6}.get(
+                         (m.group(4) or "").lower(),
+                         m.group(4) or 2) or 2)
         span = {"day": 86400.0, "week": 604800.0,
                 "month": 30 * 86400.0,
                 "year": 365 * 86400.0}[unit]
