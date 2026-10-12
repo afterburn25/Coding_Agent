@@ -3818,6 +3818,20 @@ class AgentOrchestrator:
         r"(?:(?:my|the|your|all)\s+)?"
         r"(?:reminders?|alarms?|timers?|schedules?)\b"
         r"(?:\s+(?:about|regarding|for|on|of|at)\s+.+?)?"
+        + _REMINDER_TRAIL +
+        # Question-form inventory — 'do i have any reminders',
+        # 'have i set a reminder for the dentist', 'got any
+        # reminders'. The model narrated 'nothing scheduled' over
+        # live rows on these shapes too.
+        r"|" + _REMINDER_POLITE +
+        r"(?:(?:do|did|does)\s+i\s+(?:have|got|set|made|created|"
+        r"put|booked)|have\s+i\s+(?:got|set|made|created|put|"
+        r"booked|scheduled)|got\s+any|have\s+any|any)\s+"
+        r"(?:any\s+|a\s+|an\s+|the\s+)?"
+        r"(?:reminders?|alarms?|timers?|schedules?)\b"
+        r"(?:\s+(?:about|regarding|for|on|of|at|to|set|made|"
+        r"created|scheduled|due)\s+.+?)?"
+        r"(?:\s+(?:set|made|created|scheduled|due)\b)?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     # State asks — 'are my reminders on', 'is the alarm paused',
@@ -7431,6 +7445,7 @@ class AgentOrchestrator:
             cls._REMINDER_DECL_RE, cls._REMINDER_NOUNFIRST_RE,
             cls._REMINDER_NOUNADJ_RE, cls._REMINDER_REFER_RE,
             cls._REMINDER_WHENONLY_RE, cls._REMINDER_INV_LEAD_RE,
+            cls._REMINDER_HAVE_RE,
             cls._REMINDER_STATEASK_RE, cls._REMINDER_WHENLEAD_RE,
             # State-graph asks answer from the ledger — 'what did we
             # settle on', 'what happened with that' — no model needed.
