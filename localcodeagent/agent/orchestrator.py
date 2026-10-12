@@ -5016,13 +5016,35 @@ class AgentOrchestrator:
                         if tgt.tm_wday == d_idx:
                             break
                 tgt_date = (tgt.tm_year, tgt.tm_mon, tgt.tm_mday)
-                once_hits = [
-                    s for s in rows
-                    if s.get("kind") == "once" and s.get("at")
-                    and (lambda lt: (
-                        lt.tm_year, lt.tm_mon, lt.tm_mday))(
-                        time.localtime(s["at"])) == tgt_date]
-                recur_hits = [s for s in rows if s not in once_hits]
+
+                def _fires_on(s):
+                    def _on(ts):
+                        lt = time.localtime(ts)
+                        return ((lt.tm_year, lt.tm_mon, lt.tm_mday)
+                                == tgt_date)
+                    if s.get("kind") == "once":
+                        return bool(s.get("at")) and _on(s["at"])
+                    if s.get("next_run"):
+                        return _on(s["next_run"])
+                    wd = s.get("weekday")
+                    if isinstance(wd, int):
+                        return wd == tgt.tm_wday
+                    if isinstance(wd, list):
+                        return tgt.tm_wday in wd
+                    if s.get("kind") == "daily":
+                        return True
+                    if s.get("kind") == "monthly":
+                        return s.get("day") == tgt.tm_mday
+                    if s.get("kind") == "interval":
+                        return (s.get("interval_s") or 0) <= 86400
+                    return False
+
+                once_hits = [s for s in rows
+                             if s.get("kind") == "once"
+                             and _fires_on(s)]
+                recur_hits = [s for s in rows
+                              if s.get("kind") != "once"
+                              and _fires_on(s)]
                 if not rows:
                     text = "You don't have any active reminders."
                 elif not once_hits and not recur_hits:
