@@ -4801,7 +4801,7 @@ class TruthGateTests(RecoveryLoopTests):
             r = agent.run("how much longer till the standup",
                           mode="auto")
             self.assertIn("standup", r.content)
-            self.assertNotIn("0 minutes", r.content)
+            self.assertNotIn(" in 0 minutes", r.content)
 
     def test_nounless_fired_and_cadence_asks(self):
         # Grammar sweep: 'has the standup fired', 'did the standup

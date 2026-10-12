@@ -7205,6 +7205,27 @@ class AgentOrchestrator:
                                                  time.time()))
                 if spec_j is not None:
                     when_d, task_d, spec = joined, "", spec_j
+            if spec is None and task_d and not when_d:
+                # 'a reminder to buy milk at 5' — the 'to'-task
+                # swallowed a trailing clock; the earliest boundary
+                # whose tail parses is the when ('buy milk at 5
+                # tomorrow' → 'at 5 tomorrow').
+                for mm in re.finditer(
+                        r"\s+(at|in|on|every|next|tomorrow|today|"
+                        r"tonight|tonite)\s+", task_d,
+                        re.IGNORECASE):
+                    right = task_d[mm.start():].strip()
+                    left = task_d[:mm.start()].strip(" ,;—-")
+                    spec_r = (self._reminder_spec(right, time.time())
+                              or self._reminder_spec(
+                                  "at " + right, time.time()))
+                    if (left and spec_r is not None
+                            and not re.match(
+                                r"(?:at|in|on|every|next|tomorrow|"
+                                r"today|tonight|tonite)\b", left,
+                                re.IGNORECASE)):
+                        task_d, when_d, spec = left, right, spec_r
+                        break
             if spec is None and when_d and not task_d:
                 # 'about the meeting in 15' — the when slot held a
                 # trailing 'in <dur>'; its left side is the task.
@@ -7497,6 +7518,20 @@ class AgentOrchestrator:
                 mnt = self._REMINDER_NOTASK_RE.match(plan_text)
                 if mnt is not None:
                     wtxt = str(mnt.group("when") or "")
+                    if (str(mnt.group("verb") or "").lower()
+                            in ("wake", "waking")
+                            and not re.search(
+                                r"(?:a\.?m|p\.?m)\b|morning|"
+                                r"afternoon|evening|tonight|"
+                                r"tonite|noon|midnight", wtxt,
+                                re.IGNORECASE)):
+                        # 'wake me at 6' means 6 AM — the bare-clock
+                        # PM inference turns a wake call into dinner.
+                        wtxt = re.sub(
+                            r"(\bat\s+\d{1,2}(?::\d{2})?|"
+                            r"\b\d{1,2}(?::\d{2})?(?=\s*$))",
+                            lambda mm: mm.group(1) + "am",
+                            wtxt, count=1, flags=re.IGNORECASE)
                     # 'remind me tomorrow to' / 'wake me at' — a
                     # dangling connector is not part of the when.
                     # ('\s*' would eat 'on' inside 'noon'.)
