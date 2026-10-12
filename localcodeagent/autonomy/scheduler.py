@@ -282,6 +282,11 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     t = re.sub(
         r"\b(?:the\s+)?rest\s+of\s+(?:the\s+|my\s+)?"
         r"(?:day|today|tonight)\b", "at 11:59 pm", t)
+    # 'once per week' — 'per <period>' is just 'a <period>'; the
+    # count-cadence grammar already holds 'once/twice a day'.
+    t = re.sub(
+        r"\bper\s+(second|minute|hour|day|week|month|year)s?\b",
+        r"a \1", t)
     # 'a week from now' — 'X from now' is just 'in X'.
     t = re.sub(
         r"((?:a|an|one|two|three|four|five|six|seven|eight|nine|"
@@ -841,6 +846,11 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     t = re.sub(
         r"\b(?:the\s+)?rest\s+of\s+(?:the\s+|my\s+)?"
         r"(?:day|today|tonight)\b", "at 11:59 pm", t)
+    # 'once per week' — 'per <period>' is just 'a <period>'; the
+    # count-cadence grammar already holds 'once/twice a day'.
+    t = re.sub(
+        r"\bper\s+(second|minute|hour|day|week|month|year)s?\b",
+        r"a \1", t)
     # 'a week from now' — 'X from now' is just 'in X'.
     t = re.sub(
         r"((?:a|an|one|two|three|four|five|six|seven|eight|nine|"

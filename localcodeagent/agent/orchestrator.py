@@ -4088,8 +4088,9 @@ class AgentOrchestrator:
                    or ms.groupdict().get("body4") or "")
         body = body.strip(" ,;—-")
         topic_terms = self._reminder_terms(re.sub(
-            r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
-            " ", body, flags=re.IGNORECASE))
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
+            r"one|ones|this|these|those|them|it)\b", " ", body,
+            flags=re.IGNORECASE))
         dur = str(ms.groupdict().get("dur")
                   or ms.groupdict().get("dur3")
                   or ms.groupdict().get("dur4")
