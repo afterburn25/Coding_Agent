@@ -2771,6 +2771,16 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(time.localtime(row["at"]).tm_hour, 17)
             sup.scheduler.rows.clear()
 
+            # 'every hour on the hour' — the redundant tail broke
+            # the interval fullmatch into a pin-fail.
+            result = agent.run(
+                "remind me every hour on the hour to breathe",
+                mode="auto")
+            self.assertIn("breathe", result.content)
+            self.assertEqual(
+                sup.scheduler.rows[-1].get("interval_s"), 3600.0)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

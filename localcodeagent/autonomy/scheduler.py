@@ -480,7 +480,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     m = re.fullmatch(
         r"(?:every\s+(\d+(?:\.\d+)?)\s*"
         r"(minutes?|mins?|hours?|hrs?|days?|weeks?)"
-        r"|every\s+hour|hourly)", t)
+        r"|every\s+hour(?:\s+on\s+the\s+hour)?|hourly"
+        r"|on\s+the\s+hour)", t)
     if m:
         if m.group(1) is None:
             interval = 3600.0
