@@ -3910,6 +3910,7 @@ class AgentOrchestrator:
         r"|" + _REMINDER_POLITE +
         r"did\s+(?:(?:the|my|that|this|any)\s+)?[\w'\s-]{0,30}?"
         r"(?:reminders?|alarms?|timers?)\s+"
+        r"(?:already|just|yet|still|really|actually)?\s*"
         r"(?:(?:go|went)\s+off|fire|fires|fired|ring|rang|happen|"
         r"trigger|pop\s+up)\b(?:\s+.+?)?"
         + _REMINDER_TRAIL +
@@ -3976,7 +3977,7 @@ class AgentOrchestrator:
         r"go\s+off|fires?)\b"
         + _REMINDER_TRAIL +
         r"|" + _REMINDER_POLITE +
-        r"when\s+(?:does|do|will)\s+"
+        r"(?:tell\s+me\s+)?when\s+(?:(?:does|do|will)\s+)?"
         r"(?:(?:my|the|your|that|this)\s+)?[\w'\s-]{0,40}?\s+"
         r"(?:goes?\s+off|go\s+off|fires?|rings?|hits?|triggers?|"
         r"happens?|pops?\s+up)\b"
@@ -6040,7 +6041,7 @@ class AgentOrchestrator:
             if clk is not None:
                 scope_terms = self._reminder_terms(clk.group(1))
         when_ask = bool(re.match(
-            r"\s*(?:when|what\s+time|will)\b",
+            r"\s*(?:when|what\s+time|will|tell\s+me\s+when)\b",
             plan_text, re.IGNORECASE))
         # Temporal scope — 'reminders for today', 'anything tomorrow',
         # 'coming up this weekend' scope by fire DATE, not topic.
