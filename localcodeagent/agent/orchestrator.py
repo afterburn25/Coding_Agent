@@ -6027,6 +6027,15 @@ class AgentOrchestrator:
                 end_note = (" — it repeats until you cancel; I "
                             "can't hold an end bound like “for "
                             f"{mfd.group(1)}”")
+        if task and re.fullmatch(
+                r"once|twice|thrice|(?:two|three|four|five|six|"
+                r"seven|\d+)\s+times?", task, re.IGNORECASE):
+            # 'remind me twice on friday' — a fire count, not a
+            # task; ask for the task on the parsed when.
+            return self._reminder_finish(
+                f"Sure — remind you to do what "
+                f"{str(m.group('when') or '').strip()}?",
+                user_text, task_id, event_callback)
         if not task:
             return None
         if re.match(r"(?:at|in|on)\s+\d", task) or re.search(

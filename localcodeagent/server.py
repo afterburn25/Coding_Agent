@@ -5319,7 +5319,12 @@ class AppState:
                 r"me|you|it|that|this|them|us|something|anything|"
                 r"only|just|roughly|about|around|like|basically|"
                 r"maybe|probably|kinda|sorta|sometime|some\s+point|"
-                r"at\s+some\s+point|first\s+thing",
+                r"at\s+some\s+point|first\s+thing|"
+                # 'remind me twice on friday' — a count lead is a
+                # fire-rate the cadence grammar can't hold, not a
+                # task named 'twice'.
+                r"once|twice|thrice|(?:two|three|four|five|six|"
+                r"seven|\d+)\s+times?",
                 desc, re.IGNORECASE):
             desc = ""
         # 'remind me at 5 then again at 7' — the desc slot held a
@@ -5361,8 +5366,12 @@ class AppState:
             # parsed but no task was given; echo the when like the
             # orchestrator lane does.
             if spec is not None and body.strip():
+                echo = re.sub(
+                    r"^(?:once|twice|thrice|(?:two|three|four|five|"
+                    r"six|seven|\d+)\s+times?)\s+", "",
+                    body.strip(), flags=re.IGNORECASE)
                 return {"content": (
-                    f"Sure — remind you to do what {body.strip()}?")}
+                    f"Sure — remind you to do what {echo}?")}
             return {"content": "Remind you to do what?"}
         if spec is None:
             if defer_no_time:

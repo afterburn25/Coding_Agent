@@ -829,16 +829,22 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         else:
             interval = 365 * 86400.0
         return {"kind": "interval", "interval_s": interval}
-    # 'twice a day' / 'twice a month' — fixed-span intervals.
+    # 'twice a day' / 'three times a week' — N fires spread over
+    # the span becomes a fixed interval.
     m = re.fullmatch(
         r"twice\s+(?:a\s+(day|week|month|year)|daily)|"
-        r"two\s+times\s+a\s+(day|week|month|year)", t)
+        r"two\s+times\s+a\s+(day|week|month|year)|"
+        r"(three|four|five|six|\d+)\s+times\s+a\s+"
+        r"(day|week|month|year)", t)
     if m:
-        unit = m.group(1) or m.group(2) or "day"
-        return {"kind": "interval", "interval_s": {
-            "day": 43200.0, "week": 302400.0,
-            "month": 15 * 86400.0,
-            "year": 182 * 86400.0}[unit]}
+        unit = (m.group(1) or m.group(2) or m.group(4) or "day")
+        n_f = float({"three": 3, "four": 4, "five": 5,
+                     "six": 6}.get(m.group(3) or "",
+                                   m.group(3) or 2) or 2)
+        span = {"day": 86400.0, "week": 604800.0,
+                "month": 30 * 86400.0,
+                "year": 365 * 86400.0}[unit]
+        return {"kind": "interval", "interval_s": span / n_f}
     if re.fullmatch(r"every\s+other\s+day|every\s+second\s+day", t):
         return {"kind": "interval", "interval_s": 172800.0}
     # 'every half hour' / 'every half a day' — fractional spans.
