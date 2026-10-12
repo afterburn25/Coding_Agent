@@ -3779,7 +3779,7 @@ class AgentOrchestrator:
         r"|(?:i\s+)?(?:don'?t|do\s+not|dont)\s+"
         r"(?:need|want|use|like))\s+"
         r"(?:(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
-        r"schedules?|it|that|this|them)\b"
+        r"schedules?|it|that|this|them|everything|all)\b"
         + _REMINDER_ECHO +
         r"(?:\s*(?:for|about|on|of|to|at|called|named)\s+"
         r"(?P<tail>.+?))?"
@@ -4035,7 +4035,9 @@ class AgentOrchestrator:
                 text = (" ".join(parts)
                         or "Nothing to snooze right now.")
         elif not rows:
-            text = "You don't have any reminders set."
+            text = self._reminder_none_text(
+                sched, ms.groupdict().get("noun")
+                or ms.groupdict().get("noun3"))
         elif not hits:
             names = "; ".join(
                 f"“{self._reminder_label(s)}”" for s in rows[:3])
@@ -4131,7 +4133,8 @@ class AgentOrchestrator:
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
         if not rows:
-            text = "You don't have any reminders set."
+            text = self._reminder_none_text(
+                sched, mr.group("noun"))
         elif not hits:
             names = "; ".join(
                 f"“{self._reminder_label(s)}”" for s in rows[:3])
@@ -4187,6 +4190,26 @@ class AgentOrchestrator:
                     if str(s.get("name") or "").lower()
                        .startswith(stem)]
         return sched, rows
+
+    def _reminder_none_text(self, sched, noun=None) -> str:
+        """A scoping noun ('move my alarm…') filtered the pool to
+        zero — 'you don't have any reminders' is false when other
+        rows exist; name what's actually set instead."""
+        pool = [s for s in (sched.list() or [])
+                if s.get("enabled", True)
+                and (str(s.get("name") or "").lower()
+                     .startswith("reminder")
+                     or (isinstance(s.get("action"), dict)
+                         and s["action"].get("kind") == "notify"))]
+        if noun and noun not in ("reminder", "reminders", "it",
+                                 "that", "this", "them",
+                                 "everything", "all", "schedule",
+                                 "schedules") and pool:
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in pool[:3])
+            return (f"No {str(noun).rstrip('s')} set — "
+                    f"you've got: {names}.")
+        return "You don't have any reminders set."
 
     def _reminder_label(self, s: dict) -> str:
         name = re.sub(r"^reminder\s*:\s*", "",
@@ -4387,7 +4410,9 @@ class AgentOrchestrator:
                 if not topic_terms or topic_terms <= _hay(s)]
         state = "on" if want_on else "off"
         if not rows:
-            text = "You don't have any reminders set."
+            text = self._reminder_none_text(
+                sched, mt.group("noun")
+                or mt.groupdict().get("noun2"))
         elif (topic_terms and not hits
                 and any(topic_terms <= _hay(s) for s in rows)):
             text = (f"That reminder is already {state}.")
@@ -4471,8 +4496,10 @@ class AgentOrchestrator:
                 user_text, task_id, event_callback)
         body = str(mc.group("body") or "").strip(" ,;—-")
         all_flag = bool(
-            re.search(r"\b(?:all|every|each)\b", body, re.IGNORECASE)
-            or str(mc.group("noun") or "").lower() == "them")
+            re.search(r"\b(?:all|every|each|everything)\b", body,
+                      re.IGNORECASE)
+            or str(mc.group("noun") or "").lower()
+            in ("them", "everything", "all"))
         topic_src = (mc.groupdict().get("ctime") or mc.group("tail")
                      or mc.groupdict().get("tail2") or re.sub(
                          r"\b(?:the|my|that|all|every|each|any|of|to|"
@@ -4505,7 +4532,8 @@ class AgentOrchestrator:
                     return 1e18
             hits = [min(hits, key=_fire)]
         if not rows:
-            text = "You don't have any reminders set."
+            text = self._reminder_none_text(
+                sched, mc.group("noun"))
         elif not hits:
             names = "; ".join(
                 f"“{self._reminder_label(s)}”" for s in rows[:3])

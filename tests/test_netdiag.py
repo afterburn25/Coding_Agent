@@ -2717,6 +2717,29 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(lt.tm_hour, 17)
             sup.scheduler.rows.clear()
 
+            # Noun-scoped miss — 'move my alarm to 8' over a pool
+            # holding only 'pay rent' must name the real row, not
+            # claim nothing is set.
+            sup.scheduler.add(
+                "Reminder: pay rent", "once", at=time.time() + 86400)
+            result = agent.run("move my alarm to 8", mode="auto")
+            self.assertIn("No alarm set", result.content)
+            self.assertIn("pay rent", result.content)
+            result = agent.run("turn off the 7am alarm",
+                               mode="auto")
+            self.assertIn("No alarm set", result.content)
+            self.assertIn("pay rent", result.content)
+
+            # 'cancel everything' — pool-wide cancel through the
+            # deterministic lane; the model fake-refused 'no
+            # active reminders' over a live pool.
+            sup.scheduler.add(
+                "Reminder: dentist", "once",
+                at=time.time() + 90000)
+            result = agent.run("cancel everything", mode="auto")
+            self.assertIn("Cancelled 2", result.content)
+            self.assertFalse(sup.scheduler.rows)
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
