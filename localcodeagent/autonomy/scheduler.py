@@ -222,13 +222,21 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     # dayparts carry conventional clocks.
     t = re.sub(
         r"\b(?:at|around|during)\s+lunch\s*(?:time)?\b",
-        "at noon", t)
+        "at 12:00 pm", t)
     t = re.sub(
         r"\b(?:at|around|during)\s+(?:dinner|supper)\s*"
         r"(?:time)?\b", "at 6 pm", t)
     t = re.sub(
         r"\b(?:at|around|during)\s+breakfast\s*(?:time)?\b",
         "at 8 am", t)
+    # 'midday'/'mid-morning' — conventional mid-daypart clocks;
+    # 'dawn'/'dusk' stay pin-fails (variable twilight, not a
+    # clock). Emit '12:00 pm' — the 'at noon' conversion above
+    # already ran.
+    t = re.sub(
+        r"\b(?:at|around|during)?\s*midday\b", "at 12:00 pm", t)
+    t = re.sub(
+        r"\b(?:at|around|during)?\s*mid-morning\b", "at 10 am", t)
     # 'sometime tonight' / 'at some point tomorrow' — the vague
     # qualifier isn't part of the time.
     t = re.sub(r"\bat\s+some\s+point\s+(?:in\s+)?", "", t)
@@ -693,13 +701,21 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     # dayparts carry conventional clocks.
     t = re.sub(
         r"\b(?:at|around|during)\s+lunch\s*(?:time)?\b",
-        "at noon", t)
+        "at 12:00 pm", t)
     t = re.sub(
         r"\b(?:at|around|during)\s+(?:dinner|supper)\s*"
         r"(?:time)?\b", "at 6 pm", t)
     t = re.sub(
         r"\b(?:at|around|during)\s+breakfast\s*(?:time)?\b",
         "at 8 am", t)
+    # 'midday'/'mid-morning' — conventional mid-daypart clocks;
+    # 'dawn'/'dusk' stay pin-fails (variable twilight, not a
+    # clock). Emit '12:00 pm' — the 'at noon' conversion above
+    # already ran.
+    t = re.sub(
+        r"\b(?:at|around|during)?\s*midday\b", "at 12:00 pm", t)
+    t = re.sub(
+        r"\b(?:at|around|during)?\s*mid-morning\b", "at 10 am", t)
     # 'sometime tonight' / 'at some point tomorrow' — the vague
     # qualifier isn't part of the time.
     t = re.sub(r"\bat\s+some\s+point\s+(?:in\s+)?", "", t)
