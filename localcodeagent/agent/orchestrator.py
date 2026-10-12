@@ -4136,11 +4136,14 @@ class AgentOrchestrator:
         r"(?:hit|trigger|pop\s+up|happen)\b"
         r"(?:\s+.+?)?"
         + _REMINDER_TRAIL +
-        # 'what fires next' / 'which rings next' — fire-verb
-        # ordinal asks with no noun at all.
+        # 'what fires next' / 'which rings first' — fire-verb
+        # ordinal asks with no noun at all; 'which one's next'
+        # is the same ask with a pronoun stand-in.
         r"|" + _REMINDER_POLITE +
-        r"(?:what|which)\s+(?:fires?|rings?|goes\s+off|go\s+off|"
-        r"comes\s+up|triggers?|happens?|pops\s+up)\s+next\b"
+        r"(?:what|which)\s+(?:(?:one'?s|ones|one)\s+)?"
+        r"(?:fires?|rings?|goes\s+off|go\s+off|"
+        r"comes\s+up|triggers?|happens?|pops\s+up)?\s*"
+        r"(?:next|first|earliest|last|latest)\b"
         + _REMINDER_TRAIL +
         # Clock/day-scoped inventory — 'whats at 9am', 'what
         # happens at noon', 'whats happening at 6', 'what am i
