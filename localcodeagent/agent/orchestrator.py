@@ -3617,8 +3617,8 @@ class AgentOrchestrator:
                       r"beeps?|chimes?))?")
     _REMINDER_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
-        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
+        r"remind|alert|notify|ping|wake|nudge|nag|buzz|beep|text|page|"
         r"message)\s+"
         r"me\s+(?:up\s+)?"
         r"(?P<when>.+?)\s+(?:to|about|of|that)\s+"
@@ -3629,8 +3629,8 @@ class AgentOrchestrator:
     # the connector to the LAST one recovers 'at 4:45'/'leave'.
     _REMINDER_RE_GREEDY = re.compile(
         _REMINDER_POLITE +
-        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
-        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
+        r"remind|alert|notify|ping|wake|nudge|nag|buzz|beep|text|page|"
         r"message)\s+"
         r"me\s+(?:up\s+)?"
         r"(?P<when>.+)\s+(?:to|about|of|that)\s+"
@@ -3699,8 +3699,8 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
-        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
+        r"remind|alert|notify|ping|wake|nudge|nag|buzz|beep|text|page|"
         r"message)\s+"
         r"me\s+(?:up\s+)?to\s+(?P<task>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -3714,8 +3714,8 @@ class AgentOrchestrator:
         r"weekends?|monday|tuesday|wednesday|thursday|friday|"
         r"saturday|sunday)|hourly|daily|weekly|monthly|nightly|"
         r"fortnightly)\s+"
-        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
-        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
+        r"remind|alert|notify|ping|wake|nudge|nag|buzz|beep|text|page|"
         r"message)\s+me\s+(?:up\s+)?"
         r"(?:(?:to|about|of|that)\s+(?P<task>.+?)"
         r"|(?P<when2>(?:at|in|on)\s+.+?))" + _REMINDER_TRAIL,
@@ -3728,8 +3728,8 @@ class AgentOrchestrator:
     _REMINDER_LEAD_WHEN_RE = re.compile(
         _REMINDER_POLITE +
         r"(?P<when>.+?)\s+"
-        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
-        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
+        r"remind|alert|notify|ping|wake|nudge|nag|buzz|beep|text|page|"
         r"message)\s+me\b\s*(?:up\b\s*)?"
         r"(?:(?:to|about|of|that)\s+(?P<task>.+?))?"
         + _REMINDER_TRAIL,
@@ -3751,8 +3751,8 @@ class AgentOrchestrator:
     # 3 AM' over zero rows.
     _REMINDER_BARE_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?P<verb>(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
-        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"(?P<verb>(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
+        r"remind|alert|notify|ping|wake|nudge|nag|buzz|beep|text|page|"
         r"message)\s+me\b(?:\s+up\b)?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -3785,8 +3785,8 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_NOTASK_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?P<verb>(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
-        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"(?P<verb>(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
+        r"remind|alert|notify|ping|wake|nudge|nag|buzz|beep|text|page|"
         r"message)\s+"
         r"me\s+(?:up\s+)?(?P<when>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -4673,6 +4673,7 @@ class AgentOrchestrator:
                 r"time\s+(?:left|until|till)|left|list|"
                 r"show|do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
                 r"i\s+have|i'?ve\s+(?:got\s+)?|"
+                r"how\b|status\b|"
                 r"are\s+there|is\s+there|got|active|pending|"
                 r"upcoming|when|"
                 r"right\s*\??|correct\b|yeah\??\s*$|"
@@ -5254,10 +5255,10 @@ class AgentOrchestrator:
                 elif not str(
                         mlw.groupdict().get("task") or "").strip():
                     _selfverb = re.search(
-                        r"\b(wake|waking|nudge|nudging|buzz|buzzing|"
-                        r"beep|beeping|text|texting|page|paging|"
-                        r"message|messaging)\s+me\b", plan_text,
-                        re.IGNORECASE)
+                        r"\b(wake|waking|nudge|nudging|nag|nagging|"
+                        r"buzz|buzzing|beep|beeping|text|texting|"
+                        r"page|paging|message|messaging)\s+me\b",
+                        plan_text, re.IGNORECASE)
                     if _selfverb is not None:
                         # 'at 6am wake me up' — waking is the task,
                         # like the NOTASK wake path.
@@ -5274,7 +5275,8 @@ class AgentOrchestrator:
                             _v = _selfverb.group(1).lower()
                             _lemma = {
                                 "waking": "wake", "nudging": "nudge",
-                                "buzzing": "buzz", "beeping": "beep",
+                                "nagging": "nag", "buzzing": "buzz",
+                                "beeping": "beep",
                                 "texting": "text", "paging": "page",
                                 "messaging": "message"}.get(_v, _v)
                             _task_sv = f"{_lemma} you"
@@ -5326,7 +5328,7 @@ class AgentOrchestrator:
                     if not wtxt:
                         vb_nt = str(mnt.group("verb") or "").lower()
                         if re.search(
-                                r"(?:wak(?:e|ing)|nudg(?:e|ing)|buzz|"
+                                r"(?:wak(?:e|ing)|nudg(?:e|ing)|nag|nagging|buzz|"
                                 r"buzzing|beep|beeping|text|texting|"
                                 r"pag(?:e|ing)|messag(?:e|ing))$",
                                 vb_nt):
@@ -5347,7 +5349,7 @@ class AgentOrchestrator:
                     spec_nt = self._reminder_spec(wtxt, time.time())
                     if (spec_nt is not None
                             and re.search(
-                                r"(?:wak(?:e|ing)|nudg(?:e|ing)|buzz|"
+                                r"(?:wak(?:e|ing)|nudg(?:e|ing)|nag|nagging|buzz|"
                                 r"buzzing|beep|beeping|text|texting|"
                                 r"pag(?:e|ing)|messag(?:e|ing))$",
                                 str(mnt.group("verb") or "").lower())):
@@ -5368,7 +5370,7 @@ class AgentOrchestrator:
                             _v = str(
                                 mnt.group("verb") or "").lower()
                             _task_sv = " ".join([
-                                {"waking": "wake",
+                                {"waking": "wake", "nagging": "nag",
                                  "nudging": "nudge",
                                  "buzzing": "buzz",
                                  "beeping": "beep",
@@ -5425,11 +5427,27 @@ class AgentOrchestrator:
                 mb = self._REMINDER_BARE_RE.match(plan_text)
                 if mb is not None:
                     vb = str(mb.group("verb") or "").lower()
-                    if re.search(r"wak(?:e|ing)$", vb):
-                        # 'wake me' — the task is waking; only the
-                        # time is missing.
+                    _bsm = re.search(
+                        r"wak(?:e|ing)|nudg(?:e|ing)|nag|nagging|"
+                        r"buzz(?:ing)?|beep(?:ing)?|text(?:ing)?|"
+                        r"pag(?:e|ing)|messag(?:e|ing)$", vb)
+                    if _bsm is not None:
+                        # 'wake me'/'nag me' — the verb is the
+                        # task; only the time is missing.
+                        _bm = {
+                            "waking": "Wake", "wak": "Wake",
+                            "wake": "Wake",
+                            "nudging": "Nudge", "nudge": "Nudge",
+                            "nag": "Nag", "nagging": "Nag",
+                            "buzz": "Buzz", "buzzing": "Buzz",
+                            "beep": "Beep", "beeping": "Beep",
+                            "text": "Text", "texting": "Text",
+                            "page": "Page", "paging": "Page",
+                            "message": "Message",
+                            "messaging": "Message"}.get(
+                                vb, vb.capitalize())
                         return self._reminder_finish(
-                            "Wake you when? — e.g. “at 6am”, "
+                            f"{_bm} you when? — e.g. “at 6am”, "
                             "“in an hour”, “tomorrow at 7”.",
                             user_text, task_id, event_callback)
                     # 'remind me'/'ping me' — both slots are empty;

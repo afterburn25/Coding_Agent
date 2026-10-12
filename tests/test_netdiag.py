@@ -3150,6 +3150,24 @@ class TruthGateTests(RecoveryLoopTests):
                 "every few hours", time.time())
             self.assertIsNotNone(spec)
             self.assertEqual(spec["interval_s"], 10800.0)
+
+            # "how's my reminders"/'reminders status' — the model
+            # hallucinated 'pay rent set for tomorrow at 8:00 PM'
+            # (it's Friday 10:00). how/status interrogatives answer
+            # the real pool.
+            for q in ("how's my reminders", "reminders status",
+                      "how are my reminders"):
+                r = agent._reminder_reply(q, q, task.id)
+                self.assertIsNotNone(r, q)
+                self.assertIn("pay rent", r.content)
+
+            # 'nag me at 5' — 'nag' wasn't a verb; the model
+            # narrated 'I'll nudge you at 5:00 PM tomorrow.'
+            r = agent._reminder_reply(
+                "nag me at 5", "nag me at 5", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("nag", r.content.lower())
+            self.assertTrue(sup.scheduler.rows)
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —
