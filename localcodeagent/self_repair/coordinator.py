@@ -356,6 +356,18 @@ class SelfRepairCoordinator:
     def _stage_plan(self, inc: dict) -> str:
         self._set(inc, "planning")
         top = (inc["hypotheses"] or [{}])[0]
+        if not inc["repair_kind"]:
+            # Zero actionable diagnosis (top hypothesis 'unknown') —
+            # routing onward only strands the incident in testing →
+            # lost-worktree → patching, where a patch mission spawns
+            # with nothing to fix. Signal-free reports (vague user
+            # complaints included) honestly stop here for triage; the
+            # incident keeps its hypotheses/research/suspects.
+            self._fail_open(
+                inc, "no actionable diagnosis — top hypothesis is "
+                     "'unknown'; needs human triage or a richer "
+                     "failure report")
+            return ""
         steps = []
         if inc["repair_kind"] == "operational":
             steps = [f"verify hypothesis '{top.get('kind')}'",

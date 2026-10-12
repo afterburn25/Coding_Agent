@@ -670,6 +670,32 @@ class ResearchHookTests(unittest.TestCase):
             # pipeline continued past the failed research call
             self.assertNotEqual(coord.get(inc["id"])["state"], "diagnosing")
 
+    def test_signal_free_incident_never_spawns_patch_mission(self):
+        # A vague report with zero actionable diagnosis ('unknown'
+        # top hypothesis) must needs_human at planning — spawning a
+        # patch mission with nothing to fix burns shared model
+        # capacity and could promote an arbitrary diff.
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            calls = []
+
+            def spy_generator(incident, wt):
+                calls.append(incident)
+                return {"files": []}
+
+            coord = make_coord(td, repo, patch_generator=spy_generator)
+            inc, _ = coord.report_failure(
+                source="user_report", subsystem="chat",
+                exc_type="UserReport",
+                error_message="the api keeps timing out")
+            coord.process_incident(inc["id"], max_steps=40)
+            final = coord.get(inc["id"])
+            self.assertEqual(final["state"], "needs_human")
+            self.assertIn("no actionable diagnosis",
+                          final["needs_human_reason"])
+            self.assertEqual(calls, [])          # generator never ran
+            self.assertFalse(final.get("worktree"))
+
 
 class EvalRecorderTests(unittest.TestCase):
     """Terminal incidents report verification evidence to EvalLab."""
