@@ -5327,6 +5327,19 @@ class AppState:
                 r"seven|\d+)\s+times?",
                 desc, re.IGNORECASE):
             desc = ""
+        # 'remind me at 3pm and cancel the X reminder' — a
+        # compound ask; honest "one at a time", never a row named
+        # 'X and cancel…'.
+        if re.search(
+                r"\band\s+(?:cancel|delete|remove|snooze|pause|"
+                r"reschedule|disable|mute|silence|block|clear|"
+                r"move|change|stop)\s+(?:the\s+|my\s+|that\s+|"
+                r"this\s+|all\s+|every\s+)?(?:\w+\s+){0,3}"
+                r"(?:reminders?|alarms?|timers?|schedules?|"
+                r"appointment|everything)\b", desc, re.IGNORECASE):
+            return {"content": (
+                "I can do one thing at a time — say the reminder "
+                "to set, then the reminder to change.")}
         # 'remind me at 5 then again at 7' — the desc slot held a
         # leftover clock, not a task. Two times for one reminder
         # is a real ambiguity, say so.

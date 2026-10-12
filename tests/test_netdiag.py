@@ -3547,6 +3547,49 @@ class TruthGateTests(RecoveryLoopTests):
                          "in a quarter of an hour"):
                 self.assertIsNotNone(
                     agent._reminder_spec(when, time.time()), when)
+            sup.scheduler.rows.clear()
+
+            # 'don't remind me tomorrow' — a day-scoped skip:
+            # once-rows on that date disable (real, reversible);
+            # recurring rows can't skip one fire, honestly said.
+            tom = time.localtime(time.time() + 86400)
+            sup.scheduler.add(
+                "Reminder: lunch", "once",
+                at=time.mktime((tom.tm_year, tom.tm_mon,
+                                tom.tm_mday, 9, 0, 0,
+                                -1, -1, -1)))
+            sup.scheduler.add(
+                "Reminder: gym", "daily", hour=8)
+            result = agent.run("don't remind me tomorrow",
+                               mode="auto")
+            self.assertIn("are off", result.content)
+            lunch = [s for s in sup.scheduler.rows
+                     if "lunch" in s["name"]][0]
+            self.assertFalse(lunch["enabled"])
+            gym = [s for s in sup.scheduler.rows
+                   if "gym" in s["name"]][0]
+            self.assertTrue(gym["enabled"])
+            self.assertIn("recurring", result.content)
+            sup.scheduler.rows.clear()
+            # Empty pool → honest 'nothing active'.
+            result = agent.run("don't remind me tomorrow",
+                               mode="auto")
+            self.assertIn("don't have any active reminders",
+                          result.content)
+
+            # 'remind me at 3pm and cancel the X reminder' — a
+            # compound ask gets an honest one-at-a-time, never a
+            # row named 'X and cancel…' nor a 'two times' claim.
+            result = agent.run(
+                "remind me at 3pm and cancel the pay rent "
+                "reminder", mode="auto")
+            self.assertIn("one thing at a time", result.content)
+            self.assertFalse(sup.scheduler.rows)
+            # 'and move on' / 'change my shirt' aren't schedule
+            # ops — the verb needs a schedule noun to trigger.
+            result = agent.run(
+                "remind me to stretch and move on", mode="auto")
+            self.assertIn("stretch and move on", result.content)
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(

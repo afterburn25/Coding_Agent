@@ -3895,6 +3895,9 @@ class AgentOrchestrator:
         r"ping(?:ing)?|wak(?:e|ing))\s+me\b(?:\s+up\b)?"
         r"(?:\s+(?:to|about)\s+(?P<topic>.+?))?"
         r"(?:\s+at\s+(?P<attime>\d[\w:.\s]*?|noon|midnight))?"
+        r"(?:\s+(?:on\s+)?(?P<day>tomorrow|today|tonight|"
+        r"monday|tuesday|wednesday|thursday|friday|saturday|"
+        r"sunday))?"
         r"(?:\s+(?:anymore|again|any\s+more|any\s+longer))?"
         + _REMINDER_TRAIL +
         r"|^\s*(?:no\s+(?:more\s+)?|enough\s+(?:of|with)\s+)"
@@ -4944,6 +4947,20 @@ class AgentOrchestrator:
         notify action through the autonomy scheduler, not a promise.
         Falls through (None) for 'remind me the tag' recall asks —
         those belong to memory lanes."""
+        if re.search(
+                r"\band\s+(?:cancel|delete|remove|snooze|pause|"
+                r"reschedule|disable|mute|silence|block|clear|"
+                r"move|change|stop)\s+(?:the\s+|my\s+|that\s+|"
+                r"this\s+|all\s+|every\s+)?(?:\w+\s+){0,3}"
+                r"(?:reminders?|alarms?|timers?|schedules?|"
+                r"appointment|everything)\b",
+                plan_text, re.IGNORECASE):
+            # 'remind me at 3pm and cancel the X reminder' — a
+            # compound ask; one deterministic op per turn.
+            return self._reminder_finish(
+                "I can do one thing at a time — say the reminder "
+                "to set, then the reminder to change.",
+                user_text, task_id, event_callback)
         mc = self._REMINDER_CANCEL_RE.match(plan_text)
         if mc is None:
             mc = self._REMINDER_CANCEL_BARE_RE.match(plan_text)
@@ -4980,6 +4997,58 @@ class AgentOrchestrator:
                 # 'stop waking me up at 6am' — the clock scopes the
                 # stop to the rows firing at that time.
                 topic = f"{topic} {attime}".strip()
+            day = str(mstop.groupdict().get("day") or "").strip()
+            if day:
+                # 'don't remind me tomorrow' — a day-scoped skip.
+                # Once-rows on that date can be disabled (a real,
+                # reversible skip); a recurring row can't skip one
+                # fire, so say so instead of narrating it.
+                d_idx = {"monday": 0, "tuesday": 1, "wednesday": 2,
+                         "thursday": 3, "friday": 4, "saturday": 5,
+                         "sunday": 6}.get(day)
+                now_t = time.time()
+                if d_idx is None:
+                    tgt = time.localtime(
+                        now_t + (86400 if day == "tomorrow" else 0))
+                else:
+                    for i in range(8):
+                        tgt = time.localtime(now_t + i * 86400)
+                        if tgt.tm_wday == d_idx:
+                            break
+                tgt_date = (tgt.tm_year, tgt.tm_mon, tgt.tm_mday)
+                once_hits = [
+                    s for s in rows
+                    if s.get("kind") == "once" and s.get("at")
+                    and (lambda lt: (
+                        lt.tm_year, lt.tm_mon, lt.tm_mday))(
+                        time.localtime(s["at"])) == tgt_date]
+                recur_hits = [s for s in rows if s not in once_hits]
+                if not rows:
+                    text = "You don't have any active reminders."
+                elif not once_hits and not recur_hits:
+                    text = (f"Nothing set for {day} anyway — you're "
+                            "clear.")
+                elif not once_hits:
+                    text = (f"The reminders you have can't skip a "
+                            f"single {day} fire — they're "
+                            "recurring. Say “pause them” to hold "
+                            "them until you resume, or “cancel” to "
+                            "drop one for good.")
+                else:
+                    done = sum(
+                        1 for s in once_hits
+                        if sched.set_enabled(str(s["id"]), False))
+                    names = "; ".join(
+                        f"“{self._reminder_label(s)}”"
+                        for s in once_hits[:3])
+                    text = (f"Done — {done} reminder(s) set for "
+                            f"{day} are off: {names}. Say “turn "
+                            "reminders back on” to resume them."
+                            + (" The rest can't skip a single day "
+                               "— they're recurring."
+                               if recur_hits else ""))
+                return self._reminder_finish(
+                    text, user_text, task_id, event_callback)
             if topic:
                 terms = self._reminder_terms(re.sub(
                     r"\b(?:the|my|that|all|every|each|any|of|to|for|"
@@ -6038,6 +6107,20 @@ class AgentOrchestrator:
                 user_text, task_id, event_callback)
         if not task:
             return None
+        if re.search(
+                r"\band\s+(?:cancel|delete|remove|snooze|pause|"
+                r"reschedule|disable|mute|silence|block|clear|"
+                r"move|change|stop)\s+(?:the\s+|my\s+|that\s+|"
+                r"this\s+|all\s+|every\s+)?(?:\w+\s+){0,3}"
+                r"(?:reminders?|alarms?|timers?|schedules?|"
+                r"appointment|everything)\b", task, re.IGNORECASE):
+            # 'remind me at 3pm and cancel the X reminder' — a
+            # compound ask; answer honestly rather than create a
+            # row named 'X and cancel…' or guess which half ran.
+            return self._reminder_finish(
+                "I can do one thing at a time — say the reminder "
+                "to set, then the reminder to change.",
+                user_text, task_id, event_callback)
         if re.match(r"(?:at|in|on)\s+\d", task) or re.search(
                 r"\b(?:then|again|and|or)\s+(?:at|in|on)\s+\d|"
                 r"\bthen\s+again\b", task):
