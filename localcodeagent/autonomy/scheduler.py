@@ -246,6 +246,11 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"\bby\s+(?=morning|afternoon|evening|night\b|tonight|"
         r"tomorrow|today|mon|tue|wed|thu|fri|sat|sun)",
         "", t)
+    # 'later tonight' — 'later' is a hedge before a real daypart,
+    # not a vagueness that should pin-fail.
+    t = re.sub(
+        r"\blater\s+(?=tonight|tomorrow|today|this\s+(?:morning|"
+        r"afternoon|evening|week|month|year))", "", t)
     # 'the first of every month' — a worded ordinal is the day.
     # 'on the 15th of each month' — keep a single 'on'.
     t = re.sub(
@@ -680,6 +685,11 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         r"\bby\s+(?=morning|afternoon|evening|night\b|tonight|"
         r"tomorrow|today|mon|tue|wed|thu|fri|sat|sun)",
         "", t)
+    # 'later tonight' — 'later' is a hedge before a real daypart,
+    # not a vagueness that should pin-fail.
+    t = re.sub(
+        r"\blater\s+(?=tonight|tomorrow|today|this\s+(?:morning|"
+        r"afternoon|evening|week|month|year))", "", t)
     # 'the first of every month' — a worded ordinal is the day.
     # 'on the 15th of each month' — keep a single 'on'.
     t = re.sub(

@@ -3531,6 +3531,12 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertFalse([
                 s for s in sup.scheduler.rows
                 if "a bit" in s["name"]])
+            # 'later tonight' — 'later' hedges a real daypart;
+            # bare 'later' stays a pin-fail.
+            self.assertIsNotNone(
+                agent._reminder_spec("later tonight", time.time()))
+            self.assertIsNone(
+                agent._reminder_spec("later", time.time()))
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(
