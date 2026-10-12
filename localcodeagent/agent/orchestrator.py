@@ -3878,7 +3878,7 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_RESCHEDULE_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:reschedule|move|change)\s+"
+        r"(?P<verb>reschedule|move|change)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?|schedules?|"
         r"it|that|this|them|everything|all)\b"
@@ -4157,6 +4157,15 @@ class AgentOrchestrator:
                                    task_id: str, event_callback):
         """'reschedule the deploy reminder to friday at 3' — a real
         scheduler.update of at/kind fields."""
+        if (mr.group("when") is None
+                and str(mr.group("verb") or "").lower()
+                    in ("move", "change")
+                and str(mr.group("noun") or "").lower()
+                    in ("it", "that", "this")):
+            # 'move it'/'change it' — a bare pronoun and no target
+            # is a file/object turn, not a schedule op; let it fall
+            # through to the action lanes.
+            return None
         sched, rows = self._reminder_rows(noun=mr.group("noun"))
         if sched is None:
             return self._reminder_finish(
