@@ -4449,12 +4449,28 @@ class AgentOrchestrator:
     # generic without a noun.
     _REMINDER_RESCHEDULE_BARE_RE = re.compile(
         _REMINDER_POLITE +
-        # 'move'/'change'/'switch'/'make' join on a row hit and
+        # 'move'/'change'/'switch' join on a row hit and
         # fall through on a miss — 'move pay rent' is a schedule
         # op, 'move the table' isn't.
-        r"(?P<verb>reschedule|move|change|switch|make)\s+"
+        r"(?P<verb>reschedule|move|change|switch)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)"
         r"(?:\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?))?"
+        + _REMINDER_TRAIL,
+        re.IGNORECASE)
+    # 'make the standup earlier', 'make the standup later by an
+    # hour' — 'make' claims ONLY with a direction word anchoring
+    # the tail; 'make a cup of tea'/'make sure i remember X' are
+    # not schedule turns. The tail stays in body for the shift
+    # peel; 'when'/'noun' are absent so .get() reads None.
+    _REMINDER_RESCHEDULE_MAKE_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?P<verb>make)\s+"
+        r"(?:(?:the|my|that|this|those|these)\s+)?"
+        r"(?P<body>.+?\s+(?:back|forward|earlier|later|up|down|"
+        r"sooner)(?:\s+by)?(?:\s+(?:a|an|one|two|three|four|five|"
+        r"six|seven|eight|nine|ten|couple|few|\d+(?:\.\d+)?)\s+"
+        r"(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|"
+        r"weeks?))?)"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     # 'push the standup to 10am' — bare push/bump/shift; the body
@@ -4900,8 +4916,8 @@ class AgentOrchestrator:
         """'reschedule the deploy reminder to friday at 3' — a real
         scheduler.update of at/kind fields."""
         noun = mr.groupdict().get("noun")
-        verb_l = str(mr.group("verb") or "").lower()
-        if (mr.group("when") is None
+        verb_l = str(mr.groupdict().get("verb") or "").lower()
+        if (mr.groupdict().get("when") is None
                 and verb_l in ("move", "change")
                 and str(noun or "").lower()
                     in ("it", "that", "this")):
@@ -4912,7 +4928,7 @@ class AgentOrchestrator:
         if (verb_l in ("move", "change", "switch", "make", "push",
                     "bump", "shift")
                 and mr.groupdict().get("noun") is None
-                and str(mr.group("body") or "").strip().lower()
+                and str(mr.groupdict().get("body") or "").strip().lower()
                     in ("it", "that", "this", "them", "")):
             # 'move it to friday' — a pronoun body resolves no row;
             # still a file/object turn.
@@ -4929,9 +4945,9 @@ class AgentOrchestrator:
                 "I can't manage reminders — the scheduler isn't "
                 "running in this session.",
                 user_text, task_id, event_callback)
-        body = str(mr.group("body") or "").strip(" ,;—-")
+        body = str(mr.groupdict().get("body") or "").strip(" ,;—-")
         shift_txt = ""
-        if mr.group("when") is None:
+        if mr.groupdict().get("when") is None:
             # 'push the standup back an hour', 'move it up 30
             # minutes', 'make the standup earlier' — the shift
             # tails the body because the when-slot only takes
@@ -4960,10 +4976,10 @@ class AgentOrchestrator:
                     r"eight|nine|ten|couple|few|\d+(?:\.\d+)?)\s*"
                     r"(?:seconds?|secs?|minutes?|mins?|hours?|"
                     r"hrs?|days?|weeks?)",
-                    str(mr.group("when")).strip(),
+                    str(mr.groupdict().get("when")).strip(),
                     re.IGNORECASE)):
                 shift_txt = (shm.group(1) + " "
-                             + str(mr.group("when")).strip())
+                             + str(mr.groupdict().get("when")).strip())
                 body = body[:shm.start()].strip(" ,;—-")
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
@@ -4991,7 +5007,7 @@ class AgentOrchestrator:
             # resolves no reminder row isn't a schedule op.
             return None
         _wtxt = ("" if shift_txt
-                 else str(mr.group("when") or "").strip())
+                 else str(mr.groupdict().get("when") or "").strip())
         _wtxt = re.sub(r"\s+(?:instead|actually)\s*$", "",
                        _wtxt, flags=re.IGNORECASE).strip()
         spec = self._reminder_spec(_wtxt, time.time())
@@ -6013,6 +6029,7 @@ class AgentOrchestrator:
                 self._REMINDER_STOP_RE, self._REMINDER_RESCHEDULE_RE,
                 self._REMINDER_RESCHEDULE_BARE_RE,
                 self._REMINDER_RESCHEDULE_PUSH_RE,
+                self._REMINDER_RESCHEDULE_MAKE_RE,
                 self._REMINDER_REPEAT_RE,
                 self._REMINDER_NOTASK_RE, self._REMINDER_BARE_RE,
                 self._REMINDER_HELP_RE, self._REMINDER_HAVE_RE,
@@ -6703,6 +6720,8 @@ class AgentOrchestrator:
             mr = self._REMINDER_RESCHEDULE_BARE_RE.match(plan_text)
         if mr is None:
             mr = self._REMINDER_RESCHEDULE_PUSH_RE.match(plan_text)
+        if mr is None:
+            mr = self._REMINDER_RESCHEDULE_MAKE_RE.match(plan_text)
         if mr is not None and not self._reminder_set_is_create(mr):
             _rr = self._reminder_reschedule_reply(
                 user_text, mr, task_id, event_callback)
@@ -8624,7 +8643,8 @@ class AgentOrchestrator:
             cls._REMINDER_SNOOZE_RE, cls._REMINDER_TOGGLE_RE,
             cls._REMINDER_STOP_RE, cls._REMINDER_RESCHEDULE_RE,
             cls._REMINDER_RESCHEDULE_BARE_RE,
-            cls._REMINDER_RESCHEDULE_PUSH_RE, cls._REMINDER_REPEAT_RE,
+            cls._REMINDER_RESCHEDULE_PUSH_RE,
+            cls._REMINDER_RESCHEDULE_MAKE_RE, cls._REMINDER_REPEAT_RE,
             cls._REMINDER_LEAD_CADENCE_RE, cls._REMINDER_LEAD_WHEN_RE,
             cls._REMINDER_BARE_RE, cls._REMINDER_HELP_RE,
             cls._REMINDER_DECL_RE, cls._REMINDER_NOUNFIRST_RE,
