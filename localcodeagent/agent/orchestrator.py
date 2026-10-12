@@ -3832,6 +3832,19 @@ class AgentOrchestrator:
         r"(?:\s+(?:about|regarding|for|on|of|at|to|set|made|"
         r"created|scheduled|due)\s+.+?)?"
         r"(?:\s+(?:set|made|created|scheduled|due)\b)?"
+        + _REMINDER_TRAIL +
+        # 'what's coming up' / 'whats coming up this weekend' — the
+        # schedule inventory IS the coming-up surface; a miss lets
+        # the model narrate an empty calendar over live rows.
+        r"|" + _REMINDER_POLITE +
+        r"(?:what'?s|whats|what\s+is)\s+"
+        r"(?:coming\s+up|on\s+(?:the|my)\s+"
+        r"(?:schedule|agenda|calendar|docket)|scheduled)\b"
+        r"(?:\s+(?:about|regarding|for|on|of|at|to|set|made|"
+        r"created|scheduled|due)\s+.+?)?"
+        r"(?:\s+(?:this|next|today|tonight|tomorrow|tonite)\b"
+        r"(?:\s+.+?)?)?"
+        r"(?:\s+(?:set|made|created|scheduled|due)\b)?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     # State asks — 'are my reminders on', 'is the alarm paused',
