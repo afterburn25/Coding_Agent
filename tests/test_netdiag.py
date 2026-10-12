@@ -2762,6 +2762,15 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("pay dues", result.content)
             sup.scheduler.rows.clear()
 
+            # Worded hour + meridiem — 'at five pm' pin-failed
+            # while digit clocks parsed.
+            result = agent.run("remind me at five pm to leave",
+                               mode="auto")
+            self.assertIn("leave", result.content)
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(time.localtime(row["at"]).tm_hour, 17)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

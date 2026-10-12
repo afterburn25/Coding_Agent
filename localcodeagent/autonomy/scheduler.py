@@ -62,7 +62,13 @@ _MIN_TOK = (r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|"
 def _worded_clock(t: str) -> str:
     """'at half past three' → 'at 3:30', 'at quarter to five' →
     'at 4:45', 'at ten to 6' → 'at 5:50', 'at twenty past 4' →
-    'at 4:20'."""
+    'at 4:20', 'at five pm' → 'at 5 pm'."""
+    m = re.search(
+        r"\b(one|two|three|four|five|six|seven|eight|nine|ten|"
+        r"eleven|twelve)\s+(a\.?m\.?|p\.?m\.?)\b", t)
+    if m:
+        return (t[:m.start()] + f"{_WORD_NUM[m.group(1)]} "
+                + m.group(2) + t[m.end():])
     m = re.search(r"\bquarter\s+to\s+(\w+)\b", t)
     if m:
         h = _hour_num(m.group(1))
