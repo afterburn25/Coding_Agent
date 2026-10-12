@@ -5179,6 +5179,25 @@ class AgentOrchestrator:
                         break
             spec = (self._reminder_spec(cand, time.time())
                     if cand else None)
+            if (spec is not None and task_d and when_d):
+                # 'on the 15th of each month' — a leading
+                # 'each|every <period>' in the task slot completes
+                # the cadence; rejoin 'of <period>' onto the when.
+                cm_p = re.match(
+                    r"^((?:each|every)\s+(?:month|week|year|day|"
+                    r"hour|morning|afternoon|evening|night))\b"
+                    r"(?:\s+(?:to\s+)?(.+))?$",
+                    task_d, re.IGNORECASE)
+                if cm_p is not None:
+                    joined = (f"{when_d} of {cm_p.group(1)}"
+                              .strip())
+                    spec_j = self._reminder_spec(
+                        joined, time.time())
+                    if spec_j is not None:
+                        when_d, spec = joined, spec_j
+                        task_d = re.sub(
+                            r"^to\s+", "",
+                            str(cm_p.group(2) or "").strip())
             if spec is None and dur:
                 spec = self._reminder_spec("in " + dur, time.time())
             if spec is None and when_d:
@@ -5779,6 +5798,31 @@ class AgentOrchestrator:
                             f"can't hold an end bound like "
                             f"“until {tail_u}”")
             task_lazy = str(m.group("task") or "").strip()
+            if spec is not None and task_lazy:
+                # 'on the 15th of each month' — the 'of each
+                # month' tail completes the cadence, not the
+                # task; rejoin it onto the when.
+                cm_p = re.match(
+                    r"^((?:each|every)\s+(?:month|week|year|day|"
+                    r"hour|morning|afternoon|evening|night))\b"
+                    r"(?:\s+(?:to\s+)?(.+))?$",
+                    task_lazy, re.IGNORECASE)
+                if cm_p is not None:
+                    joined = (f"{when_raw} of {cm_p.group(1)}"
+                              .strip())
+                    spec_j = self._reminder_spec(
+                        joined, time.time())
+                    if spec_j is not None:
+                        spec = spec_j
+                        forced_when = joined
+                        forced_task = re.sub(
+                            r"^to\s+", "",
+                            str(cm_p.group(2) or "").strip())
+                        if not forced_task:
+                            return self._reminder_finish(
+                                f"Sure — remind you to do what "
+                                f"{joined}?",
+                                user_text, task_id, event_callback)
             if (spec is None or re.match(
                     r"\d|one\b|two\b|three\b|four\b|five\b|six\b|"
                     r"seven\b|eight\b|nine\b|ten\b|eleven\b|twelve\b|"

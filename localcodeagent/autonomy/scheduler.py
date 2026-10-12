@@ -237,10 +237,11 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     # not an event trigger and not a task.
     t = re.sub(r"\bwhen\s+it'?s\s+(?=\d|noon|midnight)", "at ", t)
     # 'the first of every month' — a worded ordinal is the day.
+    # 'on the 15th of each month' — keep a single 'on'.
     t = re.sub(
-        r"\bthe\s+(first|second|third|fourth|fifth|sixth|seventh|"
-        r"eighth|ninth|tenth|(\d{1,2})(?:st|nd|rd|th)?)\s+of\s+"
-        r"every\s+month\b",
+        r"(?<!\bon\s)\bthe\s+(first|second|third|fourth|fifth|"
+        r"sixth|seventh|eighth|ninth|tenth|(\d{1,2})(?:st|nd|rd|th)?)"
+        r"\s+of\s+(?:every|each)\s+month\b",
         lambda m: "on the " + str({
             "first": 1, "second": 2, "third": 3, "fourth": 4,
             "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
@@ -660,10 +661,11 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     # not an event trigger and not a task.
     t = re.sub(r"\bwhen\s+it'?s\s+(?=\d|noon|midnight)", "at ", t)
     # 'the first of every month' — a worded ordinal is the day.
+    # 'on the 15th of each month' — keep a single 'on'.
     t = re.sub(
-        r"\bthe\s+(first|second|third|fourth|fifth|sixth|seventh|"
-        r"eighth|ninth|tenth|(\d{1,2})(?:st|nd|rd|th)?)\s+of\s+"
-        r"every\s+month\b",
+        r"(?<!\bon\s)\bthe\s+(first|second|third|fourth|fifth|"
+        r"sixth|seventh|eighth|ninth|tenth|(\d{1,2})(?:st|nd|rd|th)?)"
+        r"\s+of\s+(?:every|each)\s+month\b",
         lambda m: "on the " + str({
             "first": 1, "second": 2, "third": 3, "fourth": 4,
             "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
@@ -743,7 +745,7 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     # 'monthly [on the 15th]' / 'every month on the 1st' /
     # 'on the 15th of every month' — day-of-month cadence.
     m = re.fullmatch(
-        r"(?:every\s+month|monthly|once\s+a\s+month)"
+        r"(?:every\s+month|each\s+month|monthly|once\s+a\s+month)"
         r"(?:\s+on\s+the\s+(\d{1,2})(?:st|nd|rd|th)?)?"
         + clock_tail, t)
     if m:
@@ -756,7 +758,7 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 "minute": int(mn or 0)}
     m = re.fullmatch(
         r"on\s+the\s+(\d{1,2})(?:st|nd|rd|th)?\s+"
-        r"(?:day\s+)?of\s+every\s+month" + clock_tail, t)
+        r"(?:day\s+)?of\s+(?:every|each)\s+month" + clock_tail, t)
     if m:
         hr, mn, mer = m.group(2), m.group(3), m.group(4)
         return {"kind": "monthly", "day": int(m.group(1)),
