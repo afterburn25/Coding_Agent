@@ -5796,6 +5796,8 @@ class AgentOrchestrator:
                     ask = "toggle"
                 elif "say which" in low_body:
                     ask = f"which\x00{body}"
+                elif "cancel it anyway" in low_body:
+                    ask = f"anyway\x00{body}"
                 else:
                     mq = re.search(
                         r"when should i remind you "
@@ -5888,6 +5890,20 @@ class AgentOrchestrator:
                 return {"goal": hits[0], "on": want_on}
             return (f"{prior_user[:mn.start()]}{pick} "
                     f"{mn.group(0)}{prior_user[mn.end():]}")
+        if ask.startswith("anyway\x00"):
+            # 'X doesn't fire thursday — … Cancel it anyway?' →
+            # 'yes' re-runs the cancel on the quoted row; anything
+            # else declines the pending.
+            if not re.fullmatch(
+                    r"(?:yes|yeah|yep|sure|ok(?:ay)?|go\s+ahead|"
+                    r"do\s+it|please|yes\s+please|confirm|"
+                    r"confirm\s+it)", t.lower()):
+                return None
+            labels = re.findall(r"[“\"«](.+?)[”\"»]",
+                                ask.split("\x00", 1)[1])
+            if not labels:
+                return None
+            return f"cancel the {labels[0]} reminder"
         if ask == "noun_fire":
             # 'When should the alarm fire?' — the clarify itself proves
             # the prior turn was set-shaped; it just lacked a when.
@@ -6595,6 +6611,33 @@ class AgentOrchestrator:
             # 'cancel my reminders' (plural, no topic) is a wipe-all.
             all_flag = True
         now = time.time()
+        # 'cancel the dentist on thursday' / 'cancel tomorrow's
+        # reminders' — the day is a fire-window scope, not a name
+        # term; recurring rows can't drop a single occurrence.
+        day_dates, day_label = self._reminder_day_scope(
+            user_text, now)
+        if day_dates:
+            _daywords = {
+                "today", "tonight", "tonite", "tomorrow",
+                "morning", "afternoon", "evening", "night",
+                "monday", "tuesday", "wednesday", "thursday",
+                "friday", "saturday", "sunday", "weekend",
+                "weekends", "week"}
+            # Day words are window scope, never name terms; 'on',
+            # 'in', 'at' only attach to them ('cancel the dentist
+            # on thursday' → 'dentist').
+            _nonday = topic_terms - _daywords - {"on", "in", "at"}
+            if _nonday:
+                topic_terms &= _nonday
+            elif (topic_terms
+                  and (all_flag or re.search(
+                      r"\b(?:reminders|alarms|timers)\b",
+                      mc.group(0), re.IGNORECASE))):
+                # 'cancel tomorrow's reminders' — the only term is
+                # the day word; the plural noun makes it a
+                # windowed wipe.
+                topic_terms.clear()
+                all_flag = True
 
         # 'cancel the standup and the dentist' — 'and' joins two
         # scopes, not a topic. Each side resolves on its own — a
@@ -6673,7 +6716,63 @@ class AgentOrchestrator:
                     excl_terms
                     and excl_terms <= self._reminder_hay(s))]
         hits = self._reminder_ordinal_pick(hits, ord_sel, now)
-        if (not hits and ord_sel
+        _day_scoped_miss = []
+        if day_dates and hits and not skip_verb:
+            # 'skip the standup today' resolves the ROW — its own
+            # recurring-guard owns the honest reply; the window
+            # would eat the hit and misreport 'doesn't fire'.
+            import datetime as dt
+            _pre = hits
+            hits = [
+                s for s in hits
+                if (lambda f: f and dt.date.fromtimestamp(
+                    float(f)) in day_dates)(
+                    self._reminder_next_fire(s, now))]
+            _day_scoped_miss = [s for s in _pre if s not in hits]
+        if _day_scoped_miss and not hits:
+            # 'cancel the dentist on thursday' — the row exists but
+            # it doesn't fire in that window; name the real fire
+            # time instead of pretending it matched.
+            s0 = _day_scoped_miss[0]
+            text = (f"“{self._reminder_label(s0)}” doesn't fire "
+                    f"{day_label} — it fires "
+                    f"{self._reminder_when_text(s0, now)}. Cancel it "
+                    "anyway?")
+        elif (hits and day_dates and not skip_verb
+                and any(str(s.get("kind")) != "once"
+                        for s in hits)):
+            # A recurring row can't drop a single day's fire —
+            # deleting it kills every occurrence. Once-rows in the
+            # window still cancel; recurring ones get the honest
+            # offer, never a silent cadence wipe.
+            once_hits = [s for s in hits
+                         if str(s.get("kind")) == "once"]
+            rec = [s for s in hits
+                   if str(s.get("kind")) != "once"]
+            labels = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rec[:3])
+            note = (f"{labels} "
+                    f"{'is' if len(rec) == 1 else 'are'} recurring "
+                    "— cancelling would delete every fire, not "
+                    f"just {day_label}. Say “turn off …” to stop "
+                    f"{'it' if len(rec) == 1 else 'them'} instead.")
+            if not once_hits:
+                text = note
+            else:
+                done = 0
+                for s in once_hits:
+                    try:
+                        if sched.remove(str(s["id"])):
+                            done += 1
+                    except Exception:
+                        pass
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in once_hits[:3])
+                text = (f"Cancelled {done} reminder"
+                        f"{'s' if done != 1 else ''} firing "
+                        f"{day_label}: {names}. " + note)
+        elif (not hits and ord_sel
                 and str(ord_sel).startswith("idx:") and rows):
             # 'cancel the fourth reminder' over two — the index is
             # out of range; say which exist, never 'cancelled 0'.
@@ -6946,7 +7045,9 @@ class AgentOrchestrator:
         # disabled pool; answering from enabled-only rows hides
         # exactly the rows asked about.
         fired_t = re.search(
-            r"\b(?:go|went|gone)\s+off\b|\bfired\b|\brang\b",
+            r"\b(?:go|went|gone|goes|going)\s+off\b|\bfires?\b|"
+            r"\bfired\b|\brings?\b|\brang\b|\bhits?\b|"
+            r"\btriggers?\b|\bpops?\s+up\b",
             plan_text, re.IGNORECASE)
         off_ask = (fired_t is None and bool(re.search(
             r"\b(?:disabled|turned?\s+off|switched\s+off|paused|"
@@ -7531,12 +7632,32 @@ class AgentOrchestrator:
                 text = (f"{len(chits)} reminders: {bits}.")
         elif not rows and nm is not None:
             # 'any alarms' when only reminders exist — 'No reminders
-            # set' would be a false claim about the store.
+            # set' would be a false claim about the store. A scope
+            # that hits an unfiltered row ('the wake alarm' over a
+            # 'reminder: wake' row) answers about THAT row — the
+            # noun was loose vocabulary, not a kind filter.
             _s, others = self._reminder_rows()
             noun_pl = nm.group(1).lower()
             if not noun_pl.endswith("s"):
                 noun_pl += "s"
-            if others:
+            _sh = ([s for s in others
+                    if scope_terms
+                    and scope_terms <= self._reminder_hay(s)]
+                   if scope_terms else [])
+            if len(_sh) == 1:
+                s0 = _sh[0]
+                text = (f"“{self._reminder_label(s0)}” is a reminder"
+                        f" — it fires "
+                        f"{self._reminder_when_text(s0, now)}.")
+            elif _sh:
+                bits = "; ".join(
+                    f"“{self._reminder_label(s)}” "
+                    f"({self._reminder_when_text(s, now)})"
+                    for s in _sh[:5])
+                text = (f"No {noun_pl} set — reminders matching "
+                        f"“{' '.join(sorted(scope_terms))}”: "
+                        f"{bits}.")
+            elif others:
                 names = "; ".join(
                     f"“{self._reminder_label(s)}”"
                     for s in others[:3])

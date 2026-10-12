@@ -2435,6 +2435,68 @@ class TruthGateTests(RecoveryLoopTests):
             [s["name"] for s in sup.scheduler.rows],
             ["reminder: alpha"])
 
+        # Day-scoped cancel — 'cancel the dentist on thursday'
+        # checks the row's real fire date: out-of-window names the
+        # true time and asks; a recurring hit declines to wipe the
+        # cadence for a single day.
+        import datetime as dt
+        sup.scheduler.rows.clear()
+        today = dt.date.fromtimestamp(time.time())
+        mon = dt.datetime.combine(
+            today + dt.timedelta(days=(0 - today.weekday()) % 7 or 7),
+            dt.time(10, 0)).timestamp()
+        sup.scheduler.add(
+            "reminder: dentist", "once", at=mon,
+            action={"kind": "notify", "detail": "dentist"})
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=0,
+            action={"kind": "notify", "detail": "standup"})
+        r = agent._reminder_reply(
+            "cancel the dentist on thursday",
+            "cancel the dentist on thursday", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("doesn't fire thursday", r.content)
+        self.assertIn("Cancel it anyway", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 2)
+        r = agent._reminder_reply(
+            "cancel the dentist on monday",
+            "cancel the dentist on monday", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("dentist", r.content)
+        self.assertEqual(
+            [s["name"] for s in sup.scheduler.rows],
+            ["reminder: standup"])
+        r = agent._reminder_reply(
+            "cancel tomorrow's reminders",
+            "cancel tomorrow's reminders", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("recurring", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 1)
+
+        # Fire-verb asks — 'goes off'/'fires'/'rings' are time
+        # asks, not state asks; 'which reminder goes off next'
+        # names the soonest row, never 'Nothing's off' over live
+        # rows. A noun that misses the kind still answers a scoped
+        # hit ('the wake alarm' over 'reminder: wake').
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: wake", "daily", hour=6, minute=0,
+            action={"kind": "notify", "detail": "wake"})
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            action={"kind": "notify", "detail": "standup"})
+        r = agent._reminder_reply(
+            "which reminder goes off next",
+            "which reminder goes off next", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        r = agent._reminder_reply(
+            "what time does the wake alarm go off",
+            "what time does the wake alarm go off", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        self.assertIn("06:00", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
@@ -2779,6 +2841,26 @@ class TruthGateTests(RecoveryLoopTests):
                 {"role": "assistant", "content": which},
                 {"role": "user", "content": "the ninth"}])
             self.assertIsNone(agent._reminder_pending("the ninth"))
+
+            # 'Cancel it anyway?' (a day-scoped miss) resolves 'yes'
+            # into the scoped cancel on the quoted row; a non-answer
+            # declines the pending.
+            anyway = ("“dentist” doesn't fire thursday — it fires "
+                      "Mon 10:00. Cancel it anyway?")
+            agent.conversation_manager.set([
+                {"role": "user",
+                 "content": "cancel the dentist on thursday"},
+                {"role": "assistant", "content": anyway},
+                {"role": "user", "content": "yes"}])
+            self.assertEqual(
+                agent._reminder_pending("yes"),
+                "cancel the dentist reminder")
+            agent.conversation_manager.set([
+                {"role": "user",
+                 "content": "cancel the dentist on thursday"},
+                {"role": "assistant", "content": anyway},
+                {"role": "user", "content": "hmm"}])
+            self.assertIsNone(agent._reminder_pending("hmm"))
 
             # No outstanding clarify → the fragment declines instead
             # of manufacturing an op.
