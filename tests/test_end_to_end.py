@@ -1673,10 +1673,27 @@ class AutonomyApiTests(unittest.TestCase):
             state = AppState(cfg, ws, ws / ".runtime")
             try:
                 sup = state.autonomy
-                # An exclusion cadence the scheduler can't represent
+                # 'every day except sundays' resolves to a real
+                # weekly spec (Mon–Sat) — representable exclusions
+                # create, they don't defer.
+                out = state._mission_command(
+                    "remind me every day except sundays "
+                    "to check email")
+                self.assertIsNotNone(out)
+                self.assertIn("Reminder set", out["content"])
+                row = [
+                    s for s in sup.scheduler.list()
+                    if s.get("created_by") == "chat"][-1]
+                self.assertEqual(row["kind"], "weekly")
+                self.assertEqual(
+                    row["weekday"], [0, 1, 2, 3, 4, 5])
+                self.assertEqual(
+                    row["action"]["detail"], "check email")
+                sup.scheduler.remove(str(row["id"]))
+                # An exclusion the scheduler can't represent still
                 # defers — never becomes a goal or a row.
                 self.assertIsNone(state._mission_command(
-                    "remind me every day except sundays "
+                    "remind me every day except holidays "
                     "to check email"))
                 self.assertFalse(sup.standing_goals())
                 self.assertFalse([

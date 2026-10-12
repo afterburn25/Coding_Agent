@@ -3835,7 +3835,7 @@ class AgentOrchestrator:
     # narrated a fake 'no permission' refusal over a live row.
     _REMINDER_CANCEL_BARE_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
+        r"(?P<verb>cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
         r"un-?schedule|undo|axe?|ditch|forget|never\s*mind|"
         r"un-?remind(?:\s+me)?)\s+"
@@ -4013,6 +4013,13 @@ class AgentOrchestrator:
         """When-clause → schedule spec (once/daily/weekly/interval)."""
         from ..autonomy.scheduler import parse_reminder_schedule
         return parse_reminder_schedule(when, now)
+
+    @staticmethod
+    def _reminder_vague_delay(text: str) -> bool:
+        """'a while'/'a bit'/'a sec' — conventional delays a
+        reminder can pin, never a timer's duration."""
+        from ..autonomy.scheduler import is_vague_delay
+        return is_vague_delay(text)
 
     @staticmethod
     def _reminder_until_split(when: str):
@@ -4472,6 +4479,41 @@ class AgentOrchestrator:
                     if str(s.get("name") or "").lower()
                        .startswith(stem)]
         return sched, rows
+
+    # Function-word-only scopes — 'cancel me'/'delete the' carry no
+    # topic; the lane would claim and then honestly report a miss,
+    # stealing the turn from the lane that actually owns it.
+    _REMINDER_BARE_JUNK = frozenset({
+        "i", "me", "my", "we", "us", "our", "you", "your", "he",
+        "she", "him", "her", "his", "it", "its", "they", "them",
+        "their", "that", "this", "these", "those", "everything",
+        "everyone", "anything", "something", "all", "any", "one",
+        "ones", "the", "a", "an", "of", "on", "to", "for", "about",
+        "at", "in", "what", "who", "whom", "please", "pls", "plz",
+        "thanks", "thank", "ty"})
+
+    def _reminder_bare_cancel(self, text):
+        """A claiming noun-less cancel match, else None.
+
+        'forget X'/'never mind X' are memory-dismiss idioms — they
+        only count as reminder cancels when a real row topic-matches
+        ('forget what i told you about the port' is a memory forget;
+        'forget the port' with a live 'port' row is a cancel). A body
+        of pure function words ('cancel me', 'delete the') has no
+        scope to match against at all.
+        """
+        mc = self._REMINDER_CANCEL_BARE_RE.match(str(text or ""))
+        if mc is None:
+            return None
+        terms = self._reminder_terms(mc.groupdict().get("body"))
+        if not terms - self._REMINDER_BARE_JUNK:
+            return None
+        verb = str(mc.groupdict().get("verb") or "").lower()
+        if verb.startswith(("forget", "never")):
+            _, rows = self._reminder_rows(include_disabled=True)
+            if not any(terms <= self._reminder_hay(s) for s in rows):
+                return None
+        return mc
 
     def _reminder_none_text(self, sched, noun=None) -> str:
         """A scoping noun ('move my alarm…') filtered the pool to
@@ -4991,7 +5033,6 @@ class AgentOrchestrator:
         if any(rx.match(text) for rx in (
                 self._REMINDER_RE, self._REMINDER_RE_GREEDY,
                 self._REMINDER_CLARIFY_RE, self._REMINDER_CANCEL_RE,
-                self._REMINDER_CANCEL_BARE_RE,
                 self._REMINDER_SNOOZE_RE, self._REMINDER_TOGGLE_RE,
                 self._REMINDER_STOP_RE, self._REMINDER_RESCHEDULE_RE,
                 self._REMINDER_RESCHEDULE_BARE_RE,
@@ -5004,6 +5045,8 @@ class AgentOrchestrator:
                 self._REMINDER_INV_LEAD_RE,
                 self._REMINDER_STATEASK_RE,
                 self._REMINDER_WHENLEAD_RE)):
+            return True
+        if self._reminder_bare_cancel(text) is not None:
             return True
         return self._reminder_inventory_shaped(text)
 
@@ -5204,7 +5247,7 @@ class AgentOrchestrator:
                 user_text, task_id, event_callback)
         mc = self._REMINDER_CANCEL_RE.match(plan_text)
         if mc is None:
-            mc = self._REMINDER_CANCEL_BARE_RE.match(plan_text)
+            mc = self._reminder_bare_cancel(plan_text)
         if mc is not None:
             return self._reminder_cancel_reply(
                 user_text, mc, task_id, event_callback)
@@ -5447,10 +5490,15 @@ class AgentOrchestrator:
                 elif (self._reminder_spec("in " + rest,
                                           now_d) is not None
                       and not re.fullmatch(
-                          r"\d+(?:\.\d+)?", rest)):
+                          r"\d+(?:\.\d+)?", rest)
+                      and not (noun == "timer"
+                               and self._reminder_vague_delay(
+                                   rest))):
                     # 'a timer for 5 minutes' — 'for' leads a
                     # duration, not a task. A bare number is the
-                    # clock ('reminder for 4'), never 'in 4'.
+                    # clock ('reminder for 4'), never 'in 4'. 'a
+                    # timer for a while' — 'while' isn't a duration
+                    # the countdown can honor; ask honestly.
                     when_d = "in " + rest
                 elif self._reminder_spec("at " + rest,
                                          now_d) is not None:
@@ -5625,6 +5673,15 @@ class AgentOrchestrator:
                     "running in this session.",
                     user_text, task_id, event_callback)
             if spec is None:
+                if noun == "timer" and self._reminder_vague_delay(
+                        cand or task_d or rest):
+                    # 'a timer for a while' — 'while' isn't a
+                    # duration the countdown can honor; server
+                    # lane parity asks for a real one.
+                    return self._reminder_finish(
+                        "A timer needs a duration — say “set a "
+                        "timer for 10 minutes”.",
+                        user_text, task_id, event_callback)
                 if task_d:
                     return self._reminder_finish(
                         f"When should I remind you to {task_d}? — "
@@ -12808,7 +12865,8 @@ class AgentOrchestrator:
                     "hedged", "superseded"))
                 and (builtin_response is not None
                      or self._REMINDER_CANCEL_RE.match(user_text)
-                     or self._REMINDER_CANCEL_BARE_RE.match(user_text)
+                     or self._reminder_bare_cancel(user_text)
+                         is not None
                      or self._REMINDER_SNOOZE_RE.match(user_text)
                      or self._REMINDER_TOGGLE_RE.match(user_text)
                      or self._REMINDER_STOP_RE.match(user_text)

@@ -166,6 +166,19 @@ def _bad_clock(t: str) -> bool:
     return False
 
 
+# 'a while'/'a bit'/'a sec' — conventional small delays a
+# reminder may pin ('in a while' → +30m), but a timer's whole
+# meaning is its duration, so these never satisfy a timer ask.
+_VAGUE_DELAY_RE = re.compile(
+    r"an?\s+(?:little\s+)?(?:bit|moment|secs?|seconds?|while|"
+    r"short\s+while|jiffy?|few|couple)(?:\s+or\s+so)?\s*$",
+    re.IGNORECASE)
+
+
+def is_vague_delay(text: str) -> bool:
+    return bool(_VAGUE_DELAY_RE.search(str(text or "").strip()))
+
+
 def parse_reminder_when(when: str, now: float) -> float | None:
     """Parse a reminder when-clause → wall-clock timestamp.
 

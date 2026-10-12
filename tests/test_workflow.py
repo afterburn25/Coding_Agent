@@ -931,6 +931,30 @@ class TaskRecoveryTests(unittest.TestCase):
 
             self.assertEqual(reloaded.get(parked.id).status, "waiting_approval")
 
+    def test_cancelled_status_survives_completion_race(self):
+        """Regression: an accepted cancel lost to the finish path —
+        run() stamped 'completed' over 'cancelled'. Terminal statuses
+        are absorbing; only the explicit revert may move them."""
+        with tempfile.TemporaryDirectory() as td:
+            tasks = TaskStore(Path(td))
+            task = tasks.create("cancel me", "auto")
+            tasks.update(task.id, status="cancelled", phase="done")
+            tasks.update(
+                task.id, status="completed", phase="done",
+                summary="done", final_content="done")
+            self.assertEqual(tasks.get(task.id).status, "cancelled")
+            # Non-status fields on the racing update still apply.
+            self.assertEqual(tasks.get(task.id).summary, "done")
+            # A non-terminal task still completes normally.
+            task2 = tasks.create("finish me", "auto")
+            tasks.update(task2.id, status="running")
+            tasks.update(task2.id, status="completed", phase="done")
+            self.assertEqual(tasks.get(task2.id).status, "completed")
+            # The revert path remains the one sanctioned
+            # post-terminal move.
+            tasks.update(task2.id, status="reverted", phase="done")
+            self.assertEqual(tasks.get(task2.id).status, "reverted")
+
     def test_recover_stamps_model_id_when_row_lacks_one(self):
         """Recovered drives must stamp model_id on the task row — the
         eviction busy-set uses it to pin the serving runtime, and an empty

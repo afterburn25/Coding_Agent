@@ -5422,16 +5422,23 @@ class AppState:
             # whole ask; 'in <dur>' reads it as a countdown, 'at T'
             # covers a bare clock ('alarm for 7am' → body '7am').
             # A bare number is the clock, never 'in 7' minutes.
-            prefixes = (("in ", "at ", "")
-                        if not re.fullmatch(r"\d+(?:\.\d+)?",
-                                            body.strip())
-                        else ("at ", "", "in "))
-            for prefix in prefixes:
-                spec, _ = self._parse_reminder_time(
-                    prefix + body, time.time())
-                if spec is not None:
-                    desc = ""
-                    break
+            # 'a timer for a while' — 'while' isn't a duration the
+            # countdown can honor; vague bodies pin-fail honestly
+            # instead of minting 'Timer set for <random clock>'.
+            from .autonomy.scheduler import is_vague_delay
+            vague_timer = (noun == "timer"
+                           and is_vague_delay(body.strip()))
+            if not vague_timer:
+                prefixes = (("in ", "at ", "")
+                            if not re.fullmatch(r"\d+(?:\.\d+)?",
+                                                body.strip())
+                            else ("at ", "", "in "))
+                for prefix in prefixes:
+                    spec, _ = self._parse_reminder_time(
+                        prefix + body, time.time())
+                    if spec is not None:
+                        desc = ""
+                        break
         if noun != "reminder" and not desc:
             desc = noun
         if not desc:

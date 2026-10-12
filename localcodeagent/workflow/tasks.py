@@ -141,10 +141,24 @@ class TaskStore:
                 raise KeyError(task_id)
             return self._tasks[task_id]
 
+    # 'cancelled' and the explicit 'reverted' end-state are
+    # absorbing — a completion racing an accepted cancel must never
+    # resurrect the task, and a duplicate approval/retry can't
+    # reopen a finished one. A cancelled task may still be marked
+    # reverted by the explicit revert path.
+    _ABSORBING = {"cancelled": frozenset({"reverted"}),
+                  "reverted": frozenset()}
+
     def update(self, task_id: str, **changes: Any) -> TaskRecord:
         with self._lock:
             task = self.get(task_id)
             prev_status = task.status
+            new_status = changes.get("status")
+            if (new_status is not None
+                    and new_status != prev_status
+                    and prev_status in self._ABSORBING
+                    and new_status not in self._ABSORBING[prev_status]):
+                changes.pop("status")
             for key, value in changes.items():
                 if hasattr(task, key):
                     setattr(task, key, value)
