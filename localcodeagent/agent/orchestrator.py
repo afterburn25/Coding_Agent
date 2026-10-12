@@ -4899,6 +4899,25 @@ class AgentOrchestrator:
             re.IGNORECASE)
         body = _prov.sub(" ", body)
         dur = _prov.sub(" ", dur).strip(" ,;—-")
+        # 'snooze the alarm that's ringing' — the clause says the
+        # row fired just now; like the toggle lane, recency
+        # resolves it when the topic doesn't pin one row.
+        _firing_now = bool(re.search(
+            r"\b(?:that'?s|that\s+is|which\s+is|which'?s|"
+            r"that'?s\s+been|currently)\s+(?:going\s+off|going|"
+            r"ringing|firing|blaring|buzzing|sounding)\b|"
+            r"\bgoing\s+off\s+right\s+now\b",
+            body + " " + dur, re.IGNORECASE))
+        if _firing_now:
+            body = re.sub(
+                r"\b(?:that'?s|that\s+is|which\s+is|which'?s|"
+                r"that'?s\s+been)\s+(?:going\s+off|going|ringing|"
+                r"firing|blaring|buzzing|sounding)\b(?:\s+off\b)?|"
+                r"\bgoing\s+off\s+right\s+now\b", " ", body,
+                flags=re.IGNORECASE)
+            body = re.sub(
+                r"\b(?:alarms?|reminders?|timers?|alerts?)\b",
+                " ", body, flags=re.IGNORECASE)
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
             r"one|ones|this|these|those|them|it)\b", " ", body,
@@ -5034,6 +5053,24 @@ class AgentOrchestrator:
         hits = self._reminder_clock_narrow(hits, topic_terms,
                                            user_text)
         hits = self._reminder_ordinal_pick(hits, _ord_sel, now)
+        if _firing_now:
+            # 'that's ringing' asserts a recent last_run — even a
+            # single hit must actually have fired within the hour,
+            # not just be the only row in the pool. The noun
+            # filter ('alarm' matches no 'reminder: X' name) would
+            # empty rows, so resolve against the full pool.
+            _, _fl_rows = self._reminder_rows()
+            _fl = [s for s in _fl_rows if s.get("last_run")]
+            _fl = [s for s in _fl
+                   if now - float(s["last_run"]) < 3600]
+            if _fl:
+                hits = [max(_fl,
+                            key=lambda s: float(s["last_run"]))]
+            else:
+                return self._reminder_finish(
+                    "Nothing's ringing right now — snooze needs a "
+                    "row that's actually firing.",
+                    user_text, task_id, event_callback)
         if more and len(hits) > 1:
             # 'give me 5 more minutes' — the imminent row is the
             # intent; snooze it rather than asking which.
@@ -5113,7 +5150,10 @@ class AgentOrchestrator:
                         "only shifts one-shots.")
                 text = (" ".join(parts)
                         or "Nothing to snooze right now.")
-        elif not rows:
+        elif not rows and not hits:
+            # 'snooze the alarm that's ringing' resolved by
+            # recency above — noun-filtered rows empty but a real
+            # row was found; don't echo 'no alarms'.
             text = self._reminder_none_text(
                 sched, ms.groupdict().get("noun")
                 or ms.groupdict().get("noun3")
@@ -6504,16 +6544,22 @@ class AgentOrchestrator:
         # isn't a name, it says the row fired just now; resolve by
         # most-recent last_run when the topic terms don't hit.
         _firing_now = bool(re.search(
-            r"\b(?:that'?s|that\s+is|which\s+is|which'?s)\s+"
+            r"\b(?:that'?s|that\s+is|which\s+is|which'?s|"
+            r"that'?s\s+been|which'?s\s+been)\s+"
             r"(?:going|ringing|firing|blaring|buzzing|sounding)\b|"
-            r"\bgoing\s+off\s+right\s+now\b",
+            r"\bgoing\s+off\s+right\s+now\b|"
+            r"\bone\s+(?:ringing|firing|going\s+off|blaring|"
+            r"buzzing|sounding)\b",
             body, re.IGNORECASE))
         if _firing_now:
             body = re.sub(
-                r"\b(?:that'?s|that\s+is|which\s+is|which'?s)\s+"
+                r"\b(?:that'?s|that\s+is|which\s+is|which'?s|"
+                r"that'?s\s+been|which'?s\s+been)\s+"
                 r"(?:going|ringing|firing|blaring|buzzing|"
                 r"sounding)\b(?:\s+off\b)?|\bgoing\s+off\s+right\s+"
-                r"now\b", " ", body, flags=re.IGNORECASE)
+                r"now\b|\bone\s+(?:ringing|firing|going\s+off|"
+                r"blaring|buzzing|sounding)\b",
+                " ", body, flags=re.IGNORECASE)
             # 'alarm' here is a noun-class mention, not a label —
             # rows are 'reminder: wake'; recency resolves the row,
             # so the noun word shouldn't gate the topic match.
@@ -6598,27 +6644,37 @@ class AgentOrchestrator:
             if len(cand) == 1:
                 hits = cand
         state = "on" if want_on else "off"
-        if _firing_now and (not hits or len(hits) > 1):
+        if _firing_now:
             # 'that's going off' — the row ringing now is the one
             # with the freshest last_run; an hour+ stale last_run
             # isn't ringing, and none at all means an honest miss.
-            _fl = [s for s in pool if s.get("last_run")]
-            _fl = [s for s in _fl
-                   if time.time() - float(s["last_run"]) < 3600]
-            if _fl:
+            # Resolve against the unfiltered pool — 'alarm' names
+            # no 'reminder: X' row, and a single idle row in the
+            # filtered pool still isn't 'ringing'.
+            _, _fl_rows = self._reminder_rows(include_disabled=True)
+            _fl = [s for s in _fl_rows
+                   if s.get("last_run")
+                   and s.get("enabled", True)
+                   and now - float(s["last_run"]) < 3600]
+            if hits and len(hits) == 1 and hits[0] in _fl:
+                pass  # the named row is the one ringing
+            elif _fl:
                 hits = [max(_fl,
                             key=lambda s: float(s["last_run"]))]
-            elif rows:
+            elif _fl_rows:
                 nxt = min(
-                    (s for s in rows
+                    (s for s in _fl_rows
                      if self._reminder_next_fire(s, time.time())),
                     key=lambda s: self._reminder_next_fire(
                         s, time.time()), default=None)
+                _nxt_state = ("" if nxt.get("enabled", True)
+                              else " — it's off") if nxt else ""
                 return self._reminder_finish(
                     "Nothing's ringing right now"
                     + (f" — the next is "
                        f"“{self._reminder_label(nxt)}” "
-                       f"({self._reminder_when_text(nxt, time.time())})."
+                       f"({self._reminder_when_text(nxt, time.time())}"
+                       f"{_nxt_state})."
                        if nxt else "."),
                     user_text, task_id, event_callback)
         if _prov_mut and not topic_terms and _ord_sel is None:
@@ -7451,7 +7507,8 @@ class AgentOrchestrator:
             if tm is not None:
                 scope_terms = self._reminder_terms(re.sub(
                     r"\b(?:what|which|when|does|do|did|is|are|have|has|"
-                    r"had|any|"
+                    r"had|was|were|been|last|latest|first|earliest|"
+                    r"any|"
                     r"anything|go|goes|going|gone|went|off|fire|fires|"
                     r"firing|fired|ring|rang|happen|happened|trigger|"
                     r"triggered|pop|popped|set|miss(?:ed)?|"
@@ -7574,7 +7631,18 @@ class AgentOrchestrator:
             r"\b(?:has|have)\s+(?:already|just|yet|still)?\s*"
             r"(?:fired|gone\s+off|rang|rung|happened)\b|"
             r"\bwhat\s+(?:fired|went\s+off|has\s+fired|"
-            r"rang|happened|fired\s+already)\b",
+            r"rang|happened|fired\s+already)\b|"
+            # 'what was the last reminder to fire', 'when did the
+            # wake last go off' — 'last' here orders last_run, not
+            # next-fire.
+            r"\blast\b.{0,25}\b(?:to\s+fire|to\s+go\s+off|fired|"
+            r"rang|went\s+off)\b|\b(?:did|was|were)\b.{0,25}"
+            r"\blast\b.{0,25}\b(?:go\s+off|fire|ring|fires)\b",
+            plan_text, re.IGNORECASE))
+        _last_fired = bool(re.search(
+            r"\blast\b.{0,25}\b(?:to\s+fire|to\s+go\s+off|fired|"
+            r"rang|went\s+off)\b|\b(?:did|was|were)\b.{0,25}"
+            r"\blast\b.{0,25}\b(?:go\s+off|fire|ring|fires)\b",
             plan_text, re.IGNORECASE))
         cad_ask = bool(re.search(
             r"\bhow\s+(?:often|frequently)\b|"
@@ -7666,11 +7734,14 @@ class AgentOrchestrator:
                     plan_text, re.IGNORECASE)
             if cm is not None:
                 scope_terms = self._reminder_terms(re.sub(
-                    r"\b(?:does|do|did|is|are|the|a|an|my|that|this|"
+                    r"\b(?:does|do|did|is|are|was|were|been|the|a|"
+                    r"an|my|that|this|"
                     r"your|i|me|we|you|it|get|got|still|really|"
                     r"actually|reminders?|alarms?|timers?|going|"
                     r"gonna|will|to|fires?|go|goes|off|hits?|"
                     r"rings?|comes?|up|pops?|triggers?|happens?|"
+                    r"fired|rang|rung|"
+                    r"last|latest|next|first|earliest|"
                     r"reminds?|repeats?|recurs?|there|here|any|"
                     r"anything|something|everything|all)\b",
                     " ", cm.group(1), flags=re.IGNORECASE))
@@ -7685,13 +7756,16 @@ class AgentOrchestrator:
             r"monday|tuesday|wednesday|thursday|friday|saturday|"
             r"sunday|few|couple|one|time|thing|night|night))",
             plan_text, re.IGNORECASE))
-        if ((re.search(
+        if (((re.search(
                 r"\b(?:next|first|earliest|last|latest)\b"
                 r"(?!\s+(?:week|weeks|month|months|"
                 r"year|years|day|days|hour|hours|minute|minutes|"
                 r"monday|tuesday|wednesday|thursday|friday|saturday|"
                 r"sunday|few|couple|one|time|thing|night))",
-                plan_text, re.IGNORECASE) or countdown_ask)
+                plan_text, re.IGNORECASE)
+                # 'when did X last go off' — 'last' orders
+                # last_run, not next-fire; the fired lane owns it.
+                and not _last_fired) or countdown_ask)
                 and _cd_pool):
             # 'when does my next reminder fire' — ordinal, not a
             # scope term; pick the extreme-firing row like the
@@ -7897,6 +7971,22 @@ class AgentOrchestrator:
                 include_disabled=True,
                 noun=nm.group(1).lower() if nm else None)
             fhits = _scoped_hits(f_rows)
+            if (not fhits and nm is not None
+                    and (_last_fired or scope_terms)):
+                # 'my last alarm'/'the 6 o'clock alarm' — no row is
+                # named 'alarm'; an unfiltered scope hit still
+                # answers honestly (the reply names the real row).
+                _, f_rows2 = self._reminder_rows(
+                    include_disabled=True)
+                fhits = _scoped_hits(f_rows2)
+            if _last_fired:
+                # 'the last reminder to fire' — the row whose
+                # last_run is newest; a row that never ran can't
+                # be 'the last one that went off'.
+                _fr = [s for s in fhits if s.get("last_run")]
+                fhits = ([max(_fr, key=lambda s:
+                              float(s["last_run"]))]
+                         if _fr else [])
             _dfired = [s for s in fhits if s.get("last_run")]
             if day_dates:
                 # 'what fired today' — the window scopes last_run,

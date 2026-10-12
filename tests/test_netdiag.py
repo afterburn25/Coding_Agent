@@ -2705,6 +2705,45 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertFalse(
             any("dentist" in s["name"] for s in sup.scheduler.rows))
 
+        # 'when did X last go off' orders last_run, not next-fire —
+        # the ordinal lane once answered 'Your last reminder is X'
+        # with a future fire. And 'the one ringing' must verify a
+        # fresh last_run, not just pick the only enabled row.
+        for s in list(sup.scheduler.rows):
+            sup.scheduler.remove(s["id"])
+        sup.scheduler.add(
+            "reminder: wake", "daily", hour=6, minute=0,
+            last_run=time.time() - 90,
+            action={"kind": "notify", "detail": "wake"})
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            action={"kind": "notify", "detail": "standup"})
+        r = agent._reminder_reply(
+            "when did the wake last go off",
+            "when did the wake last go off", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("fired", r.content)
+        r = agent._reminder_reply(
+            "what was the last reminder to fire",
+            "what was the last reminder to fire", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        r = agent._reminder_reply(
+            "stop the alarm that's been going off",
+            "stop the alarm that's been going off", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        self.assertFalse(sup.scheduler.rows[0]["enabled"])
+        self.assertTrue(sup.scheduler.rows[1]["enabled"])
+        # 'the one ringing' over rows that didn't fire — an honest
+        # miss, never a toggle of an idle row.
+        r = agent._reminder_reply(
+            "mute the one ringing",
+            "mute the one ringing", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("ringing", r.content.lower())
+        self.assertTrue(sup.scheduler.rows[1]["enabled"])
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
