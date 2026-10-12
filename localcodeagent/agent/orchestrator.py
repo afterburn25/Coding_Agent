@@ -3860,7 +3860,7 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(
         r"\breminders?\b|\balarms?\b|\btimers?\b|\bschedules?\b|"
-        r"\bscheduled\b|\b(?:comes?|coming)\s+up\b|"
+        r"\bscheduled\b|\b(?:comes?|coming)\s+up\b|\bdue\b|"
         r"\b(?:anything|something)\s+(?:at|for|on|around)\s+\d|"
         r"\bwhat'?s\s+(?:at|for|on|around)\s+\d", re.IGNORECASE)
     # Temporal tokens in a failed when-clause → ask when, don't claim.
@@ -5332,6 +5332,15 @@ class AgentOrchestrator:
                         when_raw = str(mg.group("when") or "").strip(
                             " ,;—-")
                         spec = gspec
+                    else:
+                        # Both failed — the greedy when still spans the
+                        # fuller clause ('the first monday of the
+                        # month'), so echoing its when+task reads
+                        # truer than the lazy split's fragment
+                        # ('the month to…').
+                        m = mg
+                        when_raw = str(mg.group("when") or "").strip(
+                            " ,;—-")
             if spec is None and when_raw.lower() == "not":
                 # 'remind me not to forget' — the negation is the
                 # task, not a when. Ask for the time rather than

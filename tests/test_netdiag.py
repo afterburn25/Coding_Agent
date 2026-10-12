@@ -2740,6 +2740,28 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Cancelled 2", result.content)
             self.assertFalse(sup.scheduler.rows)
 
+            # 'is anything due soon' — 'due' lanes to real
+            # inventory; the model hallucinated 'pay rent set
+            # for next month' when it was days away.
+            sup.scheduler.add(
+                "Reminder: pay rent", "once",
+                at=time.time() + 86400)
+            result = agent.run("is anything due soon",
+                               mode="auto")
+            self.assertIn("pay rent", result.content)
+
+            # Unsupported nth-weekday — 'first monday of the
+            # month' must pin-fail with the FULL when and the
+            # clean task, not the lazy split's 'the month to'.
+            result = agent.run(
+                "remind me the first monday of the month to "
+                "pay dues", mode="auto")
+            self.assertIn("couldn't pin", result.content)
+            self.assertIn("first monday of the month",
+                          result.content)
+            self.assertIn("pay dues", result.content)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
