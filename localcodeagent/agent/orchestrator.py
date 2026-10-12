@@ -4124,7 +4124,8 @@ class AgentOrchestrator:
                         f"in {tail_d}", time.time())):
                 topic_terms |= self._reminder_terms(re.sub(
                     r"\b(?:the|my|that|all|every|each|any|of|to|"
-                    r"for|about)\b", " ", head_d,
+                    r"for|about|one|ones|this|these|those|them|"
+                    r"it)\b", " ", head_d,
                     flags=re.IGNORECASE))
                 dur = tail_d
         more = bool(ms.groupdict().get("dur2"))
