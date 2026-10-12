@@ -4540,7 +4540,12 @@ class TruthGateTests(RecoveryLoopTests):
             for q, want in (("what happens at 9am", "standup"),
                             ("whats at 9am", "standup"),
                             ("anything at 3pm", "stretch"),
-                            ("whats at 3pm", "stretch")):
+                            ("whats at 3pm", "stretch"),
+                            ("whats happening at 9", "standup"),
+                            ("what am i doing at 9", "standup"),
+                            ("what have i got at 9", "standup"),
+                            ("any meetings at 9am", "standup"),
+                            ("whats on at 3pm", "stretch")):
                 r = agent.run(q, mode="auto")
                 self.assertIn(want, r.content, q)
             r = agent.run("what happens at 9am", mode="auto")
@@ -4549,15 +4554,28 @@ class TruthGateTests(RecoveryLoopTests):
             # the real pool, never 'no reminders set'.
             for q in ("do i have anything at noon",
                       "what happens at noon",
+                      "what do i have at 8pm",
                       "whats on friday"):
                 r = agent.run(q, mode="auto")
                 self.assertIn("no reminder", r.content.lower(), q)
                 self.assertIn("standup", r.content, q)
+            # 'is anything on for tonight' scopes to TODAY's fire
+            # window — the 'for' connector must not leak into the
+            # scope terms ('no reminder about "for"').
+            r = agent.run("is anything on for tonight", mode="auto")
+            self.assertIn("standup", r.content)
+            self.assertNotIn("“for”", r.content)
             # Non-scheduler asks must not claim — 'do i have
             # anything to do' / 'whats the weather' aren't inventory.
             t = agent.tasks.create("x", "auto")
             for q in ("do i have anything to do",
-                      "whats the weather like"):
+                      "whats the weather like",
+                      "what do i have for dinner",
+                      "whats happening",
+                      "what is the time",
+                      "is anything on tv",
+                      "whats at chapter 5",
+                      "any meetings"):
                 self.assertIsNone(
                     agent._reminder_reply(q, q, t.id), q)
 

@@ -4001,14 +4001,18 @@ class AgentOrchestrator:
         r"comes\s+up|triggers?|happens?|pops\s+up)\s+next\b"
         + _REMINDER_TRAIL +
         # Clock/day-scoped inventory — 'whats at 9am', 'what
-        # happens at noon', 'whats on friday', 'do i have anything
-        # at noon'. The temporal term scopes by fire-time/day via
-        # the hay tokens, not by topic text.
+        # happens at noon', 'whats happening at 6', 'what am i
+        # doing at 3', 'what do i have at 8pm', 'whats on friday'.
+        # The temporal term scopes by fire-time/day via the hay
+        # tokens, not by topic text.
         r"|" + _REMINDER_POLITE +
-        r"(?:what'?s|whats|what\s+is|what\s+happens?)\s+"
+        r"(?:what'?s|whats|what\s+is|what\s+happens?|"
+        r"what\s+am\s+i\s+doing|"
+        r"what\s+(?:do|does|did)\s+i\s+(?:have|got)|"
+        r"what\s+have\s+i\s+got)\s+"
         r"(?:(?:on|at|for|happening|going\s+on|planned|scheduled|"
         r"set)\s+)*"
-        r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)|noon|midday|midnight|"
+        r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midday|midnight|"
         r"tonight|tonite|tomorrow|today|morning|afternoon|evening|"
         r"monday|tuesday|wednesday|thursday|friday|saturday|"
         r"sunday)\b"
@@ -4017,6 +4021,24 @@ class AgentOrchestrator:
         r"(?:do|does)\s+i\s+have\s+(?:anything|something)\s+"
         r"(?:(?:at|on|for|planned|scheduled|set|happening|coming)\s+"
         r"[\w'\s-]{0,30}?)?"
+        + _REMINDER_TRAIL +
+        # 'is anything on for tonight', 'is there anything
+        # happening at 8' — existential temporal asks.
+        r"|" + _REMINDER_POLITE +
+        r"(?:is|are)\s+(?:there\s+)?(?:anything|something)\s+"
+        r"(?:on|happening|planned|going\s+on)\s+"
+        r"(?:(?:at|on|for)\s+)?"
+        r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midday|midnight|"
+        r"tonight|tonite|tomorrow|today|morning|afternoon|evening|"
+        r"monday|tuesday|wednesday|thursday|friday|saturday|"
+        r"sunday)\b"
+        + _REMINDER_TRAIL +
+        # 'any meetings at 10', 'any events on friday' — calendar
+        # nouns with a temporal tail; the honest row answer beats
+        # a model invention either way.
+        r"|" + _REMINDER_POLITE +
+        r"any\s+(?:meetings?|events?|appointments?)\s+"
+        r"(?:at|on|for|scheduled|planned|booked)\s+.+?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     # State asks — 'are my reminders on', 'is the alarm paused',
@@ -5896,6 +5918,7 @@ class AgentOrchestrator:
                 r"\b(?:reminders?|alarms?|timers?|schedules?|"
                 r"calendars?|scheduled|the|a|an|my|that|me|us|"
                 r"anything|something|everything|"
+                r"about|regarding|for|of|to|"
                 r"at|in|on|right|correct|yeah)\b",
                 " ", sm.group(1), flags=re.IGNORECASE))
         if sm is None:
