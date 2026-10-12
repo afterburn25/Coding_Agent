@@ -3616,8 +3616,9 @@ class AgentOrchestrator:
                       r"beeps?|chimes?))?")
     _REMINDER_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak)ing|"
-        r"remind|alert|notify|ping|wake)\s+"
+        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
+        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"message)\s+"
         r"me\s+(?:up\s+)?"
         r"(?P<when>.+?)\s+(?:to|about|of|that)\s+"
         r"(?P<task>.+?)" + _REMINDER_TRAIL,
@@ -3627,8 +3628,9 @@ class AgentOrchestrator:
     # the connector to the LAST one recovers 'at 4:45'/'leave'.
     _REMINDER_RE_GREEDY = re.compile(
         _REMINDER_POLITE +
-        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak)ing|"
-        r"remind|alert|notify|ping|wake)\s+"
+        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
+        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"message)\s+"
         r"me\s+(?:up\s+)?"
         r"(?P<when>.+)\s+(?:to|about|of|that)\s+"
         r"(?P<task>.+?)" + _REMINDER_TRAIL,
@@ -3686,8 +3688,9 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak)ing|"
-        r"remind|alert|notify|ping|wake)\s+"
+        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
+        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"message)\s+"
         r"me\s+(?:up\s+)?to\s+(?P<task>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
     # 'every morning remind me to stretch' — the cadence leads the
@@ -3700,8 +3703,9 @@ class AgentOrchestrator:
         r"weekends?|monday|tuesday|wednesday|thursday|friday|"
         r"saturday|sunday)|hourly|daily|weekly|monthly|nightly|"
         r"fortnightly)\s+"
-        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak)ing|"
-        r"remind|alert|notify|ping|wake)\s+me\s+(?:up\s+)?"
+        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
+        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"message)\s+me\s+(?:up\s+)?"
         r"(?:(?:to|about|of|that)\s+(?P<task>.+?)"
         r"|(?P<when2>(?:at|in|on)\s+.+?))" + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -3713,8 +3717,9 @@ class AgentOrchestrator:
     _REMINDER_LEAD_WHEN_RE = re.compile(
         _REMINDER_POLITE +
         r"(?P<when>.+?)\s+"
-        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak)ing|"
-        r"remind|alert|notify|ping|wake)\s+me\b\s*(?:up\b\s*)?"
+        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
+        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"message)\s+me\b\s*(?:up\b\s*)?"
         r"(?:(?:to|about|of|that)\s+(?P<task>.+?))?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -3735,8 +3740,9 @@ class AgentOrchestrator:
     # 3 AM' over zero rows.
     _REMINDER_BARE_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?P<verb>(?:keep\s+)?(?:remind|alert|notify|ping|wak)ing|"
-        r"remind|alert|notify|ping|wake)\s+me\b(?:\s+up\b)?"
+        r"(?P<verb>(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
+        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"message)\s+me\b(?:\s+up\b)?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     # Bare when-only utterances — 'in two hours', 'at half 6',
@@ -3767,8 +3773,9 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_NOTASK_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?P<verb>(?:keep\s+)?(?:remind|alert|notify|ping|wak)ing|"
-        r"remind|alert|notify|ping|wake)\s+"
+        r"(?P<verb>(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
+        r"remind|alert|notify|ping|wake|nudge|buzz|beep|text|page|"
+        r"message)\s+"
         r"me\s+(?:up\s+)?(?P<when>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_CANCEL_RE = re.compile(
@@ -5131,8 +5138,12 @@ class AgentOrchestrator:
                             user_text, task_id, event_callback)
                 elif not str(
                         mlw.groupdict().get("task") or "").strip():
-                    if re.search(r"\bwak(?:e|ing)\s+me\b|\bwake\s+me\b",
-                                 plan_text, re.IGNORECASE):
+                    _selfverb = re.search(
+                        r"\b(wake|waking|nudge|nudging|buzz|buzzing|"
+                        r"beep|beeping|text|texting|page|paging|"
+                        r"message|messaging)\s+me\b", plan_text,
+                        re.IGNORECASE)
+                    if _selfverb is not None:
                         # 'at 6am wake me up' — waking is the task,
                         # like the NOTASK wake path.
                         sup = (self._autonomy() if callable(
@@ -5145,15 +5156,22 @@ class AgentOrchestrator:
                                 "session.",
                                 user_text, task_id, event_callback)
                         try:
+                            _v = _selfverb.group(1).lower()
+                            _lemma = {
+                                "waking": "wake", "nudging": "nudge",
+                                "buzzing": "buzz", "beeping": "beep",
+                                "texting": "text", "paging": "page",
+                                "messaging": "message"}.get(_v, _v)
+                            _task_sv = f"{_lemma} you"
                             fields = {k: v for k, v in
                                       spec_lw.items()
                                       if k != "kind"}
                             sched.add(
-                                "reminder: wake you",
+                                f"reminder: {_task_sv}",
                                 spec_lw["kind"],
                                 action={"kind": "notify",
                                         "title": "Reminder",
-                                        "detail": "wake you"},
+                                        "detail": _task_sv},
                                 created_by="user", **fields)
                         except Exception as exc:
                             return self._reminder_finish(
@@ -5163,7 +5181,7 @@ class AgentOrchestrator:
                         return self._reminder_finish(
                             "Reminder set "
                             + self._reminder_spec_text(
-                                spec_lw, "wake you"),
+                                spec_lw, _task_sv),
                             user_text, task_id, event_callback)
                     # 'every 30 minutes ping me' — a cadence with no
                     # task; ask honestly, never 'That's set'.
@@ -5192,9 +5210,19 @@ class AgentOrchestrator:
                         "", wtxt).strip(" ,;—-")
                     if not wtxt:
                         vb_nt = str(mnt.group("verb") or "").lower()
-                        if re.search(r"wak(?:e|ing)$", vb_nt):
+                        if re.search(
+                                r"(?:wak(?:e|ing)|nudg(?:e|ing)|buzz|"
+                                r"buzzing|beep|beeping|text|texting|"
+                                r"pag(?:e|ing)|messag(?:e|ing))$",
+                                vb_nt):
+                            _lm = {
+                                "waking": "Wake", "nudging": "Nudge",
+                                "buzzing": "Buzz", "beeping": "Beep",
+                                "texting": "Text", "paging": "Page",
+                                "messaging": "Message"}.get(
+                                    vb_nt, vb_nt.capitalize())
                             return self._reminder_finish(
-                                "Wake you when? — e.g. “at 6am”, "
+                                f"{_lm} you when? — e.g. “at 6am”, "
                                 "“in an hour”, “tomorrow at 7”.",
                                 user_text, task_id, event_callback)
                         return self._reminder_finish(
@@ -5204,11 +5232,14 @@ class AgentOrchestrator:
                     spec_nt = self._reminder_spec(wtxt, time.time())
                     if (spec_nt is not None
                             and re.search(
-                                r"\bwak(?:e|ing)$",
+                                r"(?:wak(?:e|ing)|nudg(?:e|ing)|buzz|"
+                                r"buzzing|beep|beeping|text|texting|"
+                                r"pag(?:e|ing)|messag(?:e|ing))$",
                                 str(mnt.group("verb") or "").lower())):
                         # 'wake me up in an hour' — waking is the
                         # task; schedule it like an alarm instead of
-                        # asking 'do what'.
+                        # asking 'do what'. Same for nudge/buzz/
+                        # beep/text/page/message leads.
                         sup = (self._autonomy() if callable(
                             self._autonomy) else self._autonomy)
                         sched = getattr(sup, "scheduler", None)
@@ -5219,15 +5250,26 @@ class AgentOrchestrator:
                                 "session.",
                                 user_text, task_id, event_callback)
                         try:
+                            _v = str(
+                                mnt.group("verb") or "").lower()
+                            _task_sv = " ".join([
+                                {"waking": "wake",
+                                 "nudging": "nudge",
+                                 "buzzing": "buzz",
+                                 "beeping": "beep",
+                                 "texting": "text",
+                                 "paging": "page",
+                                 "messaging": "message"}.get(_v, _v),
+                                "you"])
                             fields = {k: v for k, v in
                                       spec_nt.items()
                                       if k != "kind"}
                             sched.add(
-                                "reminder: wake you",
+                                f"reminder: {_task_sv}",
                                 spec_nt["kind"],
                                 action={"kind": "notify",
                                         "title": "Reminder",
-                                        "detail": "wake you"},
+                                        "detail": _task_sv},
                                 created_by="user", **fields)
                         except Exception as exc:
                             return self._reminder_finish(
@@ -5237,7 +5279,7 @@ class AgentOrchestrator:
                         return self._reminder_finish(
                             "Reminder set "
                             + self._reminder_spec_text(
-                                spec_nt, "wake you"),
+                                spec_nt, _task_sv),
                             user_text, task_id, event_callback)
                     if (spec_nt is not None
                             and self._REMINDER_TIMEISH_RE.search(wtxt)):

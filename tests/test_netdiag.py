@@ -2807,6 +2807,32 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(time.localtime(row["at"]).tm_min, 30)
             sup.scheduler.rows.clear()
 
+            # 'at 6 o'clock' — the redundant tail broke the clock
+            # match; o'clock now strips in both parser entries.
+            result = agent.run(
+                "remind me at 6 o'clock to leave", mode="auto")
+            self.assertIn("leave", result.content)
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(time.localtime(row["at"]).tm_hour, 18)
+            sup.scheduler.rows.clear()
+
+            # 'nudge me at 3' — new verbs lane and self-task; the
+            # model narrated 'Nudge set for 3:00 PM' over no row.
+            result = agent.run("nudge me at 3 tomorrow",
+                               mode="auto")
+            self.assertIn("nudge you", result.content)
+            self.assertTrue(sup.scheduler.rows)
+            sup.scheduler.rows.clear()
+
+            # 'on friday at 3pm' — 'on <weekday>' singular is the
+            # coming Friday once; only 'on fridays'/'every friday'
+            # recurs. The live probe banked a weekly row.
+            result = agent.run(
+                "remind me on friday at 3pm to meet", mode="auto")
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(row["kind"], "once")
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

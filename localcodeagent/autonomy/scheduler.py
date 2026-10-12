@@ -151,6 +151,8 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+in\s+the\s+evening\b",
                r"\1 pm", t)
     t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+at\s+night\b", r"\1 pm", t)
+    # 'at 6 o'clock' — the redundant tail breaks the clock match.
+    t = re.sub(r"\bo'?clock\b", "", t).strip()
     t = _worded_clock(t)
     lt = time.localtime(now)
 
@@ -410,6 +412,7 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+in\s+the\s+evening\b",
                r"\1 pm", t)
     t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+at\s+night\b", r"\1 pm", t)
+    t = re.sub(r"\bo'?clock\b", "", t).strip()
     t = _worded_clock(t)
 
     def _meridian(hour: int, mer: str | None) -> int:
@@ -539,13 +542,17 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
             return {"kind": "weekly", "weekday": wd,
                     "hour": _meridian(int(hr), mer) if hr else 9,
                     "minute": int(mn or 0)}
-    # 'every <weekday> [at T]' / 'on fridays [at T]' — weekly cadence.
+    # 'every <weekday> [at T]' / 'on fridays [at T]' — weekly
+    # cadence. 'on friday' (singular) is the coming Friday — a
+    # one-shot; 'on' recurs only over the plural.
     m = re.fullmatch(
-        r"(?:every|on|each)\s+(\w+?)s?" + clock_tail, t)
+        r"(every|each|on)\s+(\w+?)(s)?\b" + clock_tail, t)
     if m:
-        wd = _WEEKDAY_NAMES.get(m.group(1))
+        wd = (_WEEKDAY_NAMES.get(m.group(2))
+              if m.group(1) != "on" or m.group(3)
+              else None)
         if wd is not None:
-            hr, mn, mer = m.group(2), m.group(3), m.group(4)
+            hr, mn, mer = m.group(4), m.group(5), m.group(6)
             return {"kind": "weekly", "weekday": wd,
                     "hour": _meridian(int(hr), mer) if hr else 9,
                     "minute": int(mn or 0)}
