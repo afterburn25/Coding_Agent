@@ -1894,6 +1894,48 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIn("meal prep", r.content)
         self.assertEqual(len(sup.scheduler.rows), 1)
 
+        # Positional ordinals — 'the second one' picks by fire
+        # order; an out-of-range index says which exist, never
+        # 'already off'/'cancelled 0' over live rows.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: lunch", "once", at=time.time() + 3600,
+            action={"kind": "notify", "detail": "lunch"})
+        sup.scheduler.add(
+            "reminder: dinner", "once", at=time.time() + 7200,
+            action={"kind": "notify", "detail": "dinner"})
+        r = agent._reminder_reply(
+            "mute the third one", "mute the third one", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("no third", r.content)
+        self.assertTrue(
+            all(s["enabled"] for s in sup.scheduler.rows))
+        r = agent._reminder_reply(
+            "cancel the fourth reminder",
+            "cancel the fourth reminder", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("no fourth", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 2)
+        r = agent._reminder_reply(
+            "cancel the second reminder",
+            "cancel the second reminder", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("dinner", r.content)
+        self.assertEqual(
+            [s["name"] for s in sup.scheduler.rows],
+            ["reminder: lunch"])
+        # 'what time is X' — a bare copula fire-time ask over a
+        # named row; 'when does the train come' isn't ours.
+        r = agent._reminder_reply(
+            "what time is my lunch",
+            "what time is my lunch", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("lunch", r.content)
+        self.assertIsNone(
+            agent._reminder_reply(
+                "when does the train come",
+                "when does the train come", task.id))
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

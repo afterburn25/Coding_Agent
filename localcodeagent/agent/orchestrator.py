@@ -4013,10 +4013,19 @@ class AgentOrchestrator:
         r"go\s+off|fires?)\b"
         + _REMINDER_TRAIL +
         r"|" + _REMINDER_POLITE +
-        r"(?:tell\s+me\s+)?when\s+(?:(?:does|do|will)\s+)?"
+        r"(?:(?:tell\s+me\s+)?when|what\s+time)\s+"
+        r"(?:(?:does|do|will)\s+)?"
         r"(?:(?:my|the|your|that|this)\s+)?[\w'\s-]{0,40}?\s+"
         r"(?:goes?\s+off|go\s+off|fires?|rings?|hits?|triggers?|"
         r"happens?|pops?\s+up|repeats?|recurs?)\b"
+        + _REMINDER_TRAIL +
+        # 'what time is the standup', 'when is the dentist' —
+        # a bare fire-time ask; the row's clock answers, a miss
+        # names the real pool. Only the copula claims — 'when
+        # does the train come' is an event question, not ours.
+        r"|" + _REMINDER_POLITE +
+        r"(?:what\s+time|when)\s+(?:is|are|was)\s+"
+        r"(?:(?:my|the|your|that|this)\s+)?[\w'\s-]{1,40}?"
         + _REMINDER_TRAIL +
         # 'will my alarm go off', 'is my reminder going to
         # fire' — future-fire asks; next_run answers them the
@@ -5311,23 +5320,43 @@ class AgentOrchestrator:
                         self._reminder_label(s))]
         return sched, rows
 
-    _ORDINAL_SCOPE = {"next", "first", "earliest", "last", "latest"}
+    _ORDINAL_SCOPE = {"next", "first", "earliest", "last",
+                      "latest", "second", "2nd", "third", "3rd",
+                      "fourth", "4th", "fifth", "5th"}
+    _ORDINAL_POS = {"second": 1, "2nd": 1, "third": 2, "3rd": 2,
+                    "fourth": 3, "4th": 3, "fifth": 4, "5th": 4}
 
     def _reminder_ordinal_split(self, terms: set):
-        """'the first one'/'the last reminder' — ordinal selectors
-        pick an extreme-firing row, not a topic scope. Returns
-        (clean_terms, 'min'|'max'|None)."""
+        """'the first one'/'the last reminder'/'the second one' —
+        ordinal selectors pick a firing-order row, not a topic
+        scope. Returns (clean_terms, 'min'|'max'|'idx:N'|None)."""
         sel = set(terms) & self._ORDINAL_SCOPE
         if not sel:
             return set(terms), None
         rest = set(terms) - self._ORDINAL_SCOPE - {"one", "ones"}
-        return rest, ("max" if sel & {"last", "latest"} else "min")
+        if sel & {"last", "latest"}:
+            return rest, "max"
+        pos = sel & set(self._ORDINAL_POS)
+        if pos:
+            return rest, f"idx:{self._ORDINAL_POS[sorted(pos)[0]]}"
+        return rest, "min"
 
     def _reminder_ordinal_pick(self, hits: list, sel: str | None,
                              now: float):
-        """min → soonest-firing hit; max → latest-firing hit."""
+        """min → soonest-firing hit; max → latest-firing hit;
+        idx:N → the Nth hit by fire order ('the second one')."""
         if not sel or not hits:
             return hits
+        if str(sel).startswith("idx:"):
+            n = int(str(sel)[4:])
+            def _fire_i(s):
+                try:
+                    return float(
+                        self._reminder_next_fire(s, now) or 1e18)
+                except (TypeError, ValueError):
+                    return 1e18
+            ordered = sorted(hits, key=_fire_i)
+            return [ordered[n]] if n < len(ordered) else []
         latest = sel == "max"
 
         def _fire(s):
@@ -5983,6 +6012,19 @@ class AgentOrchestrator:
         hits = self._reminder_ordinal_pick(hits, _ord_sel,
                                            time.time())
         state = "on" if want_on else "off"
+        if (_ord_sel and str(_ord_sel).startswith("idx:")
+                and not hits and pool):
+            # 'mute the third one' over two rows — the index is
+            # out of range, not 'already off'; say which exist.
+            n = int(str(_ord_sel)[4:]) + 1
+            words = {2: "second", 3: "third", 4: "fourth",
+                     5: "fifth"}
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in pool[:4])
+            return self._reminder_finish(
+                f"There's no {words.get(n, str(n) + 'th')} "
+                f"reminder — you've got {len(pool)}: {names}.",
+                user_text, task_id, event_callback)
         # 'silence the pay rent reminder on friday' / 'mute reminders
         # tomorrow' — the day narrows hits to rows actually firing
         # that date; a miss says so instead of touching others.
@@ -6232,7 +6274,18 @@ class AgentOrchestrator:
                     excl_terms
                     and excl_terms <= self._reminder_hay(s))]
         hits = self._reminder_ordinal_pick(hits, ord_sel, now)
-        if not rows and not hits:
+        if (not hits and ord_sel
+                and str(ord_sel).startswith("idx:") and rows):
+            # 'cancel the fourth reminder' over two — the index is
+            # out of range; say which exist, never 'cancelled 0'.
+            n = int(str(ord_sel)[4:]) + 1
+            words = {2: "second", 3: "third", 4: "fourth",
+                     5: "fifth"}
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rows[:4])
+            text = (f"There's no {words.get(n, str(n) + 'th')} "
+                    f"reminder — you've got {len(rows)}: {names}.")
+        elif not rows and not hits:
             text = self._reminder_none_text(
                 sched, noun)
         elif not hits and excl_terms:
@@ -6677,6 +6730,28 @@ class AgentOrchestrator:
                     r"that\s+|this\s+)?"
                     r"([a-z0-9][a-z0-9'\s-]{0,40}?)"
                     r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
+            if cm is None:
+                # 'what time is THE STANDUP', 'when is THE
+                # DENTIST' — the copula sits inside the ask; the
+                # name runs to end-of-line.
+                cm = re.search(
+                    r"\b(?:what\s+time|when)\s+"
+                    r"(?:does\s+|do\s+|will\s+)?"
+                    r"(?:is|are|was)\s+(?:the\s+|my\s+|your\s+|"
+                    r"that\s+|this\s+)?"
+                    r"([a-z0-9][a-z0-9'\s-]{0,40}?)"
+                    r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
+            if cm is None:
+                # 'when THE DENTIST fires', 'tell me when THE
+                # ALARM goes off' — the name trails 'when' and
+                # leads the fire verb.
+                cm = re.search(
+                    r"\bwhen\s+(?:does\s+|do\s+|will\s+)?"
+                    r"(?:the\s+|my\s+|your\s+|that\s+|this\s+)?"
+                    r"([a-z0-9][a-z0-9'\s-]{0,40}?)\s+"
+                    r"(?:goes?\s+off|go\s+off|fires?|rings?|"
+                    r"hits?|triggers?|pops?\s+up|repeats?|"
+                    r"recurs?)\b", plan_text, re.IGNORECASE)
             if cm is None and fired_ask:
                 # 'did i miss THE STANDUP' — the name trails
                 # the miss verb.
