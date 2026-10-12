@@ -4165,6 +4165,13 @@ class AgentOrchestrator:
                          "evening": "in the evening",
                          "night": "tonight"}.get(dur, dur), now)
                 if when is None:
+                    # 'push it to 4' — a bare number is a clock
+                    # (4 PM), not four minutes; try 'at N' before
+                    # the 'in N' duration read.
+                    if re.fullmatch(r"\d{1,2}(?::\d{2})?", dur):
+                        when = self._reminder_at_when(
+                            f"at {dur}", now)
+                if when is None:
                     rel = self._reminder_at_when(f"in {dur}", now)
                     if rel is not None:
                         delta = rel - now
