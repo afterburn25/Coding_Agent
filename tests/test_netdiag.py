@@ -2936,6 +2936,17 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertTrue(sup.scheduler.rows)
             sup.scheduler.rows.clear()
 
+            # Precision hedges — 'at 7pm sharp' / 'at about 6' /
+            # 'around 6' pin-failed over filler the clock grammar
+            # doesn't carry. 'in about 10 minutes' stays a
+            # duration (the about→at rewrite is 'in'-guarded).
+            self.assertIsNotNone(_prw("at 7pm sharp", now))
+            self.assertIsNotNone(_prw("at about 6", now))
+            self.assertIsNotNone(_prw("around 6", now))
+            self.assertAlmostEqual(
+                _prw("in about 10 minutes", now), now + 600,
+                delta=2)
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

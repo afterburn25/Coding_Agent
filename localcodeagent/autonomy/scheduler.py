@@ -153,6 +153,16 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+at\s+night\b", r"\1 pm", t)
     # 'at 6 o'clock' — the redundant tail breaks the clock match.
     t = re.sub(r"\bo'?clock\b", "", t).strip()
+    # 'at 7pm sharp' / 'at about 6' / 'around 6' — precision
+    # hedges and fillers the clock grammar doesn't carry.
+    t = re.sub(r"\b(?:sharp|exactly|precisely|on\s+the\s+dot)\b",
+               "", t)
+    t = re.sub(r"\bat\s+(?:about|around|approximately|roughly|"
+               r"like)\s+", "at ", t)
+    t = re.sub(r"(?<!in\s)(?<!for\s)\b(?:about|around|"
+               r"approximately|roughly|like)\s+"
+               r"(?=\d|noon|midnight|quarter|half)", "at ", t)
+    t = " ".join(t.split())
     t = _worded_clock(t)
     lt = time.localtime(now)
 
@@ -433,6 +443,14 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                r"\1 pm", t)
     t = re.sub(r"(\d{1,2}(?::\d{2})?)\s+at\s+night\b", r"\1 pm", t)
     t = re.sub(r"\bo'?clock\b", "", t).strip()
+    t = re.sub(r"\b(?:sharp|exactly|precisely|on\s+the\s+dot)\b",
+               "", t)
+    t = re.sub(r"\bat\s+(?:about|around|approximately|roughly|"
+               r"like)\s+", "at ", t)
+    t = re.sub(r"(?<!in\s)(?<!for\s)\b(?:about|around|"
+               r"approximately|roughly|like)\s+"
+               r"(?=\d|noon|midnight|quarter|half)", "at ", t)
+    t = " ".join(t.split())
     t = _worded_clock(t)
 
     def _meridian(hour: int, mer: str | None) -> int:
