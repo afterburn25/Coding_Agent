@@ -3061,6 +3061,114 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIsNotNone(r)
         self.assertAlmostEqual(float(tea["at"]), orig + 180, -1)
 
+        # Timed toggles — 'pause X until friday' flips the row off
+        # and schedules a real resume nudge; 'turn X back on at
+        # 3pm' keeps the row's state and schedules the nudge row.
+        # Neither may claim an automatic flip no row performs.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            action={"kind": "notify", "detail": "standup"})
+        sup.scheduler.add(
+            "reminder: dentist", "once", at=time.time() - 600,
+            enabled=False,
+            action={"kind": "notify", "detail": "dentist"})
+        r = agent._reminder_reply(
+            "pause the standup until friday",
+            "pause the standup until friday", task.id)
+        self.assertIsNotNone(r)
+        self.assertFalse(sup.scheduler.rows[0]["enabled"])
+        self.assertIn("nudge", r.content)
+        r = agent._reminder_reply(
+            "turn the dentist reminder back on at 3pm",
+            "turn the dentist reminder back on at 3pm", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("stays off", r.content)
+        self.assertFalse(sup.scheduler.rows[1]["enabled"])
+        self.assertTrue(
+            any("dentist" in s["name"] and "turn" in s["name"]
+                for s in sup.scheduler.rows))
+
+        # Copy/duplicate — real journaled clones; a clockless
+        # target keeps the source's cadence clock. 'copy the
+        # file' names no reminder row and falls through.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            action={"kind": "notify", "detail": "standup"})
+        r = agent._reminder_reply(
+            "copy the standup to friday",
+            "copy the standup to friday", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("Copied", r.content)
+        cp = [s for s in sup.scheduler.rows
+              if s["kind"] == "once"]
+        self.assertEqual(len(cp), 1)
+        self.assertIn("standup", cp[0]["name"])
+        _lt = time.localtime(float(cp[0]["at"]))
+        self.assertEqual((_lt.tm_hour, _lt.tm_min), (9, 30))
+        self.assertIsNone(agent._reminder_reply(
+            "copy the file to desktop",
+            "copy the file to desktop", task.id))
+
+        # 'the same thing' — journal anaphora names the last
+        # touched row's topic; an empty journal asks instead of
+        # minting a literal row.
+        r = agent._reminder_reply(
+            "remind me about the same thing tomorrow",
+            "remind me about the same thing tomorrow", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("standup", r.content)
+        agent._sched_undo = []
+        r = agent._reminder_reply(
+            "remind me about the same thing tomorrow",
+            "remind me about the same thing tomorrow", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("same thing as what", r.content)
+
+        # 'what is overdue' — enabled once-rows past their fire
+        # time with no last_run; recurring rows never go overdue.
+        for s in list(sup.scheduler.rows):
+            sup.scheduler.remove(s["id"])
+        sup.scheduler.add(
+            "reminder: pills", "once", at=time.time() - 600,
+            action={"kind": "notify", "detail": "pills"})
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            action={"kind": "notify", "detail": "standup"})
+        r = agent._reminder_reply(
+            "what is overdue", "what is overdue", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("pills", r.content)
+        self.assertNotIn("standup", r.content)
+
+        # 'keep X where it is' / 'leave X alone' — a claimed
+        # no-op that reports the row's real state.
+        r = agent._reminder_reply(
+            "keep the standup where it is",
+            "keep the standup where it is", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("standup", r.content)
+        self.assertIn("left alone", r.content)
+        r = agent._reminder_reply(
+            "leave the pills reminder alone",
+            "leave the pills reminder alone", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("pills", r.content)
+
+        # 'every weekday but tuesday' — a representable
+        # exclusion cadence: weekly minus the named day.
+        for s in list(sup.scheduler.rows):
+            sup.scheduler.remove(s["id"])
+        r = agent._reminder_reply(
+            "remind me every weekday but tuesday to stretch",
+            "remind me every weekday but tuesday to stretch",
+            task.id)
+        self.assertIsNotNone(r)
+        row = sup.scheduler.rows[-1]
+        self.assertEqual(row["kind"], "weekly")
+        self.assertEqual(sorted(row["weekday"]), [0, 2, 3, 4])
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

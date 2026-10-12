@@ -4578,6 +4578,7 @@ class AgentOrchestrator:
         r"(?P<day>tomorrow|today|tonight|"
         r"monday|tuesday|wednesday|thursday|friday|saturday|"
         r"sunday))?"
+        r"(?:\s+at\s+(?P<att>.+?))?"
         r"(?:\s+(?:until|till|for)\s+(?P<til>.+?))?"
         r"(?:\s+(?:while|when|if)\s+(?P<cond>.+?))?"
         + _REMINDER_TRAIL +
@@ -4716,6 +4717,18 @@ class AgentOrchestrator:
         r"(?:(?:the|my|those|these)\s+)?"
         r"(?P<sw_b>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # 'copy the standup to friday' / 'duplicate the tea timer' —
+    # a real clone: new row, same action, when-target or the
+    # source's spec. Claims only once the source resolves to an
+    # actual reminder row — 'copy the file' isn't ours.
+    _REMINDER_COPY_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:copy|duplicate|clone)\s+"
+        r"(?:(?:the|my|that|this)\s+)?"
+        r"(?P<cp_src>.+?)"
+        r"(?:\s+(?:to|for|onto)\s+(?P<cp_when>.+?))?"
+        r"\s*[.!?]?\s*$",
+        re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
     # noun requirement keeps 'repeat the command' out.
@@ -4757,7 +4770,10 @@ class AgentOrchestrator:
         r"(?:the\s+|my\s+|that\s+|this\s+|\w)|"
         # 'how many more times will the standup fire'.
         r"\bhow\s+many\s+(?:more\s+)?times\b|"
-        r"\bhow\s+many\s+fires?\b",
+        r"\bhow\s+many\s+fires?\b|"
+        # 'what's overdue' / 'which reminders are overdue' —
+        # missed one-shot inventory.
+        r"\boverdue\b|\bmissed\b",
         re.IGNORECASE)
     # Temporal tokens in a failed when-clause → ask when, don't claim.
     _REMINDER_TIMEISH_RE = re.compile(
@@ -4811,6 +4827,15 @@ class AgentOrchestrator:
     # me twice on friday' names nothing; 'once a week on
     # saturdays' the same. Clarify rather than minting a row
     # named 'once a week'.
+    # 'the same thing' names no row — the journal's last-touched
+    # row is the referent. Minting 'reminder: the same thing' is
+    # garbage either way.
+    _REMINDER_SAMETHING_RE = re.compile(
+        r"(?:about\s+)?(?:the\s+|my\s+)?same\s+(?:thing|"
+        r"reminder|alarm|timer|one|stuff)|(?:about\s+)?"
+        r"(?:that|this)\s+(?:same\s+)?(?:thing|one)|"
+        r"it\s+again|(?:about\s+)?the\s+same",
+        re.IGNORECASE)
     _REMINDER_CADENCE_TASK_RE = re.compile(
         r"once|twice|thrice|(?:two|three|four|five|six|seven|"
         r"\d+)\s+times?|"
@@ -6760,6 +6785,31 @@ class AgentOrchestrator:
                 "Turn them on or off? — e.g. “turn off "
                 "my reminders”.",
                 user_text, task_id, event_callback)
+        # 'pause the standup until friday' — the verb4 alternation
+        # has no til group, so the bound lands inside the body;
+        # peel it when the tail parses as a time.
+        _til_eff = str(mt.groupdict().get("til") or "").strip(
+            " ,;—-")
+        if not _til_eff:
+            _pb = re.search(
+                r"\s+(?:for|until|till|til)\s+(.+)$", body,
+                re.IGNORECASE)
+            if _pb is not None and (
+                    re.fullmatch(
+                        r"(?:a|an|one|two|three|four|five|six|"
+                        r"seven|eight|nine|ten|couple|few|"
+                        r"\d+(?:\.\d+)?)\s*(?:seconds?|secs?|"
+                        r"minutes?|mins?|hours?|hrs?|days?|"
+                        r"weeks?)", _pb.group(1), re.IGNORECASE)
+                    or self._reminder_at_when(
+                        _pb.group(1), time.time()) is not None):
+                _til_eff = _pb.group(1).strip(" ,;—-")
+                body = body[:_pb.start()].strip(" ,;—-")
+        # 'turn the dentist back on at 3pm' — an 'at' bound defers
+        # the flip itself; the row keeps its state and a nudge row
+        # fires at the named time. That's a real, journaled row —
+        # never a claimed auto-enable.
+        _att = str(mt.groupdict().get("att") or "").strip(" ,;—-.")
         cond = str(mt.groupdict().get("cond") or "").strip(" ,;—-.")
         if cond:
             # 'pause reminders while i'm in the meeting' — a
@@ -6915,7 +6965,7 @@ class AgentOrchestrator:
         # belongs to them, not to a fire window — mask it out.
         now = time.time()
         _day_src = user_text
-        _til_g = str(mt.groupdict().get("til") or "").strip()
+        _til_g = _til_eff
         _cond_g = str(mt.groupdict().get("cond") or "").strip()
         for _g in (_til_g, _cond_g):
             if _g:
@@ -7139,8 +7189,7 @@ class AgentOrchestrator:
             text = (f"All your {singular}s are already {state}."
                     if len(rows) > 1 else
                     f"That {singular} is already {state}.")
-            til = str(mt.groupdict().get("til") or "").strip(
-                " ,;—-")
+            til = _til_eff
             if til:
                 # 'mute them until 6pm' when already off still owes
                 # the resume nudge — the off state holds, the
@@ -7155,6 +7204,46 @@ class AgentOrchestrator:
                 for s in hits[:5])
             text = (f"That matches {len(hits)} reminders: {names} — "
                     "say which.")
+        elif _att and hits:
+            # 'turn the dentist back on at 3pm' — an 'at' bound
+            # defers the flip itself; a real nudge row fires at
+            # the named time and the target keeps its state.
+            # Flipping now would be the wrong mutation; claiming
+            # auto-enable would be a lie.
+            spec_a = (self._reminder_spec("at " + _att, time.time())
+                      or self._reminder_spec(_att, time.time()))
+            if len(hits) > 1:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in hits[:5])
+                text = (f"That matches {len(hits)} reminders: "
+                        f"{names} — say which.")
+            elif spec_a is None or spec_a.get("kind") != "once":
+                text = (f"I couldn't pin “{_att}” as a time — "
+                        "say “at 3pm” or “at noon”.")
+            else:
+                s = hits[0]
+                label = self._reminder_label(s)
+                dirw = "on" if want_on else "off"
+                try:
+                    sched.add(
+                        f"reminder: turn the {label} reminder {dirw}",
+                        "once", at=spec_a["at"],
+                        action={"kind": "notify",
+                                "title": "Reminder",
+                                "detail": f"turn the {label} "
+                                          f"reminder {dirw}"})
+                except Exception as exc:
+                    text = (f"I couldn't schedule the nudge "
+                            f"({exc}).")
+                else:
+                    _st = time.strftime(
+                        "%a %H:%M" if spec_a["at"] - time.time()
+                        > 20 * 3600 else "%H:%M",
+                        time.localtime(spec_a["at"]))
+                    stays = "off" if want_on else "on"
+                    text = (f"“{label}” stays {stays} — I'll "
+                            f"nudge you {_st} to turn it {dirw}.")
         else:
             try:
                 n = sum(bool(sched.set_enabled(str(s["id"]), want_on))
@@ -7171,8 +7260,7 @@ class AgentOrchestrator:
                 # real and reversible; the flip-back can't run itself,
                 # so schedule a reminder nudge at the named time and
                 # say exactly that instead of claiming auto-resume.
-                til = str(mt.groupdict().get("til") or "").strip(
-                    " ,;—-")
+                til = _til_eff
                 if til:
                     text += _nudge_suffix(til, want_on)
         return self._reminder_finish(text, user_text, task_id,
@@ -7744,6 +7832,108 @@ class AgentOrchestrator:
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
+    def _reminder_copy_reply(self, user_text: str, mc: re.Match,
+                             task_id: str, event_callback):
+        """'copy the standup to friday' / 'duplicate the tea
+        timer' — a real clone through the journaled add: same
+        action, target when or the source's own spec. Never a
+        claimed copy that no row backs."""
+        sched, rows = self._reminder_rows(include_disabled=True)
+        if sched is None:
+            return self._reminder_finish(
+                "I can't manage reminders — the scheduler isn't "
+                "running in this session.",
+                user_text, task_id, event_callback)
+        terms = self._reminder_terms(re.sub(
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
+            r"reminders?|alarms?|timers?|schedules?)\b",
+            " ", str(mc.group("cp_src") or ""),
+            flags=re.IGNORECASE))
+        hits = ([s for s in rows
+                 if terms <= self._reminder_hay(s)]
+                if terms else [])
+        if not hits and terms:
+            hits = [s for s in rows
+                    if self._reminder_terms(self._reminder_label(s))
+                    and self._reminder_terms(
+                        self._reminder_label(s)) <= terms]
+        hits = self._reminder_clock_narrow(hits, terms, user_text)
+        if not hits:
+            # The source named no reminder row — 'copy the file'
+            # stays with the model; a row-shaped ask gets the
+            # honest miss.
+            if re.search(r"\b(?:reminders?|alarms?|timers?)\b",
+                         user_text, re.IGNORECASE):
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in rows[:4])
+                return self._reminder_finish(
+                    "I don't see a reminder matching "
+                    f"“{' '.join(sorted(terms))}”"
+                    + (f" — you've got: {names}." if names else "."),
+                    user_text, task_id, event_callback)
+            return None
+        if len(hits) > 1:
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in hits[:5])
+            return self._reminder_finish(
+                f"That matches {len(hits)} reminders: {names} — "
+                "say which.",
+                user_text, task_id, event_callback)
+        src = hits[0]
+        label = self._reminder_label(src)
+        when = (mc.group("cp_when") or "").strip(" ,;—-.")
+        now = time.time()
+        spec = None
+        if when:
+            spec = self._reminder_spec(when, now)
+            if spec is None:
+                return self._reminder_finish(
+                    f"I couldn't pin “{when}” as a time — say "
+                    "“to friday” or “to 3pm”.",
+                    user_text, task_id, event_callback)
+            # 'to friday' carries no clock — keep the source's
+            # cadence clock rather than the parse default.
+            if (src.get("hour") is not None
+                    and not re.search(
+                        r"\d|am\b|pm\b|noon|midnight|morning|"
+                        r"evening|afternoon|night", when,
+                        re.IGNORECASE)):
+                if spec.get("kind") in ("daily", "weekly",
+                                        "monthly"):
+                    spec["hour"] = src["hour"]
+                    spec["minute"] = src.get("minute", 0)
+                elif spec.get("at"):
+                    _lt = time.localtime(float(spec["at"]))
+                    spec["at"] = time.mktime(
+                        (_lt.tm_year, _lt.tm_mon, _lt.tm_mday,
+                         int(src["hour"]),
+                         int(src.get("minute") or 0), 0,
+                         _lt.tm_wday, _lt.tm_yday,
+                         _lt.tm_isdst))
+        else:
+            spec = {"kind": src.get("kind")}
+            for k in ("at", "interval_s", "hour", "minute",
+                      "weekday", "day"):
+                if src.get(k) is not None:
+                    spec[k] = src[k]
+        try:
+            _ckw = {k: spec[k] for k in (
+                "at", "interval_s", "hour", "minute", "weekday",
+                "day") if spec.get(k) is not None}
+            sched.add(str(src.get("name") or f"reminder: {label}"),
+                      spec.get("kind") or "once", **_ckw,
+                      action=src.get("action")
+                      or {"kind": "notify", "title": "Reminder",
+                          "detail": label})
+        except Exception as exc:
+            text = f"I couldn't copy the reminder ({exc})."
+        else:
+            text = (f"Copied “{label}” — fires "
+                    f"{self._reminder_when_text(spec, now)}.")
+        return self._reminder_finish(text, user_text, task_id,
+                                     event_callback)
+
     def _reminder_shaped(self, text: str) -> bool:
         """Any reminder-lane command — creates, controls, inventory.
         These are scheduler operations, never durable facts or
@@ -7778,7 +7968,8 @@ class AgentOrchestrator:
                 self._REMINDER_REFER_RE, self._REMINDER_WHENONLY_RE,
                 self._REMINDER_INV_LEAD_RE,
                 self._REMINDER_STATEASK_RE,
-                self._REMINDER_WHENLEAD_RE)):
+                self._REMINDER_WHENLEAD_RE,
+                self._REMINDER_COPY_RE)):
             return True
         if self._reminder_bare_cancel(text) is not None:
             return True
@@ -7935,6 +8126,8 @@ class AgentOrchestrator:
             r"\b(?:disabled|turned?\s+off|switched\s+off|paused|"
             r"muted|inactive|still\s+off)\b|\boff\b",
             plan_text, re.IGNORECASE)))
+        overdue_ask = bool(re.search(
+            r"\boverdue\b|\bmissed\b", plan_text, re.IGNORECASE))
         sched, rows = self._reminder_rows(
             include_disabled=off_ask,
             noun=nm.group(1).lower() if nm else None)
@@ -8729,6 +8922,27 @@ class AgentOrchestrator:
             else:
                 text = ("No reminders set — say “remind me in 10 "
                         "minutes to …” and I'll schedule it.")
+        elif overdue_ask:
+            # 'what's overdue' — an enabled one-shot whose fire
+            # time passed without a last_run missed its beat.
+            # Recurring rows roll; they're never overdue.
+            _, _od_rows = self._reminder_rows(
+                include_disabled=False,
+                noun=nm.group(1).lower() if nm else None)
+            dead = [s for s in _od_rows
+                    if s.get("kind") == "once"
+                    and s.get("at") and float(s["at"]) < now
+                    and not s.get("last_run")]
+            if dead:
+                bits = "; ".join(
+                    f"“{self._reminder_label(s)}” — was set for "
+                    f"{self._reminder_when_text(s, now)}"
+                    for s in dead[:5])
+                text = (f"{len(dead)} reminder"
+                        f"{'s are' if len(dead) != 1 else ' is'}"
+                        f" overdue: {bits}.")
+            else:
+                text = "Nothing's overdue — everything's on schedule."
         elif _rel_ask and scope_terms:
             # 'what comes after the standup' — order every row by
             # next fire and name the neighbor of the anchored row.
@@ -9173,6 +9387,63 @@ class AgentOrchestrator:
         if msw is not None:
             return self._reminder_swap_reply(
                 user_text, msw, task_id, event_callback)
+        mcp = self._REMINDER_COPY_RE.match(plan_text)
+        if mcp is not None:
+            _cpr = self._reminder_copy_reply(
+                user_text, mcp, task_id, event_callback)
+            if _cpr is not None:
+                return _cpr
+            # 'copy the file' resolved no reminder row — the
+            # generic action lane owns it.
+        mk = re.match(
+            r"^\s*(?:please\s+)?(?:keep|leave)\s+"
+            r"(?:the\s+|my\s+|that\s+|this\s+)?(?P<k_t>.+?)\s+"
+            r"(?:where\s+it\s+is|as\s+is|alone|be|as\s+they\s+are)"
+            r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
+        if mk is not None:
+            # 'keep the standup where it is' — a no-op ask; claim
+            # it and report the row's real state, never narrate.
+            sched, _k_rows = self._reminder_rows(
+                include_disabled=True)
+            if sched is not None:
+                _kt = self._reminder_terms(re.sub(
+                    r"\b(?:the|my|that|this|reminders?|alarms?|"
+                    r"timers?)\b", " ",
+                    str(mk.group("k_t") or ""),
+                    flags=re.IGNORECASE))
+                _kh = [s for s in _k_rows
+                       if _kt and _kt <= self._reminder_hay(s)]
+                if not _kh and _kt:
+                    _kh = [s for s in _k_rows
+                           if self._reminder_terms(
+                               self._reminder_label(s))
+                           and self._reminder_terms(
+                               self._reminder_label(s)) <= _kt]
+                if len(_kh) == 1:
+                    s = _kh[0]
+                    return self._reminder_finish(
+                        f"“{self._reminder_label(s)}” is left "
+                        f"alone — {'still on, fires '
+                                   if s.get('enabled', True)
+                                   else 'still off '}"
+                        f"({self._reminder_when_text(s, time.time())}).",
+                        user_text, task_id, event_callback)
+                if len(_kh) > 1:
+                    names = "; ".join(
+                        f"“{self._reminder_label(s)}”"
+                        for s in _kh[:5])
+                    return self._reminder_finish(
+                        f"That matches {len(_kh)} reminders: "
+                        f"{names} — say which.",
+                        user_text, task_id, event_callback)
+                if re.search(
+                        r"\b(?:reminders?|alarms?|timers?)\b",
+                        plan_text, re.IGNORECASE):
+                    return self._reminder_finish(
+                        "I don't see a reminder matching "
+                        f"“{' '.join(sorted(_kt))}”.",
+                        user_text, task_id, event_callback)
+                return None
         mr = self._REMINDER_RESCHEDULE_RE.match(plan_text)
         if mr is None:
             mr = self._REMINDER_RESCHEDULE_BARE_RE.match(plan_text)
@@ -10171,6 +10442,18 @@ class AgentOrchestrator:
                         # words aren't a task name; drop them so
                         # the lane asks instead of minting a row.
                         nt_task = ""
+                    if (nt_task and self._REMINDER_SAMETHING_RE
+                            .fullmatch(nt_task)):
+                        # 'the same thing tomorrow' — journal
+                        # anaphora, never a literal task name.
+                        lt_nt = self._reminder_last_touched()
+                        if lt_nt is not None:
+                            nt_task = self._reminder_label(lt_nt)
+                        else:
+                            return self._reminder_finish(
+                                "The same thing as what? — name "
+                                "the reminder to repeat.",
+                                user_text, task_id, event_callback)
                     if spec_nt is not None and nt_task:
                         sup = (self._autonomy() if callable(
                             self._autonomy) else self._autonomy)
@@ -10725,6 +11008,19 @@ class AgentOrchestrator:
         task = re.sub(r"^about\s+forgetting\s+", "", task,
                       flags=re.IGNORECASE)
         task = self._reminder_task_clean(task)
+        if self._REMINDER_SAMETHING_RE.fullmatch(task or ""):
+            # 'remind me about the same thing tomorrow' — 'the
+            # same thing' names no row; the journal's last-
+            # touched row is the referent. Minting a literal
+            # 'reminder: the same thing' row is garbage.
+            lt = self._reminder_last_touched()
+            if lt is not None:
+                task = self._reminder_label(lt)
+            else:
+                return self._reminder_finish(
+                    "The same thing as what? — name the reminder "
+                    "to repeat.",
+                    user_text, task_id, event_callback)
         # 'stretch every 30 minutes starting at 9' — a trailing
         # cadence inside the task tail belongs to the schedule;
         # 'every 30m at 9' parses as an anchored interval, not a
@@ -11050,6 +11346,7 @@ class AgentOrchestrator:
                              plan_text)
                          or self._REMINDER_RESTORE_RE.match(plan_text)
                          or self._REMINDER_SWAP_RE.match(plan_text)
+                         or self._REMINDER_COPY_RE.match(plan_text)
                          or self._reminder_inventory_shaped(
                              plan_text)
                          or self._reminder_pending(
@@ -11528,6 +11825,7 @@ class AgentOrchestrator:
             cls._REMINDER_WHATDID_RE,
             cls._REMINDER_RESTORE_RE,
             cls._REMINDER_SWAP_RE,
+            cls._REMINDER_COPY_RE,
             cls._REMINDER_WHENLEAD_RE,
             # Bare duration/clock fragments may be pending-clarify
             # replies — the resolver checks the convo at reply time.

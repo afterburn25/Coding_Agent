@@ -1203,19 +1203,25 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 86400 if unit.startswith("d") else 604800)
         return {"kind": "interval", "interval_s": max(60.0, interval),
                 **_anchor(m, 3)}
-    # 'every day except sunday [at T]' — all week minus the named
-    # day(s), a real weekly spec rather than a narrated exception.
+    # 'every day except sunday [at T]' / 'every weekday but
+    # tuesday' — the day class minus the named day(s), a real
+    # weekly spec rather than a narrated exception.
     m = re.fullmatch(
-        r"every\s+day\s+except\s+(\w+day)s?"
+        r"(?:every\s+|on\s+)?(weekdays?|weekends?|day)\s+"
+        r"(?:except|but)\s+(\w+day)s?"
         r"(?:\s+and\s+(\w+day)s?)?" + clock_tail, t)
     if m:
-        excl = {d for d in (_WEEKDAY_NAMES.get(m.group(1)),
-                            _WEEKDAY_NAMES.get(m.group(2)))
+        base = ([0, 1, 2, 3, 4]
+                if m.group(1).startswith("weekday")
+                else [5, 6] if m.group(1).startswith("weekend")
+                else list(range(7)))
+        excl = {d for d in (_WEEKDAY_NAMES.get(m.group(2)),
+                            _WEEKDAY_NAMES.get(m.group(3)))
                 if d is not None}
         if excl:
-            hr, mn, mer = m.group(3), m.group(4), m.group(5)
+            hr, mn, mer = m.group(4), m.group(5), m.group(6)
             return {"kind": "weekly",
-                    "weekday": [d for d in range(7) if d not in excl],
+                    "weekday": [d for d in base if d not in excl],
                     "hour": _meridian(int(hr), mer) if hr else 9,
                     "minute": int(mn or 0)}
     # 'every day/morning/evening/night [at T]' — daily cadence.
