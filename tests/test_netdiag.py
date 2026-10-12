@@ -3440,6 +3440,47 @@ class TruthGateTests(RecoveryLoopTests):
                 agent._reminder_spec("in a bit", time.time()))
             self.assertIsNotNone(
                 agent._reminder_spec("in a while", time.time()))
+            # 'of each month' — the cadence tail rejoins the when;
+            # 'each' joins 'every' in the monthly grammar.
+            r = agent._reminder_reply(
+                "remind me on the 15th of each month to pay dues",
+                "remind me on the 15th of each month to pay dues",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("monthly on the 15th", r.content)
+            self.assertEqual(
+                sup.scheduler.rows[-1]["kind"], "monthly")
+            self.assertEqual(sup.scheduler.rows[-1]["day"], 15)
+            sup.scheduler.rows.clear()
+            r = agent._reminder_reply(
+                "remind me on the 15th of each month",
+                "remind me on the 15th of each month", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("do what", r.content)
+            self.assertIn("15th of each month", r.content)
+            self.assertFalse(sup.scheduler.rows)
+            # 'on the 5th of each week' — 'of each <period>'
+            # doesn't fit a day anchor; pin-fail on the joined
+            # phrase, never a row named 'each week to …'.
+            r = agent._reminder_reply(
+                "remind me on the 5th of each week to check in",
+                "remind me on the 5th of each week to check in",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("pin a time", r.content)
+            self.assertFalse([
+                s for s in sup.scheduler.rows
+                if "each week" in s["name"]])
+            # 'last day of the month' — unsupported ordinal;
+            # honest pin-fail that echoes the when once, not
+            # 'of the month of the month'.
+            r = agent._reminder_reply(
+                "remind me on the last day of the month",
+                "remind me on the last day of the month", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("pin a time", r.content)
+            self.assertNotIn("of the month of the month",
+                             r.content)
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(

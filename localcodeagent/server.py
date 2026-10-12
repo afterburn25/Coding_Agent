@@ -5262,6 +5262,35 @@ class AppState:
         else:
             spec, desc = self._parse_reminder_time(
                 body, time.time())
+        # 'on the 5th of each week to check in' — the split took
+        # 'on the 5th' as the when and 'each week …' as the task;
+        # the 'of each <period>' tail belongs to the when.
+        om = re.search(
+            r"\s+of\s+((?:each|every)\s+(?:month|week|year|day|"
+            r"hour|morning|afternoon|evening|night))\b"
+            r"(?:\s+(?:to\s+)?(.+))?\s*$",
+            body, re.IGNORECASE)
+        if om is not None and spec is not None and re.match(
+                r"(?i)(?:each|every)\s+", desc):
+            joined = (body[:om.start()].strip() + " of "
+                      + om.group(1))
+            spec_j, _ = self._parse_reminder_time(
+                joined, time.time())
+            if spec_j is not None:
+                spec, desc = spec_j, str(om.group(2) or "")
+                if not desc.strip():
+                    return {"content": (
+                        f"Sure — remind you to do what {joined}?")}
+            else:
+                # 'of each week' doesn't fit 'on the 5th' — honest
+                # pin-fail on the whole phrase, not a row whose
+                # task is 'each week to …'.
+                return {"content": (
+                    f"I couldn't pin a time from “{joined}” — say "
+                    "“at 3pm”, “in 30 minutes”, or “tomorrow at 9”"
+                    + (f" and I'll set the reminder to "
+                       f"{om.group(2).strip()}."
+                       if om.group(2) else "."))}
         desc = re.sub(r"^(?:about|of|that|to)\s+", "",
                       desc.strip())
         # 'remind me roughly at 6' — a hedge word left in the

@@ -5823,6 +5823,19 @@ class AgentOrchestrator:
                                 f"Sure — remind you to do what "
                                 f"{joined}?",
                                 user_text, task_id, event_callback)
+                    else:
+                        # 'on the 5th of each week' — the cadence
+                        # tail doesn't fit the anchor; pin-fail on
+                        # the whole phrase rather than create a
+                        # row whose task is 'each week to …'.
+                        return self._reminder_finish(
+                            f"I couldn't pin a time from "
+                            f"“{joined}” — say “at 3pm”, "
+                            "“in 30 minutes”, or “tomorrow at 9”"
+                            + (f" and I'll set the reminder to "
+                               f"{cm_p.group(2).strip()}."
+                               if cm_p.group(2) else "."),
+                            user_text, task_id, event_callback)
             if (spec is None or re.match(
                     r"\d|one\b|two\b|three\b|four\b|five\b|six\b|"
                     r"seven\b|eight\b|nine\b|ten\b|eleven\b|twelve\b|"
@@ -5860,11 +5873,14 @@ class AgentOrchestrator:
                     f"{task_lazy}? — e.g. “in 10 minutes”, "
                     "“at 3pm”, “tomorrow at 9”.",
                     user_text, task_id, event_callback)
-            if spec is None and task_lazy and re.match(
-                    r"(?:the|a|an)\s", task_lazy):
+            if (spec is None and task_lazy and re.match(
+                    r"(?:the|a|an)\s", task_lazy)
+                    and not re.search(r"\bof\b", when_raw,
+                                      re.IGNORECASE)):
                 # 'at the top | of the hour' — the split cut inside
                 # a clock phrase; re-joined it parses, and the
-                # 'task' was really clock tail.
+                # 'task' was really clock tail. A when that already
+                # holds 'of' would double it.
                 joined = f"{when_raw} of {task_lazy}"
                 if self._reminder_spec(
                         joined, time.time()) is not None:
