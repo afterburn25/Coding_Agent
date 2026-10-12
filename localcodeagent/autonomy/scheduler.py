@@ -183,7 +183,7 @@ def parse_reminder_when(when: str, now: float) -> float | None:
               "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
               "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
     m = re.fullmatch(
-        r"in\s+(?:about\s+|around\s+|roughly\s+)?"
+        r"in\s+(?:(?:about|around|roughly|like)\s+)?"
         r"(\d+(?:\.\d+)?|an?\s+couple\s+(?:of\s+)?|an?|one|two|"
         r"three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
         r"half\s+an?)\s*"
@@ -467,7 +467,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                     r"weeks?", t):
         return {"kind": "interval", "interval_s": 1209600.0}
     # 'twice a day' / 'every other day' — fixed-span intervals.
-    if re.fullmatch(r"twice\s+a\s+day|two\s+times\s+a\s+day", t):
+    if re.fullmatch(
+            r"twice\s+(?:a\s+day|daily)|two\s+times\s+a\s+day", t):
         return {"kind": "interval", "interval_s": 43200.0}
     if re.fullmatch(r"every\s+other\s+day|every\s+second\s+day", t):
         return {"kind": "interval", "interval_s": 172800.0}

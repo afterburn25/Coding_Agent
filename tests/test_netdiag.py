@@ -2833,6 +2833,28 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(row["kind"], "once")
             sup.scheduler.rows.clear()
 
+            # 'twice daily' — the model narrated 'I'll remind you
+            # twice daily — first at 8 AM, then 6 PM' over zero
+            # rows; it's the 12h interval 'twice a day' is.
+            result = agent.run("remind me twice daily to stretch",
+                               mode="auto")
+            self.assertEqual(
+                sup.scheduler.rows[-1].get("interval_s"), 43200.0)
+            sup.scheduler.rows.clear()
+
+            # 'at dawn' — the model promised to 'track sunrise';
+            # honest pin-fail instead. 'in like 5 minutes' — the
+            # filler word broke the duration match.
+            result = agent.run("remind me at dawn", mode="auto")
+            self.assertIn("couldn't pin", result.content)
+            self.assertFalse(sup.scheduler.rows)
+            result = agent.run(
+                "remind me in like 5 minutes to check",
+                mode="auto")
+            self.assertIn("check", result.content)
+            self.assertTrue(sup.scheduler.rows)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

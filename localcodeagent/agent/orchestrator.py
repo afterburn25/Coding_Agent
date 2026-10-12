@@ -3876,7 +3876,8 @@ class AgentOrchestrator:
         r"tonight|today|next|mon|tue|wed|thu|fri|sat|sun|week|minute|"
         r"hour|day|am\b|pm\b|later|soon|eventually|sometime|in\s+a\s+"
         r"(?:bit|while|moment|sec)|in\s+advance|ahead\s+of\s+time|"
-        r"beforehand", re.IGNORECASE)
+        r"beforehand|dawn|dusk|sunrise|sunset|daybreak|sundown",
+        re.IGNORECASE)
     _REMINDER_EVENTISH_RE = re.compile(
         r"\b(?:when|once|if|as\s+soon\s+as|after|before|until|"
         r"whenever|every\s+time)\b", re.IGNORECASE)
