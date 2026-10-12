@@ -3840,7 +3840,8 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_SNOOZE_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:snooze|postpone|delay|push\s+back|push|bump|shift)"
+        r"(?:snooze|postpone|delay|push\s+back|push|bump|shift|"
+        r"put\s+off|hold\s+off|hold\s+over|kick\s+out)"
         r"(?:\s+(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
         r"schedules?|it|that|this|them|everything|all)\b"
         + _REMINDER_ECHO + r")?"
@@ -5651,8 +5652,10 @@ class AgentOrchestrator:
                     wtxt = str(mnt.group("when") or "")
                     # 'remind me tomorrow to' / 'wake me at' — a
                     # dangling connector is not part of the when.
+                    # ('\s*' would eat 'on' inside 'noon'.)
                     wtxt = re.sub(
-                        r"\s*(?:to|of|about|that|at|in|on|for)\s*$",
+                        r"\s+(?:to|of|about|that|at|in|on|for)\s*$|"
+                        r"^(?:to|of|about|that|at|in|on|for)\s*$",
                         "", wtxt).strip(" ,;—-")
                     if not wtxt:
                         vb_nt = str(mnt.group("verb") or "").lower()

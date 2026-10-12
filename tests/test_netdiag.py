@@ -3681,6 +3681,28 @@ class TruthGateTests(RecoveryLoopTests):
             lt = time.localtime(sub["at"])
             self.assertEqual((lt.tm_hour, lt.tm_min), (15, 0))
             sup.scheduler.rows.clear()
+
+            # 'tomorrow at noon' — the NOTASK dangling-connector
+            # strip once ate the 'on' inside 'noon' (\s* matched
+            # zero whitespace), pin-failing a good anchor.
+            result = agent.run(
+                "nudge me tomorrow at noon", mode="auto")
+            nudge = [s for s in sup.scheduler.rows
+                     if "nudge" in s["name"]][0]
+            lt = time.localtime(nudge["at"])
+            self.assertEqual((lt.tm_hour, lt.tm_min), (12, 0))
+            # 'put off'/'hold off' — postponement verbs join the
+            # snooze lane; the model fabricated 'it's not active'
+            # over a live row.
+            sup.scheduler.add(
+                "Reminder: rent", "once",
+                at=time.time() + 5 * 86400,
+                action={"kind": "notify", "detail": "rent"})
+            result = agent.run(
+                "put off the rent reminder until monday",
+                mode="auto")
+            self.assertIn("Snoozed", result.content)
+            sup.scheduler.rows.clear()
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(
