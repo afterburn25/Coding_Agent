@@ -5406,6 +5406,15 @@ class AppState:
         if re.match(r"(?:at|in|on)\s+\d", desc) or re.search(
                 r"\b(?:then|again|and|or)\s+(?:at|in|on)\s+\d|"
                 r"\bthen\s+again\b", desc):
+            # 'at 25pm' — an out-of-range clock isn't a second
+            # time, it's a bad one; pin-fail on it, don't call it
+            # an ambiguity.
+            from .autonomy.scheduler import _bad_clock
+            if _bad_clock(desc):
+                return {"content": (
+                    f"I couldn't pin a time from “{desc}” — say "
+                    "“at 3pm”, “in 30 minutes”, or “tomorrow "
+                    "at 9”.")}
             return {"content": (
                 "That's two times for one reminder — say “at 5” "
                 "or “at 7” and I'll set it.")}
@@ -5465,7 +5474,7 @@ class AppState:
                     "An alarm needs a time — say “set an alarm for "
                     "7am” or “alarm for tomorrow at 6:30”.")}
             return {"content": (
-                f"Noted — “{desc}”. I can't pin a reminder without a "
+                f"I can't pin a reminder for “{desc}” without a "
                 "time — say when, like “at 3pm”, “tomorrow”, "
                 "“every friday”, or “in 30 minutes”.")}
         kind = spec["kind"]

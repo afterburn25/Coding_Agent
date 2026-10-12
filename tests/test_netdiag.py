@@ -4122,6 +4122,100 @@ class TruthGateTests(RecoveryLoopTests):
                     agent._single_fact_recall_reply(q, "conv", "proj"),
                     q)
 
+    def test_reminder_toggle_resume_verbs_and_scoped_state(self):
+        # Grammar sweep: 'bring back'/'restore'/'reactivate' fell to
+        # the model (TOGGLE_RE lacked the resume family); 'turn off
+        # the timer' over a disabled timer claimed 'no active
+        # reminders' while other rows stayed on — the noun-scoped
+        # pool was already-off, not empty.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+                self._n = 0
+
+            def add(self, name, kind, **kw):
+                self._n += 1
+                row = {"id": f"sc-{self._n}", "name": name,
+                       "kind": kind, "enabled": kw.pop("enabled", True),
+                       **kw}
+                self.rows.append(row)
+                return row
+
+            def list(self):
+                return list(self.rows)
+
+            def remove(self, sid):
+                n = len(self.rows)
+                self.rows = [r for r in self.rows
+                             if r.get("id") != sid]
+                return len(self.rows) != n
+
+            def set_enabled(self, sid, en):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r["enabled"] = en
+                        return True
+                return False
+
+            def update(self, sid, **kw):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r.update(kw)
+                        return r
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            sup.scheduler.add(
+                "Reminder: build", "once", at=time.time() + 86400,
+                action={"kind": "notify", "detail": "build"},
+                enabled=False)
+            for verb in ("bring back", "restore", "reactivate",
+                         "put back", "renew", "revive"):
+                sup.scheduler.rows[0]["enabled"] = False
+                r = agent.run(f"{verb} the build reminder",
+                              mode="auto")
+                self.assertIn("Turned on", r.content, verb)
+                self.assertTrue(sup.scheduler.rows[0]["enabled"],
+                                verb)
+            # Noun-scoped already-off — 'turn off the timer' over a
+            # disabled timer says 'already off', never 'no active
+            # reminders' while other rows stay on.
+            sup.scheduler.add(
+                "Timer: timer", "once", at=time.time() + 600,
+                action={"kind": "notify", "detail": "timer"},
+                enabled=False)
+            r = agent.run("turn off the timer", mode="auto")
+            self.assertIn("already off", r.content)
+            self.assertNotIn("no active", r.content)
+            # Whole-pool already-off — every noun-scoped row in the
+            # target state reads 'already off', not 'no active'.
+            sup.scheduler.rows[0]["enabled"] = False
+            r = agent.run("turn off all my reminders", mode="auto")
+            self.assertIn("already off", r.content)
+            self.assertNotIn("no active", r.content)
+            # Labels strip every schedule-noun prefix, not just
+            # 'reminder:' — a server-created 'Timer: timer' row
+            # names 'timer' in the reply.
+            r = agent.run("cancel the timer", mode="auto")
+            self.assertIn("“timer”", r.content)
+            self.assertNotIn("Timer:", r.content)
+            # Recall-miss topic drops a trailing copula — 'your
+            # editor', not 'your editor is'.
+            r = agent.run("remind me what my editor is",
+                          mode="auto")
+            self.assertIn("your editor", r.content)
+            self.assertNotIn("editor is", r.content)
+
     def test_ever_tell_and_fact_count(self):
         # Live: "did I ever tell you my editor" got a self-contradictory
         # model reply ("No — ... You told me that") because 'ever'

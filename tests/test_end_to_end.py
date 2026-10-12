@@ -1643,6 +1643,15 @@ class AutonomyApiTests(unittest.TestCase):
                 self.assertEqual(len(scheds), 7)
                 self.assertIn("call the dentist",
                               scheds[-1]["action"]["detail"])
+                # 'at 25pm' — an out-of-range clock isn't a second
+                # time; it pin-fails, never misdiagnoses 'two times
+                # for one reminder'.
+                out = state._mission_command(
+                    "remind me at 25pm to x")
+                self.assertIsNotNone(out)
+                self.assertIn("couldn't pin a time", out["content"])
+                self.assertNotIn("two times", out["content"])
+                self.assertEqual(len(_reminders()), 7)
                 # A wrapped ask with no time still defers honestly —
                 # no phantom row.
                 self.assertIsNone(state._mission_command(

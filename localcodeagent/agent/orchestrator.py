@@ -3126,6 +3126,9 @@ class AgentOrchestrator:
                     r"\s+(?:called|named|known\s+as)\s*$",
                     "", topic, flags=re.IGNORECASE).strip()
                 topic = re.sub(
+                    r"\s+(?:is|are|was|were)\s*$", "", topic,
+                    flags=re.IGNORECASE).strip()
+                topic = re.sub(
                     r"\s+(?:now|anymore|any\s+more|any\s+longer|"
                     r"today|currently|these\s+days)\s*$",
                     "", topic, flags=re.IGNORECASE).strip()
@@ -3902,7 +3905,8 @@ class AgentOrchestrator:
         r"(?P<verb>turn|switch|disable|enable|re-?enable|pause|"
         r"resume|unpause|unmute|unsilence|stop|mute|silence|"
         r"hold|freeze|suspend|quiet|block|un-?block|unfreeze|"
-        r"thaw)\s+(?P<body>.+?)?"
+        r"thaw|bring\s+back|put\s+back|restore|restart|"
+        r"re-?activate|renew|revive)\s+(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?|schedules?|"
         r"it|that|this|them|everything|all)\b"
         + _REMINDER_ECHO +
@@ -4536,7 +4540,8 @@ class AgentOrchestrator:
         return "You don't have any reminders set."
 
     def _reminder_label(self, s: dict) -> str:
-        name = re.sub(r"^reminder\s*:\s*", "",
+        name = re.sub(r"^(?:reminders?|alarms?|timers?|schedules?)"
+                      r"\s*:\s*", "",
                       str(s.get("name") or "").strip(),
                       flags=re.IGNORECASE)
         act = s.get("action")
@@ -4757,7 +4762,9 @@ class AgentOrchestrator:
             else:
                 want_on = bool(re.fullmatch(
                     r"enable|re-?enable|resume|unpause|unmute|"
-                    r"unsilence|un-?block|unfreeze|thaw", verb))
+                    r"unsilence|un-?block|unfreeze|thaw|"
+                    r"bring\s+back|put\s+back|restore|restart|"
+                    r"re-?activate|renew|revive", verb))
         if want_on is None:
             return self._reminder_finish(
                 "Turn them on or off? — e.g. “turn off "
@@ -4833,9 +4840,20 @@ class AgentOrchestrator:
                     f"“{' '.join(sorted(topic_terms))}” — "
                     f"you have: {names}.")
         elif not topic_terms and not hits:
-            text = (f"All your reminders are already {state}."
-                    if want_on else
-                    "There are no active reminders to turn off.")
+            # Every noun-scoped row is already in the target state —
+            # say that; 'no active reminders' claims a globally empty
+            # pool when the scope just found nothing to flip.
+            noun_t = str(mt.group("noun")
+                         or mt.groupdict().get("noun2")
+                         or "").lower()
+            if noun_t in ("reminder", "alarm", "timer", "schedule",
+                          "reminders", "alarms", "timers", "schedules"):
+                singular = noun_t.rstrip("s")
+            else:
+                singular = "reminder"
+            text = (f"All your {singular}s are already {state}."
+                    if len(rows) > 1 else
+                    f"That {singular} is already {state}.")
         elif (topic_terms and len(hits) > 1
                 and not self._reminder_identical(hits)):
             now = time.time()
