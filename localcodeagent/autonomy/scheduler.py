@@ -44,6 +44,10 @@ _MIN_NUM = {**_WORD_NUM, "thirteen": 13, "fourteen": 14,
 def _hour_num(tok: str) -> int | None:
     if tok.isdigit():
         return int(tok)
+    if tok == "noon":
+        return 12
+    if tok == "midnight":
+        return 0
     return _WORD_NUM.get(tok)
 
 
@@ -71,7 +75,10 @@ def _worded_clock(t: str) -> str:
                 + m.group(2) + t[m.end():])
     m = re.search(r"\bquarter\s+to\s+(\w+)\b", t)
     if m:
-        h = _hour_num(m.group(1))
+        htok = m.group(1).lower()
+        if htok == "midnight":
+            return t[:m.start()] + "11:45 pm" + t[m.end():]
+        h = _hour_num(htok)
         if h is not None:
             return t[:m.start()] + f"{(h - 1) % 12 or 12}:45" + t[m.end():]
     m = re.search(r"\b(half|quarter)\s+past\s+(\w+)\b", t)
@@ -79,6 +86,8 @@ def _worded_clock(t: str) -> str:
         h = _hour_num(m.group(2))
         if h is not None:
             mins = "30" if m.group(1) == "half" else "15"
+            if h == 0:
+                return t[:m.start()] + f"12:{mins} am" + t[m.end():]
             return t[:m.start()] + f"{h}:{mins}" + t[m.end():]
     m = re.search(r"\b(" + _MIN_TOK + r")\s+to\s+(\w+)\b", t)
     if m:

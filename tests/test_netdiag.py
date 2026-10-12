@@ -2781,6 +2781,32 @@ class TruthGateTests(RecoveryLoopTests):
                 sup.scheduler.rows[-1].get("interval_s"), 3600.0)
             sup.scheduler.rows.clear()
 
+            # 'half past noon' — _hour_num now knows noon/midnight;
+            # the live probe mangled it to task 'at half past' at
+            # 12:00. Quarter-to-midnight resolves to 23:45, not
+            # the naive 11:45.
+            from localcodeagent.autonomy.scheduler import (
+                parse_reminder_when as _prw)
+            now = time.time()
+            self.assertEqual(
+                time.localtime(_prw("at half past noon", now))
+                .tm_hour, 12)
+            self.assertEqual(
+                time.localtime(_prw("at half past noon", now))
+                .tm_min, 30)
+            self.assertEqual(
+                time.localtime(_prw("at quarter to midnight", now))
+                .tm_hour, 23)
+            self.assertEqual(
+                time.localtime(_prw("at half past midnight", now))
+                .tm_hour, 0)
+            result = agent.run(
+                "remind me at half past noon to eat", mode="auto")
+            self.assertIn("eat", result.content)
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(time.localtime(row["at"]).tm_min, 30)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
