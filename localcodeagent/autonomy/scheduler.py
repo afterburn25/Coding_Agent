@@ -236,6 +236,16 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     # 'when it's 5pm' — the 'when it's' lead IS the clock phrase,
     # not an event trigger and not a task.
     t = re.sub(r"\bwhen\s+it'?s\s+(?=\d|noon|midnight)", "at ", t)
+    # 'by 5pm' / 'no later than 6' — a deadline pins at the bound;
+    # 'snooze by 20 minutes' never reaches here (that's the delta
+    # grammar, not a clock lead).
+    t = re.sub(
+        r"\bno\s+later\s+than\s+|\bby\s+(?=\d|noon|midnight)",
+        "at ", t)
+    t = re.sub(
+        r"\bby\s+(?=morning|afternoon|evening|night\b|tonight|"
+        r"tomorrow|today|mon|tue|wed|thu|fri|sat|sun)",
+        "", t)
     # 'the first of every month' — a worded ordinal is the day.
     # 'on the 15th of each month' — keep a single 'on'.
     t = re.sub(
@@ -660,6 +670,16 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     # 'when it's 5pm' — the 'when it's' lead IS the clock phrase,
     # not an event trigger and not a task.
     t = re.sub(r"\bwhen\s+it'?s\s+(?=\d|noon|midnight)", "at ", t)
+    # 'by 5pm' / 'no later than 6' — a deadline pins at the bound;
+    # 'snooze by 20 minutes' never reaches here (that's the delta
+    # grammar, not a clock lead).
+    t = re.sub(
+        r"\bno\s+later\s+than\s+|\bby\s+(?=\d|noon|midnight)",
+        "at ", t)
+    t = re.sub(
+        r"\bby\s+(?=morning|afternoon|evening|night\b|tonight|"
+        r"tomorrow|today|mon|tue|wed|thu|fri|sat|sun)",
+        "", t)
     # 'the first of every month' — a worded ordinal is the day.
     # 'on the 15th of each month' — keep a single 'on'.
     t = re.sub(
