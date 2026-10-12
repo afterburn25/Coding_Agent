@@ -4782,7 +4782,16 @@ class AgentOrchestrator:
         # verb-led scoped asks without the schedule noun.
         r"\b(?:what|which)\s+(?:fires?|goes?\s+off|hits?|rings?|"
         r"pops?\s+up|triggers?)\s+"
-        r"(?:today|tonight|tonite|tomorrow|this|next|on|in)\b",
+        r"(?:today|tonight|tonite|tomorrow|this|next|on|in)\b|"
+        # 'what did i set most recently' — created-ordinal asks
+        # with the schedule noun implied.
+        r"\bwhat\s+did\s+i\s+(?:set|make|create|add|schedule)\s+"
+        r"(?:first|earliest|last|latest|newest|most\s+"
+        r"recent(?:ly)?|oldest|recently)\b|"
+        r"\b(?:which|what)\s+(?:was|is)\s+the\s+(?:oldest|newest|"
+        r"first|last|latest|earliest)\s+(?:one|reminders?|"
+        r"alarms?|timers?)\s+i\s+(?:set|made|created|added|"
+        r"scheduled)\b",
         re.IGNORECASE)
     # Temporal tokens in a failed when-clause → ask when, don't claim.
     _REMINDER_TIMEISH_RE = re.compile(
@@ -7528,6 +7537,47 @@ class AgentOrchestrator:
             topic_terms)
         if _just_made and ord_sel is None:
             ord_sel = "cmax"
+        # 'cancel the reminder before the standup' — a fire-order
+        # neighbor scope, not a topic: resolve the anchor row,
+        # then its adjacent fire.
+        _nbr = None
+        _nbr_miss = False
+        _nbr_m = re.search(
+            r"\b(before|after)\s+(?:the\s+|my\s+|that\s+)?(.+)$",
+            topic_src, re.IGNORECASE)
+        if _nbr_m is not None:
+            _adir = _nbr_m.group(1).lower()
+            _aterms = self._reminder_terms(_nbr_m.group(2)) - {
+                "one", "ones", "reminder", "reminders", "alarm",
+                "alarms", "timer", "timers"}
+            _anchors = ([s for s in rows
+                         if _aterms <= self._reminder_hay(s)]
+                        if _aterms else [])
+            if not _anchors and _aterms:
+                _anchors = [
+                    s for s in rows
+                    if self._reminder_terms(self._reminder_label(s))
+                    and self._reminder_terms(
+                        self._reminder_label(s)) <= _aterms]
+            if len(_anchors) == 1:
+                _anc = _anchors[0]
+                _ord = sorted(
+                    (s for s in rows
+                     if self._reminder_next_fire(s, now)),
+                    key=lambda s: float(
+                        self._reminder_next_fire(s, now)))
+                _idx = [str(s.get("id")) for s in _ord].index(
+                    str(_anc.get("id"))) \
+                    if str(_anc.get("id")) in {
+                        str(s.get("id")) for s in _ord} else -1
+                _ni = (_idx + 1 if _adir == "after"
+                       else _idx - 1)
+                if 0 <= _ni < len(_ord):
+                    _nbr = _ord[_ni]
+                else:
+                    _nbr_miss = True
+            else:
+                _nbr_miss = True
         def _excl(s: dict) -> bool:
             # 'except the trash run' — extra words ride the
             # exclusion scope; the row's whole label inside it
@@ -7543,6 +7593,10 @@ class AgentOrchestrator:
         hits = [
             s for s in rows
             if _matches(s) and not _excl(s)]
+        if _nbr is not None:
+            hits = [_nbr]
+        elif _nbr_miss:
+            hits = []
         if and_hits is not None:
             hits = [s for s in and_hits
                     if not _excl(s)]
@@ -7557,7 +7611,17 @@ class AgentOrchestrator:
                 s for s in rows_d
                 if not s.get("enabled", True)
                 and _matches(s) and not _excl(s)]
-        hits = self._reminder_ordinal_pick(hits, ord_sel, now)
+        if _pmade is not None and str(ord_sel).startswith("idx:"):
+            # 'the third reminder i set' — 'set' is a creation
+            # verb, so the ordinal ranks created_at, not fire
+            # order. Rows without a stamp sort oldest.
+            n_i = int(str(ord_sel)[4:])
+            _cs = sorted(
+                hits, key=lambda s: float(
+                    s.get("created_at") or 0))
+            hits = ([_cs[n_i]] if n_i < len(_cs) else hits)
+        else:
+            hits = self._reminder_ordinal_pick(hits, ord_sel, now)
         if _past_scope:
             # 'old'/'already went off' hits the dead pool —
             # fired once-rows get parked disabled, so resolve
@@ -7668,6 +7732,15 @@ class AgentOrchestrator:
         elif not rows and not hits:
             text = self._reminder_none_text(
                 sched, noun)
+        elif not hits and _nbr_miss:
+            if len(_anchors) == 1:
+                text = (f"“{self._reminder_label(_anchors[0])}” "
+                        f"fires "
+                        f"{'first — nothing before it' if _adir == 'before' else 'last — nothing after it'}"
+                        ".")
+            else:
+                text = (f"I don't see a reminder matching "
+                        f"“{' '.join(sorted(_aterms))}”.")
         elif not hits and excl_terms:
             text = ("That's all of them — nothing else to "
                     "cancel.")
@@ -8364,6 +8437,15 @@ class AgentOrchestrator:
             r"rang|went\s+off)\b|\b(?:did|was|were)\b.{0,25}"
             r"\blast\b.{0,25}\b(?:go\s+off|fire|ring|fires)\b",
             plan_text, re.IGNORECASE))
+        _set_ask = re.search(
+            r"\b(?:first|earliest|last|latest|newest|most\s+"
+            r"recent(?:ly)?|oldest)\b.{0,30}\b(?:i\s+set|i\s+made|"
+            r"i\s+created|i\s+added|i\s+scheduled)\b|\b(?:did\s+"
+            r"(?:i|you)\s+(?:set|make|create|add|schedule)|"
+            r"(?:was|were)\s+(?:set|made|created|added|"
+            r"scheduled))\s+(first|earliest|last|latest|newest|"
+            r"most\s+recent(?:ly)?|oldest)\b",
+            plan_text, re.IGNORECASE)
         cad_ask = bool(re.search(
             r"\bhow\s+(?:often|frequently)\b|"
             r"\b(?:daily|weekly|monthly|hourly|yearly|recurring|"
@@ -8508,7 +8590,8 @@ class AgentOrchestrator:
                 plan_text, re.IGNORECASE)
                 # 'when did X last go off' — 'last' orders
                 # last_run, not next-fire; the fired lane owns it.
-                and not _last_fired) or countdown_ask)
+                and not _last_fired and not _set_ask)
+                or countdown_ask)
                 and _cd_pool):
             # 'when does my next reminder fire' — ordinal, not a
             # scope term; pick the extreme-firing row like the
@@ -8706,6 +8789,29 @@ class AgentOrchestrator:
                         for s in chits[:4])
                     text = (f"None of them is set for {cclock} — "
                             f"you've got: {bits}.")
+        elif _set_ask:
+            # 'which reminder did i set first' / 'what did i set
+            # most recently' — created_at order answers it; rows
+            # without a stamp can't be ranked, so if every row
+            # lacks one the honest answer is "can't tell".
+            ca = [s for s in rows if s.get("created_at")]
+            if not ca:
+                text = ("I don't track when the rows were "
+                        "created — I can't tell which came "
+                        "first.")
+            else:
+                _want_first = bool(re.search(
+                    r"first|earliest|oldest", _set_ask.group(0),
+                    re.IGNORECASE))
+                pick = (min if _want_first else max)(
+                    ca, key=lambda s: float(s["created_at"]))
+                text = (f"That's “{self._reminder_label(pick)}” "
+                        "— it fires "
+                        f"{self._reminder_when_text(pick, now)}"
+                        + ("." if len(ca) == len(rows)
+                           else f" — {len(rows) - len(ca)} row"
+                                f"{'s' if len(rows) - len(ca) != 1 else ''} "
+                                "have no creation stamp."))
         elif fired_ask:
             # 'did my stretch reminder go off' — the row's last_run
             # is the honest answer; a fired once-row may already be

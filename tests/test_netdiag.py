@@ -3260,6 +3260,65 @@ class TruthGateTests(RecoveryLoopTests):
             any("mom" in s["name"]
                 for s in sup.scheduler.rows))
 
+        # Created-ordinal asks — 'i set first'/'most recently'
+        # rank created_at, never fire order.
+        for s in list(sup.scheduler.rows):
+            sup.scheduler.remove(s["id"])
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            created_at=time.time() - 300,
+            action={"kind": "notify", "detail": "standup"})
+        sup.scheduler.add(
+            "reminder: tea", "once", at=time.time() + 600,
+            created_at=time.time() - 100,
+            action={"kind": "notify", "detail": "tea"})
+        r = agent._reminder_reply(
+            "which reminder did i set first",
+            "which reminder did i set first", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("standup", r.content)
+        r = agent._reminder_reply(
+            "what did i set most recently",
+            "what did i set most recently", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("tea", r.content)
+        # 'the Nth reminder i set' — created order, not fire
+        # order; 'tea' was created second.
+        r = agent._reminder_reply(
+            "cancel the second reminder i set",
+            "cancel the second reminder i set", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("tea", r.content)
+        self.assertFalse(
+            any("tea" in s["name"] for s in sup.scheduler.rows))
+        # 'the reminder before/after X' — a fire-order neighbor
+        # scope; an edge anchor answers honestly.
+        for s in list(sup.scheduler.rows):
+            sup.scheduler.remove(s["id"])
+        sup.scheduler.add(
+            "reminder: tea", "once", at=time.time() + 600,
+            action={"kind": "notify", "detail": "tea"})
+        sup.scheduler.add(
+            "reminder: dentist", "once", at=time.time() + 3600,
+            action={"kind": "notify", "detail": "dentist"})
+        r = agent._reminder_reply(
+            "cancel the reminder before the dentist",
+            "cancel the reminder before the dentist", task.id)
+        self.assertIsNotNone(r)
+        self.assertFalse(
+            any("tea" in s["name"] for s in sup.scheduler.rows))
+        self.assertTrue(
+            any("dentist" in s["name"]
+                for s in sup.scheduler.rows))
+        r = agent._reminder_reply(
+            "cancel the reminder after the dentist",
+            "cancel the reminder after the dentist", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("last", r.content)
+        self.assertTrue(
+            any("dentist" in s["name"]
+                for s in sup.scheduler.rows))
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
