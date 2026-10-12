@@ -3642,6 +3642,18 @@ class TruthGateTests(RecoveryLoopTests):
                 mode="auto")
             self.assertIn("couldn't pin", result.content)
             self.assertFalse(sup.scheduler.rows)
+
+            # 'unremind me about rent' — a negated remind verb is
+            # a cancel; it resolves the row and removes it for
+            # real, never a model-narrated miss.
+            sup.scheduler.add(
+                "Reminder: pay rent", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "rent"})
+            result = agent.run("unremind me about rent",
+                               mode="auto")
+            self.assertIn("Cancelled", result.content)
+            self.assertFalse(sup.scheduler.rows)
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(

@@ -3800,7 +3800,7 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
-        r"undo|axe?|ditch|forget|never\s*mind)"
+        r"undo|axe?|ditch|forget|never\s*mind|un-?remind(?:\s+me)?)"
         r"|(?:i\s+)?(?:don'?t|do\s+not|dont)\s+"
         r"(?:need|want|use|like))\s+"
         r"(?:(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
@@ -3827,8 +3827,8 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
-        r"undo|axe?|ditch|forget|never\s*mind)\s+"
-        r"(?:(?:the|my|that|this|your)\s+)?"
+        r"undo|axe?|ditch|forget|never\s*mind|un-?remind(?:\s+me)?)\s+"
+        r"(?:(?:the|my|that|this|your|about|me|on|of|to)\s+)*"
         # File/object shapes stay with the action lanes —
         # 'delete junk.txt', 'remove the file', 'delete the folder'.
         r"(?P<body>(?!.*(?:\bfiles?\b|\bfolders?\b|\w*dirs?\b|"
