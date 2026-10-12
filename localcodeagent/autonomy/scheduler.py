@@ -231,6 +231,19 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     # qualifier isn't part of the time.
     t = re.sub(r"\bat\s+some\s+point\s+(?:in\s+)?", "", t)
     t = re.sub(r"\bsometime\b\s*", "", t)
+    # 'when it's 5pm' — the 'when it's' lead IS the clock phrase,
+    # not an event trigger and not a task.
+    t = re.sub(r"\bwhen\s+it'?s\s+(?=\d|noon|midnight)", "at ", t)
+    # 'the first of every month' — a worded ordinal is the day.
+    t = re.sub(
+        r"\bthe\s+(first|second|third|fourth|fifth|sixth|seventh|"
+        r"eighth|ninth|tenth|(\d{1,2})(?:st|nd|rd|th)?)\s+of\s+"
+        r"every\s+month\b",
+        lambda m: "on the " + str({
+            "first": 1, "second": 2, "third": 3, "fourth": 4,
+            "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
+            "ninth": 9, "tenth": 10}.get(m.group(1), m.group(2)))
+        + " of every month", t)
     # 'at 5pm on the 20th' — a leading clock belongs after the
     # date phrase, matching 'on the 20th at 5pm'.
     t = re.sub(
@@ -349,6 +362,17 @@ def parse_reminder_when(when: str, now: float) -> float | None:
                  "d": 86400, "day": 86400, "w": 604800,
                  "week": 604800}[unit]
         return now + n * scale
+    # 'in a bit' / 'in a moment' / 'in a while' — vague small
+    # delays; pin conventional spans rather than narrate.
+    m = re.fullmatch(
+        r"in\s+an?\s+(little\s+bit|bit|moment|sec|second|while|"
+        r"short\s+while|jiffy|jiff)", t)
+    if m:
+        return now + {"bit": 600.0, "little bit": 600.0,
+                      "jiffy": 60.0, "jiff": 60.0,
+                      "moment": 120.0, "sec": 60.0, "second": 60.0,
+                      "while": 1800.0,
+                      "short while": 900.0}[m.group(1)]
     # 'in an hour and twenty minutes' — compound units sum.
     m = re.fullmatch(
         r"in\s+(\d+|an?|one|two|three|four|five|six|seven|eight|"
@@ -617,6 +641,19 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     # qualifier isn't part of the time.
     t = re.sub(r"\bat\s+some\s+point\s+(?:in\s+)?", "", t)
     t = re.sub(r"\bsometime\b\s*", "", t)
+    # 'when it's 5pm' — the 'when it's' lead IS the clock phrase,
+    # not an event trigger and not a task.
+    t = re.sub(r"\bwhen\s+it'?s\s+(?=\d|noon|midnight)", "at ", t)
+    # 'the first of every month' — a worded ordinal is the day.
+    t = re.sub(
+        r"\bthe\s+(first|second|third|fourth|fifth|sixth|seventh|"
+        r"eighth|ninth|tenth|(\d{1,2})(?:st|nd|rd|th)?)\s+of\s+"
+        r"every\s+month\b",
+        lambda m: "on the " + str({
+            "first": 1, "second": 2, "third": 3, "fourth": 4,
+            "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
+            "ninth": 9, "tenth": 10}.get(m.group(1), m.group(2)))
+        + " of every month", t)
     # '6 am weekdays' — a leading clock belongs inside the
     # cadence's 'at T' tail.
     t = re.sub(

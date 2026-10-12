@@ -1961,11 +1961,15 @@ class TruthGateTests(RecoveryLoopTests):
             # about the build' hit the model live (a stall under a
             # warming endpoint) because 'later' wasn't timeish.
             for vague in ("remind me later about the build",
-                          "remind me soon to stretch",
-                          "remind me in a bit about the deploy"):
+                          "remind me soon to stretch"):
                 result = agent.run(vague, mode="auto")
                 self.assertIn("couldn't pin a time", result.content,
                               vague)
+            # 'in a bit' — vague but conventional; pins ~10min
+            # rather than stalling on a pin-fail.
+            result = agent.run("remind me in a bit about the deploy",
+                               mode="auto")
+            self.assertIn("deploy", result.content)
             # 'wake me up early tomorrow' — the NOTASK when parsed
             # ('early tomorrow') but spec failed → the model answered
             # 'just say “set wake-up for 6am”' instead of asking.
@@ -3337,6 +3341,41 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertFalse([
                 s for s in sup.scheduler.rows
                 if "sometime" in s["name"]])
+            sup.scheduler.rows.clear()
+
+            # 'every hour until 10pm' — the until-tail split off as
+            # the time and made task 'every hour until'. The base
+            # cadence creates with an honest no-end-bound note.
+            r = agent._reminder_reply(
+                "remind me every hour until 10pm to stretch",
+                "remind me every hour until 10pm to stretch",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("every", r.content.lower())
+            self.assertIn("can't hold", r.content)
+            self.assertEqual(
+                sup.scheduler.rows[-1]["kind"], "interval")
+            sup.scheduler.rows.clear()
+            # 'the first of every month' — worded ordinal is the
+            # day (was monthly on today's day-of-month).
+            spec = agent._reminder_spec(
+                "the first of every month", time.time())
+            self.assertIsNotNone(spec)
+            self.assertEqual(spec["day"], 1)
+            # 'when it's 5pm' — the when-it's lead is the clock,
+            # not a task name.
+            r = agent._reminder_reply(
+                "remind me when it's 5pm to leave",
+                "remind me when it's 5pm to leave", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("17:00", r.content)
+            self.assertIn("leave", r.content)
+            # 'in a bit'/'in a while' — vague small delays pin
+            # conventional spans.
+            self.assertIsNotNone(
+                agent._reminder_spec("in a bit", time.time()))
+            self.assertIsNotNone(
+                agent._reminder_spec("in a while", time.time()))
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —

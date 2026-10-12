@@ -3938,6 +3938,18 @@ class AgentOrchestrator:
         from ..autonomy.scheduler import parse_reminder_schedule
         return parse_reminder_schedule(when, now)
 
+    @staticmethod
+    def _reminder_until_split(when: str):
+        """'every hour until 10pm' → ('every hour', '10pm'). The
+        scheduler can't hold end bounds — lanes create the base
+        cadence and say the bound isn't enforceable."""
+        m = re.search(r"\s+(?:until|till)\s+(.+)$",
+                      str(when or ""))
+        if m is None:
+            return when, None
+        return (when[:m.start()].strip(" ,;—-"),
+                m.group(1).strip(" ,;—-"))
+
     def _reminder_spec_text(self, spec: dict, task: str) -> str:
         """'every friday at 15:00 — I'll ping you to X.' style suffix."""
         kind = spec["kind"]
@@ -5161,6 +5173,21 @@ class AgentOrchestrator:
                                                  time.time()))
                 if spec_j is not None:
                     when_d, task_d, spec = joined, "", spec_j
+            end_note = ""
+            if spec is None and cand:
+                # 'every hour until 10pm' — the end bound made the
+                # whole clause unparseable; the base cadence still
+                # creates, honestly noting the bound isn't held.
+                base_u, tail_u = self._reminder_until_split(cand)
+                if tail_u:
+                    spec_u = self._reminder_spec(
+                        base_u, time.time())
+                    if spec_u is not None:
+                        when_d, cand, spec = base_u, base_u, spec_u
+                        end_note = (
+                            " — it repeats until you cancel; I "
+                            f"can't hold an end bound like "
+                            f"“until {tail_u}”")
             if sched is None:
                 return self._reminder_finish(
                     "I can't set reminders — the scheduler isn't "
@@ -5217,13 +5244,15 @@ class AgentOrchestrator:
                         user_text, task_id, event_callback)
                 return self._reminder_finish(
                     f"{noun.capitalize()} set "
-                    + self._reminder_spec_text(spec, task_f),
+                    + self._reminder_spec_text(spec, task_f)
+                    + end_note,
                     user_text, task_id, event_callback)
             lead = ("in " if dur else
                     "at " if re.match(r"\d|noon|midnight", cand,
                                       re.IGNORECASE) else "")
             return self._reminder_finish(
-                f"Sure — remind you to do what {lead}{cand}?",
+                f"Sure — remind you to do what {lead}{cand}?"
+                + end_note,
                 user_text, task_id, event_callback)
         mh = self._REMINDER_HELP_RE.match(plan_text)
         if mh is not None:
@@ -5383,6 +5412,7 @@ class AgentOrchestrator:
                     # the main create path.
                     m = mlw
         clarify = None
+        end_note = ""
         forced_when = forced_task = None
         if m is None:
             m2 = self._REMINDER_CLARIFY_RE.match(plan_text)
@@ -5421,6 +5451,20 @@ class AgentOrchestrator:
                             "“remind me in 10 minutes to stretch”.",
                             user_text, task_id, event_callback)
                     spec_nt = self._reminder_spec(wtxt, time.time())
+                    if spec_nt is None:
+                        # 'every hour until 10pm' — strip the end
+                        # bound; the base cadence still resolves.
+                        base_nt, tail_nt = (
+                            self._reminder_until_split(wtxt))
+                        if tail_nt:
+                            spec_nt = self._reminder_spec(
+                                base_nt, time.time())
+                            if spec_nt is not None:
+                                end_note = (
+                                    " — it repeats until you "
+                                    "cancel; I can't hold an end "
+                                    f"bound like “until {tail_nt}”")
+                                wtxt = base_nt
                     if (spec_nt is not None
                             and re.search(
                                 r"(?:wak(?:e|ing)|nudg(?:e|ing)|nag|nagging|buzz|"
@@ -5470,7 +5514,7 @@ class AgentOrchestrator:
                         return self._reminder_finish(
                             "Reminder set "
                             + self._reminder_spec_text(
-                                spec_nt, _task_sv),
+                                spec_nt, _task_sv) + end_note,
                             user_text, task_id, event_callback)
                     if spec_nt is not None:
                         # 'remind me at six thirty' — the worded
@@ -5478,7 +5522,8 @@ class AgentOrchestrator:
                         # than demanding a TIMEISH token the words
                         # 'six thirty' don't carry.
                         return self._reminder_finish(
-                            f"Sure — remind you to do what {wtxt}?",
+                            f"Sure — remind you to do what {wtxt}?"
+                            + end_note,
                             user_text, task_id, event_callback)
                     if self._REMINDER_EVENTISH_RE.search(wtxt):
                         # 'remind me before the meeting' — an event
@@ -5592,6 +5637,22 @@ class AgentOrchestrator:
         else:
             when_raw = str(m.group("when") or "").strip(" ,;—-")
             spec = self._reminder_spec(when_raw, time.time())
+            if spec is None:
+                # 'every hour until 10pm' — strip the end bound;
+                # the base cadence still creates, honestly noting
+                # the bound isn't held.
+                base_u, tail_u = self._reminder_until_split(
+                    when_raw)
+                if tail_u:
+                    spec_u = self._reminder_spec(
+                        base_u, time.time())
+                    if spec_u is not None:
+                        spec = spec_u
+                        forced_when = base_u
+                        end_note = (
+                            " — it repeats until you cancel; I "
+                            f"can't hold an end bound like "
+                            f"“until {tail_u}”")
             task_lazy = str(m.group("task") or "").strip()
             if (spec is None or re.match(
                     r"\d|one\b|two\b|three\b|four\b|five\b|six\b|"
@@ -5719,7 +5780,8 @@ class AgentOrchestrator:
                     for extra in srows[1:]:
                         sched.remove(str(extra["id"]))
                     text = ("Moved the reminder — "
-                            + self._reminder_spec_text(spec, task))
+                            + self._reminder_spec_text(spec, task)
+                            + end_note)
                 else:
                     sched.add(
                         f"reminder: {task[:100]}", kind,
@@ -5727,7 +5789,8 @@ class AgentOrchestrator:
                                 "detail": task},
                         created_by="user", **fields)
                     text = ("Reminder set " +
-                            self._reminder_spec_text(spec, task))
+                            self._reminder_spec_text(spec, task)
+                            + end_note)
             except Exception as exc:
                 text = f"I couldn't set the reminder ({exc})."
         return self._reminder_finish(text, user_text, task_id,

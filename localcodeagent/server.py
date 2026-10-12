@@ -5231,7 +5231,27 @@ class AppState:
         honest ask, unless defer_no_time hands it to the
         orchestrator's clarify/recall lanes."""
         body = str(body or "")
-        spec, desc = self._parse_reminder_time(body, time.time())
+        # 'every hour until 10pm' — the 'until' tail would split as
+        # the time and leave 'every hour until' as the task. The
+        # scheduler can't hold end bounds: create the base cadence
+        # and say so.
+        end_note = ""
+        um = re.search(r"\s+(?:until|till)\s+(.+?)\s*$",
+                       body.strip(), re.IGNORECASE)
+        if um is not None:
+            spec_u, desc_u = self._parse_reminder_time(
+                body[:um.start()].strip(), time.time())
+            if spec_u is not None and spec_u["kind"] != "once":
+                spec, desc = spec_u, desc_u
+                end_note = (" — it repeats until you cancel; I "
+                            "can't hold an end bound like "
+                            f"“until {um.group(1)}”")
+            else:
+                spec, desc = self._parse_reminder_time(
+                    body, time.time())
+        else:
+            spec, desc = self._parse_reminder_time(
+                body, time.time())
         desc = re.sub(r"^(?:about|of|that|to)\s+", "",
                       desc.strip())
         # 'remind me roughly at 6' — a hedge word left in the
@@ -5312,7 +5332,7 @@ class AppState:
                 f"Moved the reminder "
                 f"{self._reminder_spec_text(spec)} — {desc}. "
                 "It'll surface as a notification; cancel it from "
-                "the Missions page if plans change.")}
+                "the Missions page if plans change." + end_note)}
         sup.scheduler.add(
             label, kind,
             action={"kind": "notify", "title": noun.capitalize(),
@@ -5322,7 +5342,7 @@ class AppState:
             f"{noun.capitalize()} set {self._reminder_spec_text(spec)}"
             + (f" — {desc}" if desc != noun else "") + ". "
             "It'll surface as a notification; cancel it from the "
-            "Missions page if plans change.")}
+            "Missions page if plans change." + end_note)}
 
     def _goal_control_reply(self, sup, gm) -> dict | None:
         """Enable/disable standing goals by topic — a real
