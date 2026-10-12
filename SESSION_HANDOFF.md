@@ -5190,3 +5190,30 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   evidence-capture ack instead of blocking on the model.
 - The deployed instance (:56071) self-corrupted server.py once — audit
   which repair/self-edit lane can write outside its worktree.
+
+### Truth-lane hardening round (2026-10-12)
+- **State-ask lane** (`758b0088`): `is my <name> reminder on` fell to
+  the model (a name between determiner and noun missed
+  `_REMINDER_STATEASK_RE`) and got a false "No pay rent reminder
+  found" over a live disabled row during a 50-turn soak. Widened the
+  regex, added `include_disabled` scoping so a disabled row answers
+  "it's off" (not "no reminder"), and kept noun-scoped misses naming
+  the rows that exist.
+- **Repair promote bounded to the reviewed set** (`7cb16904`): the
+  promote stage re-scanned the whole worktree (`git diff base` +
+  untracked copies) while review only checked `inc["patch_files"]` —
+  any scratch/diagnosis file written into the worktree after review
+  promoted unreviewed, the same leak class as the `2987f187` stub
+  incident below. Promotion now lands exactly the reviewed set;
+  post-review additions send the incident back through review.
+  Regression: `test_undeclared_worktree_files_never_promote`.
+- **Watch resolved**: the ~70 "Crash recovery" notifications on
+  dogfood correlate with deliberate restart probes (restart*.txt),
+  not spontaneous crashes; self-repair incidents on CI failures are
+  the designed detector path (worktree-bounded, 5-attempt cap,
+  `needs_human` escalation).
+- Verified live on dogfood: brain lifecycle (init → ed25519 signed →
+  lock → restart → unlock → mutate), conversation memory+reminder
+  truth lanes under `mode=chat`, image lane honest failures
+  (`unsupported_workflow`, `insufficient_resources` with real VRAM
+  accounting), all 18 UI pages + API 200s.
