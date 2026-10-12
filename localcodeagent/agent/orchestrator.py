@@ -3867,7 +3867,8 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _SCHEDULE_INVENTORY_RE = re.compile(
         r"\breminders?\b|\balarms?\b|\btimers?\b|\bschedules?\b|"
-        r"\bscheduled\b|\b(?:comes?|coming)\s+up\b|\bdue\b|"
+        r"\bscheduled\b|\bcalendar\b|\b(?:comes?|coming)\s+up\b|"
+        r"\bdue\b|"
         r"\b(?:anything|something)\s+(?:at|for|on|around)\s+\d|"
         r"\bwhat'?s\s+(?:at|for|on|around)\s+\d", re.IGNORECASE)
     # Temporal tokens in a failed when-clause → ask when, don't claim.
@@ -4659,7 +4660,8 @@ class AgentOrchestrator:
         if sm is not None:
             scope_terms = self._reminder_terms(re.sub(
                 r"\b(?:reminders?|alarms?|timers?|schedules?|"
-                r"scheduled|the|a|an|my|that|me|us|at|in|on)\b",
+                r"calendars?|scheduled|the|a|an|my|that|me|us|"
+                r"at|in|on)\b",
                 " ", sm.group(1), flags=re.IGNORECASE))
         if sm is None:
             # No connector tail — 'when is the dentist reminder'

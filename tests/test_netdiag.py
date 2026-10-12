@@ -2947,6 +2947,17 @@ class TruthGateTests(RecoveryLoopTests):
                 _prw("in about 10 minutes", now), now + 600,
                 delta=2)
 
+            # 'what's on my calendar' — 'calendar' lanes to
+            # inventory; the sm-capture scope strips it like
+            # the other schedule nouns.
+            sup.scheduler.add(
+                "Reminder: pay rent", "once",
+                at=time.time() + 86400)
+            result = agent.run("what's on my calendar",
+                               mode="auto")
+            self.assertIn("pay rent", result.content)
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
