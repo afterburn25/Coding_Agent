@@ -2497,6 +2497,47 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIn("wake", r.content)
         self.assertIn("06:00", r.content)
 
+        # Identical re-create — the row didn't change, so the
+        # reply says 'Already set', not 'Moved'.
+        sup.scheduler.rows.clear()
+        agent._sched_undo = []
+        r = agent._reminder_reply(
+            "remind me at 9am to stretch",
+            "remind me at 9am to stretch", task.id)
+        self.assertIsNotNone(r)
+        r = agent._reminder_reply(
+            "remind me at 9am to stretch",
+            "remind me at 9am to stretch", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("Already set", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 1)
+
+        # 'it' anaphora — the last journaled mutation names the
+        # referent: a bare 'turn it off'/'move it' flips THAT row,
+        # never mass-applies a singular pronoun.
+        r = agent._reminder_reply(
+            "remind me daily to call mom",
+            "remind me daily to call mom", task.id)
+        self.assertIsNotNone(r)
+        self.assertEqual(len(sup.scheduler.rows), 2)
+        r = agent._reminder_reply(
+            "turn it off", "turn it off", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("call mom", r.content)
+        off_rows = [s["name"] for s in sup.scheduler.rows
+                    if not s["enabled"]]
+        self.assertEqual(off_rows, ["reminder: call mom"])
+        # Reversible lanes bind 'it' to the last-touched row; the
+        # destructive lane keeps the pinned contract — a bare
+        # pronoun is an empty scope over the enabled pool.
+        r = agent._reminder_reply(
+            "cancel it", "cancel it", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("stretch", r.content)
+        self.assertEqual(
+            [s["name"] for s in sup.scheduler.rows],
+            ["reminder: call mom"])
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

@@ -5014,6 +5014,8 @@ class AgentOrchestrator:
             delta = 600.0  # bare 'snooze' — a default ten minutes.
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
+        hits = self._reminder_clock_narrow(hits, topic_terms,
+                                           user_text)
         hits = self._reminder_ordinal_pick(hits, _ord_sel, now)
         if more and len(hits) > 1:
             # 'give me 5 more minutes' — the imminent row is the
@@ -5310,8 +5312,21 @@ class AgentOrchestrator:
             topic_terms)
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
+        hits = self._reminder_clock_narrow(hits, topic_terms,
+                                           user_text)
         hits = self._reminder_ordinal_pick(hits, _ord_sel,
                                            time.time())
+        if (not topic_terms and _ord_sel is None
+                and re.fullmatch(
+                    r"(?:it|that|this|the\s+one|that\s+one)",
+                    str(body or "").strip().lower()
+                    or str(mr.groupdict().get("noun")
+                           or "").strip().lower())):
+            # 'move it to 6' — singular anaphora resolves to the
+            # last journaled mutation's row, not a 'say which'.
+            lt = self._reminder_last_touched()
+            if lt is not None:
+                hits = [lt]
         if (verb_l in ("move", "change", "switch", "make", "push",
                     "bump", "shift")
                 and mr.groupdict().get("noun") is None
@@ -5598,6 +5613,77 @@ class AgentOrchestrator:
                     or stem in self._reminder_terms(
                         self._reminder_label(s))]
         return sched, rows
+
+    def _reminder_last_touched(self):
+        """'it'/'that reminder' — the referent only when the last
+        mutation turn touched exactly ONE user row. Mass ops leave
+        several journal entries, and auto-resume nudge rows are
+        internal bookkeeping, so both still resolve to the honest
+        'say which' pool."""
+        journal = getattr(self, "_sched_undo", None) or []
+        if not journal:
+            return None
+        sup = (self._autonomy() if callable(self._autonomy)
+               else self._autonomy)
+        sched = getattr(sup, "scheduler", None)
+        if sched is None:
+            return None
+        live = {str(s.get("id")): s for s in (sched.list() or [])}
+        sids = []
+        for ent in journal:
+            sid = (str(ent[1]) if ent[0] != "readd"
+                   else str((ent[1] or {}).get("id") or ""))
+            row = live.get(sid)
+            if row is None or sid in sids:
+                continue
+            name = str(row.get("name") or "")
+            det = (row.get("action") if isinstance(
+                row.get("action"), dict) else {}).get("detail", "")
+            if name == "reminder: turn reminders back on" \
+                    or str(det) == "turn reminders back on":
+                continue  # auto-resume nudge — not a referent
+            sids.append(sid)
+        if len(sids) != 1:
+            return None
+        return live[sids[0]]
+
+    def _reminder_clock(self, s: dict):
+        """(hour, minute) a row fires at — recurring kinds carry it
+        in fields, once/interval rows resolve through next fire."""
+        if (s.get("kind") in ("daily", "weekly", "monthly")
+                and s.get("hour") is not None):
+            return (int(s["hour"]), int(s.get("minute") or 0))
+        f = self._reminder_next_fire(s, time.time())
+        if f:
+            lt = time.localtime(float(f))
+            return (lt.tm_hour, lt.tm_min)
+        return None
+
+    def _reminder_clock_narrow(self, hits: list, terms: set,
+                               text: str):
+        """'the 3pm reminder' over several rows in the 3pm hour —
+        the bare meridiem names the top of the hour when such a
+        row exists; the hour window stands otherwise. A plural
+        noun straight after the clock ('the 3pm reminders')
+        keeps the hour class."""
+        if len(hits) < 2:
+            return hits
+        low = str(text or "").lower()
+        for t in terms:
+            tm = re.fullmatch(r"(\d{1,2})(am|pm)", str(t))
+            if tm is None:
+                continue
+            if re.search(
+                    rf"\b{tm.group(0)}\s+(?:reminders|alarms|"
+                    r"timers|schedules)\b", low):
+                continue
+            h = int(tm.group(1)) % 12
+            hh = h + (12 if tm.group(2) == "pm" else 0)
+            exact = [s for s in hits
+                     if self._reminder_clock(s) == (hh, 0)]
+            if exact:
+                hits = exact
+        return hits
 
     _ORDINAL_SCOPE = {"next", "first", "earliest", "last",
                       "latest", "second", "2nd", "third", "3rd",
@@ -6378,9 +6464,33 @@ class AgentOrchestrator:
         _hay = self._reminder_hay
         hits = [s for s in pool
                 if not topic_terms or topic_terms <= _hay(s)]
+        hits = self._reminder_clock_narrow(hits, topic_terms,
+                                           user_text)
         hits = self._reminder_ordinal_pick(hits, _ord_sel,
                                            time.time())
         state = "on" if want_on else "off"
+        if (not topic_terms and _ord_sel is None
+                and re.fullmatch(
+                    r"(?:it|that|this|the\s+one|that\s+one)",
+                    (str(body or "").strip().lower()
+                     or str(mt.group("noun")
+                            or mt.groupdict().get("noun2")
+                            or mt.groupdict().get("noun3")
+                            or mt.groupdict().get("noun6")
+                            or "").strip().lower()))):
+            # 'turn it off' — singular anaphora, not a mass toggle;
+            # the last journaled mutation names the referent.
+            lt = self._reminder_last_touched()
+            if lt is not None:
+                lt_hits = [s for s in pool
+                           if str(s.get("id")) == str(lt.get("id"))]
+                if lt_hits:
+                    hits = lt_hits
+                else:
+                    return self._reminder_finish(
+                        f"“{self._reminder_label(lt)}” is already "
+                        f"{state}.", user_text, task_id,
+                        event_callback)
         if (_ord_sel and str(_ord_sel).startswith("idx:")
                 and not hits and pool):
             # 'mute the third one' over two rows — the index is
@@ -6704,6 +6814,8 @@ class AgentOrchestrator:
             hits = [s for s in and_hits
                     if not (excl_terms
                             and excl_terms <= self._reminder_hay(s))]
+        hits = self._reminder_clock_narrow(hits, topic_terms,
+                                           user_text)
         if not hits:
             # 'unschedule the rent reminder' on a paused row —
             # a disabled-only match still cancels; enabled hits
@@ -9572,11 +9684,28 @@ class AgentOrchestrator:
                                  .get("detail", "")).strip().lower()
                             == task.lower()]
                 if srows:
-                    sched.update(str(srows[0]["id"]), kind=kind,
-                                 **fields)
+                    s0 = srows[0]
+                    # 'remind me at 9am to X' re-sent identically
+                    # changes nothing — 'Moved' would be a false
+                    # claim. 'in 5 minutes' reparses a second
+                    # later; sub-minute at-drift is still 'same'.
+                    same = str(s0.get("kind")) == kind
+                    for k, v in fields.items():
+                        if not same:
+                            break
+                        if k in ("at", "next_run", "last_run"):
+                            try:
+                                same = abs(float(s0.get(k))
+                                           - float(v)) < 60
+                            except (TypeError, ValueError):
+                                same = False
+                        else:
+                            same = s0.get(k) == v
+                    sched.update(str(s0["id"]), kind=kind, **fields)
                     for extra in srows[1:]:
                         sched.remove(str(extra["id"]))
-                    text = ("Moved the reminder — "
+                    text = (("Already set — " if same
+                             else "Moved the reminder — ")
                             + self._reminder_spec_text(spec, task)
                             + end_note)
                 else:
