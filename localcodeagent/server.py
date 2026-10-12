@@ -14467,6 +14467,14 @@ class Handler(BaseHTTPRequestHandler):
                                                      event_callback=self.state._voice_tee(voice_rid, self.state._bus_emit))
                     self.state._voice_finish(voice_rid, result.content,
                         delivery=getattr(result, "delivery", None))
+                except KeyError:
+                    self.state._voice_finish(voice_rid)
+                    # The parked approval was already claimed (double
+                    # submit, replay, or a resolved card) — exactly-once
+                    # held; report stale, never a 500.
+                    self._json({"error": approvals_mod.STALE_MESSAGE,
+                                "stale": True}, 409)
+                    return
                 except Exception:
                     self.state._voice_finish(voice_rid)
                     raise
