@@ -2842,6 +2842,35 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIsNotNone(r)
         self.assertIn("No past reminders", r.content)
 
+        # A cadence stranded inside the task tail belongs to the
+        # schedule — 'every 30m starting at 9' is an anchored
+        # interval, never a one-shot named 'stretch every 30
+        # minutes starting'; 'twice a day at 8' anchors the first
+        # fire of a 12h interval; 'twice weekly' splits across
+        # task/when slots.
+        sup.scheduler.rows.clear()
+        for q, want_kind, want_iv, want_task in (
+                ("remind me to stretch every 30 minutes "
+                 "starting at 9am", "interval", 1800.0, "stretch"),
+                ("remind me to take meds twice a day at 8am",
+                 "interval", 43200.0, "take meds"),
+                ("remind me to water plants twice weekly",
+                 "interval", 302400.0, "water plants"),
+                ("remind me to drink water every other hour",
+                 "interval", 7200.0, "drink water")):
+            r = agent._reminder_reply(q, q, task.id)
+            self.assertIsNotNone(r, q)
+            row = sup.scheduler.rows[-1]
+            self.assertEqual(row["kind"], want_kind, q)
+            self.assertEqual(row["interval_s"], want_iv, q)
+            self.assertEqual(
+                row["name"], f"reminder: {want_task}", q)
+        # 'twice a day at 8am' anchors the first fire at 08:00.
+        import datetime as _dt
+        at = sup.scheduler.rows[1]["at"]
+        self.assertEqual(
+            _dt.datetime.fromtimestamp(at).hour, 8)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

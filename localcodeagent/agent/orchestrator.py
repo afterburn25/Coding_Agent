@@ -10026,6 +10026,34 @@ class AgentOrchestrator:
                                f"{cm_p.group(2).strip()}."
                                if cm_p.group(2) else "."),
                             user_text, task_id, event_callback)
+            if spec is not None and task_lazy:
+                # 'stretch every 30 minutes starting at 9am' —
+                # the lazy split put the clock in when and left
+                # the cadence trailing inside the task; rejoin
+                # them so the row is an anchored interval, not a
+                # one-shot named 'stretch every 30 minutes'.
+                cm_e = re.search(
+                    r"\b(every\s+(?:(?:a|an|one|two|three|four|"
+                    r"five|six|seven|eight|nine|ten|couple|few|"
+                    r"other|second|third|fourth|\d+(?:\.\d+)?)\s+)?"
+                    r"(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|"
+                    r"days?|weeks?|fortnights?|months?|years?)"
+                    r"(?:\s+(?:starting|beginning|starts?|"
+                    r"beginning|from))?)\s*$",
+                    task_lazy, re.IGNORECASE)
+                if cm_e is not None:
+                    head_t = task_lazy[:cm_e.start()].strip(
+                        " ,;—-")
+                    joined = (re.sub(
+                        r"\s+(?:starting|beginning|starts?|from)$",
+                        "", cm_e.group(1), flags=re.IGNORECASE)
+                        + " " + when_raw)
+                    spec_j = self._reminder_spec(
+                        joined, time.time())
+                    if spec_j is not None:
+                        spec = spec_j
+                        forced_when = joined
+                        forced_task = head_t
             if (spec is None or re.match(
                     r"\d|one\b|two\b|three\b|four\b|five\b|six\b|"
                     r"seven\b|eight\b|nine\b|ten\b|eleven\b|twelve\b|"
@@ -10174,6 +10202,55 @@ class AgentOrchestrator:
         task = re.sub(r"^about\s+forgetting\s+", "", task,
                       flags=re.IGNORECASE)
         task = self._reminder_task_clean(task)
+        # 'stretch every 30 minutes starting at 9' — a trailing
+        # cadence inside the task tail belongs to the schedule;
+        # 'every 30m at 9' parses as an anchored interval, not a
+        # one-shot named 'stretch every 30 minutes starting'.
+        cad_t = re.search(
+            r"\b(every\s+(?:(?:a|an|one|two|three|four|five|six|"
+            r"seven|eight|nine|ten|couple|few|other|second|third|"
+            r"fourth|\d+(?:\.\d+)?)\s+)?(?:seconds?|secs?|minutes?|"
+            r"mins?|hours?|hrs?|days?|weeks?|fortnights?|months?|"
+            r"years?)|(?:once|twice|thrice|(?:two|three|four|"
+            r"five|six|\d+)\s+times?)\s+(?:a\s+|per\s+)?"
+            r"(?:day|week|month|year|daily|weekly|monthly|"
+            r"yearly))"
+            r"(?:\s+(?:starting|beginning|from))?\s*$",
+            task, re.IGNORECASE)
+        if cad_t is not None:
+            head_t = task[:cad_t.start()].strip(" ,;—-")
+            if head_t:
+                cad_txt = re.sub(
+                    r"\s+(?:starting|beginning|from)$", "",
+                    cad_t.group(1), flags=re.IGNORECASE)
+                joined_t = (cad_txt + " " + (
+                    forced_when if forced_when is not None
+                    else str(m.group("when") or "")
+                    if m is not None else "")).strip()
+                if self._reminder_spec(
+                        joined_t, time.time()) is not None:
+                    task = head_t
+                    forced_when = joined_t
+        if cad_t is None and task:
+            # 'water plants twice weekly' — the split left bare
+            # 'twice' in the task and 'weekly' in the when;
+            # 'twice weekly' parses as a 2-per-week interval.
+            cnt_t = re.search(
+                r"\b(once|twice|thrice|(?:two|three|four|five|"
+                r"six|\d+)\s+times?)\s*$", task, re.IGNORECASE)
+            when_l = (forced_when if forced_when is not None
+                      else str(m.group("when") or "")
+                      if m is not None else "").strip()
+            if (cnt_t is not None and re.fullmatch(
+                    r"(?:a\s+|per\s+)?(?:day|week|month|year|"
+                    r"daily|weekly|monthly|yearly)", when_l,
+                    re.IGNORECASE)):
+                head_t = task[:cnt_t.start()].strip(" ,;—-")
+                joined_t = (cnt_t.group(1) + " " + when_l).strip()
+                if (head_t and self._reminder_spec(
+                        joined_t, time.time()) is not None):
+                    task = head_t
+                    forced_when = joined_t
         # 'remind me at the same time tomorrow' — a deictic time
         # reference isn't a task name; it asks "same time as what?"
         if re.fullmatch(

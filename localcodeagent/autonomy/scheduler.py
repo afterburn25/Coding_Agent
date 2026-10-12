@@ -1073,25 +1073,41 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     # 'twice a day' / 'three times a week' — N fires spread over
     # the span becomes a fixed interval.
     m = re.fullmatch(
-        r"twice\s+(?:a\s+(day|week|month|year)|daily)|"
+        r"(?:twice\s+(?:a\s+(day|week|month|year)|"
+        r"(daily|weekly|monthly|yearly))|"
         r"two\s+times\s+a\s+(day|week|month|year)|"
         r"(three|four|five|six|\d+)\s+times\s+a\s+"
-        r"(day|week|month|year)", t)
+        r"(day|week|month|year))" + clock_tail, t)
     if m:
-        unit = (m.group(1) or m.group(2) or m.group(4) or "day")
+        unit = (m.group(1) or m.group(2) or m.group(3)
+                or m.group(5) or "day")
+        unit = {"daily": "day", "weekly": "week",
+                "monthly": "month", "yearly": "year"}.get(
+                    unit, unit)
         n_f = float({"three": 3, "four": 4, "five": 5,
-                     "six": 6}.get(m.group(3) or "",
-                                   m.group(3) or 2) or 2)
+                     "six": 6}.get(m.group(4) or "",
+                                   m.group(4) or 2) or 2)
         span = {"day": 86400.0, "week": 604800.0,
                 "month": 30 * 86400.0,
                 "year": 365 * 86400.0}[unit]
-        return {"kind": "interval", "interval_s": span / n_f}
+        return {"kind": "interval", "interval_s": span / n_f,
+                **_anchor(m, 6)}
     m = re.fullmatch(
         r"(?:every\s+other\s+day|every\s+second\s+day)"
         + clock_tail, t)
     if m:
         return {"kind": "interval", "interval_s": 172800.0,
                 **_anchor(m, 1)}
+    m = re.fullmatch(
+        r"every\s+other\s+(hours?|hrs?|minutes?|mins?|weeks?)"
+        + clock_tail, t)
+    if m:
+        unit_o = m.group(1)
+        return {"kind": "interval",
+                "interval_s": 2 * (
+                    60 if unit_o.startswith(("m", "min")) else
+                    3600 if unit_o.startswith(("h", "hr")) else
+                    604800), **_anchor(m, 2)}
     # 'every third day' — an ordinal picks every Nth unit.
     m = re.fullmatch(
         r"every\s+(third|fourth|fifth|sixth|seventh|eighth|"
