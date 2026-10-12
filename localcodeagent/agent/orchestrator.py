@@ -4655,6 +4655,13 @@ class AgentOrchestrator:
         r"put\s+(?:the\s+|my\s+|that\s+|this\s+|those\s+|"
         r"these\s+)(?P<body7>[\w'\s-]{1,40}?)\s+"
         r"on\s+(?:hold|ice|pause)\b"
+        + _REMINDER_TRAIL +
+        r"|" + _REMINDER_POLITE +
+        # 'put the alarm on snooze (for 10)' — the delay idiom;
+        # _reminder_reply rewrites it onto the snooze grammar.
+        r"put\s+(?:the\s+|my\s+|that\s+|this\s+|those\s+|"
+        r"these\s+)(?P<body8>[\w'\s-]{1,40}?)\s+"
+        r"on\s+snooze\b(?:\s+(?:for|until|till)\s+.+?)?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_STOP_RE = re.compile(
@@ -10111,6 +10118,14 @@ class AgentOrchestrator:
             what = str(rp.group("what") or "").strip(" ,;—-")
             plan_text = (f"remind me about {what}" if what
                          else "remind me")
+        # 'put the alarm on snooze' — a delay idiom, not a hold;
+        # normalize onto the snooze grammar so the row resolves
+        # or the 'until when' clarify asks honestly.
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?"
+            r"(?:please\s+)?)put\s+((?:the|my|that|this|those|"
+            r"these)\s+[\w'\s-]{1,40}?)\s+on\s+snooze\b",
+            r"\1snooze \2", plan_text, flags=re.IGNORECASE)
         if re.search(
                 r"\band\s+(?:cancel|delete|remove|snooze|pause|"
                 r"reschedule|disable|mute|silence|block|clear|"

@@ -3664,6 +3664,21 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(sup.scheduler.rows[0]["hour"], 9)
             self.assertEqual(sup.scheduler.rows[0]["minute"], 0)
 
+            # 'put X on snooze' — the delay idiom normalizes onto
+            # the snooze grammar; a real shift or honest clarify.
+            before = float(sup.scheduler.rows[1]["at"])
+            r = agent._local_action_reply(
+                "put the brew on snooze for 10 minutes", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Snoozed", r.content)
+            self.assertAlmostEqual(
+                float(sup.scheduler.rows[1]["at"]),
+                before + 600, delta=2)
+            r = agent._local_action_reply(
+                "put the standup on snooze", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("until when", r.content)
+
             # 'pause all reminders except X' — the exclusion tail
             # scopes the flip pool; the named row stays enabled.
             r = agent._local_action_reply(
