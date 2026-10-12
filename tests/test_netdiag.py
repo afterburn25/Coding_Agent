@@ -1710,6 +1710,36 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(inv)
             self.assertIn("off", inv.text)
             off_row["enabled"] = True
+            # Cadence asks — 'how often does X fire', 'is X daily
+            # or weekly', 'what day does X hit' — answer from the
+            # row's kind/hour fields, never model invention.
+            inv = agent._reminder_inventory_reply(
+                "how often does the build reminder fire",
+                "how often does the build reminder fire")
+            self.assertIsNotNone(inv)
+            self.assertIn("check the build", inv.text)
+            inv = agent._reminder_inventory_reply(
+                "is the build reminder daily or weekly",
+                "is the build reminder daily or weekly")
+            self.assertIsNotNone(inv)
+            self.assertIn("check the build", inv.text)
+            inv = agent._reminder_inventory_reply(
+                "what day does the build reminder hit",
+                "what day does the build reminder hit")
+            self.assertIsNotNone(inv)
+            self.assertIn("check the build", inv.text)
+            inv = agent._reminder_inventory_reply(
+                "when does the timesheets go off",
+                "when does the timesheets go off")
+            self.assertIsNotNone(inv)
+            self.assertIn("timesheets", inv.text)
+            for q in ("how often does the standup fire",
+                      "is the standup daily or weekly",
+                      "what day does the rent reminder hit",
+                      "when does the standup go off"):
+                self.assertTrue(
+                    AgentOrchestrator.can_run_without_coding_model(q),
+                    q)
             # A parseable time with no task clarifies, never guesses.
             r = agent._reminder_reply(
                 "remind me in 5 minutes",

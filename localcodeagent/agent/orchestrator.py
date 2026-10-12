@@ -3876,6 +3876,46 @@ class AgentOrchestrator:
         r"|" + _REMINDER_POLITE +
         r"(?:am|are)\s+i\s+(?:still\s+)?reminded\b"
         r"(?:\s+of\s+.+?)?"
+        + _REMINDER_TRAIL +
+        # Cadence asks — 'how often does the standup fire', 'is the
+        # standup daily or weekly', 'what day does the rent
+        # reminder hit', 'when does the alarm go off'. A model
+        # answer invents cadence; the row answers it.
+        r"|" + _REMINDER_POLITE +
+        r"how\s+(?:often|frequently)\s+(?:does|do|is|are|will)\s+"
+        r"[\w'\s-]{0,40}?"
+        r"(?:reminders?|alarms?|timers?|reminded|fires?|firing|"
+        r"hits?|rings?|goes?\s+off|go\s+off|comes?\s+up|"
+        r"pops?\s+up|repeats?|recurs?|repeating|recurring)\b"
+        + _REMINDER_TRAIL +
+        r"|" + _REMINDER_POLITE +
+        r"(?:is|are)\s+(?:(?:my|the|your|that|this)\s+)?"
+        r"[\w'\s-]{0,40}?"
+        r"(?:reminders?|alarms?|timers?)\s+(?:a\s+)?"
+        r"(?:daily|weekly|monthly|hourly|yearly|recurring|"
+        r"repeating)\b"
+        r"(?:\s+or\s+(?:a\s+)?(?:daily|weekly|monthly|hourly|"
+        r"yearly|recurring|repeating)\b)?"
+        + _REMINDER_TRAIL +
+        r"|" + _REMINDER_POLITE +
+        r"(?:is|are)\s+(?:(?:my|the|your|that|this)\s+)?"
+        r"[\w'\s-]{0,40}?\s+"
+        r"(?:daily|weekly|monthly|hourly|yearly|recurring|"
+        r"repeating)\s+or\s+(?:a\s+)?"
+        r"(?:daily|weekly|monthly|hourly|yearly|recurring|"
+        r"repeating)\b"
+        + _REMINDER_TRAIL +
+        r"|" + _REMINDER_POLITE +
+        r"(?:what|which)\s+day\s+(?:does|do|is|are|will)\s+"
+        r"[\w'\s-]{0,40}?"
+        r"(?:reminders?|alarms?|timers?|hits?|rings?|goes?\s+off|"
+        r"go\s+off|fires?)\b"
+        + _REMINDER_TRAIL +
+        r"|" + _REMINDER_POLITE +
+        r"when\s+(?:does|do|will)\s+"
+        r"(?:(?:my|the|your|that|this)\s+)?[\w'\s-]{0,40}?\s+"
+        r"(?:goes?\s+off|go\s+off|fires?|rings?|hits?|triggers?|"
+        r"happens?|pops?\s+up)\b"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     # State asks — 'are my reminders on', 'is the alarm paused',
@@ -5532,6 +5572,9 @@ class AgentOrchestrator:
                     r"disabled?|enabled?|paused?|muted?|active|"
                     r"inactive|turn(?:ed)?|switch(?:ed)?|"
                     r"paus(?:e|ing)|mut(?:e|ing)|off|on|"
+                    r"often|frequently|daily|weekly|monthly|hourly|"
+                    r"yearly|recurring|repeating|repeat|recur|recurs|"
+                    r"come|comes|hit|hits|rings|every|"
                     r"view|run|through|walk|read|out)\b",
                     " ", tm.group(1), flags=re.IGNORECASE))
         when_ask = bool(re.match(
@@ -5578,6 +5621,37 @@ class AgentOrchestrator:
             r"(?:reminders?|alarms?|timers?)\b.{0,20}\b"
             r"(?:fired|gone\s+off|rang|rung|happened|triggered|"
             r"popped\s+up)\b", plan_text, re.IGNORECASE))
+        cad_ask = bool(re.search(
+            r"\bhow\s+(?:often|frequently)\b|"
+            r"\b(?:daily|weekly|monthly|hourly|yearly|recurring|"
+            r"repeating)\s+or\s+(?:a\s+)?(?:daily|weekly|monthly|"
+            r"hourly|yearly|recurring|repeating)\b|"
+            r"\b(?:reminders?|alarms?|timers?)\s+(?:a\s+)?"
+            r"(?:daily|weekly|monthly|hourly|yearly|recurring|"
+            r"repeating)\b|"
+            r"\b(?:what|which)\s+day\b", plan_text,
+            re.IGNORECASE))
+        if not scope_terms and (cad_ask or when_ask):
+            # Noun-less cadence/when asks carry the row name as the
+            # object — 'when does THE STANDUP go off', 'is THE
+            # STANDUP daily'. The connector/noun extractions miss
+            # it; pull it from between the verb and the
+            # cadence/fire word.
+            cm = re.search(
+                r"\b(?:does|do|is|are|will)\s+(?:the\s+|my\s+|"
+                r"your\s+|that\s+|this\s+)?"
+                r"([a-z0-9][a-z0-9'\s-]{0,40}?)\s+"
+                r"(?:reminders?|alarms?|timers?|fires?|firing|"
+                r"hits?|rings?|goes?\s+off|go\s+off|comes?\s+up|"
+                r"pops?\s+up|reminds?|repeats?|recurs?|daily|"
+                r"weekly|monthly|hourly|yearly|recurring|"
+                r"repeating)\b", plan_text, re.IGNORECASE)
+            if cm is not None:
+                scope_terms = self._reminder_terms(re.sub(
+                    r"\b(?:does|do|did|is|are|the|a|an|my|that|this|"
+                    r"your|i|me|we|you|it|get|got|still|really|"
+                    r"actually|reminders?|alarms?|timers?)\b",
+                    " ", cm.group(1), flags=re.IGNORECASE))
         if ((re.search(
                 r"\bnext\b(?!\s+(?:week|weeks|month|months|year|"
                 r"years|day|days|hour|hours|minute|minutes|monday|"
@@ -5722,6 +5796,58 @@ class AgentOrchestrator:
                     for s in fhits[:5])
                 text = (f"{fired_n} of {len(fhits)} have fired: "
                         f"{bits}.")
+        elif cad_ask:
+            # 'how often does the standup fire' / 'is the standup
+            # daily or weekly' — the row's cadence is the answer.
+            # Disabled rows still have a cadence; say it's off.
+            _, c_rows = self._reminder_rows(
+                include_disabled=True,
+                noun=nm.group(1).lower() if nm else None)
+            chits = ([s for s in c_rows
+                      if scope_terms <= self._reminder_hay(s)]
+                     if scope_terms else c_rows)
+
+            def _cad(s: dict) -> str:
+                return self._reminder_spec_text(
+                    s, self._reminder_label(s)).split(" — I")[0]
+
+            if not chits:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”" for s in rows[:3])
+                if scope_terms:
+                    text = (f"No reminder about "
+                            f"“{' '.join(sorted(scope_terms))}”"
+                            + (f" — you've got: {names}."
+                               if rows else "."))
+                elif nm is not None:
+                    _s, others = self._reminder_rows()
+                    noun_pl = nm.group(1).lower()
+                    if not noun_pl.endswith("s"):
+                        noun_pl += "s"
+                    if others:
+                        names_o = "; ".join(
+                            f"“{self._reminder_label(s)}”"
+                            for s in others[:3])
+                        text = (f"No {noun_pl} set — you've got "
+                                f"{len(others)} reminder"
+                                f"{'s' if len(others) != 1 else ''}"
+                                f": {names_o}.")
+                    else:
+                        text = f"No {noun_pl} set."
+                else:
+                    text = ("No reminders set — say “remind me in 10 "
+                            "minutes to …” and I'll schedule it.")
+            elif len(chits) == 1:
+                s = chits[0]
+                tail = ("" if s.get("enabled", True)
+                        else " — it's off right now")
+                text = (f"“{self._reminder_label(s)}” fires "
+                        f"{_cad(s)}{tail}.")
+            else:
+                bits = "; ".join(
+                    f"“{self._reminder_label(s)}” ({_cad(s)})"
+                    for s in chits[:5])
+                text = (f"{len(chits)} reminders: {bits}.")
         elif not rows and nm is not None:
             # 'any alarms' when only reminders exist — 'No reminders
             # set' would be a false claim about the store.
