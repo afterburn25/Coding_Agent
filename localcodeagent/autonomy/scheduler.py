@@ -260,6 +260,15 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"ten|couple|few|\d+(?:\.\d+)?)\s+(?:second|minute|hour|"
         r"day|week|month|year)s?)\s+from\s+now\b",
         r"in \1", t)
+    # 'at 5pm in 2 days' — same combined anchor clock-first;
+    # reorder to 'in 2 days at 5pm'.
+    t = re.sub(
+        r"^at\s+((?:\d{1,2})(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|am|"
+        r"pm)?|noon|midnight)\s+in\s+"
+        r"((?:a|an|one|two|three|four|five|six|seven|eight|nine|"
+        r"ten|couple|few|\d+(?:\.\d+)?)\s+(?:second|minute|hour|"
+        r"day|week|month)s?)\s*$",
+        r"in \2 at \1", t)
     # 'later tonight' — 'later' is a hedge before a real daypart,
     # not a vagueness that should pin-fail.
     t = re.sub(
@@ -756,6 +765,15 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         r"ten|couple|few|\d+(?:\.\d+)?)\s+(?:second|minute|hour|"
         r"day|week|month|year)s?)\s+from\s+now\b",
         r"in \1", t)
+    # 'at 5pm in 2 days' — same combined anchor clock-first;
+    # reorder to 'in 2 days at 5pm'.
+    t = re.sub(
+        r"^at\s+((?:\d{1,2})(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|am|"
+        r"pm)?|noon|midnight)\s+in\s+"
+        r"((?:a|an|one|two|three|four|five|six|seven|eight|nine|"
+        r"ten|couple|few|\d+(?:\.\d+)?)\s+(?:second|minute|hour|"
+        r"day|week|month)s?)\s*$",
+        r"in \2 at \1", t)
     # 'later tonight' — 'later' is a hedge before a real daypart,
     # not a vagueness that should pin-fail.
     t = re.sub(
