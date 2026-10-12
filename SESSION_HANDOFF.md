@@ -5356,3 +5356,40 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   reschedule-cadence-preserving/toggle/cancel verified post-change);
   collision set (push to origin, kill the task, restart it) still
   declines; reminder suite 81 green each round.
+
+### 2026-10-12 (cont.) — snooze/hold surface + github ctx_repo anaphora containment
+- **Implicit-duration snooze + 'put X on hold'** (`dfce9a62`):
+  'postpone the standup an hour' left the duration in the body
+  (asked 'until when'); the snooze split now peels a trailing
+  duration when the head isn't a bare connector. 'put the alarm
+  on hold' joins TOGGLE (body3/noun3 wired incl. the noun-aware
+  none-text — 'You don't have any alarms set' vs the false
+  'no reminders').
+- **Due-asks + will/going-to-fire** (`8bab435c`): 'whats due'
+  joins the coming-up alternative; 'will my alarm go off'/'is
+  my reminder going to fire' are when_asks routed through
+  cad_ask for scoped answers; will/going strip from scope.
+  Bare 'will X hit/trigger' stays out — alarm-flavored verbs
+  only for the noun-optional variant.
+- **github ctx_repo anaphora contained** (`a1751fb2`): deployed
+  dogfood turned up 'do my reminders still work' answering
+  "I couldn't reach GitHub — API 404". 'work' in the read-intent
+  list is noun-sense; with a repo in conversational context the
+  lane claimed ANY intent-word turn. Now, when ctx_repo is the
+  only referent, verb-shaped 'work' declines (function ask) and
+  a connector/possessive naming a non-repo-domain object
+  declines ('status of my reminders', 'updates on the timer').
+  Repo-domain objects and bare follow-ups still claim.
+- **Live dogfood verification (deployed 8bab435c, llm-runtime
+  stopped→reloaded):** every new form claimed builtin-local with
+  real rows — fired-ask 'Not yet — set for 07:48', state-ask
+  'Yes — on (07:48)', 'what fires next', 'whats due', 'count my
+  reminders', 'did i miss any reminders', disabled-filter
+  inventory '1 reminder is off', 'No — it is off so it can't
+  fire', snooze+postpone+put-on-hold real mutations, turn-back-
+  on + cancel round-trip, honest empty after.
+- Pending-form audit closed: 'wake me at 7 tomorrow'/'wake me
+  up at 7'/'alarm for 9am' create via NOTASK/NOUNFIRST; clock
+  scope ('9am') matches fire-time via the hay's clock tokens —
+  the scoped miss on a 7am row was honest; 'time left on the
+  timer' counts down from next_run.
