@@ -4312,6 +4312,17 @@ class AgentOrchestrator:
         r"\D\S[\w' .-]*?)"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # 'rename the standup to scrum' — a real row mutation (name +
+    # detail), not a narrated label. 'rename the file' stays out —
+    # the rename lane only claims against a matching row.
+    _REMINDER_RENAME_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:rename|retitle)\s+"
+        r"(?:the\s+|my\s+|that\s+|this\s+)?"
+        r"(?P<body>[\w'\s-]{1,50}?)\s+"
+        r"(?:to|as)\s+(?P<new>[\w'\"“”\s-]{1,50}?)"
+        + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _REMINDER_SNOOZE_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:snooze|postpone|delay|push\s+back|"
@@ -4438,6 +4449,14 @@ class AgentOrchestrator:
         r"(?P<dir6>off|back\s+on|on)\s+"
         r"(?:the\s+|my\s+|that\s+|this\s+|those\s+|these\s+)?"
         r"(?P<body6>[\w'\s-]{1,40}?)"
+        + _REMINDER_TRAIL +
+        # 'put the standup on hold' — the pause idiom noun-less;
+        # claims only on a row hit like the other bare-body
+        # alternatives.
+        r"|" + _REMINDER_POLITE +
+        r"put\s+(?:the\s+|my\s+|that\s+|this\s+|those\s+|"
+        r"these\s+)(?P<body7>[\w'\s-]{1,40}?)\s+"
+        r"on\s+(?:hold|ice|pause)\b"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_STOP_RE = re.compile(
@@ -4584,6 +4603,20 @@ class AgentOrchestrator:
         reminder can pin, never a timer's duration."""
         from ..autonomy.scheduler import is_vague_delay
         return is_vague_delay(text)
+
+    # Fire-count/cadence words stranded in a task slot — 'remind
+    # me twice on friday' names nothing; 'once a week on
+    # saturdays' the same. Clarify rather than minting a row
+    # named 'once a week'.
+    _REMINDER_CADENCE_TASK_RE = re.compile(
+        r"once|twice|thrice|(?:two|three|four|five|six|seven|"
+        r"\d+)\s+times?|"
+        r"(?:once|twice|thrice|(?:two|three|four|five|six|seven|"
+        r"\d+)\s+times?)\s+(?:a|per)\s+(?:day|week|month|year)|"
+        r"(?:once|twice|thrice)\s+a\s+(?:day|week|month|year)|"
+        r"every\s+[a-z]+(?:\s+[a-z]+){0,2}|hourly|daily|weekly|"
+        r"monthly|yearly|fortnightly|weekdays?|weekends?",
+        re.IGNORECASE)
 
     @staticmethod
     def _reminder_task_clean(task: str) -> str:
@@ -5842,7 +5875,8 @@ class AgentOrchestrator:
                        or mt.groupdict().get("body3")
                        or mt.groupdict().get("body4")
                        or mt.groupdict().get("body5")
-                       or mt.groupdict().get("body6") or "")
+                       or mt.groupdict().get("body6")
+                       or mt.groupdict().get("body7") or "")
             body = body.strip(" ,;—-")
             if (verb in ("restart", "restore", "renew", "revive",
                          "resume", "suspend", "block", "freeze",
@@ -6230,6 +6264,70 @@ class AgentOrchestrator:
                         f"“{self._reminder_label(hits[0])}”."
                         if gone == 1 else
                         f"Cancelled {gone} reminders.")
+        return self._reminder_finish(text, user_text, task_id,
+                                     event_callback)
+
+    def _reminder_rename_reply(self, user_text: str, mr: re.Match,
+                               task_id: str, event_callback):
+        """'rename the standup to scrum' — a real row mutation:
+        the name prefix is kept, the label and action detail take
+        the new text. A miss asks which reminder; a multi-hit
+        scopes like cancel."""
+        body = str(mr.group("body") or "").strip(" ,;—-")
+        new = str(mr.group("new") or "").strip(" ,;—-\"'“”")
+        sched, rows = self._reminder_rows(include_disabled=True)
+        if sched is None:
+            return self._reminder_finish(
+                "I can't manage reminders — the scheduler isn't "
+                "running in this session.",
+                user_text, task_id, event_callback)
+        topic_terms = self._reminder_terms(re.sub(
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
+            r"reminders?|alarms?|timers?|schedules?)\b",
+            " ", body, flags=re.IGNORECASE))
+        topic_terms, ord_sel = self._reminder_ordinal_split(
+            topic_terms)
+        hits = [s for s in rows
+                if not topic_terms
+                or topic_terms <= self._reminder_hay(s)]
+        hits = self._reminder_ordinal_pick(
+            hits, ord_sel, time.time())
+        if not hits:
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rows[:3])
+            text = (f"I don't see a reminder matching "
+                    f"“{' '.join(sorted(topic_terms)) or 'that'}”"
+                    + (f" — you have: {names}." if names else "."))
+        elif (len(hits) > 1
+                and not self._reminder_identical(hits)):
+            now = time.time()
+            names = "; ".join(
+                f"“{self._reminder_label(s)}” "
+                f"({self._reminder_when_text(s, now)})"
+                for s in hits[:5])
+            text = (f"That matches {len(hits)} reminders: {names} "
+                    "— say which.")
+        else:
+            s = hits[0]
+            old = self._reminder_label(s)
+            act = (s.get("action") if isinstance(s.get("action"),
+                                                dict) else {})
+            prefix = re.match(
+                r"^((?:reminders?|alarms?|timers?|schedules?)"
+                r"\s*:)", str(s.get("name") or ""),
+                re.IGNORECASE)
+            name = ((prefix.group(1) + " ") if prefix
+                    else "reminder: ") + new[:100]
+            try:
+                sched.update(
+                    str(s["id"]), name=name,
+                    action={**act, "detail": new})
+            except Exception as exc:
+                text = (f"I couldn't rename the reminder "
+                        f"({exc}).")
+            else:
+                text = (f"Renamed the reminder “{old}” to "
+                        f"“{new}”.")
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
@@ -7016,6 +7114,10 @@ class AgentOrchestrator:
         if mt is not None:
             return self._reminder_toggle_reply(
                 user_text, mt, task_id, event_callback)
+        mre = self._REMINDER_RENAME_RE.match(plan_text)
+        if mre is not None:
+            return self._reminder_rename_reply(
+                user_text, mre, task_id, event_callback)
         mr = self._REMINDER_RESCHEDULE_RE.match(plan_text)
         if mr is None:
             mr = self._REMINDER_RESCHEDULE_BARE_RE.match(plan_text)
@@ -7899,6 +8001,13 @@ class AgentOrchestrator:
                                 f"{task_t}? — e.g. “remind me in 10 "
                                 f"minutes {conn} {task_t}”.",
                                 user_text, task_id, event_callback)
+                    if (nt_task
+                            and self._REMINDER_CADENCE_TASK_RE
+                            .fullmatch(nt_task)):
+                        # 'once a week on saturdays' — the cadence
+                        # words aren't a task name; drop them so
+                        # the lane asks instead of minting a row.
+                        nt_task = ""
                     if spec_nt is not None and nt_task:
                         sup = (self._autonomy() if callable(
                             self._autonomy) else self._autonomy)
@@ -8269,6 +8378,21 @@ class AgentOrchestrator:
                         m = mg
                         when_raw = str(mg.group("when") or "").strip(
                             " ,;—-")
+            if spec is None and when_raw:
+                # 'weekly on saturdays' — a redundant cadence word
+                # glued to a parseable connector tail; the tail
+                # carries the real schedule.
+                for bw in re.finditer(
+                        r"\s+(?=(?:on|at|in|every)\s)", when_raw,
+                        re.IGNORECASE):
+                    right_w = when_raw[bw.start():].strip()
+                    spec_w = self._reminder_spec(
+                        right_w, time.time())
+                    if spec_w is not None:
+                        when_raw = right_w
+                        spec = spec_w
+                        forced_when = right_w
+                        break
             if spec is None and when_raw.lower() == "not":
                 # 'remind me not to forget' — the negation is the
                 # task, not a when. A trailing boundary word may
@@ -8405,11 +8529,11 @@ class AgentOrchestrator:
                 end_note = (" — it repeats until you cancel; I "
                             "can't hold an end bound like “for "
                             f"{mfd.group(1)}”")
-        if task and re.fullmatch(
-                r"once|twice|thrice|(?:two|three|four|five|six|"
-                r"seven|\d+)\s+times?", task, re.IGNORECASE):
+        if task and self._REMINDER_CADENCE_TASK_RE.fullmatch(task):
             # 'remind me twice on friday' — a fire count, not a
-            # task; ask for the task on the parsed when.
+            # task; ask for the task on the parsed when. Same for
+            # 'once a week'/'every friday' — cadence phrases the
+            # when-slot left stranded aren't task names.
             return self._reminder_finish(
                 f"Sure — remind you to do what "
                 f"{str(m.group('when') or '').strip()}?",
@@ -9075,6 +9199,7 @@ class AgentOrchestrator:
             cls._REMINDER_NOTASK_RE, cls._REMINDER_CANCEL_RE,
             cls._REMINDER_CANCEL_BARE_RE,
             cls._REMINDER_SNOOZE_RE, cls._REMINDER_TOGGLE_RE,
+            cls._REMINDER_RENAME_RE,
             cls._REMINDER_STOP_RE, cls._REMINDER_RESCHEDULE_RE,
             cls._REMINDER_RESCHEDULE_BARE_RE,
             cls._REMINDER_RESCHEDULE_PUSH_RE,

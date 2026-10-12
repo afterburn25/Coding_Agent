@@ -1790,6 +1790,21 @@ class TruthGateTests(RecoveryLoopTests):
                              if r["id"] != sid]
                 return len(self.rows) < n
 
+            def update(self, sid, **fields):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r.update(fields)
+                        return dict(r)
+                return None
+
+            def set_enabled(self, sid, enabled):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r["enabled"] = bool(enabled)
+                        return True
+                return False
+                return len(self.rows) < n
+
         class _Sup:
             def __init__(self):
                 self.scheduler = _Sched()
@@ -1838,6 +1853,46 @@ class TruthGateTests(RecoveryLoopTests):
             "cancel my alarms", "cancel my alarms", task.id)
         self.assertIsNotNone(r)
         self.assertFalse(sup.scheduler.rows)
+
+        # 'rename X to Y' mutates the row's name + detail — never
+        # a narrated label over an untouched row.
+        sup.scheduler.add(
+            "reminder: standup", "once", at=time.time() + 3600,
+            action={"kind": "notify", "detail": "standup"})
+        r = agent._reminder_reply(
+            "rename the standup to scrum",
+            "rename the standup to scrum", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("scrum", r.content)
+        self.assertEqual(sup.scheduler.rows[0]["name"],
+                         "reminder: scrum")
+        self.assertEqual(
+            sup.scheduler.rows[0]["action"]["detail"], "scrum")
+        # 'put X on hold' is the pause idiom noun-less — a real
+        # off flip on the matched row.
+        r = agent._reminder_reply(
+            "put the scrum on hold",
+            "put the scrum on hold", task.id)
+        self.assertIsNotNone(r)
+        self.assertFalse(sup.scheduler.rows[0]["enabled"])
+        # Cadence words stranded in a task slot clarify instead of
+        # minting a row named 'once a week'.
+        sup.scheduler.rows.clear()
+        r = agent._reminder_reply(
+            "remind me once a week on saturdays",
+            "remind me once a week on saturdays", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("do what", r.content)
+        self.assertFalse(sup.scheduler.rows)
+        # 'weekly on saturdays' — the connector tail carries the
+        # real schedule past the redundant cadence word.
+        r = agent._reminder_reply(
+            "remind me weekly on saturdays to meal prep",
+            "remind me weekly on saturdays to meal prep", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("Saturday", r.content)
+        self.assertIn("meal prep", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 1)
 
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
