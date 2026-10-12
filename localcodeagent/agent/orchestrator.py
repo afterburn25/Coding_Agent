@@ -3887,7 +3887,8 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?P<verb>turn|switch|disable|enable|re-?enable|pause|"
         r"resume|unpause|unmute|unsilence|stop|mute|silence|"
-        r"hold|freeze|suspend|quiet|block)\s+(?P<body>.+?)?"
+        r"hold|freeze|suspend|quiet|block|un-?block|unfreeze|"
+        r"thaw)\s+(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?|schedules?|"
         r"it|that|this|them|everything|all)\b"
         + _REMINDER_ECHO +
@@ -4674,7 +4675,7 @@ class AgentOrchestrator:
             else:
                 want_on = bool(re.fullmatch(
                     r"enable|re-?enable|resume|unpause|unmute|"
-                    r"unsilence", verb))
+                    r"unsilence|un-?block|unfreeze|thaw", verb))
         if want_on is None:
             return self._reminder_finish(
                 "Turn them on or off? — e.g. “turn off "
