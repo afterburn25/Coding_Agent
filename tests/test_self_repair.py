@@ -696,6 +696,32 @@ class ResearchHookTests(unittest.TestCase):
             self.assertEqual(calls, [])          # generator never ran
             self.assertFalse(final.get("worktree"))
 
+    def test_signal_free_incident_resumed_at_patching_never_spawns(self):
+        # An incident persisted mid-flight in `patching` (restart, or
+        # a lost-worktree rewind) skips planning entirely — the
+        # dispatch gate must still refuse a mission when repair_kind
+        # never became actionable.
+        with tempfile.TemporaryDirectory() as td:
+            repo = make_repo(td)
+            calls = []
+
+            def spy_generator(incident, wt):
+                calls.append(incident)
+                return {"files": []}
+
+            coord = make_coord(td, repo, patch_generator=spy_generator)
+            inc, _ = coord.report_failure(
+                source="user_report", subsystem="chat",
+                exc_type="UserReport",
+                error_message="the api keeps timing out")
+            # Simulate a persisted mid-flight resume.
+            coord._set(inc, "patching")
+            coord._save()
+            coord.process_incident(inc["id"], max_steps=10)
+            final = coord.get(inc["id"])
+            self.assertEqual(final["state"], "needs_human")
+            self.assertEqual(calls, [])          # generator never ran
+
 
 class EvalRecorderTests(unittest.TestCase):
     """Terminal incidents report verification evidence to EvalLab."""

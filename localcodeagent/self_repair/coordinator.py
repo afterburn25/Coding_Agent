@@ -430,6 +430,16 @@ class SelfRepairCoordinator:
             self._fail_open(inc, "no code-repair generator wired — "
                                  "diagnosis and suspects attached")
             return ""
+        if not inc.get("repair_kind"):
+            # Defense in depth — the planning gate catches new
+            # signal-free incidents, but a persisted `patching`
+            # incident (or a lost-worktree rewind) can reach mission
+            # spawn with an empty repair_kind; a vague complaint must
+            # never launch a blind patch mission.
+            self._fail_open(
+                inc, "patching reached with no actionable diagnosis — "
+                     "needs human triage")
+            return ""
         if self._is_blocked():
             self._fail_open(inc, "autonomy is stopped/paused")
             return ""
