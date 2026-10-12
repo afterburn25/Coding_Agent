@@ -3926,7 +3926,10 @@ class AgentOrchestrator:
     # generic without a noun.
     _REMINDER_RESCHEDULE_BARE_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?P<verb>reschedule)\s+"
+        # 'move'/'change' join on a row hit and fall through on a
+        # miss — 'move pay rent' is a schedule op, 'move the
+        # table' isn't.
+        r"(?P<verb>reschedule|move|change)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)"
         r"(?:\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?))?"
         + _REMINDER_TRAIL,
@@ -4242,21 +4245,57 @@ class AgentOrchestrator:
         """'reschedule the deploy reminder to friday at 3' — a real
         scheduler.update of at/kind fields."""
         noun = mr.groupdict().get("noun")
+        verb_l = str(mr.group("verb") or "").lower()
         if (mr.group("when") is None
-                and str(mr.group("verb") or "").lower()
-                    in ("move", "change")
+                and verb_l in ("move", "change")
                 and str(noun or "").lower()
                     in ("it", "that", "this")):
             # 'move it'/'change it' — a bare pronoun and no target
             # is a file/object turn, not a schedule op; let it fall
             # through to the action lanes.
             return None
+        if (verb_l in ("move", "change")
+                and mr.groupdict().get("noun") is None
+                and str(mr.group("body") or "").strip().lower()
+                    in ("it", "that", "this", "them", "")):
+            # 'move it to friday' — a pronoun body resolves no row;
+            # still a file/object turn.
+            return None
         sched, rows = self._reminder_rows(noun=noun)
         if sched is None:
+            if (verb_l in ("move", "change")
+                    and mr.groupdict().get("noun") is None):
+                # No scheduler to resolve the body against — a
+                # bare move/change belongs to the action lanes.
+                return None
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
                 "running in this session.",
                 user_text, task_id, event_callback)
+        body = str(mr.group("body") or "").strip(" ,;—-")
+        topic_terms = self._reminder_terms(re.sub(
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
+            " ", body, flags=re.IGNORECASE))
+        hits = [s for s in rows if not topic_terms
+                or topic_terms <= self._reminder_hay(s)]
+        if (verb_l in ("move", "change")
+                and mr.groupdict().get("noun") is None
+                and not hits and topic_terms):
+            # Bare move/change elaborates — 'pay rent' should hit a
+            # row named just 'rent'. Relaxed direction: the row's
+            # own label terms live inside what was said. 'move the
+            # table' still resolves nothing → falls through.
+            hits = [s for s in rows
+                    if self._reminder_terms(
+                        self._reminder_label(s))
+                    and self._reminder_terms(
+                        self._reminder_label(s)) <= topic_terms]
+        if (verb_l in ("move", "change")
+                and mr.groupdict().get("noun") is None
+                and not hits):
+            # 'move the table'/'change the font' — a body that
+            # resolves no reminder row isn't a schedule op.
+            return None
         spec = self._reminder_spec(
             str(mr.group("when") or ""), time.time())
         _wtxt = str(mr.group("when") or "").strip()
@@ -4282,12 +4321,6 @@ class AgentOrchestrator:
                 "Reschedule to when? — e.g. “to friday at 3pm” "
                 "or “to every morning”.",
                 user_text, task_id, event_callback)
-        body = str(mr.group("body") or "").strip(" ,;—-")
-        topic_terms = self._reminder_terms(re.sub(
-            r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
-            " ", body, flags=re.IGNORECASE))
-        hits = [s for s in rows if not topic_terms
-                or topic_terms <= self._reminder_hay(s)]
         if not rows:
             text = self._reminder_none_text(
                 sched, noun)

@@ -3734,6 +3734,23 @@ class TruthGateTests(RecoveryLoopTests):
                 "remind me every monday at 8 and every friday "
                 "at 9", mode="auto")
             self.assertFalse(sup.scheduler.rows)
+
+            # 'move pay rent to X' — a row-hitting move/change is
+            # a reschedule; a miss like 'move the table' falls
+            # through to the action lanes (and 'move it'/'change
+            # it' stay generic asks).
+            sup.scheduler.add(
+                "Reminder: rent", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "rent"})
+            result = agent.run(
+                "move pay rent to friday at 2pm", mode="auto")
+            self.assertIn("Rescheduled", result.content)
+            task = agent.tasks.create("x", "auto")
+            self.assertIsNone(agent._reminder_reply(
+                "move the table to the garage",
+                "move the table to the garage", task.id))
+            sup.scheduler.rows.clear()
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(
