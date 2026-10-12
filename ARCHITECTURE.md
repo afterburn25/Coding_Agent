@@ -322,6 +322,18 @@ driver liveness: _drive_threads registry + watchdog
   MCP server subprocesses, tracked background terminal processes, the managed
   ComfyUI process, and all model runtimes; the desktop host restarts a crashed
   backend (crash-loop bound of 3 restarts inside 5 minutes).
+- Durable stores persist through `DocStore` — a `(domain, basename)` kv row in
+  `state.db` plus an atomic file shadow. Three stores share the name
+  "procedure" but are deliberately separate memories with one writer each:
+  `autonomy/procedures.json` (`ProcedureMemory`) records *terminal outcomes of
+  recurring missions* keyed by `source:source_id` — history hand-off and
+  re-spawn suppression for detector/goal/schedule signatures;
+  `learning/procedures.json` (`ProceduralMemory`) holds *learned skill
+  procedures* — verified multi-episode recipes with success stats, staleness,
+  and promotion; `autonomy/repair_memory.json` (`RepairMemory`) holds *repair
+  recipes per failure signature* — which fixes worked and which looped. The
+  `(domain, key)` primary key keeps the shared basename collision-free; each
+  store is written only by its owner class.
 
 ## v0.4 Web + Image capability layers
 
