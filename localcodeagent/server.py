@@ -5243,9 +5243,19 @@ class AppState:
                 body[:um.start()].strip(), time.time())
             if spec_u is not None and spec_u["kind"] != "once":
                 spec, desc = spec_u, desc_u
+                # 'until 10pm to stretch' — the task follows the
+                # bound; recover it from the tail.
+                tail = um.group(1).strip()
+                _, tail_desc = self._parse_reminder_time(
+                    tail, time.time())
+                if tail_desc:
+                    desc = desc or tail_desc
+                    tail = re.sub(
+                        r"\s+(?:to|for)\s+" + re.escape(tail_desc)
+                        + r"\s*$", "", tail) or tail
                 end_note = (" — it repeats until you cancel; I "
                             "can't hold an end bound like "
-                            f"“until {um.group(1)}”")
+                            f"“until {tail}”")
             else:
                 spec, desc = self._parse_reminder_time(
                     body, time.time())
