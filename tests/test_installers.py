@@ -138,7 +138,8 @@ class TestInstallIntent(unittest.TestCase):
         self.assertEqual(p.kind, "install")
         self.assertEqual(p.tool, "computer_install")
         self.assertEqual(p.permission, "packages.install")
-        self.assertEqual(p.params["path"], str(f))
+        self.assertEqual(Path(p.params["path"]).resolve(),
+                         f.resolve())
 
     def test_install_product_searches_downloads(self):
         orig = apps.find_installer

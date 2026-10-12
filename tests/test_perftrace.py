@@ -13,11 +13,14 @@ class PerfTraceTests(unittest.TestCase):
     def test_marks_keep_order_and_deltas(self):
         p = PerfTrace()
         p.mark("chat", "send")
-        time.sleep(0.01)
+        # Windows monotonic ticks at ~15.6ms (GetTickCount64 since
+        # CPython 3.13); a 10ms sleep can land both marks in one
+        # tick. Sleep past two ticks for a reliable nonzero delta.
+        time.sleep(0.05)
         p.mark("chat", "first_token")
         rows = p.timeline(lane="chat")
         self.assertEqual([r["stage"] for r in rows], ["send", "first_token"])
-        self.assertGreaterEqual(rows[1]["delta_s"], 0.005)
+        self.assertGreaterEqual(rows[1]["delta_s"], 0.02)
 
     def test_unknown_lane_rejected(self):
         p = PerfTrace()

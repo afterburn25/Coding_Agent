@@ -68,7 +68,7 @@ class CodingModelCatalogTests(unittest.TestCase):
             manager = CodingModelCatalogManager(Path(td))
             with patch("localcodeagent.runtime.catalog.catalog_by_id", return_value={asset.id: asset}), patch(
                 "localcodeagent.runtime.catalog.urllib.request.urlopen",
-                return_value=_Response(data),
+                side_effect=lambda *a, **k: _Response(data),
             ):
                 job = manager.start_install(asset.id)
                 deadline = time.time() + 3
@@ -99,7 +99,7 @@ class CodingModelCatalogTests(unittest.TestCase):
             manager = CodingModelCatalogManager(Path(td))
             with patch("localcodeagent.runtime.catalog.catalog_by_id", return_value={asset.id: asset}), patch(
                 "localcodeagent.runtime.catalog.urllib.request.urlopen",
-                return_value=SlowResponse(),
+                side_effect=lambda *a, **k: SlowResponse(),
             ):
                 first = manager.start_install(asset.id)
                 second = manager.start_install(asset.id)

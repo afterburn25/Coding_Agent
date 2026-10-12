@@ -129,7 +129,8 @@ class TestParse(unittest.TestCase):
         ext.mkdir()
         plan = parse_local_action(
             f"create folder alpha in {ext}", workspace=self.ws)
-        self.assertEqual(Path(plan.params["path"]), ext / "alpha")
+        self.assertEqual(Path(plan.params["path"]),
+                         (ext / "alpha").resolve())
         self.assertTrue(plan.outside_root)
 
     def test_name_containing_in_is_preserved(self):
