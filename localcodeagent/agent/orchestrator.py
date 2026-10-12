@@ -3885,8 +3885,16 @@ class AgentOrchestrator:
         r"(?:(?!reminders?\b|alarms?\b|timers?\b|schedules?\b)"
         r"[\w'-]+\s+){0,4}?"
         r"(?:reminders?|alarms?|timers?|schedules?)\s+"
+        r"(?:still|currently|actually|really)?\s*"
         r"(?:on|off|enabled|disabled|active|inactive|paused|"
-        r"running|going|muted|back)\b" + _REMINDER_TRAIL,
+        r"running|going|muted|back)\b" + _REMINDER_TRAIL +
+        # 'did i disable/turn off the stretch reminder' — a state
+        # ask about the row's current enabled flag; the persisted
+        # row answers it.
+        r"|" + _REMINDER_POLITE +
+        r"did\s+i\s+(?:disable|turn\s+off|switch\s+off|mute|"
+        r"pause)\s+(?:(?:the|my|that|this)\s+)?[\w'\s-]{0,30}?"
+        r"(?:reminders?|alarms?|timers?)\b" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
@@ -5411,10 +5419,24 @@ class AgentOrchestrator:
         # 'what timers do i have' lists timers, not reminders.
         nm = re.search(r"\b(alarms?|timers?)\b", plan_text,
                        re.IGNORECASE)
+        # 'which reminders are turned off' / 'any disabled
+        # reminders' — state-filtered inventory must include the
+        # disabled pool; answering from enabled-only rows hides
+        # exactly the rows asked about.
+        fired_t = re.search(
+            r"\b(?:go|went|gone)\s+off\b|\bfired\b|\brang\b",
+            plan_text, re.IGNORECASE)
+        off_ask = (fired_t is None and bool(re.search(
+            r"\b(?:disabled|turned?\s+off|switched\s+off|paused|"
+            r"muted|inactive|still\s+off)\b|\boff\b",
+            plan_text, re.IGNORECASE)))
         sched, rows = self._reminder_rows(
+            include_disabled=off_ask,
             noun=nm.group(1).lower() if nm else None)
         if sched is None:
             return None
+        if off_ask:
+            rows = [s for s in rows if not s.get("enabled", True)]
         now = time.time()
         # Scoped asks — 'do i have a reminder about the dentist',
         # 'when is my dentist reminder' — filter to the named topic;
@@ -5451,6 +5473,9 @@ class AgentOrchestrator:
                     r"you|your|got|still|really|actually|don'?t|dont|"
                     r"not|no|more|longer|anymore|list|show|see|how|"
                     r"many|much|number|count|total|tell|give|display|"
+                    r"disabled?|enabled?|paused?|muted?|active|"
+                    r"inactive|turn(?:ed)?|switch(?:ed)?|"
+                    r"paus(?:e|ing)|mut(?:e|ing)|off|on|"
                     r"view|run|through|walk|read|out)\b",
                     " ", tm.group(1), flags=re.IGNORECASE))
         when_ask = bool(re.match(
@@ -5625,6 +5650,10 @@ class AgentOrchestrator:
                         "%H:%M", time.localtime(float(lr)))
                     text = (f"Yes — “{self._reminder_label(s)}” "
                             f"fired at {when_f}.")
+                elif not s.get("enabled", True):
+                    text = (f"No — “{self._reminder_label(s)}” is "
+                            "off, so it can't fire until you turn "
+                            "it back on.")
                 else:
                     text = (f"Not yet — "
                             f"“{self._reminder_label(s)}” is set "
@@ -5654,6 +5683,21 @@ class AgentOrchestrator:
                         f"{names}.")
             else:
                 text = (f"No {noun_pl} set — say “remind me in 10 "
+                        "minutes to …” and I'll schedule it.")
+        elif not rows and off_ask:
+            # 'which reminders are off' over an all-on pool — the
+            # enabled rows exist, they're just not what was asked.
+            _, all_rows = self._reminder_rows(
+                noun=nm.group(1).lower() if nm else None)
+            if all_rows:
+                names_a = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in all_rows[:3])
+                text = (f"Nothing's off — {len(all_rows)} reminder"
+                        f"{'s are' if len(all_rows) != 1 else ' is'}"
+                        f" on: {names_a}.")
+            else:
+                text = ("No reminders set — say “remind me in 10 "
                         "minutes to …” and I'll schedule it.")
         elif scope_terms or day_dates:
             hits = [s for s in rows
@@ -5692,8 +5736,13 @@ class AgentOrchestrator:
                 f"“{self._reminder_label(s)}” "
                 f"({self._reminder_when_text(s, now)})"
                 for s in rows[:5])
-            text = (f"You've got {len(rows)} reminder"
-                    f"{'s' if len(rows) != 1 else ''}: {bits}.")
+            if off_ask:
+                text = (f"{len(rows)} reminder"
+                        f"{'s are' if len(rows) != 1 else ' is'}"
+                        f" off: {bits}.")
+            else:
+                text = (f"You've got {len(rows)} reminder"
+                        f"{'s' if len(rows) != 1 else ''}: {bits}.")
         from ..context.realize import RenderedReply
         return RenderedReply(text=text, speech_act="answer")
 

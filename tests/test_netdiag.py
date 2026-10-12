@@ -1678,10 +1678,38 @@ class TruthGateTests(RecoveryLoopTests):
             for q in ("show me upcoming reminders",
                       "are there reminders for today",
                       "list everything scheduled",
-                      "any alarms tomorrow"):
+                      "any alarms tomorrow",
+                      "am i reminded of anything",
+                      "upcoming events",
+                      "has my reminder fired yet"):
                 self.assertTrue(
                     AgentOrchestrator.can_run_without_coding_model(q),
                     q)
+
+            # State-filtered inventory includes the disabled pool —
+            # 'which reminders are off' must not hide off rows.
+            off_row = next(
+                s for s in sup.scheduler.rows
+                if "lunch" in s["name"])
+            off_row["enabled"] = False
+            inv = agent._reminder_inventory_reply(
+                "which reminders are turned off",
+                "which reminders are turned off")
+            self.assertIsNotNone(inv)
+            self.assertIn("lunch", inv.text)
+            self.assertNotIn("timesheets", inv.text)
+            inv = agent._reminder_inventory_reply(
+                "any disabled reminders",
+                "any disabled reminders")
+            self.assertIsNotNone(inv)
+            self.assertIn("lunch", inv.text)
+            # 'did i disable X' answers from the row's enabled flag.
+            inv = agent._reminder_inventory_reply(
+                "did i disable the lunch reminder",
+                "did i disable the lunch reminder")
+            self.assertIsNotNone(inv)
+            self.assertIn("off", inv.text)
+            off_row["enabled"] = True
             # A parseable time with no task clarifies, never guesses.
             r = agent._reminder_reply(
                 "remind me in 5 minutes",
