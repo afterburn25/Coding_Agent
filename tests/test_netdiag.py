@@ -3114,6 +3114,15 @@ class TruthGateTests(RecoveryLoopTests):
                 "remind me at six thirty", task.id)
             self.assertIsNotNone(r)
             self.assertIn("do what", r.content)
+
+            # 'i have a reminder at 5 right' — a confirmation
+            # ask; the model guessed 'No reminder at 5 right now'
+            # from narration. Confirm-tags lane to real inventory.
+            r = agent._reminder_reply(
+                "i have a reminder at 5 right",
+                "i have a reminder at 5 right", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("you've got", r.content)
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —

@@ -4658,7 +4658,9 @@ class AgentOrchestrator:
                 r"how\s+much|how\s+long|how\s+soon|"
                 r"time\s+(?:left|until|till)|left|list|"
                 r"show|do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
+                r"i\s+have|i'?ve\s+(?:got\s+)?|"
                 r"are\s+there|got|active|pending|upcoming|when|"
+                r"right\s*\??|correct\b|yeah\??\s*$|"
                 r"tell\s+me|run\s+through|go\s+through|"
                 r"walk\s+me\s+through|read\s+(?:out|through))\b",
                 text, re.IGNORECASE)
@@ -4711,7 +4713,7 @@ class AgentOrchestrator:
             scope_terms = self._reminder_terms(re.sub(
                 r"\b(?:reminders?|alarms?|timers?|schedules?|"
                 r"calendars?|scheduled|the|a|an|my|that|me|us|"
-                r"at|in|on)\b",
+                r"at|in|on|right|correct|yeah)\b",
                 " ", sm.group(1), flags=re.IGNORECASE))
         if sm is None:
             # No connector tail — 'when is the dentist reminder'
@@ -4902,7 +4904,8 @@ class AgentOrchestrator:
                 user_text, task_id, event_callback)
         if (self._REMINDER_REFER_RE.match(plan_text)
                 or self._REMINDER_INV_LEAD_RE.match(plan_text)
-                or self._REMINDER_STATEASK_RE.match(plan_text)):
+                or self._REMINDER_STATEASK_RE.match(plan_text)
+                or self._reminder_inventory_shaped(plan_text)):
             # 'that reminder at 3' / 'tell me about my reminders' —
             # referential or imperative inventory asks, not creates;
             # the model narrated fake sets and empty schedules.
