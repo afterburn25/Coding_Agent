@@ -2753,6 +2753,18 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("No alarm set", result.content)
             self.assertIn("pay rent", result.content)
 
+            # 'move the pay rent reminder to 11' — a bare-number
+            # reschedule target is the clock (11:00), never
+            # 'in 11 minutes'.
+            row = sup.scheduler.add(
+                "Reminder: dentist", "once",
+                at=time.time() + 90000)
+            result = agent.run(
+                "move the dentist reminder to 11", mode="auto")
+            self.assertIn("Rescheduled", result.content)
+            self.assertIn("11:00", result.content)
+            sup.scheduler.remove(str(row["id"]))
+
             # 'cancel everything' — pool-wide cancel through the
             # deterministic lane; the model fake-refused 'no
             # active reminders' over a live pool.

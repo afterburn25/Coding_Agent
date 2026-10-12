@@ -4246,15 +4246,24 @@ class AgentOrchestrator:
                 user_text, task_id, event_callback)
         spec = self._reminder_spec(
             str(mr.group("when") or ""), time.time())
+        _wtxt = str(mr.group("when") or "").strip()
         if spec is None:
             # 'change the timer to 30 minutes' — a duration target,
-            # not a clock.
-            spec = self._reminder_spec(
-                "in " + str(mr.group("when") or ""), time.time())
+            # not a clock. A bare number is the clock first —
+            # 'to 11' is 11:00, not 'in 11 minutes'.
+            if re.fullmatch(r"\d{1,4}", _wtxt):
+                spec = self._reminder_spec(
+                    "at " + _wtxt, time.time())
+                if spec is None:
+                    spec = self._reminder_spec(
+                        "in " + _wtxt, time.time())
+            else:
+                spec = self._reminder_spec(
+                    "in " + _wtxt, time.time())
         if spec is None:
             # 'change my alarm to 7' — a bare clock target.
             spec = self._reminder_spec(
-                "at " + str(mr.group("when") or ""), time.time())
+                "at " + _wtxt, time.time())
         if spec is None:
             return self._reminder_finish(
                 "Reschedule to when? — e.g. “to friday at 3pm” "
