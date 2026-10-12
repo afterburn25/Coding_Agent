@@ -4529,6 +4529,36 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertNotIn("logged", r.content)
             self.assertIn("can't file", r.content)
 
+    def test_agent_complaint_survives_persona_veto(self):
+        # A named persona vetoes canned small talk — but the bug-report
+        # ack is a fact ("I logged X"), not style. Without the
+        # exemption the ack is dropped and the turn falls to the model
+        # lane — the ~180s stall seen live under a starved GPU.
+        class _Repair:
+            def __init__(self):
+                self.calls = []
+
+            def report_failure(self, **kw):
+                self.calls.append(kw)
+                return ({"id": "ri-9"}, "new")
+
+        class _Sup:
+            def __init__(self):
+                self.repair = _Repair()
+
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            agent._persona_active = lambda: True
+            provider = _ScriptedProvider([{
+                "role": "assistant", "content": "model should not run"}])
+            agent._provider_for = lambda p, **kw: provider
+            r = agent.run("the api keeps timing out", mode="chat")
+            self.assertIn("logged", r.content)
+            self.assertNotIn("model should not run", r.content)
+            self.assertEqual(len(sup.repair.calls), 1)
+
     def test_world_complaint_stays_on_model_path(self):
         # 'my code keeps crashing' is a help-me request, not a product
         # complaint — the lane must not claim it or file an incident.

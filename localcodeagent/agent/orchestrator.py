@@ -12979,6 +12979,7 @@ class AgentOrchestrator:
             and facts_reply is None
             and recall_reply is None
             and state_reply is None
+            and complaint_reply is None
             and self._persona_active()
             and not builtin_reply.genome_rendered
         ):
@@ -12987,9 +12988,9 @@ class AgentOrchestrator:
             # flat and break character. Let the model lane answer; the
             # utility prompt already lists real capabilities.
             # EXCEPTIONS: creator-locked identity answers (age/birthday/
-            # creator) and the GitHub live-status lane are facts, not
-            # style — they stay deterministic under a persona so no
-            # model output can contradict them.
+            # creator), the GitHub live-status lane, and the bug-report
+            # ack are facts, not style — they stay deterministic under
+            # a persona so no model output can contradict them.
             from .. import identity
             if identity.response_for(
                     user_text,
