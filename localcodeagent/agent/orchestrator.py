@@ -5094,10 +5094,35 @@ class AgentOrchestrator:
             if pick is None:
                 return None
             mn = re.search(
-                r"\b(?:reminders?|alarms?|timers?|schedules?)\b",
+                r"\b(?:reminders?|alarms?|timers?|schedules?|goals?)\b",
                 prior_user.lower())
             if mn is None:
                 return None
+            if mn.group(0).startswith("goal"):
+                # Goal selects can't splice-route — the goal op lives
+                # on the supervisor, not the scheduler. Resolve the
+                # pick to a goal row and carry the toggle direction
+                # out for _reminder_reply to apply directly.
+                want_on = bool(re.match(
+                    r"(?:start|enable|re-?enable|resume|unpause|"
+                    r"turn\s+on|turn\s+back\s+on|switch\s+on|"
+                    r"restart|bring\s+back|wake|activate)\b",
+                    prior_user.lower()))
+                pick_t = self._reminder_terms(pick)
+                sup = (self._autonomy() if callable(self._autonomy)
+                       else self._autonomy)
+                goals = []
+                try:
+                    goals = list(sup.standing_goals() or []) \
+                        if sup is not None else []
+                except Exception:
+                    goals = []
+                hits = [g for g in goals
+                        if pick_t <= self._reminder_terms(
+                            str(g.get("objective") or ""))]
+                if len(hits) != 1:
+                    return None
+                return {"goal": hits[0], "on": want_on}
             return (f"{prior_user[:mn.start()]}{pick} "
                     f"{mn.group(0)}{prior_user[mn.end():]}")
         if ask == "noun_fire":
@@ -6267,6 +6292,27 @@ class AgentOrchestrator:
         Falls through (None) for 'remind me the tag' recall asks —
         those belong to memory lanes."""
         synth = self._reminder_pending(user_text)
+        if isinstance(synth, dict):
+            # 'That matches N goals — say which.' → 'the first one':
+            # the goal op lives on the supervisor, so the resolver
+            # carries the pick out and the toggle lands here.
+            sup = (self._autonomy() if callable(self._autonomy)
+                   else self._autonomy)
+            goal = synth["goal"]
+            obj = str(goal.get("objective") or goal.get("id") or "")
+            ok = False
+            try:
+                ok = bool(sup is not None and sup.set_goal_enabled(
+                    str(goal["id"]), bool(synth["on"])))
+            except Exception:
+                ok = False
+            text = (
+                f"{'Re-enabled' if synth['on'] else 'Stopped'} "
+                f"the goal “{obj[:60]}”." if ok else
+                "I couldn't change that goal — the supervisor "
+                "refused.")
+            return self._reminder_finish(
+                text, user_text, task_id, event_callback)
         if synth is not None:
             # 'Snooze until when?' → 'for 20 minutes': the fragment
             # completes the pending op against its original scope.
