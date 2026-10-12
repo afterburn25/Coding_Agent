@@ -5308,6 +5308,12 @@ class AppState:
         if noun != "reminder" and not desc:
             desc = noun
         if not desc:
+            # 'remind me on the 15th of each month' — the cadence
+            # parsed but no task was given; echo the when like the
+            # orchestrator lane does.
+            if spec is not None and body.strip():
+                return {"content": (
+                    f"Sure — remind you to do what {body.strip()}?")}
             return {"content": "Remind you to do what?"}
         if spec is None:
             if defer_no_time:
