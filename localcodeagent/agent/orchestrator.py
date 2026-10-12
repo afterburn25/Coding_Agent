@@ -3819,7 +3819,8 @@ class AgentOrchestrator:
     _REMINDER_INV_LEAD_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:tell\s+me(?:\s+about)?|run\s+through|go\s+through|"
-        r"walk\s+me\s+through|read\s+(?:out|through)|list|show)\s+"
+        r"walk\s+me\s+through|read\s+(?:out|through)|list|show|"
+        r"count)\s+"
         r"(?:(?:my|the|your|all)\s+)?"
         r"(?:reminders?|alarms?|timers?|schedules?)\b"
         r"(?:\s+(?:about|regarding|for|on|of|at)\s+.+?)?"
@@ -3872,10 +3873,16 @@ class AgentOrchestrator:
         r"popped\s+up)\b(?:\s+(?:yet|already|just|still))?"
         + _REMINDER_TRAIL +
         # Passive inventory — 'am i reminded of anything' asks the
-        # same store the active forms do.
+        # same store the active forms do. 'did i miss any
+        # reminders' is a fired-ask — last_run answers it.
         r"|" + _REMINDER_POLITE +
         r"(?:am|are)\s+i\s+(?:still\s+)?reminded\b"
         r"(?:\s+of\s+.+?)?"
+        + _REMINDER_TRAIL +
+        r"|" + _REMINDER_POLITE +
+        r"did\s+i\s+(?:just\s+)?miss(?:ed)?\s+"
+        r"(?:(?:the|my|that|this|any|a)\s+)?[\w'\s-]{0,30}?"
+        r"(?:reminders?|alarms?|timers?)\b"
         + _REMINDER_TRAIL +
         # Cadence asks — 'how often does the standup fire', 'is the
         # standup daily or weekly', 'what day does the rent
@@ -5564,7 +5571,8 @@ class AgentOrchestrator:
                     r"had|any|"
                     r"anything|go|goes|going|gone|went|off|fire|fires|"
                     r"firing|fired|ring|rang|happen|happened|trigger|"
-                    r"triggered|pop|popped|set|"
+                    r"triggered|pop|popped|set|miss(?:ed)?|"
+                    r"just|already|yet|recent(?:ly)?|"
                     r"the|a|an|my|that|next|time|day|date|hour|i|me|we|"
                     r"you|your|got|still|really|actually|don'?t|dont|"
                     r"not|no|more|longer|anymore|list|show|see|how|"
@@ -5620,7 +5628,9 @@ class AgentOrchestrator:
             r"pop\s+up)\b|\b(?:has|have)\b.{0,40}\b"
             r"(?:reminders?|alarms?|timers?)\b.{0,20}\b"
             r"(?:fired|gone\s+off|rang|rung|happened|triggered|"
-            r"popped\s+up)\b", plan_text, re.IGNORECASE))
+            r"popped\s+up)\b|\bdid\b.{0,20}\bmiss(?:ed)?\b"
+            r".{0,25}\b(?:reminders?|alarms?|timers?)\b",
+            plan_text, re.IGNORECASE))
         cad_ask = bool(re.search(
             r"\bhow\s+(?:often|frequently)\b|"
             r"\b(?:daily|weekly|monthly|hourly|yearly|recurring|"
