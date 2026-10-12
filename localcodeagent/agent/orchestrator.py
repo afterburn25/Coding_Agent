@@ -4616,6 +4616,7 @@ class AgentOrchestrator:
         """'snooze the X reminder [for 20m|until 3pm]' — a real `at`
         update via scheduler.update, never a narrated postponement."""
         sched, rows = self._reminder_rows(
+            include_disabled=True,
             noun=(ms.groupdict().get("noun")
                   or ms.groupdict().get("noun3")
                   or ms.groupdict().get("noun4")
@@ -4883,7 +4884,11 @@ class AgentOrchestrator:
                             f"until {stamp}."
                             + (f" (merged {merged} duplicate"
                                + ("s.)" if merged != 1 else ".)")
-                               if merged else ""))
+                               if merged else "")
+                            + (" — it's off, so it won't fire "
+                               "until you turn it on"
+                               if not hits[0].get("enabled", True)
+                               else ""))
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
@@ -4933,7 +4938,8 @@ class AgentOrchestrator:
             # 'move it to friday' — a pronoun body resolves no row;
             # still a file/object turn.
             return None
-        sched, rows = self._reminder_rows(noun=noun)
+        sched, rows = self._reminder_rows(
+            include_disabled=True, noun=noun)
         if sched is None:
             if (verb_l in ("move", "change", "switch", "make", "push",
                     "bump", "shift")
@@ -5119,7 +5125,11 @@ class AgentOrchestrator:
                         + self._reminder_spec_text(fields, label)
                         + (f" (merged {merged} duplicate"
                            + ("s.)" if merged != 1 else ".)")
-                           if merged else ""))
+                           if merged else "")
+                        + (" — it's off, so it won't fire "
+                           "until you turn it on"
+                           if not hits[0].get("enabled", True)
+                           else ""))
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
@@ -6587,14 +6597,34 @@ class AgentOrchestrator:
                         or scope_terms <= self._reminder_hay(s))
                     and _in_window(s)]
             if not hits:
-                names = "; ".join(
-                    f"“{self._reminder_label(s)}”" for s in rows[:3])
-                what = (f"about “{' '.join(sorted(scope_terms))}”"
+                # A named row that's OFF is the honest answer, not
+                # 'no reminder' — 'when does the build reminder
+                # fire' over a disabled row should say it's off.
+                _, d_rows = self._reminder_rows(
+                    include_disabled=True,
+                    noun=nm.group(1).lower() if nm else None)
+                dhits = [s for s in d_rows
+                         if (not scope_terms
+                             or scope_terms <= self._reminder_hay(s))
+                         and _in_window(s)]
+                if len(dhits) == 1:
+                    s = dhits[0]
+                    text = (
+                        f"“{self._reminder_label(s)}” is off — it "
+                        f"won't fire (set for "
+                        f"{self._reminder_when_text(s, now)}). Say "
+                        "“turn on the reminder” to enable it.")
+                else:
+                    names = "; ".join(
+                        f"“{self._reminder_label(s)}”"
+                        for s in rows[:3])
+                    what = (
+                        f"about “{' '.join(sorted(scope_terms))}”"
                         if scope_terms
                         else f"for {day_label or 'then'}")
-                text = ("No reminder " + what
-                        + (f" — you've got: {names}."
-                           if rows else "."))
+                    text = ("No reminder " + what
+                            + (f" — you've got: {names}."
+                               if rows else "."))
             elif when_ask and len(hits) == 1:
                 text = (f"Your “{self._reminder_label(hits[0])}” "
                         f"reminder fires "

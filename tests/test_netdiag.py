@@ -4551,6 +4551,29 @@ class TruthGateTests(RecoveryLoopTests):
                 "switch the pay rent reminder to sunday",
                 mode="auto")
             self.assertIn("Rescheduled", r.content)
+            # Disabled rows are visible to mutation and state asks —
+            # 'push the build reminder back an hour' over a
+            # switched-off row reported "no reminder matching
+            # 'build'" live. Mutations land + disclose the off
+            # state; a when-ask names the row instead of missing.
+            sup.scheduler.rows[-1]["enabled"] = False
+            sup.scheduler.rows[-1]["kind"] = "once"
+            sup.scheduler.rows[-1]["at"] = time.time() + 3600
+            r = agent.run(
+                "snooze the pay rent reminder 30 minutes",
+                mode="auto")
+            self.assertIn("Snoozed", r.content)
+            self.assertIn("won't fire", r.content)
+            r = agent.run(
+                "reschedule the pay rent reminder to 7pm",
+                mode="auto")
+            self.assertIn("Rescheduled", r.content)
+            self.assertIn("won't fire", r.content)
+            r = agent.run(
+                "when does the pay rent reminder fire",
+                mode="auto")
+            self.assertIn("is off", r.content)
+            self.assertNotIn("No reminder", r.content)
 
     def test_clock_scoped_inventory_asks(self):
         # Grammar sweep: 'what happens at 9am', 'whats at 9am',
