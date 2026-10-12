@@ -4214,7 +4214,15 @@ class AgentOrchestrator:
         + _REMINDER_TRAIL +
         r"|" + _REMINDER_POLITE +
         r"(?P<noun2>reminders?|alarms?|timers?|schedules?)\s+"
-        r"(?P<dir2>back\s+on|off|on)" + _REMINDER_TRAIL,
+        r"(?P<dir2>back\s+on|off|on)" + _REMINDER_TRAIL +
+        # 'put the alarm on hold' — a pause idiom; 'put' can't
+        # join the generic verb list ('put the alarm on' must
+        # not claim as a disable).
+        r"|" + _REMINDER_POLITE +
+        r"put\s+(?P<body3>(?:(?:the|my|that|this|those|these|"
+        r"all|any)\s+)?[\w'\s-]{0,30}?)\s*"
+        r"\b(?P<noun3>reminders?|alarms?|timers?|schedules?)\b"
+        r"\s+on\s+hold\b" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_STOP_RE = re.compile(
         _REMINDER_POLITE +
@@ -4417,6 +4425,30 @@ class AgentOrchestrator:
         dsm = re.search(
             r"\s+(?:by|for|until|till|til|to|back|up|forward)\s+"
             r"(.+)$", dur)
+        if dsm is None:
+            # 'postpone the standup an hour' — the duration tails
+            # the scope with no connector at all; peel a trailing
+            # bare duration off dur, the head is the topic. A head
+            # of pure connector words ('by 30 minutes' arrives with
+            # 'by' leading) leaves nothing to scope — skip the
+            # peel and let the duration parse handle it whole.
+            tdm = re.search(
+                r"\s+((?:a|an|one|two|three|four|five|six|seven|"
+                r"eight|nine|ten|couple|few|\d+(?:\.\d+)?)\s+"
+                r"(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|"
+                r"days?)(?:\s+more\s+time)?)$", dur,
+                re.IGNORECASE)
+            if tdm is not None:
+                head_d = dur[:tdm.start()].strip(" ,;—-")
+                head_terms = self._reminder_terms(re.sub(
+                    r"\b(?:the|my|that|all|every|each|any|of|to|"
+                    r"for|about|one|ones|this|these|those|them|"
+                    r"it|by|until|till|til|back|up|forward|in|"
+                    r"earlier|later|more|time)\b", " ", head_d,
+                    flags=re.IGNORECASE))
+                if head_terms:
+                    topic_terms |= head_terms
+                    dur = tdm.group(1)
         if dsm is not None:
             head_d = dur[:dsm.start()].strip(" ,;—-")
             tail_d = dsm.group(1).strip(" ,;—-")
@@ -5107,7 +5139,9 @@ class AgentOrchestrator:
         else:
             verb = str(mt.group("verb") or "").lower()
             dirw = str(mt.group("dir") or "").lower()
-            body = str(mt.group("body") or "").strip(" ,;—-")
+            body = str(mt.group("body")
+                       or mt.groupdict().get("body3") or "")
+            body = body.strip(" ,;—-")
             if (verb in ("restart", "restore", "renew", "revive",
                          "resume", "suspend", "block", "freeze",
                          "hold", "bring back", "put back",
@@ -5155,7 +5189,8 @@ class AgentOrchestrator:
                 user_text, task_id, event_callback)
         sched, rows = self._reminder_rows(
             include_disabled=True,
-            noun=mt.group("noun") or mt.groupdict().get("noun2"))
+            noun=(mt.group("noun") or mt.groupdict().get("noun2")
+                  or mt.groupdict().get("noun3")))
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
@@ -5195,7 +5230,8 @@ class AgentOrchestrator:
         if not rows:
             text = self._reminder_none_text(
                 sched, mt.group("noun")
-                or mt.groupdict().get("noun2"))
+                or mt.groupdict().get("noun2")
+                or mt.groupdict().get("noun3"))
         elif day and not hits:
             text = (f"“{' '.join(sorted(topic_terms))}” isn't set "
                     f"for {day} — nothing to turn {state}."
