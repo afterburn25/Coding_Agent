@@ -4023,6 +4023,20 @@ class AgentOrchestrator:
         r"(?:am|are)\s+i\s+(?:still\s+)?reminded\b"
         r"(?:\s+of\s+.+?)?"
         + _REMINDER_TRAIL +
+        # Fired-inventory — 'which reminders have already fired',
+        # 'what fired today', 'what went off this morning'. The
+        # fire verb is the noun ('what fired'), so only
+        # alarm-flavored verbs claim; 'what happened' stays out —
+        # it's not schedule vocabulary.
+        r"|" + _REMINDER_POLITE +
+        r"what\s+(?:fired|went\s+off|has\s+fired|have\s+fired|"
+        r"rang|rung|fired\s+already)\b(?:\s+.+?)?"
+        + _REMINDER_TRAIL +
+        r"|" + _REMINDER_POLITE +
+        r"which\s+(?:reminders?|alarms?|timers?)\s+"
+        r"(?:has|have)\s+(?:already|just|yet|still)?\s*"
+        r"(?:fired|gone\s+off|rang|rung|happened)\b"
+        r"(?:\s+.+?)?" + _REMINDER_TRAIL +
         r"|" + _REMINDER_POLITE +
         r"did\s+i\s+(?:just\s+)?miss(?:ed)?\s+"
         r"(?:(?:the|my|that|this|any|a)\s+)?[\w'\s-]{0,30}?"
@@ -6178,8 +6192,10 @@ class AgentOrchestrator:
             for w in re.findall(r"[a-z0-9']+",
                                 str(text or "").lower()))
             # 'from' is a connector ('change my alarm from 6 to
-            # 7' scopes on '6'), never a topic token.
-            if w and w != "from"}
+            # 7' scopes on '6'), never a topic token; 'already'
+            # is a tense adverb ('which reminders have already
+            # fired'), never a label.
+            if w and w not in ("from", "already", "just", "yet")}
 
     @staticmethod
     def _reminder_next_fire(s: dict, now: float) -> float | None:
@@ -6478,6 +6494,26 @@ class AgentOrchestrator:
             r"(?:\s+(?!(?:by|for|until|till|til|to|at|in|on|"
             r"back|forward|earlier|later)\b)\S+)*",
             " ", body, flags=re.IGNORECASE)
+        # 'stop the alarm that's going off' — 'that's going off'
+        # isn't a name, it says the row fired just now; resolve by
+        # most-recent last_run when the topic terms don't hit.
+        _firing_now = bool(re.search(
+            r"\b(?:that'?s|that\s+is|which\s+is|which'?s)\s+"
+            r"(?:going|ringing|firing|blaring|buzzing|sounding)\b|"
+            r"\bgoing\s+off\s+right\s+now\b",
+            body, re.IGNORECASE))
+        if _firing_now:
+            body = re.sub(
+                r"\b(?:that'?s|that\s+is|which\s+is|which'?s)\s+"
+                r"(?:going|ringing|firing|blaring|buzzing|"
+                r"sounding)\b(?:\s+off\b)?|\bgoing\s+off\s+right\s+"
+                r"now\b", " ", body, flags=re.IGNORECASE)
+            # 'alarm' here is a noun-class mention, not a label —
+            # rows are 'reminder: wake'; recency resolves the row,
+            # so the noun word shouldn't gate the topic match.
+            body = re.sub(
+                r"\b(?:alarms?|reminders?|timers?|alerts?)\b",
+                " ", body, flags=re.IGNORECASE)
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
             r"one|ones|this|these|those|them|it)\b",
@@ -6494,6 +6530,29 @@ class AgentOrchestrator:
         hits = self._reminder_ordinal_pick(hits, _ord_sel,
                                            time.time())
         state = "on" if want_on else "off"
+        if _firing_now and (not hits or len(hits) > 1):
+            # 'that's going off' — the row ringing now is the one
+            # with the freshest last_run; an hour+ stale last_run
+            # isn't ringing, and none at all means an honest miss.
+            _fl = [s for s in pool if s.get("last_run")]
+            _fl = [s for s in _fl
+                   if time.time() - float(s["last_run"]) < 3600]
+            if _fl:
+                hits = [max(_fl,
+                            key=lambda s: float(s["last_run"]))]
+            elif rows:
+                nxt = min(
+                    (s for s in rows
+                     if self._reminder_next_fire(s, time.time())),
+                    key=lambda s: self._reminder_next_fire(
+                        s, time.time()), default=None)
+                return self._reminder_finish(
+                    "Nothing's ringing right now"
+                    + (f" — the next is "
+                       f"“{self._reminder_label(nxt)}” "
+                       f"({self._reminder_when_text(nxt, time.time())})."
+                       if nxt else "."),
+                    user_text, task_id, event_callback)
         if _prov_mut and not topic_terms and _ord_sel is None:
             # 'turn on the one i just disabled' — a mutation
             # provenance resolves through the journal, not a
@@ -6692,6 +6751,23 @@ class AgentOrchestrator:
                 mc.groupdict().get("tail"),
                 mc.groupdict().get("tail2"), body) if g),
             re.IGNORECASE))
+        # 'the reminder i set yesterday' — a day word inside a
+        # creation clause scopes created_at, never the name; the
+        # clause is found on the raw groups because the tail2
+        # fallback below can swap topic_src before it runs.
+        _pmade = re.search(
+            r"\bi\s+(?:(?:just|recently|lately)\s+)?"
+            r"(?:set|made|created|scheduled|booked|put|"
+            r"asked\s+for|added|gave\s+you)\b((?:\s+\S+){0,3})",
+            " ".join(str(g) for g in (
+                mc.groupdict().get("ctime"),
+                mc.groupdict().get("tail"),
+                mc.groupdict().get("tail2"), body) if g),
+            re.IGNORECASE)
+        _made_dates = _made_label = None
+        if _pmade is not None:
+            _made_dates, _made_label = self._reminder_created_scope(
+                _pmade.group(1))
         if re.fullmatch(
                 r"\s*i\s+(?:(?:just|recently|lately)\s+)?"
                 r"(?:set|made|created|scheduled|booked|put|"
@@ -6763,9 +6839,15 @@ class AgentOrchestrator:
         now = time.time()
         # 'cancel the dentist on thursday' / 'cancel tomorrow's
         # reminders' — the day is a fire-window scope, not a name
-        # term; recurring rows can't drop a single occurrence.
+        # term; recurring rows can't drop a single occurrence. A
+        # day word inside a creation clause ('the one i made
+        # today') scopes created_at, not fire dates — the clause
+        # is blanked before the window resolves.
         day_dates, day_label = self._reminder_day_scope(
-            user_text, now)
+            user_text if _made_dates is None
+            else re.sub(re.escape(_pmade.group(0)), " ",
+                        user_text, flags=re.IGNORECASE),
+            now)
         if day_dates:
             _daywords = {
                 "today", "tonight", "tonite", "tomorrow",
@@ -6868,6 +6950,24 @@ class AgentOrchestrator:
                     excl_terms
                     and excl_terms <= self._reminder_hay(s))]
         hits = self._reminder_ordinal_pick(hits, ord_sel, now)
+        if _made_dates is not None and hits:
+            # 'cancel the one i made today' — created_at scopes the
+            # hits; no row created then means an honest miss, not
+            # a 'say which' over unrelated rows.
+            import datetime as dt
+            hits = [
+                s for s in hits
+                if s.get("created_at")
+                and dt.date.fromtimestamp(
+                    float(s["created_at"])) in _made_dates]
+            if not hits:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”" for s in rows[:3])
+                return self._reminder_finish(
+                    f"None of your reminders were created "
+                    f"{_made_label or 'then'}"
+                    + (f" — you've got: {names}." if rows else "."),
+                    user_text, task_id, event_callback)
         _day_scoped_miss = []
         if day_dates and hits and not skip_verb:
             # 'skip the standup today' resolves the ROW — its own
@@ -7184,6 +7284,40 @@ class AgentOrchestrator:
             return None, None
         return dates, label
 
+    @staticmethod
+    def _reminder_created_scope(text: str):
+        """Creation-date scope inside a provenance clause — 'the
+        reminder i set yesterday'. Creation is always past, so a
+        bare weekday name resolves BACKWARD (last Friday), unlike
+        the fire-scope window which resolves forward. Returns
+        (dates, label) or (None, None)."""
+        import datetime as dt
+        tl = str(text or "").lower()
+        today = dt.date.today()
+        dates, label = set(), None
+        if re.search(r"\byesterday\b|\blast\s+night\b", tl):
+            dates.add(today - dt.timedelta(days=1))
+            label = "yesterday"
+        if re.search(r"\b(?:today|tonight|tonite|this\s+"
+                     r"(?:morning|afternoon|evening))\b", tl):
+            dates.add(today)
+            label = label or "today"
+        for i, d in enumerate(("monday", "tuesday", "wednesday",
+                              "thursday", "friday", "saturday",
+                              "sunday")):
+            if re.search(rf"\b{d}s?\b", tl):
+                delta = (today.weekday() - i) % 7 or 7
+                dates.add(today - dt.timedelta(days=delta))
+                label = label or ("last " + d)
+        if re.search(r"\blast\s+week\b", tl):
+            base = today - dt.timedelta(days=today.weekday() + 7)
+            dates.update(base + dt.timedelta(days=i)
+                         for i in range(7))
+            label = label or "last week"
+        if not dates:
+            return None, None
+        return dates, label
+
     def _reminder_inventory_reply(self, user_text: str,
                                   plan_text: str):
         """'what reminders do i have' — answers from the scheduler
@@ -7357,7 +7491,14 @@ class AgentOrchestrator:
             r"\bdid\b.{0,20}\bmiss(?:ed)?\b.{0,25}\b\d{1,2}"
             r"(?::\d{2})?\s*(?:am|pm)\b|"
             r"\bwhat\s+did\s+i\s+miss\b|"
-            r"\bdid\s+i\s+miss(?:ed)?\b",
+            r"\bdid\s+i\s+miss(?:ed)?\b|"
+            # Fired-inventory asks — 'which reminders have already
+            # fired', 'what fired today', 'what went off this
+            # morning'. last_run rows are the answer.
+            r"\b(?:has|have)\s+(?:already|just|yet|still)?\s*"
+            r"(?:fired|gone\s+off|rang|rung|happened)\b|"
+            r"\bwhat\s+(?:fired|went\s+off|has\s+fired|"
+            r"rang|happened|fired\s+already)\b",
             plan_text, re.IGNORECASE))
         cad_ask = bool(re.search(
             r"\bhow\s+(?:often|frequently)\b|"
@@ -7680,6 +7821,16 @@ class AgentOrchestrator:
                 include_disabled=True,
                 noun=nm.group(1).lower() if nm else None)
             fhits = _scoped_hits(f_rows)
+            _dfired = [s for s in fhits if s.get("last_run")]
+            if day_dates:
+                # 'what fired today' — the window scopes last_run,
+                # not next fire; a row that last ran Tuesday
+                # didn't fire today.
+                import datetime as dt
+                _dfired = [
+                    s for s in _dfired
+                    if dt.date.fromtimestamp(
+                        float(s["last_run"])) in day_dates]
             if not fhits:
                 names = "; ".join(
                     f"“{self._reminder_label(s)}”" for s in rows[:3])
@@ -7711,11 +7862,21 @@ class AgentOrchestrator:
             elif len(fhits) == 1:
                 s = fhits[0]
                 lr = s.get("last_run")
-                if lr:
+                if lr and (not day_dates
+                           or s in _dfired):
                     when_f = time.strftime(
                         "%H:%M", time.localtime(float(lr)))
                     text = (f"Yes — “{self._reminder_label(s)}” "
                             f"fired at {when_f}.")
+                elif lr:
+                    # Fired, but outside the asked window —
+                    # 'did the standup go off today' when it last
+                    # ran Friday.
+                    when_f = time.strftime(
+                        "%a %H:%M", time.localtime(float(lr)))
+                    text = (f"No — “{self._reminder_label(s)}” "
+                            f"last fired {when_f}; it's set for "
+                            f"{self._reminder_when_text(s, now)}.")
                 elif not s.get("enabled", True):
                     text = (f"No — “{self._reminder_label(s)}” is "
                             "off, so it can't fire until you turn "
@@ -7725,13 +7886,16 @@ class AgentOrchestrator:
                             f"“{self._reminder_label(s)}” is set "
                             f"for {self._reminder_when_text(s, now)}.")
             else:
-                fired_n = sum(1 for s in fhits if s.get("last_run"))
+                fired_n = len(_dfired)
                 bits = "; ".join(
                     f"“{self._reminder_label(s)}” "
-                    f"({'fired' if s.get('last_run') else 'pending'})"
+                    f"({'fired' if s in _dfired else 'pending'})"
                     for s in fhits[:5])
-                text = (f"{fired_n} of {len(fhits)} have fired: "
-                        f"{bits}.")
+                _when_word = " today" if (
+                    day_dates and len(day_dates) == 1
+                    and dt.date.today() in day_dates) else ""
+                text = (f"{fired_n} of {len(fhits)} "
+                        f"have fired{_when_word}: {bits}.")
         elif cad_ask:
             # 'how often does the standup fire' / 'is the standup
             # daily or weekly' — the row's cadence is the answer.

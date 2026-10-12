@@ -2575,6 +2575,61 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIsNotNone(r)
         self.assertNotIn("don't have any", r.content)
 
+        # 'that's going off' resolves by freshest last_run — the
+        # row ringing now, never a mass toggle. An hour+ stale
+        # last_run isn't ringing.
+        for s in list(sup.scheduler.rows):
+            sup.scheduler.remove(s["id"])
+        sup.scheduler.add(
+            "reminder: wake", "daily", hour=6, minute=0,
+            last_run=time.time() - 120,
+            action={"kind": "notify", "detail": "wake"})
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            action={"kind": "notify", "detail": "standup"})
+        r = agent._reminder_reply(
+            "stop the alarm that's going off",
+            "stop the alarm that's going off", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        self.assertEqual(
+            {s["name"]: s["enabled"] for s in sup.scheduler.rows},
+            {"reminder: wake": False, "reminder: standup": True})
+        sup.scheduler.rows[0]["enabled"] = True
+
+        # Fired-inventory asks answer from last_run — 'what fired
+        # today' scopes last_run to today's date, not next fire.
+        r = agent._reminder_reply(
+            "which reminders have already fired",
+            "which reminders have already fired", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("1 of 2", r.content)
+        r = agent._reminder_reply(
+            "what fired today", "what fired today", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("1 of 2", r.content)
+
+        # 'the one i made today' — a day word inside a creation
+        # clause scopes created_at, not the fire window; no row
+        # created then is an honest miss, never a 'say which'.
+        import datetime as _dt
+        sup.scheduler.rows[0]["created_at"] = time.mktime(
+            (_dt.date.today() - _dt.timedelta(days=1)).timetuple())
+        r = agent._reminder_reply(
+            "cancel the one i made today",
+            "cancel the one i made today", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("created today", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 2)
+        r = agent._reminder_reply(
+            "cancel the reminder i set yesterday",
+            "cancel the reminder i set yesterday", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        self.assertEqual(
+            [s["name"] for s in sup.scheduler.rows],
+            ["reminder: standup"])
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
