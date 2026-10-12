@@ -4580,8 +4580,8 @@ class AgentOrchestrator:
         r"\s*(?P<dir>back\s+on|off|on)?"
         r"(?:\s+(?:on\s+)?(?:(?:next|this|coming)\s+)?"
         r"(?P<day>tomorrow|today|tonight|"
-        r"monday|tuesday|wednesday|thursday|friday|saturday|"
-        r"sunday))?"
+        r"mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|"
+        r"saturdays?|sundays?))?"
         r"(?:\s+at\s+(?P<att>.+?))?"
         r"(?:\s+(?:until|till|for)\s+(?P<til>.+?))?"
         r"(?:\s+(?:while|when|if)\s+(?P<cond>.+?))?"
@@ -4625,6 +4625,14 @@ class AgentOrchestrator:
         r"(?:the\s+|my\s+|that\s+|this\s+|those\s+|these\s+)"
         r"(?P<body5>[\w'\s-]{1,40}?)\s+"
         r"(?P<dir5>back\s+on|off|on)\b"
+        # 'turn the standup off on fridays' — the day narrows the
+        # flip to rows firing that class; the handler reads it
+        # from user_text.
+        r"(?:\s+on\s+(?:(?:next|this|coming)\s+)?"
+        r"(?:(?:mon|tues|wednes|thurs|fri|satur|sun)days?|"
+        r"weekdays?|weekends?|tomorrow|today|tonight|tonite)"
+        r"(?:\s+(?:and|&|,)\s+(?:(?:mon|tues|wednes|thurs|fri|"
+        r"satur|sun)days?|weekdays?|weekends?))*)?"
         + _REMINDER_TRAIL +
         # 'turn off the last one' — the direction leads the body.
         # Still noun-less-claim only on a row hit; 'turn off the
@@ -4634,6 +4642,11 @@ class AgentOrchestrator:
         r"(?P<dir6>off|back\s+on|on)\s+"
         r"(?:the\s+|my\s+|that\s+|this\s+|those\s+|these\s+)?"
         r"(?P<body6>[\w'\s-]{1,40}?)"
+        r"(?:\s+on\s+(?:(?:next|this|coming)\s+)?"
+        r"(?:(?:mon|tues|wednes|thurs|fri|satur|sun)days?|"
+        r"weekdays?|weekends?|tomorrow|today|tonight|tonite)"
+        r"(?:\s+(?:and|&|,)\s+(?:(?:mon|tues|wednes|thurs|fri|"
+        r"satur|sun)days?|weekdays?|weekends?))*)?"
         + _REMINDER_TRAIL +
         # 'put the standup on hold' — the pause idiom noun-less;
         # claims only on a row hit like the other bare-body
@@ -4770,7 +4783,8 @@ class AgentOrchestrator:
         r"(?:going\s+off|firing|ringing|buzzing)\s*[.!?]?\s*$|"
         # 'the reminder i made this morning' — a bare created-
         # scope fragment naming a row, not an action.
-        r"(?:the|that)\s+(?:[\w'-]+\s+){0,3}reminders?\s+"
+        r"(?:the|that)\s+(?:[\w'-]+\s+){0,3}"
+        r"(?:one|reminders?)\s+"
         r"i\s+(?:just\s+|recently\s+|lately\s+)?"
         r"(?:made|set|created|added|scheduled|booked|asked\s+for|"
         r"gave\s+you|put)\b|"
@@ -4838,7 +4852,8 @@ class AgentOrchestrator:
         # verb-led scoped asks without the schedule noun.
         r"\b(?:what|which)\s+(?:fires?|goes?\s+off|hits?|rings?|"
         r"pops?\s+up|triggers?)\s+"
-        r"(?:today|tonight|tonite|tomorrow|this|next|on|in)\b|"
+        r"(?:today|tonight|tonite|tomorrow|this|next|on|in|"
+        r"between)\b|"
         # 'what did i set most recently' — created-ordinal asks
         # with the schedule noun implied.
         r"\bwhat\s+did\s+i\s+(?:set|make|create|add|schedule)\s+"
@@ -5734,6 +5749,11 @@ class AgentOrchestrator:
         # 'the 9am one' — 'one' is the referent word, not scope;
         # the clock term alone picks the row.
         topic_terms -= {"one", "ones"}
+        # 'move everything an hour later' — the mass word is the
+        # pool itself, not a topic; an empty scope takes the
+        # quantified mass-shift path.
+        topic_terms -= {"everything", "all", "them", "those",
+                        "these"}
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
         if (not hits and noun and topic_terms
@@ -6946,11 +6966,14 @@ class AgentOrchestrator:
             if verb in ("turn", "switch"):
                 dm = re.match(r"(off|on|back\s+on)\b", body,
                               re.IGNORECASE)
-                if dirw:
-                    want_on = dirw != "off"
-                elif dm:
+                if dm:
+                    # 'turn off reminders on saturdays' — the
+                    # direction lives in the body; the dir group
+                    # eats the 'on' that leads the day clause.
                     want_on = dm.group(1).lower() != "off"
                     body = body[dm.end():].strip(" ,;—-")
+                elif dirw:
+                    want_on = dirw != "off"
                 else:
                     want_on = None
             else:
@@ -7300,6 +7323,11 @@ class AgentOrchestrator:
         # tomorrow' — the day narrows hits to rows actually firing
         # that date; a miss says so instead of touching others.
         day = str(mt.groupdict().get("day") or "").strip().lower()
+        if day and day not in ("today", "tonight", "tonite",
+                               "tomorrow"):
+            # 'fridays'/'saturdays' — the plural is the same fire
+            # class; the date resolver wants the singular.
+            day = day.rstrip("s")
         # 'the reminder i set for friday' — the relative clause's
         # object is scope (a day word narrows by fire-date; other
         # words join the topic).
@@ -7641,6 +7669,39 @@ class AgentOrchestrator:
                 topic_terms.clear()
                 all_flag = True
 
+        # 'cancel everything after 6pm' — 'after 6pm' is a
+        # fire-clock boundary, not a name term; rows compare on
+        # their own wall clock so a recurring 19:00 fires 'after
+        # 6' and a once-row tomorrow at 07:00 doesn't.
+        _cb = re.search(
+            r"\b(after|before|past)\s+"
+            r"(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)\b",
+            topic_src, re.IGNORECASE)
+        _cb_dir = _cbound = _cb_arg = None
+        if _cb is not None:
+            _cw = _cb.group(2).lower().replace(" ", "")
+            _cb_arg = _cw
+            if _cw == "noon":
+                _cbound = (12, 0)
+            elif _cw == "midnight":
+                _cbound = (0, 0)
+            else:
+                _cm2 = re.fullmatch(
+                    r"(\d{1,2})(?::(\d{2}))?(am|pm)?", _cw)
+                if _cm2 is not None:
+                    _ch = int(_cm2.group(1))
+                    if _cm2.group(3) == "pm":
+                        _ch = _ch % 12 + 12
+                    elif _cm2.group(3) == "am":
+                        _ch = _ch % 12
+                    elif _ch <= 6:
+                        _ch += 12
+                    _cbound = (_ch, int(_cm2.group(2) or 0))
+            if _cbound is not None:
+                _cb_dir = _cb.group(1).lower()
+                topic_src = (topic_src[:_cb.start()] + " "
+                             + topic_src[_cb.end():])
+                topic_terms -= self._reminder_terms(_cb.group(0))
         # 'cancel the standup and the dentist' — 'and' joins two
         # scopes, not a topic. Each side resolves on its own — a
         # unique subset hit or an exact label match; sides that
@@ -7763,6 +7824,14 @@ class AgentOrchestrator:
                     if not _excl(s)]
         hits = self._reminder_clock_narrow(hits, topic_terms,
                                            user_text)
+        def _in_bound(s: dict) -> bool:
+            if _cbound is None:
+                return True
+            _c = self._reminder_clock(s)
+            return _c is not None and (
+                (_cb_dir in ("after", "past") and _c > _cbound)
+                or (_cb_dir == "before" and _c < _cbound))
+        hits = [s for s in hits if _in_bound(s)]
         if not hits:
             # 'unschedule the rent reminder' on a paused row —
             # a disabled-only match still cancels; enabled hits
@@ -7771,7 +7840,8 @@ class AgentOrchestrator:
             hits = [
                 s for s in rows_d
                 if not s.get("enabled", True)
-                and _matches(s) and not _excl(s)]
+                and _matches(s) and not _excl(s)
+                and _in_bound(s)]
         if _pmade is not None and str(ord_sel).startswith("idx:"):
             # 'the third reminder i set' — 'set' is a creation
             # verb, so the ordinal ranks created_at, not fire
@@ -7905,6 +7975,11 @@ class AgentOrchestrator:
         elif not hits and excl_terms:
             text = ("That's all of them — nothing else to "
                     "cancel.")
+        elif not hits and _cbound is not None:
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rows[:3])
+            text = (f"Nothing fires {_cb_dir} {_cb_arg}"
+                    + (f" — you've got: {names}." if rows else "."))
         elif not hits:
             names = "; ".join(
                 f"“{self._reminder_label(s)}”" for s in rows[:3])
@@ -8309,6 +8384,11 @@ class AgentOrchestrator:
             dates.update((today + dt.timedelta(days=delta),
                           today + dt.timedelta(days=delta + 1)))
             label = label or "the weekend"
+        if re.search(r"\bweekdays?\b", t):
+            dates.update(d for i in range(7)
+                         for d in (today + dt.timedelta(days=i),)
+                         if d.weekday() < 5)
+            label = label or "weekdays"
         for d, wd in {"monday": 0, "tuesday": 1, "wednesday": 2,
                       "thursday": 3, "friday": 4, "saturday": 5,
                       "sunday": 6}.items():
@@ -8390,6 +8470,50 @@ class AgentOrchestrator:
             r"something)\s+(?:at|for|around)\s+"
             r"(\d{1,2}(?::\d{2})?(?:\s*[ap]\.?m\.?)?|noon|"
             r"midnight|midday)\b", plan_text, re.IGNORECASE)
+        # 'what fires between 9 and 10' — a clock-range ask; the
+        # bounds pair into a window, the trailing '10' isn't a
+        # standalone scope.
+        _rng_pair = None
+        _rng = re.search(
+            r"\bbetween\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|"
+            r"midnight|midday)\s+(?:and|to|until|till|til|-)\s+"
+            r"(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight|"
+            r"midday)\b", plan_text, re.IGNORECASE)
+        if _rng is not None:
+            def _rng_clk(t):
+                """((h,m), had_meridian)"""
+                t = str(t).strip().lower().replace(" ", "")
+                if t in ("noon", "midday"):
+                    return ((12, 0), True)
+                if t == "midnight":
+                    return ((0, 0), True)
+                m = re.fullmatch(
+                    r"(\d{1,2})(?::(\d{2}))?(am|pm)", t)
+                if m is None:
+                    m2 = re.fullmatch(
+                        r"(\d{1,2})(?::(\d{2}))?", t)
+                    if m2 is None:
+                        return (None, False)
+                    h = int(m2.group(1))
+                    h = h + 12 if h <= 6 else h
+                    return ((h, int(m2.group(2) or 0)), False)
+                h = int(m.group(1)) % 12
+                return ((h + (12 if m.group(3) == "pm" else 0),
+                         int(m.group(2) or 0)), True)
+            _rc1, _rm1 = _rng_clk(_rng.group(1))
+            _rc2, _rm2 = _rng_clk(_rng.group(2))
+            if _rc1 is None or _rc2 is None:
+                _rng_pair = None
+            else:
+                if _rc2 <= _rc1:
+                    # 'between 6 and 8' — both bounds bare, the
+                    # first took ≤6→pm, so the second is the same
+                    # evening's 8pm (+12). 'between 11pm and 2am'
+                    # carries real meridians — a genuine overnight
+                    # wrap (+24).
+                    _rc2 = (_rc2[0] + (12 if not (_rm1 or _rm2)
+                                       else 24), _rc2[1])
+                _rng_pair = (_rc1, _rc2)
         sched, rows = self._reminder_rows(
             include_disabled=off_ask,
             noun=nm.group(1).lower() if nm else None)
@@ -8469,7 +8593,7 @@ class AgentOrchestrator:
             clk = re.search(
                 r"\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)"
                 r"\b[.!?]?\s*$", plan_text, re.IGNORECASE)
-            if clk is not None:
+            if clk is not None and _rng_pair is None:
                 scope_terms = self._reminder_terms(clk.group(1))
         when_ask = bool(re.match(
             r"\s*(?:when|what\s+time|will|tell\s+me\s+when)\b",
@@ -9437,6 +9561,36 @@ class AgentOrchestrator:
                 text = (f"No reminder fires at {_cw}"
                         + (f" — you've got: {names}."
                            if rows else "."))
+        elif _rng_pair is not None:
+            lo, hi = _rng_pair
+
+            def _in_rng(s):
+                c = self._reminder_clock(s)
+                if c is None:
+                    return False
+                c2 = ((c[0] + 24, c[1]) if c < lo else c)
+                return lo <= c2 <= hi
+            _rh = [s for s in rows if _in_rng(s)]
+            if _rh:
+                _rh.sort(key=lambda s: self._reminder_clock(s))
+                bits = "; ".join(
+                    f"“{self._reminder_label(s)}” "
+                    f"({self._reminder_when_text(s, now)})"
+                    for s in _rh[:6])
+                text = (f"{len(_rh)} reminder"
+                        f"{'s' if len(_rh) != 1 else ''} firing "
+                        f"between {_rng.group(1).strip()} and "
+                        f"{_rng.group(2).strip()}: {bits}.")
+            else:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}” "
+                    f"({self._reminder_when_text(s, now)})"
+                    for s in rows[:4])
+                text = (f"Nothing fires between "
+                        f"{_rng.group(1).strip()} and "
+                        f"{_rng.group(2).strip()}"
+                        + (f" — you've got: {names}."
+                           if rows else "."))
         elif scope_terms or day_dates or _created_dates:
             hits = [s for s in rows
                     if (not scope_terms
@@ -9794,7 +9948,8 @@ class AgentOrchestrator:
         # 'the reminder i made this morning' — a bare created-
         # scope fragment; identify the row, never a blank stare.
         _mfrag = re.match(
-            r"(?:the|that)\s+(?:[\w'-]+\s+){0,3}reminders?\s+"
+            r"(?:the|that)\s+((?:[\w'-]+\s+){0,3})"
+            r"(?:one|reminders?)\s+"
             r"i\s+(?:just\s+|recently\s+|lately\s+)?"
             r"(?:made|set|created|added|scheduled|booked|"
             r"asked\s+for|gave\s+you|put)\b(.*)$",
@@ -9803,8 +9958,12 @@ class AgentOrchestrator:
             _ffs, _ffrows = self._reminder_rows(
                 include_disabled=True)
             if _ffs is not None:
+                _mord = re.search(
+                    r"\b(first|second|third|fourth|fifth|sixth|"
+                    r"last|newest|latest|oldest|earliest)\b",
+                    _mfrag.group(1) or "", re.IGNORECASE)
                 _fd, _flabel = self._reminder_created_scope(
-                    _mfrag.group(1) or "")
+                    _mfrag.group(2) or "")
                 _fp = [s for s in _ffrows
                        if s.get("created_at")]
                 if _fd is not None:
@@ -9816,6 +9975,30 @@ class AgentOrchestrator:
                     _fp,
                     key=lambda s: float(s.get("created_at") or 0),
                     reverse=True)
+                if _mord is not None and _fp:
+                    _ow = _mord.group(1).lower()
+                    _oidx = {"first": 0, "earliest": 0, "oldest": 0,
+                             "second": 1, "third": 2, "fourth": 3,
+                             "fifth": 4, "sixth": 5}.get(_ow, 0)
+                    _pk = (_fp[0]
+                           if _ow in ("last", "newest", "latest")
+                           else (_fp[len(_fp) - 1 - _oidx]
+                                 if len(_fp) > _oidx else None))
+                    if _pk is not None:
+                        return self._reminder_finish(
+                            f"That's "
+                            f"“{self._reminder_label(_pk)}” — fires "
+                            f"{self._reminder_when_text(_pk, time.time())}.",
+                            user_text, task_id, event_callback)
+                    _fnames = "; ".join(
+                        f"“{self._reminder_label(s)}”"
+                        for s in _fp[:4])
+                    return self._reminder_finish(
+                        f"You only made {len(_fp)} reminder"
+                        f"{'s' if len(_fp) != 1 else ''}"
+                        f"{(' ' + _flabel) if _flabel else ''}: "
+                        f"{_fnames}.",
+                        user_text, task_id, event_callback)
                 if len(_fp) == 1:
                     return self._reminder_finish(
                         f"That's “{self._reminder_label(_fp[0])}” "

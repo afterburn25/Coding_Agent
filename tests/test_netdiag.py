@@ -3517,10 +3517,12 @@ class TruthGateTests(RecoveryLoopTests):
             task = agent.tasks.create("x", "auto")
             sup.scheduler.add(
                 "reminder: standup", "daily", hour=9, minute=30,
-                action={"kind": "notify", "detail": "standup"})
+                action={"kind": "notify", "detail": "standup"},
+                created_at=time.time() - 7200)
             sup.scheduler.add(
                 "reminder: tea", "once", at=time.time() + 3600,
-                action={"kind": "notify", "detail": "tea"})
+                action={"kind": "notify", "detail": "tea"},
+                created_at=time.time() - 3600)
 
             # keep/leave no-op asks report the row's real state —
             # never a narrated 'done'.
@@ -3644,7 +3646,7 @@ class TruthGateTests(RecoveryLoopTests):
             r = agent._local_action_reply(
                 "the reminder i made this morning", task.id)
             self.assertIsNotNone(r)
-            self.assertIn("created", r.content)
+            self.assertIn("2 reminders", r.content)
             # Compound/article amounts — 'an hour and a half',
             # 'a couple days', 'a half hour earlier' all parse.
             before = float(sup.scheduler.rows[1]["at"])
@@ -3693,6 +3695,71 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("weekend", r.content)
             self.assertNotIn("about “this”", r.content)
+
+            # 'the Nth reminder i made' — the ordinal ranks
+            # created_at inside the fragment lane.
+            r = agent._local_action_reply(
+                "the first reminder i made", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("standup", r.content)
+            r = agent._local_action_reply(
+                "the newest one i set", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("brew", r.content)
+
+            # 'move everything an hour later' — the mass word is
+            # the pool; each row shifts off its own fire.
+            before0 = sup.scheduler.rows[0]["hour"]
+            before1 = float(sup.scheduler.rows[1]["at"])
+            r = agent._local_action_reply(
+                "move everything an hour later", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Shifted", r.content)
+            self.assertEqual(sup.scheduler.rows[0]["hour"],
+                             before0 + 1)
+            self.assertAlmostEqual(
+                float(sup.scheduler.rows[1]["at"]),
+                before1 + 3600, delta=2)
+
+            # 'what fires between 10 and 12' — a clock window;
+            # '6 and 8' wraps to the same evening, never an
+            # inverted nothing.
+            r = agent._local_action_reply(
+                "what fires between 10 and 12", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("standup", r.content)
+            r = agent._local_action_reply(
+                "what fires between 23 and 1", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Nothing fires", r.content)
+
+            # 'turn X off on fridays' — the day narrows the flip
+            # pool by fire class; the row flips for real.
+            r = agent._local_action_reply(
+                "turn the standup off on fridays", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("off", r.content.lower())
+            self.assertFalse(sup.scheduler.rows[0]["enabled"])
+            r = agent._local_action_reply("undo that", task.id)
+            self.assertIsNotNone(r)
+            self.assertTrue(sup.scheduler.rows[0]["enabled"])
+
+            # 'cancel everything before 11pm' — a fire-clock
+            # bound; 'before 1am' over a daytime pool misses
+            # honestly instead of naming the bound as a topic.
+            r = agent._local_action_reply(
+                "cancel everything before 1am", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Nothing fires", r.content)
+            r = agent._local_action_reply(
+                "cancel everything before 11pm", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            # The cancel pool is enabled rows — the two paused
+            # earlier stay put until re-enabled or named.
+            self.assertEqual(
+                [r2["name"] for r2 in sup.scheduler.rows],
+                ["reminder: brew", "reminder: wake"])
 
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
