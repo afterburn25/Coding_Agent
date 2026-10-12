@@ -3480,19 +3480,25 @@ class AgentOrchestrator:
     # the user's world ('my code keeps crashing') stays on the model
     # path — they want help, not a logged incident.
     _AGENT_SELF_TARGET_RE = re.compile(
-        r"\b(?:you|your|u|nexus|this|the)\s+(?:app(?:lication)?|"
+        r"\b(?:you|your|u|nexus|this|the|my)\s+(?:app(?:lication)?|"
         r"ui|interface|backend|server|model|models|voice|chat|agent|"
-        r"reminders?|notifications?|timers?|alarms?|responses?|"
+        r"thing|reminders?|notifications?|timers?|alarms?|responses?|"
         r"replies|answers?|recommendations?|suggestions?|"
         r"recommendation|reply|latency|speed|performance|api|"
         r"image(?:\s+(?:gen(?:eration|erator)?|s))?|generation|"
         r"install(?:er|ation)?|update(?:s)?|voice\s+output)\b|"
         r"\b(?:you|your|nexus)\s+(?:keep|kept|stop|are|is|were|was|"
         r"got|just|didn'?t|don'?t|won'?t|can'?t|never|always|"
-        r"still)\b|\bnexus\s+(?:is|keeps?|stopped|won'?t|doesn'?t|"
+        r"still)\b|\byou'?re\s+(?:too|so|still|really|always|getting|"
+        r"being|just|not|wrong|slow|broken|confused|lost|stuck)\b|"
+        r"\bnexus\s+(?:is|keeps?|stopped|won'?t|doesn'?t|"
         r"isn'?t)\b|\b(?:the|this|my)\s+(?:api|ui|backend|frontend|"
         r"installer|updater|voice\s+engine)\s+(?:is|keeps?|stopped|"
-        r"won'?t|doesn'?t|isn'?t|timed?|hangs?|crash|freeze|lag)",
+        r"won'?t|doesn'?t|isn'?t|timed?|hangs?|crash|freeze|lag)|"
+        r"^(?:image\s+(?:gen(?:eration|erator)?|s)|voice\s+(?:output|"
+        r"engine|synthesis|tts)|api|ui|backend|frontend|reminders?|"
+        r"notifications?|timers?|alarms?|updates?|installer|updater|"
+        r"chat|voice|model|llm)\b",
         re.IGNORECASE)
 
     def _complaint_reply(self, user_text: str, env=None):

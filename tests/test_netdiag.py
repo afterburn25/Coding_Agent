@@ -4495,7 +4495,14 @@ class TruthGateTests(RecoveryLoopTests):
             agent._autonomy = lambda: sup
             for text in ("the api keeps timing out",
                          "the ui freezes every time i open it",
-                         "nexus is too slow today"):
+                         "nexus is too slow today",
+                         "the api times out after 30 seconds",
+                         "the reminders didn't fire this morning",
+                         "the voice output is distorted",
+                         "my reminders are not working",
+                         "image generation keeps failing",
+                         "you're too slow",
+                         "this thing is broken"):
                 sup.repair.calls.clear()
                 r = agent.run(text, mode="chat")
                 self.assertIn("logged", r.content)
@@ -4580,9 +4587,13 @@ class TruthGateTests(RecoveryLoopTests):
             agent._autonomy = lambda: sup
             provider = _ScriptedProvider([{
                 "role": "assistant",
-                "content": "Tell me the error message."}])
+                "content": "Tell me the error message."}] * 4)
             agent._provider_for = lambda p, **kw: provider
-            agent.run("my code keeps crashing", mode="chat")
+            for text in ("my code keeps crashing",
+                         "the build is not working",
+                         "my python script segfaults",
+                         "i'm not working today"):
+                agent.run(text, mode="chat")
             self.assertEqual(sup.repair.calls, [])
 
 
