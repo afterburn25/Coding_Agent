@@ -2956,6 +2956,49 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run("what's on my calendar",
                                mode="auto")
             self.assertIn("pay rent", result.content)
+
+            # State asks — 'are my reminders on' answered 'I don't
+            # have a system to check' from the model live; the
+            # answer is the inventory.
+            task = agent.tasks.create("x", "auto")
+            for state_q in ("are my reminders on",
+                            "are my reminders paused",
+                            "are reminders enabled"):
+                r = agent._reminder_reply(
+                    state_q, state_q, task.id)
+                self.assertIsNotNone(r, state_q)
+                self.assertIn("pay rent", r.content)
+            r = agent._reminder_reply(
+                "is my alarm on", "is my alarm on", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("pay rent", r.content)
+
+            # 'forget to' wrappers and the 'that i need to'
+            # connector normalize into the create lane.
+            for raw, pt in (
+                    ("don't forget to remind me at 7",
+                     " remind me at 7"),
+                    ("i'll forget to call mom",
+                     "remind me to call mom"),
+                    ("remind me that i need to call mom",
+                     "remind me to call mom"),
+                    ("remind me!!! at 5", "remind me at 5")):
+                r = agent._reminder_reply(raw, pt, task.id)
+                self.assertIsNotNone(r, raw)
+            # 'i'll forget to X' normalizes to a no-time create —
+            # the honest ask names the task.
+            r = agent._reminder_reply(
+                "i'll forget to call mom",
+                "remind me to call mom", task.id)
+            self.assertIn("call mom", r.content)
+
+            # Out-of-range clocks — 'at 25pm' silently rolled to
+            # 1am via mktime; it must pin-fail, never schedule.
+            self.assertIsNone(_prw("at 25pm", now))
+            self.assertIsNone(_prw("at 25 o'clock", now))
+            self.assertIsNone(_prw("at 6:99", now))
+            self.assertIsNotNone(_prw("at 14:30", now))
+            self.assertIsNotNone(_prw("at 12pm", now))
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —

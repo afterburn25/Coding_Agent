@@ -129,6 +129,27 @@ def _worded_clock(t: str) -> str:
     return t
 
 
+def _bad_clock(t: str) -> bool:
+    """'at 25pm' / 'at 30 o'clock' / 'at 6:99' — out-of-range
+    clocks that mktime would silently roll to another hour.
+    Reject so the caller asks for a real time."""
+    for m in re.finditer(
+            r"\b(\d{1,3})(?::(\d{1,2}))?\s*"
+            r"(?:a\.?m\.?|p\.?m\.?|am|pm|o'?clock)\b", t):
+        if int(m.group(1)) > 12 or (m.group(2)
+                                    and int(m.group(2)) > 59):
+            return True
+    for m in re.finditer(
+            r"\bat\s+(\d{1,3}):(\d{1,2})\b", t):
+        if int(m.group(1)) > 24 or int(m.group(2)) > 59:
+            return True
+    if re.search(r"\bat\s+(\d{1,3})\b", t):
+        m = re.search(r"\bat\s+(\d{1,3})\b", t)
+        if int(m.group(1)) > 24:
+            return True
+    return False
+
+
 def parse_reminder_when(when: str, now: float) -> float | None:
     """Parse a reminder when-clause → wall-clock timestamp.
 
@@ -164,6 +185,8 @@ def parse_reminder_when(when: str, now: float) -> float | None:
                r"(?=\d|noon|midnight|quarter|half)", "at ", t)
     t = " ".join(t.split())
     t = _worded_clock(t)
+    if _bad_clock(t):
+        return None
     lt = time.localtime(now)
 
     def _meridian(hour: int, mer: str | None) -> int:
@@ -452,6 +475,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                r"(?=\d|noon|midnight|quarter|half)", "at ", t)
     t = " ".join(t.split())
     t = _worded_clock(t)
+    if _bad_clock(t):
+        return None
 
     def _meridian(hour: int, mer: str | None) -> int:
         mer = re.sub(r"[\s.]", "", mer or "")

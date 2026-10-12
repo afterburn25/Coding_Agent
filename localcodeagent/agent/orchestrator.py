@@ -3686,6 +3686,16 @@ class AgentOrchestrator:
         r"(?:\s+(?:about|regarding|for|on|of|at)\s+.+?)?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # State asks — 'are my reminders on', 'is the alarm paused'.
+    # The model claimed 'I don't have a system to check' over a
+    # live row; the answer is the inventory.
+    _REMINDER_STATEASK_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:are|is)\s+(?:(?:my|the|your|all|any|those|these)\s+)?"
+        r"(?:reminders?|alarms?|timers?|schedules?)\s+"
+        r"(?:on|off|enabled|disabled|active|inactive|paused|"
+        r"running|going|muted|back)\b" + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag)ing|"
@@ -4580,6 +4590,14 @@ class AgentOrchestrator:
             r"\bi\s+(?:want|need|wanna|would\s+like|'?d\s+like)\s+"
             r"to\s+be\s+reminded\b|\bto\s+be\s+reminded\b",
             "remind me", text, flags=re.IGNORECASE)
+        text = re.sub(
+            r"\b(?:don'?t|do\s+not)\s+forget\s+to\s+"
+            r"(?=(?:remind|alert|notify|ping|wake|nudge)\b)", "",
+            text, flags=re.IGNORECASE)
+        text = re.sub(
+            r"\bi'?ll\s+forget\s+to\b", "remind me to",
+            text, flags=re.IGNORECASE)
+        text = re.sub(r"!+", "", text)
         if any(rx.match(text) for rx in (
                 self._REMINDER_RE, self._REMINDER_RE_GREEDY,
                 self._REMINDER_CLARIFY_RE, self._REMINDER_CANCEL_RE,
@@ -4591,7 +4609,8 @@ class AgentOrchestrator:
                 self._REMINDER_LEAD_WHEN_RE, self._REMINDER_DECL_RE,
                 self._REMINDER_NOUNFIRST_RE, self._REMINDER_NOUNADJ_RE,
                 self._REMINDER_REFER_RE, self._REMINDER_WHENONLY_RE,
-                self._REMINDER_INV_LEAD_RE)):
+                self._REMINDER_INV_LEAD_RE,
+                self._REMINDER_STATEASK_RE)):
             return True
         return self._reminder_inventory_shaped(text)
 
@@ -4841,7 +4860,8 @@ class AgentOrchestrator:
             return self._reminder_finish(
                 text, user_text, task_id, event_callback)
         if (self._REMINDER_REFER_RE.match(plan_text)
-                or self._REMINDER_INV_LEAD_RE.match(plan_text)):
+                or self._REMINDER_INV_LEAD_RE.match(plan_text)
+                or self._REMINDER_STATEASK_RE.match(plan_text)):
             # 'that reminder at 3' / 'tell me about my reminders' —
             # referential or imperative inventory asks, not creates;
             # the model narrated fake sets and empty schedules.
@@ -5548,6 +5568,25 @@ class AgentOrchestrator:
         plan_text = re.sub(
             r"\b(reminders?|alarms?|timers?)\s*:\s*", r"\1 ",
             plan_text, flags=re.IGNORECASE)
+        # 'don't forget to remind me at 7' — the 'forget to'
+        # wrapper hid the create; 'i'll forget to call mom' is
+        # the same ask with no verb at all.
+        plan_text = re.sub(
+            r"\b(?:don'?t|do\s+not)\s+forget\s+to\s+"
+            r"(?=(?:remind|alert|notify|ping|wake|nudge)\b)", "",
+            plan_text, flags=re.IGNORECASE)
+        plan_text = re.sub(
+            r"\bi'?ll\s+forget\s+to\b", "remind me to",
+            plan_text, flags=re.IGNORECASE)
+        # 'remind me that i need to call mom' — the that-clause
+        # is the task connector.
+        plan_text = re.sub(
+            r"\bthat\s+i\s+(?:need|have|gotta|should|must|am\s+"
+            r"supposed)\s+to\b", "to", plan_text,
+            flags=re.IGNORECASE)
+        # 'remind me!!! at 5' — emphasis punctuation is not a
+        # connector.
+        plan_text = re.sub(r"!+", "", plan_text)
         # Reminders are a bounded local action: 'remind me in 5
         # minutes to X' → a real once-schedule firing a notification.
         # Their own regexes are the tighter gate — 'remind me to X'
@@ -5575,6 +5614,8 @@ class AgentOrchestrator:
                          or self._REMINDER_WHENONLY_RE.match(plan_text)
                          or self._REMINDER_REFER_RE.match(plan_text)
                          or self._REMINDER_INV_LEAD_RE.match(
+                             plan_text)
+                         or self._REMINDER_STATEASK_RE.match(
                              plan_text))):
             return None
         # Checked before parse_local_action, which has no temporal
@@ -6012,7 +6053,8 @@ class AgentOrchestrator:
             cls._REMINDER_BARE_RE, cls._REMINDER_HELP_RE,
             cls._REMINDER_DECL_RE, cls._REMINDER_NOUNFIRST_RE,
             cls._REMINDER_NOUNADJ_RE, cls._REMINDER_REFER_RE,
-            cls._REMINDER_WHENONLY_RE, cls._REMINDER_INV_LEAD_RE))
+            cls._REMINDER_WHENONLY_RE, cls._REMINDER_INV_LEAD_RE,
+            cls._REMINDER_STATEASK_RE))
 
     @staticmethod
     def direct_image_generation_intent(user_text: str) -> bool:
