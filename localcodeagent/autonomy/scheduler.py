@@ -251,6 +251,32 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     t = re.sub(
         r"\blater\s+(?=tonight|tomorrow|today|this\s+(?:morning|"
         r"afternoon|evening|week|month|year))", "", t)
+    # 'at 930' / 'at 1030' / 'at 930pm' — a 3-4 digit bare clock
+    # reads H:MM.
+    t = re.sub(
+        r"\bat\s+(\d{3,4})\s*(a\.?m\.?|p\.?m\.?)\b",
+        lambda m: (f"at {m.group(1)[:-2]}:{m.group(1)[-2:]} "
+                   + m.group(2)), t)
+    t = re.sub(
+        r"\bat\s+(\d{3,4})\b(?!\s*(?:a\.?m\.?|p\.?m\.?|:))",
+        lambda m: f"at {m.group(1)[:-2]}:{m.group(1)[-2:]}", t)
+    # 'a quarter after 3' — 'after' is 'past' in clock grammar;
+    # a leading 'a' before quarter/half breaks the worded clock.
+    t = re.sub(r"\bquarter\s+after\b", "quarter past", t)
+    t = re.sub(
+        r"\ba\s+(?=quarter\s+(?:past|to|till|til)\b|half\s+past)",
+        "", t)
+    # 'at seven tomorrow morning' — a worded hour + day + daypart
+    # gets its meridiem from the daypart.
+    t = re.sub(
+        r"\bat\s+(one|two|three|four|five|six|seven|eight|nine|"
+        r"ten|eleven|twelve)\s+(tomorrow|today)\s+"
+        r"(morning|afternoon|evening|night)\b",
+        lambda m: (f"at {m.group(1)} "
+                   + ("am" if m.group(3) == "morning" else "pm")
+                   + f" {m.group(2)}"), t)
+    # 'every single day' — 'single' is an intensifier.
+    t = re.sub(r"\bevery\s+single\s+", "every ", t)
     # 'the first of every month' — a worded ordinal is the day.
     # 'on the 15th of each month' — keep a single 'on'.
     t = re.sub(
@@ -690,6 +716,32 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     t = re.sub(
         r"\blater\s+(?=tonight|tomorrow|today|this\s+(?:morning|"
         r"afternoon|evening|week|month|year))", "", t)
+    # 'at 930' / 'at 1030' / 'at 930pm' — a 3-4 digit bare clock
+    # reads H:MM.
+    t = re.sub(
+        r"\bat\s+(\d{3,4})\s*(a\.?m\.?|p\.?m\.?)\b",
+        lambda m: (f"at {m.group(1)[:-2]}:{m.group(1)[-2:]} "
+                   + m.group(2)), t)
+    t = re.sub(
+        r"\bat\s+(\d{3,4})\b(?!\s*(?:a\.?m\.?|p\.?m\.?|:))",
+        lambda m: f"at {m.group(1)[:-2]}:{m.group(1)[-2:]}", t)
+    # 'a quarter after 3' — 'after' is 'past' in clock grammar;
+    # a leading 'a' before quarter/half breaks the worded clock.
+    t = re.sub(r"\bquarter\s+after\b", "quarter past", t)
+    t = re.sub(
+        r"\ba\s+(?=quarter\s+(?:past|to|till|til)\b|half\s+past)",
+        "", t)
+    # 'at seven tomorrow morning' — a worded hour + day + daypart
+    # gets its meridiem from the daypart.
+    t = re.sub(
+        r"\bat\s+(one|two|three|four|five|six|seven|eight|nine|"
+        r"ten|eleven|twelve)\s+(tomorrow|today)\s+"
+        r"(morning|afternoon|evening|night)\b",
+        lambda m: (f"at {m.group(1)} "
+                   + ("am" if m.group(3) == "morning" else "pm")
+                   + f" {m.group(2)}"), t)
+    # 'every single day' — 'single' is an intensifier.
+    t = re.sub(r"\bevery\s+single\s+", "every ", t)
     # 'the first of every month' — a worded ordinal is the day.
     # 'on the 15th of each month' — keep a single 'on'.
     t = re.sub(

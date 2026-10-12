@@ -3537,6 +3537,16 @@ class TruthGateTests(RecoveryLoopTests):
                 agent._reminder_spec("later tonight", time.time()))
             self.assertIsNone(
                 agent._reminder_spec("later", time.time()))
+            # 'at 930' / 'at a quarter after 3' / 'at seven
+            # tomorrow morning' — informal clock forms resolve;
+            # 'every single day' and 'on the weekend' (once Sat).
+            for when in ("at 930", "at 930pm", "at 1030",
+                         "at a quarter after 3", "at a quarter to 5",
+                         "at seven tomorrow morning",
+                         "every single day",
+                         "in a quarter of an hour"):
+                self.assertIsNotNone(
+                    agent._reminder_spec(when, time.time()), when)
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(
