@@ -5308,7 +5308,8 @@ class AgentOrchestrator:
                 # 'each|every <period>' in the task slot completes
                 # the cadence; rejoin 'of <period>' onto the when.
                 cm_p = re.match(
-                    r"^((?:each|every)\s+(?:month|week|year|day|"
+                    r"^(?:of\s+)?((?:each|every|the)\s+"
+                    r"(?:month|week|year|day|"
                     r"hour|morning|afternoon|evening|night))\b"
                     r"(?:\s+(?:to\s+)?(.+))?$",
                     task_d, re.IGNORECASE)
@@ -6007,7 +6008,8 @@ class AgentOrchestrator:
                 # month' tail completes the cadence, not the
                 # task; rejoin it onto the when.
                 cm_p = re.match(
-                    r"^((?:each|every)\s+(?:month|week|year|day|"
+                    r"^(?:of\s+)?((?:each|every|the)\s+"
+                    r"(?:month|week|year|day|"
                     r"hour|morning|afternoon|evening|night))\b"
                     r"(?:\s+(?:to\s+)?(.+))?$",
                     task_lazy, re.IGNORECASE)
@@ -6123,6 +6125,12 @@ class AgentOrchestrator:
         task = (clarify if clarify is not None
                 else forced_task if forced_task is not None
                 else str(m.group("task") or "")).strip().rstrip(".")
+        # 'take out trash before thursday' — 'thursday' fed the
+        # when; a connector left dangling at the task's end isn't
+        # part of the name.
+        task = re.sub(
+            r"\s+(?:before|after|by|until|till|on|at|for|and|or|"
+            r"to|about|of)$", "", task, flags=re.IGNORECASE)
         mfd = re.match(
             r"^for\s+((?:a|an|one|two|three|four|five|six|seven|"
             r"eight|nine|ten|\d+(?:\.\d+)?)\s+(?:second|minute|hour|"

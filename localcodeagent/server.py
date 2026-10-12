@@ -5318,6 +5318,12 @@ class AppState:
         # watched, so there's nothing to remind about.
         desc = re.sub(r"^(?:unless|if)\b.*$", "", desc,
                       flags=re.IGNORECASE).strip(" ,;—-")
+        # 'take out trash before thursday' — 'thursday' fed the
+        # when; a connector left dangling at the task's end isn't
+        # part of the name.
+        desc = re.sub(
+            r"\s+(?:before|after|by|until|till|on|at|for|and|or|"
+            r"to|about|of)$", "", desc, flags=re.IGNORECASE)
         # 'remind me roughly at 6' — a hedge word left in the
         # desc slot isn't a task name.
         if re.fullmatch(

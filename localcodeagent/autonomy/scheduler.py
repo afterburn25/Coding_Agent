@@ -296,7 +296,7 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     t = re.sub(
         r"(?<!\bon\s)\bthe\s+(first|second|third|fourth|fifth|"
         r"sixth|seventh|eighth|ninth|tenth|(\d{1,2})(?:st|nd|rd|th)?)"
-        r"\s+of\s+(?:every|each)\s+month\b",
+        r"\s+of\s+(?:every|each|the)\s+month\b",
         lambda m: "on the " + str({
             "first": 1, "second": 2, "third": 3, "fourth": 4,
             "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
@@ -775,7 +775,7 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     t = re.sub(
         r"(?<!\bon\s)\bthe\s+(first|second|third|fourth|fifth|"
         r"sixth|seventh|eighth|ninth|tenth|(\d{1,2})(?:st|nd|rd|th)?)"
-        r"\s+of\s+(?:every|each)\s+month\b",
+        r"\s+of\s+(?:every|each|the)\s+month\b",
         lambda m: "on the " + str({
             "first": 1, "second": 2, "third": 3, "fourth": 4,
             "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
@@ -868,7 +868,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                 "minute": int(mn or 0)}
     m = re.fullmatch(
         r"on\s+the\s+(\d{1,2})(?:st|nd|rd|th)?\s+"
-        r"(?:day\s+)?of\s+(?:every|each)\s+month" + clock_tail, t)
+        r"(?:day\s+)?of\s+(?:every|each|the)\s+month"
+        + clock_tail, t)
     if m:
         hr, mn, mer = m.group(2), m.group(3), m.group(4)
         return {"kind": "monthly", "day": int(m.group(1)),

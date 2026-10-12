@@ -3654,6 +3654,21 @@ class TruthGateTests(RecoveryLoopTests):
                                mode="auto")
             self.assertIn("Cancelled", result.content)
             self.assertFalse(sup.scheduler.rows)
+
+            # 'the 15th of the month' — 'of the month' is the same
+            # monthly intent as 'of each month'; with a task it
+            # makes a real monthly row, without it asks honestly.
+            result = agent.run(
+                "remind me the 15th of the month to pay dues",
+                mode="auto")
+            dues = [s for s in sup.scheduler.rows
+                    if "dues" in s["name"]][0]
+            self.assertEqual(dues["kind"], "monthly")
+            self.assertEqual(dues["day"], 15)
+            result = agent.run(
+                "remind me on the 5th of the month", mode="auto")
+            self.assertIn("do what", result.content)
+            sup.scheduler.rows.clear()
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(
