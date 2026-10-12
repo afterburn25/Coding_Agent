@@ -3123,6 +3123,33 @@ class TruthGateTests(RecoveryLoopTests):
                 "i have a reminder at 5 right", task.id)
             self.assertIsNotNone(r)
             self.assertIn("you've got", r.content)
+
+            # 'same time tomorrow' — model narrated '"Same time
+            # tomorrow" — set to 10:00 AM. Confirmed.' over zero
+            # rows. 'same time' lanes to the honest pin-fail.
+            r = agent._reminder_reply(
+                "same time tomorrow", "same time tomorrow",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("couldn't pin", r.content)
+
+            # 'is there anything tomorrow' — no schedule noun;
+            # the model narrated 'No scheduled reminders'. The
+            # anything+daypart noun variant answers the real pool.
+            sup.scheduler.add(
+                "Reminder: pay rent", "once",
+                at=time.time() + 86400)
+            r = agent._reminder_reply(
+                "is there anything tomorrow",
+                "is there anything tomorrow", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("pay rent", r.content)
+
+            # 'every few hours' — informal three-unit span.
+            spec = agent._reminder_spec(
+                "every few hours", time.time())
+            self.assertIsNotNone(spec)
+            self.assertEqual(spec["interval_s"], 10800.0)
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —

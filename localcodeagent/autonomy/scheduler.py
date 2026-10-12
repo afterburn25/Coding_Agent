@@ -632,14 +632,16 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         return {"kind": "interval",
                 "interval_s": 1800.0 if m.group(1) == "hour"
                 else 43200.0}
-    # 'every couple (of) hours' — informal two-unit span.
+    # 'every couple (of) hours' / 'every few hours' — informal
+    # two/three-unit spans.
     m = re.fullmatch(
-        r"every\s+(?:a\s+)?couple\s+(?:of\s+)?"
+        r"every\s+(?:a\s+)?(couple|few)\s+(?:of\s+)?"
         r"(minutes?|mins?|hours?|hrs?|days?)", t)
     if m:
-        unit = m.group(1)
+        unit = m.group(2)
+        n = 2.0 if m.group(1) == "couple" else 3.0
         return {"kind": "interval",
-                "interval_s": 2.0 * (
+                "interval_s": n * (
                     60 if unit.startswith(("m", "min")) else
                     3600 if unit.startswith("h") else 86400)}
     # 'every N units' / 'every hour' / 'hourly' — interval cadence.

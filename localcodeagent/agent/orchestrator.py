@@ -3765,6 +3765,7 @@ class AgentOrchestrator:
         r"(?P<when>(?:at|in|on|every|next|tomorrow|tonight|tonite|"
         r"today|this|later|soon|daily|weekly|monthly|nightly|hourly|"
         r"fortnightly|half|quarter|noon|midnight|a\s+(?:few|couple)|"
+        r"same\s+time|"
         r"\d|one\b|two\b|three\b|four\b|five\b|six\b|seven\b|eight\b|"
         r"nine\b|ten\b|eleven\b|twelve\b)\b"
         r"(?!\s+(?:is|are|was|were|be)\b).*?)" + _REMINDER_TRAIL,
@@ -3890,7 +3891,11 @@ class AgentOrchestrator:
         r"\bscheduled\b|\bcalendar\b|\b(?:comes?|coming)\s+up\b|"
         r"\bdue\b|"
         r"\b(?:anything|something)\s+(?:at|for|on|around)\s+\d|"
-        r"\bwhat'?s\s+(?:at|for|on|around)\s+\d", re.IGNORECASE)
+        r"\bwhat'?s\s+(?:at|for|on|around)\s+\d|"
+        r"\b(?:anything|something)\s+(?:tomorrow|today|tonight|"
+        r"tonite|this|next|monday|tuesday|wednesday|thursday|"
+        r"friday|saturday|sunday|morning|afternoon|evening)\b",
+        re.IGNORECASE)
     # Temporal tokens in a failed when-clause → ask when, don't claim.
     _REMINDER_TIMEISH_RE = re.compile(
         r"\d|morning|afternoon|evening|night|noon|midnight|tomorrow|"
@@ -4659,7 +4664,8 @@ class AgentOrchestrator:
                 r"time\s+(?:left|until|till)|left|list|"
                 r"show|do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
                 r"i\s+have|i'?ve\s+(?:got\s+)?|"
-                r"are\s+there|got|active|pending|upcoming|when|"
+                r"are\s+there|is\s+there|got|active|pending|"
+                r"upcoming|when|"
                 r"right\s*\??|correct\b|yeah\??\s*$|"
                 r"tell\s+me|run\s+through|go\s+through|"
                 r"walk\s+me\s+through|read\s+(?:out|through))\b",
