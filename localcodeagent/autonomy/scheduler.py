@@ -170,8 +170,9 @@ def _bad_clock(t: str) -> bool:
 # reminder may pin ('in a while' → +30m), but a timer's whole
 # meaning is its duration, so these never satisfy a timer ask.
 _VAGUE_DELAY_RE = re.compile(
-    r"an?\s+(?:little\s+)?(?:bit|moment|secs?|seconds?|while|"
-    r"short\s+while|jiffy?|few|couple)(?:\s+or\s+so)?\s*$",
+    r"(?:an?\s+(?:little\s+)?(?:bit|moment|secs?|seconds?|while|"
+    r"short\s+while|jiffy?|few|couple)(?:\s+or\s+so)?|"
+    r"soon(?:ish)?|shortly)\s*$",
     re.IGNORECASE)
 
 
@@ -448,7 +449,7 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"in\s+(?:(?:about|around|roughly|like)\s+)?"
         r"(\d+(?:\.\d+)?|an?\s+couple\s+(?:of\s+)?|an?|one|two|"
         r"three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
-        r"half\s+an?|an?\s+half)\s*"
+        r"an?\s+few|few|half\s+an?|an?\s+half)\s*"
         r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
         r"days?|d|weeks?|w|months?)(?:\s+or\s+so)?"
         + clock_tail
@@ -457,6 +458,7 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         n_raw = m.group(1)
         n = (0.5 if "half" in n_raw else
              2.0 if "couple" in n_raw else
+             3.0 if "few" in n_raw else
              _WORDS.get(n_raw, None))
         if n is None:
             n = float(n_raw)
@@ -503,13 +505,21 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     # delays; pin conventional spans rather than narrate.
     m = re.fullmatch(
         r"in\s+an?\s+(little\s+bit|bit|moment|sec|second|while|"
-        r"short\s+while|jiffy|jiff)", t)
+        r"short\s+while|little\s+while|jiffy|jiff)", t)
     if m:
         return now + {"bit": 600.0, "little bit": 600.0,
                       "jiffy": 60.0, "jiff": 60.0,
                       "moment": 120.0, "sec": 60.0, "second": 60.0,
                       "while": 1800.0,
+                      "little while": 1200.0,
                       "short while": 900.0}[m.group(1)]
+    # 'soon'/'shortly'/'in a sec-ish' — bare vague-delay words.
+    m = re.fullmatch(
+        r"(?:in\s+)?(?:a\s+)?"
+        r"(pretty\s+|real\s+|very\s+|so\s+)?"
+        r"(soon|shortly)(?:ish)?", t)
+    if m:
+        return now + (1800.0 if m.group(2) == "soon" else 1200.0)
     # 'in an hour and twenty minutes' — compound units sum.
     m = re.fullmatch(
         r"in\s+(\d+|an?|one|two|three|four|five|six|seven|eight|"

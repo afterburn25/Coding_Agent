@@ -5330,6 +5330,25 @@ class AppState:
                 end_note = (" — it repeats until you cancel; I "
                             "can't hold an end bound like “for "
                             f"{fdm.group(1)}”")
+        vague_demoted = False
+        if spec is not None and noun == "timer":
+            # 'set a timer soon' / 'in a bit' — vague spans parse
+            # as once-offsets, but a countdown has no honest
+            # duration to honor; demote and ask.
+            from .autonomy.scheduler import is_vague_delay
+            wtxt_v = body.strip()
+            dd = desc.strip()
+            if dd:
+                if wtxt_v.lower().endswith(dd.lower()):
+                    wtxt_v = wtxt_v[:len(wtxt_v) - len(dd)].strip(
+                        " ,;—-")
+                elif wtxt_v.lower().startswith(dd.lower()):
+                    wtxt_v = wtxt_v[len(dd):].strip(" ,;—-")
+            wtxt_v = re.sub(r"\s+(?:to|for|about|of|that)$", "",
+                            wtxt_v, flags=re.IGNORECASE)
+            if is_vague_delay(wtxt_v):
+                spec, desc = None, ""
+                vague_demoted = True
         desc = re.sub(r"^(?:about|of|that|to)\s+", "",
                       desc.strip())
         # 'remind me unless i'm busy tomorrow' — a leading
@@ -5436,7 +5455,8 @@ class AppState:
             # instead of minting 'Timer set for <random clock>'.
             from .autonomy.scheduler import is_vague_delay
             vague_timer = (noun == "timer"
-                           and is_vague_delay(body.strip()))
+                           and (vague_demoted
+                                or is_vague_delay(body.strip())))
             if not vague_timer:
                 prefixes = (("in ", "at ", "")
                             if not re.fullmatch(r"\d+(?:\.\d+)?",

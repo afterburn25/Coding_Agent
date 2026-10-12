@@ -2391,16 +2391,22 @@ class TruthGateTests(RecoveryLoopTests):
             # Vague cadences get the honest ask — 'remind me later
             # about the build' hit the model live (a stall under a
             # warming endpoint) because 'later' wasn't timeish.
-            for vague in ("remind me later about the build",
-                          "remind me soon to stretch"):
-                result = agent.run(vague, mode="auto")
-                self.assertIn("couldn't pin a time", result.content,
-                              vague)
+            result = agent.run("remind me later about the build",
+                               mode="auto")
+            self.assertIn("couldn't pin a time", result.content)
             # 'in a bit' — vague but conventional; pins ~10min
-            # rather than stalling on a pin-fail.
+            # rather than stalling on a pin-fail. 'soon'/'shortly'
+            # are the same conventional class (+30m/+20m).
             result = agent.run("remind me in a bit about the deploy",
                                mode="auto")
             self.assertIn("deploy", result.content)
+            result = agent.run("remind me soon to nap",
+                               mode="auto")
+            self.assertIn("Reminder set", result.content)
+            self.assertIn("nap", result.content)
+            result = agent.run("remind me about the dentist "
+                               "in a little while", mode="auto")
+            self.assertIn("Reminder set", result.content)
 
             # 'in 15' — a bare number counts down minutes; 'in
             # 2015' is not a delay.
@@ -3101,12 +3107,13 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertEqual(lt.tm_hour, 18)
             self.assertEqual(lt.tm_min, 30)
             self.assertEqual(lt.tm_wday, 4)
-            # 'in a few minutes' — vague; honest pin-fail, never
-            # the model's 'The timer is 30 minutes' invention.
+            # 'in a few minutes' — vague but conventional (+3m);
+            # with no task it asks what to remind, never the
+            # model's 'The timer is 30 minutes' invention.
             n0 = len(sup.scheduler.rows)
             result = agent.run("remind me in a few minutes",
                                mode="auto")
-            self.assertIn("couldn't pin", result.content)
+            self.assertIn("do what", result.content)
             self.assertEqual(len(sup.scheduler.rows), n0)
             sup.scheduler.rows.clear()
 
@@ -3617,6 +3624,30 @@ class TruthGateTests(RecoveryLoopTests):
                 float(row["at"]) - time.time(), 500)
             self.assertLess(
                 float(row["at"]) - time.time(), 800)
+
+            # Vague timer asks — 'soon'/'a bit'/'a little while'
+            # parse as once-offsets for reminders, but a countdown
+            # has no honest duration to honor. They must refuse
+            # rather than mint 'Timer set for <random clock>'.
+            sup.scheduler.rows.clear()
+            for vague in ("set a timer for soon",
+                          "set a timer soon",
+                          "set a timer in a bit",
+                          "set a timer for a little while",
+                          "set a timer soon to stretch"):
+                r = agent._reminder_reply(vague, vague, task.id)
+                self.assertIsNotNone(r, vague)
+                self.assertIn("needs a duration", r.content, vague)
+            self.assertEqual(len(sup.scheduler.rows), 0)
+            # The same spans remain valid for reminders, and a real
+            # duration still makes a real timer row.
+            r = agent._reminder_reply(
+                "set a timer for 10 minutes to stretch",
+                "set a timer for 10 minutes to stretch", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Timer set", r.content)
+            self.assertIn("stretch", r.content)
+            self.assertEqual(len(sup.scheduler.rows), 1)
 
             # 'at six thirty' — the TRAIL courtesy stripped 'ty'
             # off 'thirty', leaving 'at six thir' to the model.
