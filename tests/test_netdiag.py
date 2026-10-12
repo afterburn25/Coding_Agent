@@ -4705,11 +4705,13 @@ class TruthGateTests(RecoveryLoopTests):
             for q in ("repeat the command", "repeat the message"):
                 self.assertIsNone(
                     agent._reminder_reply(q, q, t.id), q)
-            # 'how much longer till' is a countdown ask.
+            # 'how much longer till' is a countdown ask — answers
+            # the soonest row's real next_run delta, whichever row
+            # that is at the suite's wall-clock time.
             r = agent.run("how much longer till my reminder",
                           mode="auto")
-            self.assertIn("standup", r.content)
-            self.assertIn("in ", r.content)
+            self.assertIn("next reminder is", r.content)
+            self.assertIn(" in ", r.content)
 
     def test_ever_tell_and_fact_count(self):
         # Live: "did I ever tell you my editor" got a self-contradictory
