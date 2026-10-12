@@ -1709,6 +1709,17 @@ class TruthGateTests(RecoveryLoopTests):
                 "did i disable the lunch reminder")
             self.assertIsNotNone(inv)
             self.assertIn("off", inv.text)
+            # Noun-less state asks — 'is the lunch off' answers
+            # the row's enabled flag; 'is the server off' matches
+            # no row and falls through to its real owner.
+            r = agent._reminder_reply(
+                "is the lunch off", "is the lunch off", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("off", r.content)
+            self.assertIsNone(
+                agent._reminder_reply(
+                    "is the server off", "is the server off",
+                    task.id))
             off_row["enabled"] = True
             # Cadence asks — 'how often does X fire', 'is X daily
             # or weekly', 'what day does X hit' — answer from the

@@ -4146,6 +4146,17 @@ class AgentOrchestrator:
         r"(?:still|currently|actually|really)?\s*"
         r"(?:work|working|fire|go\s+off)\b" + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # Noun-less state asks — 'is the standup off', 'are they all
+    # on'. The inventory lane only claims when a persisted row
+    # matches the name; a miss falls through so 'is the server
+    # off' keeps its real owner.
+    _REMINDER_NOUNLESS_STATEASK_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?:are|is)\s+(?:(?:my|the|your|that|this|all|any|"
+        r"those|these)\s+)?[a-z0-9][a-z0-9'\s-]{0,40}?\s+"
+        r"(?:on|off|paused|muted|enabled|disabled|active|"
+        r"inactive)\b" + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
@@ -6483,6 +6494,19 @@ class AgentOrchestrator:
         # enabled flag from the persisted row instead.
         state_ask = bool(
             self._REMINDER_STATEASK_RE.match(plan_text))
+        # Noun-less state asks — 'is the standup off', 'are they
+        # all on'. Only claimed when a persisted row actually
+        # matches; 'is the server off' still belongs elsewhere.
+        nounless_state = bool(
+            re.search(
+                r"\b(?:is|are)\s+(?:the\s+|my\s+|your\s+|that\s+|"
+                r"this\s+)?[a-z0-9][a-z0-9'\s-]{0,40}?\s+"
+                r"(?:on|off|paused|muted|enabled|disabled|active|"
+                r"inactive|still\s+on|still\s+off)\s*[.!?]?\s*$",
+                plan_text, re.IGNORECASE)
+            and not re.search(
+                r"\b(?:reminders?|alarms?|timers?|schedules?)\b",
+                plan_text, re.IGNORECASE)) and not state_ask
         countdown_ask = bool(re.search(
             r"\bhow\s+(?:long|soon|much\s+time|much\s+longer)\b|"
             r"\btime\s+(?:is\s+)?(?:left|remaining|until|till)\b|"
@@ -6529,12 +6553,13 @@ class AgentOrchestrator:
             r"\bgoing\s+to\s+(?:go\s+off|fire|ring|hit|trigger|"
             r"happen|pop\s+up)\b", plan_text,
             re.IGNORECASE))
-        if not scope_terms and (cad_ask or when_ask or fired_ask):
+        if not scope_terms and (cad_ask or when_ask or fired_ask
+                                or nounless_state):
             # Noun-less cadence/when asks carry the row name as the
             # object — 'when does THE STANDUP go off', 'is THE
-            # STANDUP daily'. The connector/noun extractions miss
-            # it; pull it from between the verb and the
-            # cadence/fire word.
+            # STANDUP daily', 'is THE STANDUP off'. The
+            # connector/noun extractions miss it; pull it from
+            # between the verb and the cadence/fire/state word.
             cm = re.search(
                 r"\b(?:does|do|is|are|will)\s+(?:the\s+|my\s+|"
                 r"your\s+|that\s+|this\s+)?"
@@ -6543,7 +6568,8 @@ class AgentOrchestrator:
                 r"hits?|rings?|goes?\s+off|go\s+off|comes?\s+up|"
                 r"pops?\s+up|reminds?|repeats?|recurs?|daily|"
                 r"weekly|monthly|hourly|yearly|recurring|"
-                r"repeating)\b", plan_text, re.IGNORECASE)
+                r"repeating|on|off|paused|muted|enabled|disabled|"
+                r"active|inactive)\b", plan_text, re.IGNORECASE)
             if cm is None:
                 # 'how often is THE STANDUP' — no terminal vocab
                 # word; the name runs to end-of-line.
@@ -6629,14 +6655,23 @@ class AgentOrchestrator:
                 text = (f"{_ord_word} "
                         f"“{self._reminder_label(soonest)}” "
                         f"({self._reminder_when_text(soonest, now)}).")
-        elif state_ask:
+        elif state_ask or nounless_state:
             # 'is my pay rent reminder on' — a disabled row is the
             # answer ('it's off'), not a miss. The enabled-only
             # pool would report 'no reminder' over a real row.
             _, state_rows = self._reminder_rows(
                 include_disabled=True,
                 noun=nm.group(1).lower() if nm else None)
+            if scope_terms <= {
+                    "everything", "all", "them", "they", "it"}:
+                # 'are they all off' — the pool itself is the
+                # scope; 'everything' isn't a row term.
+                scope_terms = set()
             hits = _scoped_hits(state_rows)
+            if nounless_state and not hits:
+                # 'is the server off' — a state-shaped ask over no
+                # reminder row; leave it to the real owner.
+                return None
             if scope_terms and not hits:
                 names = "; ".join(
                     f"“{self._reminder_label(s)}”" for s in rows[:3])
@@ -7152,6 +7187,8 @@ class AgentOrchestrator:
         if (self._REMINDER_REFER_RE.match(plan_text)
                 or self._REMINDER_INV_LEAD_RE.match(plan_text)
                 or self._REMINDER_STATEASK_RE.match(plan_text)
+                or self._REMINDER_NOUNLESS_STATEASK_RE.match(
+                    plan_text)
                 or self._reminder_inventory_shaped(plan_text)):
             # 'that reminder at 3' / 'tell me about my reminders' —
             # referential or imperative inventory asks, not creates;
@@ -9048,7 +9085,9 @@ class AgentOrchestrator:
             cls._REMINDER_NOUNADJ_RE, cls._REMINDER_REFER_RE,
             cls._REMINDER_WHENONLY_RE, cls._REMINDER_INV_LEAD_RE,
             cls._REMINDER_HAVE_RE,
-            cls._REMINDER_STATEASK_RE, cls._REMINDER_WHENLEAD_RE,
+            cls._REMINDER_STATEASK_RE,
+            cls._REMINDER_NOUNLESS_STATEASK_RE,
+            cls._REMINDER_WHENLEAD_RE,
             # Bare duration/clock fragments may be pending-clarify
             # replies — the resolver checks the convo at reply time.
             cls._REMINDER_PENDING_FRAG_RE,
