@@ -1936,6 +1936,97 @@ class TruthGateTests(RecoveryLoopTests):
                 "when does the train come",
                 "when does the train come", task.id))
 
+        # 'from X to Y' — the 'from' clock scopes WHICH row (and
+        # hands a bare-digit target its meridian); the 'to' clock
+        # is the real target. The un-split '6 to 7' parsed as a
+        # stray delay and recur_merge re-claimed the old clock.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "alarm: morning call", "daily", hour=6, minute=0,
+            action={"kind": "notify", "detail": "morning call"})
+        sup.scheduler.add(
+            "alarm: evening check", "daily", hour=18, minute=0,
+            action={"kind": "notify", "detail": "evening check"})
+        r = agent._reminder_reply(
+            "change my alarm from 6am to 7",
+            "change my alarm from 6am to 7", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("morning call", r.content)
+        self.assertIn("07:00", r.content)
+        self.assertEqual(
+            (sup.scheduler.rows[0]["hour"],
+             sup.scheduler.rows[0]["minute"]), (7, 0))
+        self.assertEqual(sup.scheduler.rows[0]["kind"], "daily")
+        r = agent._reminder_reply(
+            "change my alarm from 6pm to 8",
+            "change my alarm from 6pm to 8", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("evening check", r.content)
+        self.assertIn("20:00", r.content)
+        self.assertEqual(
+            (sup.scheduler.rows[1]["hour"],
+             sup.scheduler.rows[1]["minute"]), (20, 0))
+        # A 'from' clock naming no row misses honestly — never a
+        # fabricated 'Rescheduled' over nothing.
+        r = agent._reminder_reply(
+            "change my alarm from 9 to 10",
+            "change my alarm from 9 to 10", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("don't see", r.content)
+        self.assertEqual(
+            [s["hour"] for s in sup.scheduler.rows], [7, 20])
+        # A body without a schedule noun still falls through.
+        self.assertIsNone(
+            agent._reminder_reply(
+                "change the font",
+                "change the font", task.id))
+        # 'appointment' is filler next to a real subject — the
+        # dentist row resolves by 'dentist' alone.
+        sup.scheduler.add(
+            "reminder: dentist", "once", at=time.time() + 7200,
+            action={"kind": "notify", "detail": "dentist"})
+        r = agent._reminder_reply(
+            "reschedule my dentist appointment to friday",
+            "reschedule my dentist appointment to friday",
+            task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("dentist", r.content)
+        self.assertEqual(sup.scheduler.rows[2]["kind"], "once")
+        # A row literally named 'appointment' keeps its term.
+        sup.scheduler.add(
+            "reminder: appointment", "once",
+            at=time.time() + 3600,
+            action={"kind": "notify", "detail": "appointment"})
+        r = agent._reminder_reply(
+            "cancel the appointment",
+            "cancel the appointment", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("appointment", r.content)
+        self.assertNotIn(
+            "reminder: appointment",
+            [s["name"] for s in sup.scheduler.rows])
+        # 'skip' can't drop one fire of a recurring row — honest
+        # ops offered instead of deleting the cadence.
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=0,
+            action={"kind": "notify", "detail": "standup"})
+        n_rows = len(sup.scheduler.rows)
+        r = agent._reminder_reply(
+            "skip the standup today",
+            "skip the standup today", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("can't skip", r.content)
+        self.assertEqual(len(sup.scheduler.rows), n_rows)
+        # 'skip' on a one-shot is a normal cancel — it fires once.
+        r = agent._reminder_reply(
+            "skip the dentist",
+            "skip the dentist", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("dentist", r.content)
+        self.assertNotIn(
+            "reminder: dentist",
+            [s["name"] for s in sup.scheduler.rows])
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

@@ -5082,9 +5082,30 @@ class AgentOrchestrator:
                 shift_txt = (shm.group(1) + " "
                              + str(mr.groupdict().get("when")).strip())
                 body = body[:shm.start()].strip(" ,;—-")
+        # 'change my alarm from 6 to 7' — the lazy body strands
+        # 'from' and the when slot swallows '6 to 7' whole; that
+        # stray text parses as a short delay and recur_merge keeps
+        # the row's old clock under a 'Rescheduled' claim. 'from X'
+        # scopes WHICH row (the 6:00 one); 'to Y' is the target.
+        _wtxt_from = None
+        _wfm = re.fullmatch(
+            r"(.+?)\s+(?:to|until|till)\s+(.+)",
+            str(mr.groupdict().get("when") or "").strip(),
+            re.IGNORECASE)
+        if (_wfm is not None
+                and re.search(r"\bfrom\s*$", body, re.IGNORECASE)):
+            body = (re.sub(r"\s*\bfrom\s*$", "", body,
+                           flags=re.IGNORECASE)
+                    + " " + _wfm.group(1).strip())
+            _wtxt_from = _wfm.group(2).strip()
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
             " ", body, flags=re.IGNORECASE))
+        if len(topic_terms) > 1:
+            # 'the dentist appointment' — 'appointment' is the
+            # schedule noun, not a topic token; a row literally
+            # named 'appointment' keeps it when it's all there is.
+            topic_terms -= {"appointment", "appointments"}
         topic_terms, _ord_sel = self._reminder_ordinal_split(
             topic_terms)
         hits = [s for s in rows if not topic_terms
@@ -5107,11 +5128,19 @@ class AgentOrchestrator:
         if (verb_l in ("move", "change", "switch", "make", "push",
                     "bump", "shift")
                 and mr.groupdict().get("noun") is None
-                and not hits):
+                and not hits
+                and not (topic_terms & {
+                    "reminder", "reminders", "alarm", "alarms",
+                    "timer", "timers", "schedule", "schedules",
+                    "appointment", "appointments"})):
             # 'move the table'/'change the font' — a body that
-            # resolves no reminder row isn't a schedule op.
+            # resolves no reminder row isn't a schedule op. A
+            # schedule noun inside the body ('change my alarm
+            # from 9 to 10') IS one — miss honestly instead of
+            # handing a fabricated reschedule to the model.
             return None
         _wtxt = ("" if shift_txt
+                 else _wtxt_from if _wtxt_from is not None
                  else str(mr.groupdict().get("when") or "").strip())
         _wtxt = re.sub(r"\s+(?:instead|actually)\s*$", "",
                        _wtxt, flags=re.IGNORECASE).strip()
@@ -5121,8 +5150,20 @@ class AgentOrchestrator:
             # not a clock. A bare number is the clock first —
             # 'to 11' is 11:00, not 'in 11 minutes'.
             if re.fullmatch(r"\d{1,4}", _wtxt):
+                # A 'from 6 to 7' source clock hands the bare-digit
+                # target its meridian — a 6am alarm moves to 7am, a
+                # 6pm one to 19:00, not the inferred default.
+                _mer = ""
+                if (_wtxt_from is not None and hits
+                        and int(_wtxt) <= 12):
+                    _hh = hits[0].get("hour")
+                    if _hh is None and hits[0].get("at"):
+                        _hh = time.localtime(
+                            float(hits[0]["at"])).tm_hour
+                    if _hh is not None:
+                        _mer = ("am" if int(_hh) < 12 else "pm")
                 spec = self._reminder_spec(
-                    "at " + _wtxt, time.time())
+                    "at " + _wtxt + _mer, time.time())
                 if spec is None:
                     spec = self._reminder_spec(
                         "in " + _wtxt, time.time())
@@ -5190,8 +5231,12 @@ class AgentOrchestrator:
         elif not hits:
             names = "; ".join(
                 f"“{self._reminder_label(s)}”" for s in rows[:3])
+            shown = sorted(
+                topic_terms - {
+                    "reminder", "reminders", "alarm", "alarms",
+                    "timer", "timers", "schedule", "schedules"})
             text = (f"I don't see a reminder matching "
-                    f"“{' '.join(sorted(topic_terms))}” — "
+                    f"“{' '.join(shown) or 'that'}” — "
                     f"you have: {names}.")
         elif (len(hits) > 1
                 and not self._reminder_identical(hits)):
@@ -5728,7 +5773,10 @@ class AgentOrchestrator:
         return {w for w in (
             re.sub(r"'s$|'$", "", w)
             for w in re.findall(r"[a-z0-9']+",
-                                str(text or "").lower())) if w}
+                                str(text or "").lower()))
+            # 'from' is a connector ('change my alarm from 6 to
+            # 7' scopes on '6'), never a topic token.
+            if w and w != "from"}
 
     @staticmethod
     def _reminder_next_fire(s: dict, now: float) -> float | None:
@@ -6192,6 +6240,20 @@ class AgentOrchestrator:
             r"them|it|this|those|these|everything|one|ones)\b",
             " ", topic_src, flags=re.IGNORECASE)
         topic_terms = self._reminder_terms(topic_src)
+        skip_verb = bool(re.match(
+            self._REMINDER_POLITE + r"skip\b", user_text,
+            re.IGNORECASE))
+        if skip_verb:
+            # 'skip the standup today' — the day words describe
+            # WHICH fire to skip, not the row's name; strip them
+            # so the row resolves and the skip reply is honest.
+            topic_terms -= {
+                "today", "tonight", "tonite", "tomorrow",
+                "monday", "tuesday", "wednesday", "thursday",
+                "friday", "saturday", "sunday", "morning",
+                "afternoon", "evening", "night"}
+        if len(topic_terms) > 1:
+            topic_terms -= {"appointment", "appointments"}
         if not topic_terms and re.search(
                 r"\b(?:reminders|alarms|timers)\b", mc.group(0),
                 re.IGNORECASE):
@@ -6306,6 +6368,17 @@ class AgentOrchestrator:
                 for s in hits[:5])
             text = (f"That matches {len(hits)} reminders: {names} — "
                     "say which, or “cancel all reminders”.")
+        elif (skip_verb
+                and any(str(s.get("kind")) != "once"
+                        for s in hits)):
+            # 'skip the standup' — a recurring row can't drop one
+            # fire; offer the real ops instead of deleting the
+            # whole cadence under a 'skipped' claim.
+            labels = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in hits[:3])
+            text = ("I can't skip a single fire of a recurring "
+                    f"reminder — “cancel {labels}” drops it for "
+                    "good, “turn it off” pauses it.")
         else:
             try:
                 gone = sum(bool(sched.remove(str(s["id"])))
@@ -6338,6 +6411,8 @@ class AgentOrchestrator:
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
             r"reminders?|alarms?|timers?|schedules?)\b",
             " ", body, flags=re.IGNORECASE))
+        if len(topic_terms) > 1:
+            topic_terms -= {"appointment", "appointments"}
         topic_terms, ord_sel = self._reminder_ordinal_split(
             topic_terms)
         hits = [s for s in rows
