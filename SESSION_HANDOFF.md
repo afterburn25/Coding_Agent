@@ -5393,3 +5393,35 @@ Long-150 dogfood round 6 — spec ledger, memory poison, phantom referents (comm
   scope ('9am') matches fire-time via the hay's clock tokens —
   the scoped miss on a 7am row was honest; 'time left on the
   timer' counts down from next_run.
+
+## Block N+1 — clock-scope sweep, de-flake, fragment-fix deploy (12 Oct)
+
+- Inventory sweep round: clock/day-scoped inventory asks claim
+  ('what happens at 9am', 'whats at 9am', 'do i have anything at
+  noon', 'what do i have at 8pm', 'whats happening at 6', 'any
+  meetings at 10', 'is anything on for tonight'); connector
+  strip widened (for/about/regarding/on/of/at); scope hits widen
+  past the noun filter so 'did the 9am alarm go off' finds a
+  09:00 reminder row; fired/miss asks ('what did i miss at 9',
+  'was i supposed to do something at 9') answer from last_run.
+- Reschedule verbs: push/bump/shift reschedule with cadence
+  preserved (daily row retimed to 10:00 stays daily); git pushes
+  ('push to origin/main', 'push it to origin') fenced by the
+  connector-guarded _REMINDER_PUSH_RE at gate + handler layers.
+- again/repeat normalization into create ('remind me again about
+  the standup', 'repeat the standup reminder'); 'repeat the
+  command' declines. pls/plz leading politeness; 'all' no longer
+  scopes; 'next/first reminder' = ordinal inventory.
+- Indirect when-asks ('tell me when the standup fires') and
+  adverb-interposed fired asks ('did the alarm already ring').
+- Noun-less determiner toggles ('unpause the standup'), 'set
+  my/the alarm for 7' article creates.
+- CI de-flake x2 (52f8601b + 6428b13d): clock-scope test rows
+  now land today unconditionally; countdown assertion pins a
+  named row + duration, not which row is soonest (CI wall-clock
+  differs from local).
+- **Fragment-fix deploy (752ff2a1 -> artifact 6428b13d):**
+  live-verified model-down — 'remind me about the laundry' ->
+  clarify -> 'for 20 minutes' -> real row 09:02; 'remind me to
+  stretch' -> 'for 30 minutes' -> real row 09:12; cancel
+  round-trips. Both task-ask synths consume duration fragments.
