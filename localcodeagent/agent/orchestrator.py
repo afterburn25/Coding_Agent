@@ -6311,6 +6311,13 @@ class AgentOrchestrator:
         task = re.sub(
             r"\s+(?:before|after|by|until|till|on|at|for|and|or|"
             r"to|about|of)$", "", task, flags=re.IGNORECASE)
+        # 'remind me not to forget the meeting' — the negation is
+        # instruction filler; the row should name the thing itself.
+        task = re.sub(
+            r"^(?:not\s+to|to\s+not|to)\s+(?:forget|miss)\s+",
+            "", task, flags=re.IGNORECASE)
+        task = re.sub(r"^about\s+forgetting\s+", "", task,
+                      flags=re.IGNORECASE)
         mfd = re.match(
             r"^for\s+((?:a|an|one|two|three|four|five|six|seven|"
             r"eight|nine|ten|\d+(?:\.\d+)?)\s+(?:second|minute|hour|"

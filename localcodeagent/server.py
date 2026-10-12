@@ -5324,6 +5324,13 @@ class AppState:
         desc = re.sub(
             r"\s+(?:before|after|by|until|till|on|at|for|and|or|"
             r"to|about|of)$", "", desc, flags=re.IGNORECASE)
+        # 'remind me not to forget the meeting' — the negation is
+        # instruction filler; the row should name the thing itself.
+        desc = re.sub(
+            r"^(?:not\s+to|to\s+not|to)\s+(?:forget|miss)\s+",
+            "", desc, flags=re.IGNORECASE)
+        desc = re.sub(r"^about\s+forgetting\s+", "", desc,
+                      flags=re.IGNORECASE)
         # 'remind me roughly at 6' — a hedge word left in the
         # desc slot isn't a task name.
         if re.fullmatch(
