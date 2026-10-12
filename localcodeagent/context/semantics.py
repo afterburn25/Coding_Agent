@@ -193,8 +193,11 @@ class SemanticFrame:
                     "github_read"):
             # github_read carries no topic vocabulary on purpose —
             # follow-ups like "read it" name no repo; the lane resolves
-            # the referent from conversation context.
-            return act in (QUESTION, COMMAND, REQUEST)
+            # the referent from conversation context. Fragments count
+            # as request-shaped here too ('any update on that' is an
+            # elliptical state ask) — the lane's own regex still
+            # decides whether it can actually answer.
+            return act in (QUESTION, COMMAND, REQUEST) or self.fragment
         if lane in ("feature_status", "feature_explain", "diagnostics"):
             # Complaints are bug reports — they route to investigation,
             # never to a canned feature-status/explanation dump. An
