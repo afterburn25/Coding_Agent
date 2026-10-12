@@ -6396,6 +6396,18 @@ class AgentOrchestrator:
             "", task, flags=re.IGNORECASE)
         task = re.sub(r"^about\s+forgetting\s+", "", task,
                       flags=re.IGNORECASE)
+        # 'remind me at the same time tomorrow' — a deictic time
+        # reference isn't a task name; it asks "same time as what?"
+        if re.fullmatch(
+                r"at\s+the\s+same\s+time|the\s+same\s+time|"
+                r"same\s+time", task, re.IGNORECASE):
+            return self._reminder_finish(
+                "Same time as what? — tell me what to remind you "
+                "about and I'll pin it.",
+                user_text, task_id, event_callback)
+        task = re.sub(
+            r"\s+(?:at\s+)?the\s+same\s+time\s*$", "", task,
+            flags=re.IGNORECASE)
         mfd = re.match(
             r"^for\s+((?:a|an|one|two|three|four|five|six|seven|"
             r"eight|nine|ten|\d+(?:\.\d+)?)\s+(?:second|minute|hour|"

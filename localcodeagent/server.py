@@ -5350,6 +5350,17 @@ class AppState:
             "", desc, flags=re.IGNORECASE)
         desc = re.sub(r"^about\s+forgetting\s+", "", desc,
                       flags=re.IGNORECASE)
+        # 'remind me at the same time tomorrow' — a deictic time
+        # reference isn't a task name.
+        if re.fullmatch(
+                r"at\s+the\s+same\s+time|the\s+same\s+time|"
+                r"same\s+time", desc, re.IGNORECASE):
+            return {"content": (
+                "Same time as what? — tell me what to remind you "
+                "about and I'll pin it.")}
+        desc = re.sub(
+            r"\s+(?:at\s+)?the\s+same\s+time\s*$", "", desc,
+            flags=re.IGNORECASE)
         # 'remind me roughly at 6' — a hedge word left in the
         # desc slot isn't a task name.
         if re.fullmatch(
@@ -5357,6 +5368,10 @@ class AppState:
                 r"only|just|roughly|about|around|like|basically|"
                 r"maybe|probably|kinda|sorta|sometime|some\s+point|"
                 r"at\s+some\s+point|first\s+thing|"
+                # 'remind me at the same time tomorrow' — a deictic
+                # time reference isn't a task name.
+                r"at\s+the\s+same\s+time|the\s+same\s+time|"
+                r"same\s+time|"
                 # 'remind me twice on friday' — a count lead is a
                 # fire-rate the cadence grammar can't hold, not a
                 # task named 'twice'.
