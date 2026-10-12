@@ -1957,6 +1957,135 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Snoozed", r.content)
             self.assertAlmostEqual(once_row["at"], at_2pm + 1800, 0)
 
+    def test_reminder_pending_clarify_consumes_bare_fragment(self):
+        # 'Snooze until when?' taught a reply shape ('for 20 minutes')
+        # no lane consumed — the fragment fell to the model and the
+        # snooze never landed. A pending resolver now synthesizes the
+        # original scoped op + the fragment into a real mutation.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+                self._n = 0
+
+            def add(self, name, kind, **kw):
+                self._n += 1
+                row = {"id": f"sc-{self._n}", "name": name,
+                       "kind": kind, "enabled": True, **kw}
+                self.rows.append(row)
+                return row
+
+            def list(self):
+                return list(self.rows)
+
+            def remove(self, sid):
+                n = len(self.rows)
+                self.rows = [r for r in self.rows if r["id"] != sid]
+                return len(self.rows) < n
+
+            def update(self, sid, **fields):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r.update(fields)
+                        return dict(r)
+                return None
+
+            def set_enabled(self, sid, enabled):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r["enabled"] = bool(enabled)
+                        return True
+                return False
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        class _Mgr:
+            def __init__(self):
+                self._msgs = []
+
+            def set(self, msgs):
+                self._msgs = msgs
+
+            def active(self):
+                return {"messages": self._msgs}
+
+            def record_exchange(self, u, a):
+                pass
+
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            agent.conversation_manager = _Mgr()
+            task = agent.tasks.create("x", "auto")
+            agent._reminder_reply(
+                "remind me in 5 minutes to check the oven",
+                "remind me in 5 minutes to check the oven", task.id)
+            oven = sup.scheduler.rows[-1]
+
+            r = agent._reminder_reply(
+                "snooze the oven reminder until later",
+                "snooze the oven reminder until later", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("until when", r.content.lower())
+
+            agent.conversation_manager.set([
+                {"role": "user",
+                 "content": "snooze the oven reminder until later"},
+                {"role": "assistant", "content": r.content},
+                {"role": "user", "content": "for 20 minutes"}])
+            self.assertEqual(
+                agent._reminder_pending("for 20 minutes"),
+                "snooze the oven reminder for 20 minutes")
+            before = float(oven.get("next_run") or oven.get("at"))
+            r = agent._reminder_reply(
+                "for 20 minutes", "for 20 minutes", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Snoozed", r.content)
+            self.assertAlmostEqual(
+                float(oven.get("next_run") or oven.get("at")),
+                before + 1200, -1)
+
+            # The create clarify resolves the same way — the bare
+            # fragment completes 'When should I remind you to X?'.
+            agent.conversation_manager.set([
+                {"role": "user", "content": "remind me to stretch"},
+                {"role": "assistant",
+                 "content": "When should I remind you to stretch? — "
+                            "e.g. “remind me in 10 minutes to "
+                            "stretch”."},
+                {"role": "user", "content": "in 10 minutes"}])
+            self.assertEqual(
+                agent._reminder_pending("in 10 minutes"),
+                "remind me in 10 minutes to stretch")
+            n_rows = len(sup.scheduler.rows)
+            r = agent._reminder_reply(
+                "in 10 minutes", "in 10 minutes", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Reminder set", r.content)
+            self.assertEqual(len(sup.scheduler.rows), n_rows + 1)
+
+            # No outstanding clarify → the fragment declines instead
+            # of manufacturing an op.
+            agent.conversation_manager.set([
+                {"role": "user", "content": "what is the weather"},
+                {"role": "assistant", "content": "It is sunny."},
+                {"role": "user", "content": "for 20 minutes"}])
+            self.assertIsNone(
+                agent._reminder_pending("for 20 minutes"))
+            # A different clarify in between → stale, no carry-over.
+            agent.conversation_manager.set([
+                {"role": "user", "content": "some other question"},
+                {"role": "assistant", "content": "Here is the answer."},
+                {"role": "user", "content": "for 20 minutes"}])
+            self.assertIsNone(
+                agent._reminder_pending("for 20 minutes"))
+
     def test_unpause_survives_spelling_normalization(self):
         # Live: 'unpause my reminders'/'unpause the reminders' fell to
         # the model, which riffed on 'unpassed' — run() feeds

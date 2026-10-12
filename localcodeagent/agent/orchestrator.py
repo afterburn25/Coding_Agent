@@ -4967,6 +4967,129 @@ class AgentOrchestrator:
                 return None
         return mc
 
+    # A bare duration/clock fragment — the only reply shape the
+    # clarify prompts teach ('Snooze until when? — e.g. "for 20
+    # minutes"').
+    _REMINDER_PENDING_FRAG_RE = re.compile(
+        r"^(?:for\s+)?(?:a\s+|an\s+)?(?:\d+(?:\.\d+)?|few|couple|"
+        r"half)\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|"
+        r"days?|weeks?)\s*$|"
+        r"^(?:(?:until|til|till|at|by|in)\s+)?\d{1,2}(?::\d{2})?"
+        r"\s*(?:am|pm)?\s*$|"
+        r"^(?:on|off)\s*$|"
+        r"^(?:until|til|till|at|by|in|to|on|for|every|"
+        r"tomorrow|today|tonight|tonite|next|this|"
+        r"monday|tuesday|wednesday|thursday|friday|saturday|"
+        r"sunday|weekday|weekend)\s+\S(?:.{0,23}\S)?\s*$",
+        re.IGNORECASE)
+
+    def _reminder_pending(self, current_text):
+        """Resolve a bare fragment against an outstanding reminder
+        clarify — 'Snooze until when?' → 'for 20 minutes' completes
+        the snooze on the SAME scoped turn; 'When should I remind
+        you to X?' → 'in 10 minutes' creates the row; 'Turn them on
+        or off?' → 'off' toggles. Asking a question the lane can't
+        consume taught users a reply that fell to the model.
+        → synthesized reminder text | None."""
+        t = str(current_text or "").strip().rstrip(".,!?")
+        cur = str(current_text or "").strip().rstrip(".,!?")
+        if not t or not self._REMINDER_PENDING_FRAG_RE.match(t):
+            return None
+        seen_self = False
+        ask = None
+        prior_user = None
+        for msg in reversed(self._convo_messages()):
+            role = msg.get("role")
+            body = str(msg.get("content") or "").strip() \
+                .rstrip(".,!?")
+            if role == "user":
+                # The in-flight turn may or may not be recorded yet —
+                # skip it if it is, and take the last OTHER user turn
+                # as the clarify's subject. An unrelated turn in that
+                # slot fails the reminder-shape check below, so a stale
+                # pending can never carry over.
+                if not seen_self and body == cur:
+                    seen_self = True
+                    continue
+                prior_user = body
+                break
+            if role != "assistant" or ask is not None:
+                continue
+            if ask is None:
+                low_body = body.lower()
+                if "snooze until when" in low_body:
+                    ask = "snooze"
+                elif "reschedule to when" in low_body:
+                    ask = "reschedule"
+                elif "when should the" in low_body \
+                        and "fire" in low_body:
+                    ask = "noun_fire"
+                elif "turn them on or off" in low_body:
+                    ask = "toggle"
+                else:
+                    mq = re.search(
+                        r"when should i remind you "
+                        r"(?:(to|about|not to)\s+)?(.+?)\s*"
+                        r"(?:\?|\s+[—–-]|$)",
+                        low_body)
+                    if mq is not None:
+                        ask = (f"{mq.group(1) or 'to'} "
+                               f"{mq.group(2).strip()}")
+                    else:
+                        mq = re.search(
+                            r"\b(wake|ping|buzz|beep|text|page|"
+                            r"message|remind|alert|notify|nudge)\w*"
+                            r"\s+you\s+when\b", low_body)
+                        if mq is None:
+                            return None
+                        ask = f"verbwhen:{mq.group(1)}"
+                continue
+        if ask is None or prior_user is None:
+            return None
+        if ask == "noun_fire":
+            # 'When should the alarm fire?' — the clarify itself proves
+            # the prior turn was set-shaped; it just lacked a when.
+            frag = t if re.match(
+                r"(?:for|at|in|on|to|by|until|til|till)\b",
+                t.lower()) else f"for {t}"
+            return f"{prior_user} {frag}"
+        if ask in ("snooze", "reschedule", "toggle"):
+            rx = {
+                "snooze": (self._REMINDER_SNOOZE_RE,),
+                "reschedule": (self._REMINDER_RESCHEDULE_RE,
+                               self._REMINDER_RESCHEDULE_BARE_RE),
+                "toggle": (self._REMINDER_TOGGLE_RE,),
+            }[ask]
+            m = next(
+                (r.match(prior_user.lower()) for r in rx
+                 if r.match(prior_user.lower())), None)
+            if m is None:
+                return None
+            # The fragment REPLACES whatever unparseable tail the
+            # first pass called a duration/target — 'snooze X until
+            # later' + 'for 20 minutes' → 'snooze X for 20 minutes',
+            # never 'later for 20 minutes' leaking into topic scope.
+            cut = min(
+                (m.start(g) for g in m.groupdict()
+                 if g.startswith(("dur", "when")) and m.group(g)),
+                default=len(prior_user))
+            head = re.sub(
+                r"\s+(?:for|until|til|till|by|to|in|at|out)\s*$",
+                "", prior_user[:cut].rstrip())
+            frag = t
+            if ask == "reschedule" and not re.match(
+                    r"(?:to|until|til|till|at|by|in|on)\b",
+                    t.lower()):
+                frag = f"to {t}"
+            return f"{head} {frag}"
+        if ask.startswith("verbwhen:"):
+            return f"{ask[9:]} me {t}"
+        if ask.startswith("not to "):
+            # 'remind me not to run' + 'at 3pm' — the grammar wants
+            # infinitive-negation after the when: 'to not run'.
+            return f"remind me {t} to not {ask[7:]}"
+        return f"remind me {t} {ask}"
+
     def _reminder_none_text(self, sched, noun=None) -> str:
         """A scoping noun ('move my alarm…') filtered the pool to
         zero — 'you don't have any reminders' is false when other
@@ -6089,6 +6212,11 @@ class AgentOrchestrator:
         notify action through the autonomy scheduler, not a promise.
         Falls through (None) for 'remind me the tag' recall asks —
         those belong to memory lanes."""
+        synth = self._reminder_pending(user_text)
+        if synth is not None:
+            # 'Snooze until when?' → 'for 20 minutes': the fragment
+            # completes the pending op against its original scope.
+            user_text = plan_text = synth
         if re.search(
                 r"\band\s+(?:cancel|delete|remove|snooze|pause|"
                 r"reschedule|disable|mute|silence|block|clear|"
@@ -7572,7 +7700,9 @@ class AgentOrchestrator:
                          or self._REMINDER_WHENLEAD_RE.match(
                              plan_text)
                          or self._reminder_inventory_shaped(
-                             plan_text))):
+                             plan_text)
+                         or self._reminder_pending(
+                             user_text))):
             return None
         # Checked before parse_local_action, which has no temporal
         # grammar — without this the ask fell to the model and it
@@ -8037,6 +8167,9 @@ class AgentOrchestrator:
             cls._REMINDER_WHENONLY_RE, cls._REMINDER_INV_LEAD_RE,
             cls._REMINDER_HAVE_RE,
             cls._REMINDER_STATEASK_RE, cls._REMINDER_WHENLEAD_RE,
+            # Bare duration/clock fragments may be pending-clarify
+            # replies — the resolver checks the convo at reply time.
+            cls._REMINDER_PENDING_FRAG_RE,
             # State-graph asks answer from the ledger — 'what did we
             # settle on', 'what happened with that' — no model needed.
             cls._STATE_DECISION_Q_RE, cls._STATE_LOOP_Q_RE,
