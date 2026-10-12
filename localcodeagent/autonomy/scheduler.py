@@ -77,7 +77,7 @@ def _worded_clock(t: str) -> str:
     if m:
         return (t[:m.start()] + f"{_WORD_NUM[m.group(1)]} "
                 + m.group(2) + t[m.end():])
-    m = re.search(r"\bquarter\s+to\s+(\w+)\b", t)
+    m = re.search(r"\bquarter\s+(?:to|till?)\s+(\w+)\b", t)
     if m:
         htok = m.group(1).lower()
         if htok == "midnight":
@@ -93,7 +93,8 @@ def _worded_clock(t: str) -> str:
             if h == 0:
                 return t[:m.start()] + f"12:{mins} am" + t[m.end():]
             return t[:m.start()] + f"{h}:{mins}" + t[m.end():]
-    m = re.search(r"\b(" + _MIN_TOK + r")\s+to\s+(\w+)\b", t)
+    m = re.search(r"\b(" + _MIN_TOK + r")\s+(?:to|till?)\s+(\w+)\b",
+                  t)
     if m:
         mn = _min_num(m.group(1))
         htok = m.group(2).lower()
@@ -254,6 +255,25 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"\bby\s+(?=morning|afternoon|evening|night\b|tonight|"
         r"tomorrow|today|mon|tue|wed|thu|fri|sat|sun)",
         "", t)
+    # 'before 8pm' — same deadline pin as 'by'; 'before the
+    # meeting' keeps its 'the' so an event still refuses. noon/
+    # midnight emit the converted clock — the 'at noon' rewrite
+    # already ran. '5 minutes before 3pm' is a clock offset —
+    # its own grammar below, don't touch the 'before'.
+    if not re.search(
+            r"\b(?:a|an|one|two|three|four|five|six|seven|eight|"
+            r"nine|ten|few|couple|\d+(?:\.\d+)?)\s+(?:second|"
+            r"minute|hour|day|week|month)s?\s+before\b", t):
+        t = re.sub(r"\bbefore\s+noon\b", "at 12:00 pm", t)
+        t = re.sub(r"\bbefore\s+midnight\b", "at 12:00 am", t)
+        t = re.sub(r"\bbefore\s+(?=\d)", "at ", t)
+        t = re.sub(
+            r"\bbefore\s+(?=morning|afternoon|evening|night\b|"
+            r"tonight|tomorrow|today|monday|tuesday|wednesday|"
+            r"thursday|friday|saturday|sunday)", "", t)
+    # 'the day after tomorrow' — a date anchor, not an event.
+    t = re.sub(
+        r"\b(?:the\s+)?day\s+after\s+tomorrow\b", "in 2 days", t)
     # 'a week from now' — 'X from now' is just 'in X'.
     t = re.sub(
         r"((?:a|an|one|two|three|four|five|six|seven|eight|nine|"
@@ -759,6 +779,25 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         r"\bby\s+(?=morning|afternoon|evening|night\b|tonight|"
         r"tomorrow|today|mon|tue|wed|thu|fri|sat|sun)",
         "", t)
+    # 'before 8pm' — same deadline pin as 'by'; 'before the
+    # meeting' keeps its 'the' so an event still refuses. noon/
+    # midnight emit the converted clock — the 'at noon' rewrite
+    # already ran. '5 minutes before 3pm' is a clock offset —
+    # its own grammar below, don't touch the 'before'.
+    if not re.search(
+            r"\b(?:a|an|one|two|three|four|five|six|seven|eight|"
+            r"nine|ten|few|couple|\d+(?:\.\d+)?)\s+(?:second|"
+            r"minute|hour|day|week|month)s?\s+before\b", t):
+        t = re.sub(r"\bbefore\s+noon\b", "at 12:00 pm", t)
+        t = re.sub(r"\bbefore\s+midnight\b", "at 12:00 am", t)
+        t = re.sub(r"\bbefore\s+(?=\d)", "at ", t)
+        t = re.sub(
+            r"\bbefore\s+(?=morning|afternoon|evening|night\b|"
+            r"tonight|tomorrow|today|monday|tuesday|wednesday|"
+            r"thursday|friday|saturday|sunday)", "", t)
+    # 'the day after tomorrow' — a date anchor, not an event.
+    t = re.sub(
+        r"\b(?:the\s+)?day\s+after\s+tomorrow\b", "in 2 days", t)
     # 'a week from now' — 'X from now' is just 'in X'.
     t = re.sub(
         r"((?:a|an|one|two|three|four|five|six|seven|eight|nine|"

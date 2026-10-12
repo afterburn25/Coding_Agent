@@ -3796,6 +3796,22 @@ class TruthGateTests(RecoveryLoopTests):
                 agent._reminder_spec("at noon today", time.time()))
             self.assertIsNotNone(
                 agent._reminder_spec("today at 3", time.time()))
+            # 'ten til 4' — worded minutes-til like 'quarter to';
+            # 'before <clock>' is a deadline pin like 'by';
+            # 'the day after tomorrow' is a date anchor, not an
+            # event trigger.
+            self.assertIsNotNone(
+                agent._reminder_spec("at ten til 4", time.time()))
+            self.assertIsNotNone(
+                agent._reminder_spec("before 8pm", time.time()))
+            self.assertIsNotNone(
+                agent._reminder_spec("before noon", time.time()))
+            self.assertIsNotNone(
+                agent._reminder_spec(
+                    "the day after tomorrow", time.time()))
+            self.assertIsNone(
+                agent._reminder_spec(
+                    "remind me before the meeting", time.time()))
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —
