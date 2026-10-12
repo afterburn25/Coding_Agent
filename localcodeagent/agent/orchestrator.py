@@ -3845,7 +3845,7 @@ class AgentOrchestrator:
         # the model narrate an empty calendar over live rows.
         r"|" + _REMINDER_POLITE +
         r"(?:what'?s|whats|what\s+is)\s+"
-        r"(?:coming\s+up|on\s+(?:the|my)\s+"
+        r"(?:coming\s+up|due|on\s+(?:the|my)\s+"
         r"(?:schedule|agenda|calendar|docket)|scheduled)\b"
         r"(?:\s+(?:about|regarding|for|on|of|at|to|set|made|"
         r"created|scheduled|due)\s+.+?)?"
@@ -3936,6 +3936,27 @@ class AgentOrchestrator:
         r"(?:(?:my|the|your|that|this)\s+)?[\w'\s-]{0,40}?\s+"
         r"(?:goes?\s+off|go\s+off|fires?|rings?|hits?|triggers?|"
         r"happens?|pops?\s+up)\b"
+        + _REMINDER_TRAIL +
+        # 'will my alarm go off', 'is my reminder going to
+        # fire' — future-fire asks; next_run answers them the
+        # same as 'when does X go off'.
+        r"|" + _REMINDER_POLITE +
+        r"(?:will|is|are|does|do)\s+"
+        r"(?:(?:my|the|your|that|this|any)\s+)?[\w'\s-]{0,40}?\s+"
+        r"(?:(?:reminders?|alarms?|timers?)\s+)?"
+        r"(?:(?:going\s+to|gonna)\s+)?"
+        r"(?:go\s+off|fire|ring)\b"
+        r"(?:\s+.+?)?"
+        + _REMINDER_TRAIL +
+        # Generic fire-verbs need the reminder noun — 'will the
+        # stock hit 100' isn't a scheduler ask.
+        r"|" + _REMINDER_POLITE +
+        r"(?:will|is|are|does|do)\s+"
+        r"(?:(?:my|the|your|that|this|any)\s+)?[\w'\s-]{0,40}?\s+"
+        r"(?:reminders?|alarms?|timers?)\s+"
+        r"(?:(?:going\s+to|gonna)\s+)?"
+        r"(?:hit|trigger|pop\s+up|happen)\b"
+        r"(?:\s+.+?)?"
         + _REMINDER_TRAIL +
         # 'what fires next' / 'which rings next' — fire-verb
         # ordinal asks with no noun at all.
@@ -5649,11 +5670,13 @@ class AgentOrchestrator:
                     r"often|frequently|daily|weekly|monthly|hourly|"
                     r"yearly|recurring|repeating|repeat|recur|recurs|"
                     r"come|comes|hit|hits|rings|every|there|here|"
+                    r"will|gonna|going|due|"
                     r"work|works|working|functional|okay|ok|fine|good|"
                     r"view|run|through|walk|read|out)\b",
                     " ", tm.group(1), flags=re.IGNORECASE))
         when_ask = bool(re.match(
-            r"\s*(?:when|what\s+time)\b", plan_text, re.IGNORECASE))
+            r"\s*(?:when|what\s+time|will)\b",
+            plan_text, re.IGNORECASE))
         # Temporal scope — 'reminders for today', 'anything tomorrow',
         # 'coming up this weekend' scope by fire DATE, not topic.
         # Matched as topic text they produced 'no reminder about
@@ -5706,7 +5729,9 @@ class AgentOrchestrator:
             r"\b(?:reminders?|alarms?|timers?)\s+(?:a\s+)?"
             r"(?:daily|weekly|monthly|hourly|yearly|recurring|"
             r"repeating)\b|"
-            r"\b(?:what|which)\s+day\b", plan_text,
+            r"\b(?:what|which)\s+day\b|\bwill\b|"
+            r"\bgoing\s+to\s+(?:go\s+off|fire|ring|hit|trigger|"
+            r"happen|pop\s+up)\b", plan_text,
             re.IGNORECASE))
         if not scope_terms and (cad_ask or when_ask):
             # Noun-less cadence/when asks carry the row name as the
@@ -5727,7 +5752,11 @@ class AgentOrchestrator:
                 scope_terms = self._reminder_terms(re.sub(
                     r"\b(?:does|do|did|is|are|the|a|an|my|that|this|"
                     r"your|i|me|we|you|it|get|got|still|really|"
-                    r"actually|reminders?|alarms?|timers?)\b",
+                    r"actually|reminders?|alarms?|timers?|going|"
+                    r"gonna|will|to|fires?|go|goes|off|hits?|"
+                    r"rings?|comes?|up|pops?|triggers?|happens?|"
+                    r"reminds?|repeats?|recurs?|there|here|any|"
+                    r"anything|something|everything|all)\b",
                     " ", cm.group(1), flags=re.IGNORECASE))
         if ((re.search(
                 r"\bnext\b(?!\s+(?:week|weeks|month|months|year|"
