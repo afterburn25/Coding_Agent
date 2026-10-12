@@ -1126,7 +1126,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         return {"kind": "interval", "interval_s": span / n_f,
                 **_anchor(m, 6)}
     m = re.fullmatch(
-        r"(?:every\s+other\s+day|every\s+second\s+day)"
+        r"(?:on\s+|every\s+)?(?:every\s+other\s+day|"
+        r"every\s+second\s+day|alternate\s+days?)"
         + clock_tail, t)
     if m:
         return {"kind": "interval", "interval_s": 172800.0,

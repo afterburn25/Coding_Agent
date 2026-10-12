@@ -9932,6 +9932,27 @@ class AgentOrchestrator:
                 base_u, tail_u = self._reminder_until_split(
                     when_raw)
                 if tail_u:
+                    # 'until i tell you to stop' — the lazy 'to'
+                    # split stole the bound's verb into the task
+                    # slot; rejoin the bound and ask for the real
+                    # task instead of creating a row named 'stop'.
+                    _tb = str(m.group("task") or "").strip()
+                    if (re.search(
+                            r"\b(?:i|you|we|they|he|she|me|us|"
+                            r"them)\s*$", tail_u, re.IGNORECASE)
+                            and re.fullmatch(
+                                r"[a-z'\s-]{1,40}", _tb)):
+                        tail_u = (tail_u + " to " + _tb).strip()
+                        if self._reminder_spec(
+                                base_u, time.time()) is not None:
+                            return self._reminder_finish(
+                                f"Sure — remind you to do what "
+                                f"{base_u}? (I can't hold a "
+                                f"bound like “until {tail_u}”, "
+                                "but the cadence works once you "
+                                "name the task.)",
+                                user_text, task_id,
+                                event_callback)
                     spec_u = self._reminder_spec(
                         base_u, time.time())
                     if spec_u is not None:
