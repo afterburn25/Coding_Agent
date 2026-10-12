@@ -2871,6 +2871,68 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertEqual(
             _dt.datetime.fromtimestamp(at).hour, 8)
 
+        # 'advance' is a shift verb — it pulls a recurring row's
+        # clock earlier in place. A whole-day shift on a DAILY row
+        # is a no-op and says so; on a WEEKLY row it moves the
+        # weekday. A quantified shift with no matching row misses
+        # honestly instead of falling to the model.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            action={"kind": "notify", "detail": "standup"})
+        sup.scheduler.add(
+            "reminder: trash", "weekly", weekday=4,
+            hour=7, minute=0,
+            action={"kind": "notify", "detail": "trash"})
+        r = agent._reminder_reply(
+            "advance the standup by an hour",
+            "advance the standup by an hour", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("Rescheduled", r.content)
+        self.assertEqual(sup.scheduler.rows[0]["hour"], 8)
+        self.assertEqual(sup.scheduler.rows[0]["minute"], 30)
+        self.assertEqual(sup.scheduler.rows[0]["kind"], "daily")
+        r = agent._reminder_reply(
+            "advance the standup 30 minutes",
+            "advance the standup 30 minutes", task.id)
+        self.assertIsNotNone(r)
+        self.assertEqual(sup.scheduler.rows[0]["hour"], 8)
+        self.assertEqual(sup.scheduler.rows[0]["minute"], 0)
+        self.assertEqual(sup.scheduler.rows[0]["kind"], "daily")
+        r = agent._reminder_reply(
+            "advance the standup by 2 days",
+            "advance the standup by 2 days", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("doesn't change a daily cadence", r.content)
+        self.assertEqual(sup.scheduler.rows[0]["hour"], 8)
+        r = agent._reminder_reply(
+            "advance the trash run 2 days",
+            "advance the trash run 2 days", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("Rescheduled", r.content)
+        self.assertEqual(sup.scheduler.rows[1]["weekday"], 2)
+        self.assertEqual(sup.scheduler.rows[1]["hour"], 7)
+        r = agent._reminder_reply(
+            "push the dentist forward an hour",
+            "push the dentist forward an hour", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("don't see a reminder", r.content)
+
+        # 're-arm' rides the restore lane — an enabled row is
+        # honest 'already on'; a disabled row re-enables for real.
+        r = agent._reminder_reply(
+            "re-arm the standup reminder",
+            "re-arm the standup reminder", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("already on", r.content)
+        sup.scheduler.set_enabled(
+            str(sup.scheduler.rows[1]["id"]), False)
+        r = agent._reminder_reply(
+            "re-arm the trash reminder",
+            "re-arm the trash reminder", task.id)
+        self.assertIsNotNone(r)
+        self.assertTrue(sup.scheduler.rows[1]["enabled"])
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
