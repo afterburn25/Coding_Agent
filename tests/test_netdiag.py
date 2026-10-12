@@ -2672,6 +2672,24 @@ class TruthGateTests(RecoveryLoopTests):
                     "remind me in a few minutes"))
             agent.answer_memory = None
 
+            # And inside run(): single-fact recall must not answer
+            # a time-shaped reminder ask with banked trivia —
+            # live it replied 'The timer is 30 minutes' from a
+            # narrated fake-set fact. 'remind me about X' keeps
+            # its deliberate recall behavior.
+            agent.conversation_memory.learn_from_user(
+                "the deploy tag is v42", project_id="x")
+            agent.conversation_memory.learn_from_user(
+                "the timer is 30 minutes", project_id="x")
+            self.assertIsNone(agent._single_fact_recall_reply(
+                "remind me in a few minutes", "conv", "x"))
+            self.assertIsNone(agent._single_fact_recall_reply(
+                "remind me tomorrow at 9", "conv", "x"))
+            reply = agent._single_fact_recall_reply(
+                "remind me about the deploy tag", "conv", "x")
+            self.assertIsNotNone(reply)
+            self.assertIn("v42", reply.text)
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
