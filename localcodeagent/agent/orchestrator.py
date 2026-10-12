@@ -3977,7 +3977,7 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_SNOOZE_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?:snooze|postpone|delay|push\s+back|push|bump|shift|"
+        r"(?:snooze|postpone|delay|push\s+back|"
         r"put\s+off|hold\s+off|hold\s+over|kick\s+out)"
         r"(?:\s+(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
         r"schedules?|it|that|this|them|everything|all)\b"
@@ -3985,6 +3985,18 @@ class AgentOrchestrator:
         r"(?:\s+(?P<way>for|until|till|til|to|by|back|up|forward|"
         r"later|earlier|sooner))?"
         r"(?:\s+(?P<dur>.+?))?"
+        + _REMINDER_TRAIL +
+        # Bare 'push|bump|shift' collide with git/software verbs —
+        # 'push to origin' is a repo command, not a snooze. These
+        # verbs claim ONLY with an explicit reminder noun/pronoun.
+        r"|" + _REMINDER_POLITE +
+        r"(?:push|bump|shift)\s+"
+        r"(?:(?P<body6>.+?)\s+)?"
+        r"(?P<noun6>reminders?|alarms?|timers?|schedules?|it|that|"
+        r"this|them|everything|all)\b" + _REMINDER_ECHO +
+        r"(?:\s+(?P<way6>for|until|till|til|to|by|back|up|forward|"
+        r"later|earlier|sooner))?"
+        r"(?:\s+(?P<dur6>.+?))?"
         + _REMINDER_TRAIL +
         # 'give me 5 more minutes' — a snooze on the imminent row;
         # the model narrated 'That's now set for 20:26' over an
@@ -4213,7 +4225,8 @@ class AgentOrchestrator:
         sched, rows = self._reminder_rows(
             noun=(ms.groupdict().get("noun")
                   or ms.groupdict().get("noun3")
-                  or ms.groupdict().get("noun4")))
+                  or ms.groupdict().get("noun4")
+                  or ms.groupdict().get("noun6")))
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
@@ -4221,7 +4234,8 @@ class AgentOrchestrator:
                 user_text, task_id, event_callback)
         body = str(ms.groupdict().get("body")
                    or ms.groupdict().get("body2")
-                   or ms.groupdict().get("body4") or "")
+                   or ms.groupdict().get("body4")
+                   or ms.groupdict().get("body6") or "")
         body = body.strip(" ,;—-")
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
@@ -4230,7 +4244,8 @@ class AgentOrchestrator:
         dur = str(ms.groupdict().get("dur")
                   or ms.groupdict().get("dur3")
                   or ms.groupdict().get("dur4")
-                  or ms.groupdict().get("dur5") or "")
+                  or ms.groupdict().get("dur5")
+                  or ms.groupdict().get("dur6") or "")
         dur = dur.strip(" ,;—-")
         if ms.groupdict().get("lead"):
             # 'the 10am reminder, push it to 4' — the scope is the
@@ -4352,7 +4367,9 @@ class AgentOrchestrator:
                     way_all = str(
                         ms.groupdict().get("way")
                         or ms.groupdict().get("way2")
-                        or ms.groupdict().get("way4") or "").lower()
+                        or ms.groupdict().get("way4")
+                        or ms.groupdict().get("way5")
+                        or ms.groupdict().get("way6") or "").lower()
                     back = way_all in ("earlier", "sooner", "up")
                     tgt = (when if when is not None
                            else (max(now, base - delta) if back
@@ -4377,7 +4394,8 @@ class AgentOrchestrator:
             text = self._reminder_none_text(
                 sched, ms.groupdict().get("noun")
                 or ms.groupdict().get("noun3")
-                or ms.groupdict().get("noun4"))
+                or ms.groupdict().get("noun4")
+                or ms.groupdict().get("noun6"))
         elif not hits:
             names = "; ".join(
                 f"“{self._reminder_label(s)}”" for s in rows[:3])
@@ -4416,7 +4434,8 @@ class AgentOrchestrator:
                     way = str(ms.groupdict().get("way")
                               or ms.groupdict().get("way2")
                               or ms.groupdict().get("way4")
-                              or ms.groupdict().get("way5") or "")
+                              or ms.groupdict().get("way5")
+                              or ms.groupdict().get("way6") or "")
                     if way.lower() in (
                             "earlier", "sooner", "up"):
                         when = max(now, base - delta)
@@ -7340,6 +7359,20 @@ class AgentOrchestrator:
         # lanes — no model needed for 'remind me at 3pm to X' or
         # 'mute my reminders'.
         t = str(user_text or "")
+        if (cls._FACTS_RECALL_RE.search(t)
+                or cls._RULES_RECALL_RE.search(t)
+                or cls._REPEAT_ASK_RE.match(t)
+                or (cls._FACT_RECALL_RE.match(t)
+                    and not cls._FACT_RECALL_SKIP_RE.search(t))
+                or (cls._GIT_STATE_Q_RE.search(t)
+                    and not cls._GIT_STATE_VERB_RE.search(t))):
+            # Memory inspection ('what do you know about me'), rules
+            # recall, repeat-asks, single-fact recall ('what's my
+            # editor') and git repo-state questions ('is the repo
+            # clean') all answer from local stores — no model needed.
+            # The lane still decides the claim; a decline degrades to
+            # the honest model-down error the 409 would give anyway.
+            return True
         return any(rx.match(t) for rx in (
             cls._REMINDER_RE, cls._REMINDER_CLARIFY_RE,
             cls._REMINDER_NOTASK_RE, cls._REMINDER_CANCEL_RE,
