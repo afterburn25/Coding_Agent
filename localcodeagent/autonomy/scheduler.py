@@ -188,7 +188,8 @@ def parse_reminder_when(when: str, now: float) -> float | None:
                r"approximately|roughly|like)\s+"
                r"(?=\d|noon|midnight|quarter|half)", "at ", t)
     # 'on 10/15' — a numeric date reads as october 15; 'at 7a' /
-    # 'at 7p' shorthand meridiems.
+    # 'at 7p' shorthand meridiems; 'monday through friday' is the
+    # weekdays cadence.
     t = re.sub(
         r"\b(\d{1,2})/(\d{1,2})\b",
         lambda m: (_MONTHS_NUM[int(m.group(1))] + " " + m.group(2))
@@ -196,6 +197,9 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         and 1 <= int(m.group(2)) <= 31 else m.group(0), t)
     t = re.sub(r"\b(\d{1,2})\s*([ap])\.?(?=\s|$|[?,;])",
                r"\1 \2m", t)
+    t = re.sub(
+        r"\bmonday\s*(?:-\s*|\s+(?:through|thru|to|-)\s+)friday\b",
+        "weekdays", t)
     t = " ".join(t.split())
     t = _worded_clock(t)
     if _bad_clock(t):
@@ -487,7 +491,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
                r"approximately|roughly|like)\s+"
                r"(?=\d|noon|midnight|quarter|half)", "at ", t)
     # 'on 10/15' — a numeric date reads as october 15; 'at 7a' /
-    # 'at 7p' shorthand meridiems.
+    # 'at 7p' shorthand meridiems; 'monday through friday' is the
+    # weekdays cadence.
     t = re.sub(
         r"\b(\d{1,2})/(\d{1,2})\b",
         lambda m: (_MONTHS_NUM[int(m.group(1))] + " " + m.group(2))
@@ -495,6 +500,9 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         and 1 <= int(m.group(2)) <= 31 else m.group(0), t)
     t = re.sub(r"\b(\d{1,2})\s*([ap])\.?(?=\s|$|[?,;])",
                r"\1 \2m", t)
+    t = re.sub(
+        r"\bmonday\s*(?:-\s*|\s+(?:through|thru|to|-)\s+)friday\b",
+        "weekdays", t)
     t = " ".join(t.split())
     t = _worded_clock(t)
     if _bad_clock(t):

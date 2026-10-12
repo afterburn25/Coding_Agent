@@ -3836,7 +3836,16 @@ class AgentOrchestrator:
         r"(?P<noun3>reminders?|alarms?|timers?|it|that|this|them|"
         r"everything|all)\s+"
         r"(?P<way2>earlier|later|sooner|back|forward)\b"
-        r"(?:\s+(?:by\s+)?(?P<dur3>.+?))?" + _REMINDER_TRAIL,
+        r"(?:\s+(?:by\s+)?(?P<dur3>.+?))?" + _REMINDER_TRAIL +
+        # 'move it up an hour' — up/down directions on 'move' only;
+        # 'move' stays out of the first alternation so 'move X to
+        # friday' still reaches the reschedule lane.
+        r"|" + _REMINDER_POLITE +
+        r"move\s+(?:(?P<body4>.+?)\s+)?"
+        r"(?P<noun4>reminders?|alarms?|timers?|it|that|this|them|"
+        r"everything|all)\s+"
+        r"(?P<way4>up|down)\b"
+        r"(?:\s+(?:by\s+)?(?P<dur4>.+?))?" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_TOGGLE_RE = re.compile(
         _REMINDER_POLITE +
@@ -3969,20 +3978,23 @@ class AgentOrchestrator:
         update via scheduler.update, never a narrated postponement."""
         sched, rows = self._reminder_rows(
             noun=(ms.groupdict().get("noun")
-                  or ms.groupdict().get("noun3")))
+                  or ms.groupdict().get("noun3")
+                  or ms.groupdict().get("noun4")))
         if sched is None:
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
                 "running in this session.",
                 user_text, task_id, event_callback)
         body = str(ms.groupdict().get("body")
-                   or ms.groupdict().get("body2") or "")
+                   or ms.groupdict().get("body2")
+                   or ms.groupdict().get("body4") or "")
         body = body.strip(" ,;—-")
         topic_terms = self._reminder_terms(re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
             " ", body, flags=re.IGNORECASE))
         dur = str(ms.groupdict().get("dur")
-                  or ms.groupdict().get("dur3") or "")
+                  or ms.groupdict().get("dur3")
+                  or ms.groupdict().get("dur4") or "")
         dur = dur.strip(" ,;—-")
         more = bool(ms.groupdict().get("dur2"))
         if more and not dur:
@@ -4025,6 +4037,7 @@ class AgentOrchestrator:
                 s.get("next_run") or s.get("at") or now))]
         all_scope = (str(ms.groupdict().get("noun")
                          or ms.groupdict().get("noun3")
+                         or ms.groupdict().get("noun4")
                          or "").lower()
                      in ("them", "everything", "all")
                      and not topic_terms)
@@ -4044,7 +4057,8 @@ class AgentOrchestrator:
                     base = float(s.get("at") or now)
                     way_all = str(
                         ms.groupdict().get("way")
-                        or ms.groupdict().get("way2") or "").lower()
+                        or ms.groupdict().get("way2")
+                        or ms.groupdict().get("way4") or "").lower()
                     back = way_all in ("earlier", "sooner", "up")
                     tgt = (when if when is not None
                            else (max(now, base - delta) if back
@@ -4068,7 +4082,8 @@ class AgentOrchestrator:
         elif not rows:
             text = self._reminder_none_text(
                 sched, ms.groupdict().get("noun")
-                or ms.groupdict().get("noun3"))
+                or ms.groupdict().get("noun3")
+                or ms.groupdict().get("noun4"))
         elif not hits:
             names = "; ".join(
                 f"“{self._reminder_label(s)}”" for s in rows[:3])
@@ -4105,7 +4120,8 @@ class AgentOrchestrator:
                 if when is None:
                     base = float(hits[0].get("at") or now)
                     way = str(ms.groupdict().get("way")
-                              or ms.groupdict().get("way2") or "")
+                              or ms.groupdict().get("way2")
+                              or ms.groupdict().get("way4") or "")
                     if way.lower() in (
                             "earlier", "sooner", "up"):
                         when = max(now, base - delta)

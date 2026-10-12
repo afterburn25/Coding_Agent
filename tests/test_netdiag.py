@@ -3029,6 +3029,42 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(_prw("on 12/31", now))
             self.assertIsNotNone(_prw("at 7a", now))
             self.assertIsNotNone(_prw("at 7p", now))
+
+            # 'move it up an hour' — the model refused ('I can't
+            # move...'). 'up'/'down' on 'move' snoozes earlier/
+            # later; 'move X to friday' still reschedules.
+            sup.scheduler.rows.clear()
+            sup.scheduler.add(
+                "Reminder: pay rent", "once",
+                at=time.time() + 86400)
+            before = float(sup.scheduler.rows[0]["at"])
+            r = agent._reminder_reply(
+                "move it up an hour", "move it up an hour",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Snoozed", r.content)
+            self.assertAlmostEqual(
+                float(sup.scheduler.rows[0]["at"]),
+                before - 3600, delta=5)
+            r = agent._reminder_reply(
+                "move my reminder to friday",
+                "move my reminder to friday", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Rescheduled", r.content)
+
+            # 'monday through friday' — the parser ate 'friday'
+            # as the day and banked 'monday through' as the task
+            # live. Range phrasing is the weekdays cadence.
+            sup.scheduler.rows.clear()
+            r = agent._reminder_reply(
+                "remind me monday through friday to stand",
+                "remind me monday through friday to stand",
+                task.id)
+            self.assertIsNotNone(r)
+            row = sup.scheduler.rows[0]
+            self.assertEqual(row["kind"], "weekly")
+            self.assertEqual(row["weekday"], [0, 1, 2, 3, 4])
+            self.assertIn("stand", row["name"])
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —
