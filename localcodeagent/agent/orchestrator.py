@@ -4367,7 +4367,8 @@ class AgentOrchestrator:
         # 'set'/'switch' join too, but 'set' needs a row hit —
         # 'set a reminder for 9am' is a create, 'set the X
         # reminder for 9am instead' retimes a live row.
-        r"(?P<verb>reschedule|move|change|switch|set)\s+"
+        r"(?P<verb>reschedule|move|change|switch|set|push|"
+        r"bump|shift)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?|schedules?|"
         r"it|that|this|them|everything|all)\b"
@@ -4386,6 +4387,18 @@ class AgentOrchestrator:
         # 'move the table' isn't.
         r"(?P<verb>reschedule|move|change|switch)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)"
+        r"(?:\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?))?"
+        + _REMINDER_TRAIL,
+        re.IGNORECASE)
+    # 'push the standup to 10am' — bare push/bump/shift; the body
+    # can't start with a connector, so 'push to origin'/'push to
+    # main' (git) never even match. Handler falls through on a
+    # row miss like move/change.
+    _REMINDER_RESCHEDULE_PUSH_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?P<verb>push|bump|shift)\s+"
+        r"(?:(?:the|my|that)\s+)?"
+        r"(?P<body>(?!to\b|until\b|till\b|for\b).+?)"
         r"(?:\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?))?"
         + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -4819,7 +4832,8 @@ class AgentOrchestrator:
             # is a file/object turn, not a schedule op; let it fall
             # through to the action lanes.
             return None
-        if (verb_l in ("move", "change", "switch")
+        if (verb_l in ("move", "change", "switch", "push",
+                    "bump", "shift")
                 and mr.groupdict().get("noun") is None
                 and str(mr.group("body") or "").strip().lower()
                     in ("it", "that", "this", "them", "")):
@@ -4828,7 +4842,8 @@ class AgentOrchestrator:
             return None
         sched, rows = self._reminder_rows(noun=noun)
         if sched is None:
-            if (verb_l in ("move", "change", "switch")
+            if (verb_l in ("move", "change", "switch", "push",
+                    "bump", "shift")
                     and mr.groupdict().get("noun") is None):
                 # No scheduler to resolve the body against — a
                 # bare move/change belongs to the action lanes.
@@ -4843,7 +4858,8 @@ class AgentOrchestrator:
             " ", body, flags=re.IGNORECASE))
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
-        if (verb_l in ("move", "change", "switch")
+        if (verb_l in ("move", "change", "switch", "push",
+                    "bump", "shift")
                 and mr.groupdict().get("noun") is None
                 and not hits and topic_terms):
             # Bare move/change elaborates — 'pay rent' should hit a
@@ -4855,7 +4871,8 @@ class AgentOrchestrator:
                         self._reminder_label(s))
                     and self._reminder_terms(
                         self._reminder_label(s)) <= topic_terms]
-        if (verb_l in ("move", "change", "switch")
+        if (verb_l in ("move", "change", "switch", "push",
+                    "bump", "shift")
                 and mr.groupdict().get("noun") is None
                 and not hits):
             # 'move the table'/'change the font' — a body that
@@ -5799,6 +5816,7 @@ class AgentOrchestrator:
                 self._REMINDER_SNOOZE_RE, self._REMINDER_TOGGLE_RE,
                 self._REMINDER_STOP_RE, self._REMINDER_RESCHEDULE_RE,
                 self._REMINDER_RESCHEDULE_BARE_RE,
+                self._REMINDER_RESCHEDULE_PUSH_RE,
                 self._REMINDER_NOTASK_RE, self._REMINDER_BARE_RE,
                 self._REMINDER_HELP_RE, self._REMINDER_HAVE_RE,
                 self._REMINDER_LEAD_CADENCE_RE,
@@ -5977,6 +5995,7 @@ class AgentOrchestrator:
                     r"come|comes|hit|hits|rings|every|there|here|"
                     r"will|gonna|going|due|"
                     r"work|works|working|functional|okay|ok|fine|good|"
+                    r"till|until|til|"
                     r"view|run|through|walk|read|out)\b",
                     " ", tm.group(1), flags=re.IGNORECASE))
         if sm is None and not scope_terms:
@@ -6033,8 +6052,8 @@ class AgentOrchestrator:
         state_ask = bool(
             self._REMINDER_STATEASK_RE.match(plan_text))
         countdown_ask = bool(re.search(
-            r"\bhow\s+(?:long|soon|much\s+time)\b|\btime\s+"
-            r"(?:is\s+)?(?:left|remaining|until|till)\b|"
+            r"\bhow\s+(?:long|soon|much\s+time|much\s+longer)\b|"
+            r"\btime\s+(?:is\s+)?(?:left|remaining|until|till)\b|"
             r"\bleft\s+on\b", plan_text, re.IGNORECASE))
         fired_ask = bool(re.search(
             r"\bdid\b.{0,40}\b(?:reminders?|alarms?|timers?)\b"
@@ -6404,6 +6423,24 @@ class AgentOrchestrator:
             # 'Snooze until when?' → 'for 20 minutes': the fragment
             # completes the pending op against its original scope.
             user_text = plan_text = synth
+        # 'remind me again about the standup' — 'again' is a
+        # re-fire adverb, not part of the when or task; dropping
+        # it lets the create grammar produce a clean clarify.
+        plan_text = re.sub(
+            r"\b(remind|alert|notify|ping|wake)\s+me\s+again\b",
+            r"\1 me", plan_text, flags=re.IGNORECASE)
+        # 'repeat the standup reminder' — noun-anchored re-arm ask;
+        # normalize onto the create grammar so a real row or an
+        # honest clarify comes back. 'repeat the command' declines.
+        rp = re.match(
+            r"^\s*(?:can\s+you\s+|could\s+you\s+|please\s+)?"
+            r"repeat\s+(?:the\s+|my\s+|that\s+|this\s+)?"
+            r"(?P<what>.+?\s+)?(?:reminders?|alarms?|timers?)\b"
+            r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
+        if rp is not None:
+            what = str(rp.group("what") or "").strip(" ,;—-")
+            plan_text = (f"remind me about {what}" if what
+                         else "remind me")
         if re.search(
                 r"\band\s+(?:cancel|delete|remove|snooze|pause|"
                 r"reschedule|disable|mute|silence|block|clear|"
@@ -6435,6 +6472,8 @@ class AgentOrchestrator:
         mr = self._REMINDER_RESCHEDULE_RE.match(plan_text)
         if mr is None:
             mr = self._REMINDER_RESCHEDULE_BARE_RE.match(plan_text)
+        if mr is None:
+            mr = self._REMINDER_RESCHEDULE_PUSH_RE.match(plan_text)
         if mr is not None and not self._reminder_set_is_create(mr):
             return self._reminder_reschedule_reply(
                 user_text, mr, task_id, event_callback)
@@ -7866,6 +7905,8 @@ class AgentOrchestrator:
                          or self._REMINDER_RESCHEDULE_RE.match(plan_text)
                          or self._REMINDER_RESCHEDULE_BARE_RE.match(
                              plan_text)
+                         or self._REMINDER_RESCHEDULE_PUSH_RE.match(
+                             plan_text)
                          or self._REMINDER_NOTASK_RE.match(plan_text)
                          or self._REMINDER_LEAD_CADENCE_RE.match(
                              plan_text)
@@ -8347,6 +8388,7 @@ class AgentOrchestrator:
             cls._REMINDER_SNOOZE_RE, cls._REMINDER_TOGGLE_RE,
             cls._REMINDER_STOP_RE, cls._REMINDER_RESCHEDULE_RE,
             cls._REMINDER_RESCHEDULE_BARE_RE,
+            cls._REMINDER_RESCHEDULE_PUSH_RE,
             cls._REMINDER_LEAD_CADENCE_RE, cls._REMINDER_LEAD_WHEN_RE,
             cls._REMINDER_BARE_RE, cls._REMINDER_HELP_RE,
             cls._REMINDER_DECL_RE, cls._REMINDER_NOUNFIRST_RE,
