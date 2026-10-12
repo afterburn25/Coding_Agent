@@ -5239,7 +5239,8 @@ class AppState:
         if re.fullmatch(
                 r"me|you|it|that|this|them|us|something|anything|"
                 r"only|just|roughly|about|around|like|basically|"
-                r"maybe|probably|kinda|sorta|first\s+thing",
+                r"maybe|probably|kinda|sorta|sometime|some\s+point|"
+                r"at\s+some\s+point|first\s+thing",
                 desc, re.IGNORECASE):
             desc = ""
         # 'remind me at 5 then again at 7' — the desc slot held a

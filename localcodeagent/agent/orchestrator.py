@@ -5097,6 +5097,7 @@ class AgentOrchestrator:
                     r"me|you|it|that|this|them|us|something|"
                     r"anything|only|just|roughly|about|around|"
                     r"like|basically|maybe|probably|kinda|sorta|"
+                    r"sometime|some\s+point|at\s+some\s+point|"
                     r"first\s+thing",
                     task_d, re.IGNORECASE):
                 # 'reminders for me' — a pronoun isn't a task; let
@@ -5629,7 +5630,8 @@ class AgentOrchestrator:
                     f"{task_lazy}? — e.g. “in 10 minutes”, "
                     "“at 3pm”, “tomorrow at 9”.",
                     user_text, task_id, event_callback)
-            if spec is None and task_lazy:
+            if spec is None and task_lazy and re.match(
+                    r"(?:the|a|an)\s", task_lazy):
                 # 'at the top | of the hour' — the split cut inside
                 # a clock phrase; re-joined it parses, and the
                 # 'task' was really clock tail.

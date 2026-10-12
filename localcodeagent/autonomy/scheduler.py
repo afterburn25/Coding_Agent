@@ -216,6 +216,21 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     t = re.sub(
         r"\bfirst\s+thing(?:\s+tomorrow|\s+in\s+the\s+morning|"
         r"\s+in\s+the\s+am)?\b", "tomorrow at 7", t)
+    # 'around lunchtime' / 'at dinner' / 'during lunch' — meal
+    # dayparts carry conventional clocks.
+    t = re.sub(
+        r"\b(?:at|around|during)\s+lunch\s*(?:time)?\b",
+        "at noon", t)
+    t = re.sub(
+        r"\b(?:at|around|during)\s+(?:dinner|supper)\s*"
+        r"(?:time)?\b", "at 6 pm", t)
+    t = re.sub(
+        r"\b(?:at|around|during)\s+breakfast\s*(?:time)?\b",
+        "at 8 am", t)
+    # 'sometime tonight' / 'at some point tomorrow' — the vague
+    # qualifier isn't part of the time.
+    t = re.sub(r"\bat\s+some\s+point\s+(?:in\s+)?", "", t)
+    t = re.sub(r"\bsometime\b\s*", "", t)
     # 'at 5pm on the 20th' — a leading clock belongs after the
     # date phrase, matching 'on the 20th at 5pm'.
     t = re.sub(
@@ -587,6 +602,21 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     t = re.sub(
         r"\bfirst\s+thing(?:\s+tomorrow|\s+in\s+the\s+morning|"
         r"\s+in\s+the\s+am)?\b", "tomorrow at 7", t)
+    # 'around lunchtime' / 'at dinner' / 'during lunch' — meal
+    # dayparts carry conventional clocks.
+    t = re.sub(
+        r"\b(?:at|around|during)\s+lunch\s*(?:time)?\b",
+        "at noon", t)
+    t = re.sub(
+        r"\b(?:at|around|during)\s+(?:dinner|supper)\s*"
+        r"(?:time)?\b", "at 6 pm", t)
+    t = re.sub(
+        r"\b(?:at|around|during)\s+breakfast\s*(?:time)?\b",
+        "at 8 am", t)
+    # 'sometime tonight' / 'at some point tomorrow' — the vague
+    # qualifier isn't part of the time.
+    t = re.sub(r"\bat\s+some\s+point\s+(?:in\s+)?", "", t)
+    t = re.sub(r"\bsometime\b\s*", "", t)
     # '6 am weekdays' — a leading clock belongs inside the
     # cadence's 'at T' tail.
     t = re.sub(

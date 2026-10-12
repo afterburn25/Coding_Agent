@@ -3316,6 +3316,29 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("pay rent", r.content)
             sup.scheduler.rows.clear()
 
+            # Meal dayparts — 'around lunchtime' was a model
+            # fake-set; lunch/dinner/breakfast pin real clocks.
+            r = agent._reminder_reply(
+                "remind me around lunchtime to eat",
+                "remind me around lunchtime to eat", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("12:00", r.content)
+            self.assertIn("eat", r.content)
+            spec = agent._reminder_spec("at dinner", time.time())
+            self.assertIsNotNone(spec)
+            # 'sometime tonight' made a row named 'sometime'; the
+            # qualifier strips, the daypart resolves, the reply
+            # asks for the task.
+            r = agent._reminder_reply(
+                "remind me sometime tonight",
+                "remind me sometime tonight", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("do what", r.content)
+            self.assertFalse([
+                s for s in sup.scheduler.rows
+                if "sometime" in s["name"]])
+            sup.scheduler.rows.clear()
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (
