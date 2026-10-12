@@ -3550,6 +3550,14 @@ class AgentOrchestrator:
                   "install."),
             speech_act="answer")
 
+    # Lane vocabulary for decision recall — 'settle' in 'what did we
+    # settle on' is function text, not a scope term; stripping these
+    # keeps unscoped asks from miss-matching the ledger.
+    _DECISION_FUNCTION_TERMS = frozenset({
+        "settle", "settled", "decide", "decided", "decision", "decisions",
+        "agree", "agreed", "choose", "chose", "pick", "picked", "conclude",
+        "concluded", "land", "landed", "went", "go", "going"})
+
     def _state_recall_reply(self, user_text: str, state_ctx,
                             env=None):
         """Conversation-state recall — 'what did we settle on', 'what
@@ -3575,7 +3583,10 @@ class AgentOrchestrator:
             act = [d for d in (getattr(state_ctx, "decisions", None)
                                or []) if d.get("status") == "active"]
             if act:
-                q_terms = terms_of(text)
+                # 'settle/decide/agree' are lane vocabulary, not scope
+                # — 'what did we settle on' is an UNSCOPED recall and
+                # must summarize the ledger, not miss-match against it.
+                q_terms = terms_of(text) - self._DECISION_FUNCTION_TERMS
                 ranked = sorted(
                     act,
                     key=lambda d: (
@@ -3588,7 +3599,13 @@ class AgentOrchestrator:
                 hits = len(q_terms & terms_of(
                     str(top.get("subject", "")) + " "
                     + str(top.get("value", ""))))
-                if hits or len(act) == 1:
+                if not q_terms:
+                    named = [str(d.get("value") or d.get("subject"))
+                             for d in ranked[:3]]
+                    canonical = ("On record we settled: "
+                                 + "; ".join(named) + ".")
+                    sid = "state:decision_recall"
+                elif hits or len(act) == 1:
                     canonical = (
                         f"We settled on {top.get('value')}"
                         + (f" for {top.get('subject')}"
