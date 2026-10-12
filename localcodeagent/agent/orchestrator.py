@@ -4503,7 +4503,13 @@ class AgentOrchestrator:
         r"\bwhat'?s\s+(?:at|for|on|around)\s+\d|"
         r"\b(?:anything|something)\s+(?:tomorrow|today|tonight|"
         r"tonite|this|next|monday|tuesday|wednesday|thursday|"
-        r"friday|saturday|sunday|morning|afternoon|evening)\b",
+        r"friday|saturday|sunday|morning|afternoon|evening)\b|"
+        # Noun-less countdown asks — 'how much longer', 'time
+        # left', 'how long until the standup'. Bare 'how long'
+        # stays out ('how long is a marathon' isn't a countdown).
+        r"\bhow\s+much\s+longer\b|\bhow\s+much\s+time\s+left\b|"
+        r"\btime\s+(?:is\s+)?(?:left|remaining|until|till)\b|"
+        r"\bhow\s+long\s+(?:until|till|til|left|more)\b",
         re.IGNORECASE)
     # Temporal tokens in a failed when-clause → ask when, don't claim.
     _REMINDER_TIMEISH_RE = re.compile(
@@ -5580,6 +5586,60 @@ class AgentOrchestrator:
             for w in re.findall(r"[a-z0-9']+",
                                 str(text or "").lower())) if w}
 
+    @staticmethod
+    def _reminder_next_fire(s: dict, now: float) -> float | None:
+        """Next fire timestamp — next_run/at for one-shots, the
+        next cadence occurrence for recurring rows whose row
+        carries only hour/minute/weekday (test stubs, rows yet to
+        tick). A countdown reading '0 minutes' off a missing
+        next_run was a lie."""
+        fire = s.get("next_run") or s.get("at")
+        if fire:
+            return float(fire)
+        kind = s.get("kind")
+        hour, minute = s.get("hour"), s.get("minute")
+        if hour is None:
+            return None
+        import datetime as _dt
+        today = _dt.datetime.fromtimestamp(now)
+        clock = (int(hour), int(minute or 0))
+
+        def _mk(d, plus=0):
+            t = d.replace(hour=clock[0], minute=clock[1],
+                          second=0, microsecond=0)
+            return t.timestamp() + plus * 86400
+
+        if kind == "daily":
+            t = _mk(today)
+            return t if t > now else t + 86400
+        if kind == "weekly":
+            wd = s.get("weekday")
+            days = ([int(wd)] if isinstance(wd, int)
+                    else [int(x) for x in wd] if wd else
+                    [today.weekday()])
+            for i in range(8):
+                d = today + _dt.timedelta(days=i)
+                if d.weekday() in days:
+                    t = _mk(d)
+                    if t > now:
+                        return t
+            return None
+        if kind == "monthly":
+            day = int(s.get("day") or 1)
+            for m in range(13):
+                y = today.year + (today.month + m - 1) // 12
+                mo = (today.month + m - 1) % 12 + 1
+                try:
+                    t = _dt.datetime(y, mo, min(day, 28)
+                                     if day > 28 and mo == 2
+                                     else day, clock[0], clock[1])
+                except ValueError:
+                    continue
+                if t.timestamp() > now:
+                    return t.timestamp()
+            return None
+        return None
+
     def _reminder_when_text(self, s: dict, now: float) -> str:
         kind = s.get("kind")
         hour, minute = s.get("hour"), s.get("minute")
@@ -6179,8 +6239,8 @@ class AgentOrchestrator:
         # a 'when'-ask over one hit answers the time directly.
         scope_terms = set()
         sm = re.search(
-            r"\b(?:about|regarding|for|on|of|at)\s+(.+?)\s*[.!?]?\s*$",
-            plan_text, re.IGNORECASE)
+            r"\b(?:about|regarding|for|on|of|at|until|till|til)\s+"
+            r"(.+?)\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
         if sm is not None:
             scope_terms = self._reminder_terms(re.sub(
                 r"\b(?:reminders?|alarms?|timers?|schedules?|"
@@ -6368,19 +6428,27 @@ class AgentOrchestrator:
                     r"reminds?|repeats?|recurs?|there|here|any|"
                     r"anything|something|everything|all)\b",
                     " ", cm.group(1), flags=re.IGNORECASE))
+        _cd_terms = scope_terms - {"next", "first"}
+        _cd_pool = ([s for s in rows
+                     if _cd_terms <= self._reminder_hay(s)]
+                    if _cd_terms else rows)
         if ((re.search(
                 r"\b(?:next|first)\b(?!\s+(?:week|weeks|month|months|"
                 r"year|years|day|days|hour|hours|minute|minutes|"
                 r"monday|tuesday|wednesday|thursday|friday|saturday|"
                 r"sunday|few|couple|one|time|thing))",
-                plan_text, re.IGNORECASE) or countdown_ask) and rows):
+                plan_text, re.IGNORECASE) or countdown_ask)
+                and _cd_pool):
             # 'when does my next reminder fire' — ordinal, not a
             # scope term; pick the soonest-firing row like the
             # cancel lane does. ('next week' stays a time scope.)
-            soonest = min(rows, key=lambda s: float(
-                s.get("next_run") or s.get("at") or 1e18))
-            fire = float(soonest.get("next_run")
-                         or soonest.get("at") or 0)
+            # A scoped countdown ('how long until the standup')
+            # counts down to THAT row; a scoped miss falls through
+            # to the honest no-reminder reply below.
+            soonest = min(_cd_pool, key=lambda s: float(
+                self._reminder_next_fire(s, now) or 1e18))
+            fire = float(self._reminder_next_fire(soonest, now)
+                         or 0)
             if countdown_ask:
                 # 'how long until my next reminder' — answer the
                 # duration; the model guessed 'in 4 hours' when the

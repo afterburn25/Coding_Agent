@@ -4780,6 +4780,28 @@ class TruthGateTests(RecoveryLoopTests):
                           mode="auto")
             self.assertIn("next reminder is", r.content)
             self.assertIn(" in ", r.content)
+            # Noun-less countdown claims — bare 'how much longer'
+            # reached the model before the countdown leads joined
+            # the inventory shape; scoped countdowns ('how long
+            # until X') count down to THAT row and miss honestly.
+            r = agent.run("how much longer", mode="auto")
+            self.assertIn("next reminder is", r.content)
+            self.assertIn(" in ", r.content)
+            r = agent.run("how long until the call",
+                          mode="auto")
+            self.assertIn("call", r.content)
+            r = agent.run("how long until the movie ends",
+                          mode="auto")
+            self.assertIn("No reminder", r.content)
+            # A recurring row with no next_run counts down to its
+            # next cadence occurrence, not '0 minutes'.
+            sup.scheduler.add(
+                "reminder: standup", "daily", hour=9, minute=0,
+                action={"kind": "notify", "detail": "standup"})
+            r = agent.run("how much longer till the standup",
+                          mode="auto")
+            self.assertIn("standup", r.content)
+            self.assertNotIn("0 minutes", r.content)
 
     def test_nounless_fired_and_cadence_asks(self):
         # Grammar sweep: 'has the standup fired', 'did the standup
