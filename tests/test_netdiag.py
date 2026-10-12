@@ -3259,9 +3259,27 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(spec)
             for when in ("at 7ish", "at 8 and a half",
                          "seven-thirty", "6 am weekdays",
-                         "on school days at 7"):
+                         "on school days at 7",
+                         "at 5pm on the 20th"):
                 self.assertIsNotNone(
                     agent._reminder_spec(when, time.time()), when)
+            # 'at 5 then again at 7' — the second clock landed in
+            # the task slot; never a row named 'at 5 then again'.
+            r = agent._reminder_reply(
+                "remind me at 5 then again at 7",
+                "remind me at 5 then again at 7", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("pin a time", r.content)
+            self.assertFalse([
+                s for s in sup.scheduler.rows
+                if "then again" in s["name"]])
+            # 'set two reminders' — a count lead can't be one row;
+            # ask for the task/time honestly.
+            r = agent._reminder_reply(
+                "set two reminders for tomorrow",
+                "set two reminders for tomorrow", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("do what", r.content)
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —

@@ -211,6 +211,15 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     # 'on school days' / 'work days' — weekday cadence names.
     t = re.sub(r"\b(?:school|work|business)\s+days\b",
                "weekdays", t)
+    # 'at 5pm on the 20th' — a leading clock belongs after the
+    # date phrase, matching 'on the 20th at 5pm'.
+    t = re.sub(
+        r"\bat\s+(\d{1,2}(?::\d{2})?\s*"
+        r"(?:a\.?m\.?|p\.?m\.?|am|pm)?)\s+"
+        r"(on\s+(?:(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?|"
+        r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
+        r"\w*\s+\d{1,2}(?:st|nd|rd|th)?))",
+        r"\2 at \1", t)
     # 'on 10/15' — a numeric date reads as october 15; 'at 7a' /
     # 'at 7p' shorthand meridiems; 'monday through friday' is the
     # weekdays cadence.
@@ -566,6 +575,15 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         r"\b(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|am|pm))\s+"
         r"(weekdays?|weekends?|daily|weekly|mornings?|"
         r"afternoons?|evenings?|nights?)", r"\2 at \1", t)
+    # 'at 5pm on the 20th' — a leading clock belongs after the
+    # date phrase, matching 'on the 20th at 5pm'.
+    t = re.sub(
+        r"\bat\s+(\d{1,2}(?::\d{2})?\s*"
+        r"(?:a\.?m\.?|p\.?m\.?|am|pm)?)\s+"
+        r"(on\s+(?:(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?|"
+        r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
+        r"\w*\s+\d{1,2}(?:st|nd|rd|th)?))",
+        r"\2 at \1", t)
     # 'on 10/15' — a numeric date reads as october 15; 'at 7a' /
     # 'at 7p' shorthand meridiems; 'monday through friday' is the
     # weekdays cadence.

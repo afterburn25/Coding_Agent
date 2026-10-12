@@ -5241,6 +5241,15 @@ class AppState:
                 r"only|just|roughly|about|around|like|basically|"
                 r"maybe|probably|kinda|sorta", desc, re.IGNORECASE):
             desc = ""
+        # 'remind me at 5 then again at 7' — the desc slot held a
+        # leftover clock, not a task. Two times for one reminder
+        # is a real ambiguity, say so.
+        if re.match(r"(?:at|in|on)\s+\d", desc) or re.search(
+                r"\b(?:then|again|and|or)\s+(?:at|in|on)\s+\d|"
+                r"\bthen\s+again\b", desc):
+            return {"content": (
+                "That's two times for one reminder — say “at 5” "
+                "or “at 7” and I'll set it.")}
         if (spec is None and noun == "timer"
                 and re.fullmatch(r"\d+(?:\.\d+)?", body.strip())):
             # 'timer for 10' — timers count down; a bare number is

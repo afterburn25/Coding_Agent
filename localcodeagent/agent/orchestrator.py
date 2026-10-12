@@ -3775,12 +3775,15 @@ class AgentOrchestrator:
     # are set for 4' over zero rows.
     _REMINDER_NOUNADJ_RE = re.compile(
         _REMINDER_POLITE +
+        r"(?:(?:set|create|make|add|schedule)\s+(?:me\s+)?"
+        r"(?:an?\s+)?)?"
         r"(?P<adj>daily|weekly|monthly|nightly|hourly|weekdays?|"
         r"weekends?|workdays?|morning|afternoon|evening|night|"
         r"tomorrow|tonight|biweekly|bimonthly|fortnightly|"
         r"semi-?weekly|semi-?monthly|annual(?:ly)?|yearly|"
         r"quarterly|biannual(?:ly)?|urgent|important|critical|"
-        r"quick|fast|midnight|noon)\s+"
+        r"quick|fast|midnight|noon|two|three|four|five|six|"
+        r"seven|eight|nine|ten|\d+)\s+"
         r"(?P<noun>reminders?|alarms?|timers?)\b"
         r"(?:\s+(?P<tail>.+?))?" + _REMINDER_TRAIL,
         re.IGNORECASE)
@@ -5159,6 +5162,19 @@ class AgentOrchestrator:
                     user_text, task_id, event_callback)
             task_f = task_d or (
                 noun if noun in ("alarm", "timer") else "")
+            if task_f and (
+                    re.match(r"(?:at|in|on)\s+\d", task_f)
+                    or re.search(
+                        r"\b(?:then|again|and|or)\s+"
+                        r"(?:at|in|on)\s+\d|\bthen\s+again\b",
+                        task_f)):
+                # 'at 5 then again at 7' — the task slot held a
+                # second clock; two times for one reminder is a
+                # real ambiguity, say so.
+                return self._reminder_finish(
+                    "That's two times for one reminder — say "
+                    "“at 5” or “at 7” and I'll set it.",
+                    user_text, task_id, event_callback)
             if task_f:
                 kind = spec["kind"]
                 fields = {k: v for k, v in spec.items()
@@ -5624,6 +5640,15 @@ class AgentOrchestrator:
                 else str(m.group("task") or "")).strip().rstrip(".")
         if not task:
             return None
+        if re.match(r"(?:at|in|on)\s+\d", task) or re.search(
+                r"\b(?:then|again|and|or)\s+(?:at|in|on)\s+\d|"
+                r"\bthen\s+again\b", task):
+            # 'at 5 then again at 7' — the task slot held a second
+            # clock; two times for one reminder is ambiguous.
+            return self._reminder_finish(
+                "That's two times for one reminder — say “at 5” "
+                "or “at 7” and I'll set it.",
+                user_text, task_id, event_callback)
         sup = (self._autonomy() if callable(self._autonomy)
                else self._autonomy)
         sched = getattr(sup, "scheduler", None)
