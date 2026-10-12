@@ -3590,6 +3590,58 @@ class TruthGateTests(RecoveryLoopTests):
             result = agent.run(
                 "remind me to stretch and move on", mode="auto")
             self.assertIn("stretch and move on", result.content)
+            sup.scheduler.rows.clear()
+
+            # 'mute reminders tomorrow' / 'silence X on friday' —
+            # a day after the toggle verb scopes the flip to rows
+            # actually firing that date; a miss says so honestly.
+            sup.scheduler.add(
+                "Reminder: lunch", "once",
+                at=time.mktime((tom.tm_year, tom.tm_mon,
+                                tom.tm_mday, 9, 0, 0,
+                                -1, -1, -1)))
+            _lt = time.localtime(time.time())
+            _df = (4 - _lt.tm_wday) % 7 or 7
+            sup.scheduler.add(
+                "Reminder: pay rent", "once",
+                at=time.mktime((_lt.tm_year, _lt.tm_mon,
+                                _lt.tm_mday + _df, 10, 0, 0,
+                                -1, -1, -1)),
+                action={"kind": "notify", "detail": "rent"})
+            result = agent.run("mute reminders tomorrow",
+                               mode="auto")
+            lunch = [s for s in sup.scheduler.rows
+                     if "lunch" in s["name"]][0]
+            rent = [s for s in sup.scheduler.rows
+                    if "rent" in s["name"]][0]
+            self.assertFalse(lunch["enabled"])
+            self.assertTrue(rent["enabled"])
+            result = agent.run("turn reminders on tomorrow",
+                               mode="auto")
+            lunch = [s for s in sup.scheduler.rows
+                     if "lunch" in s["name"]][0]
+            self.assertTrue(lunch["enabled"])
+            result = agent.run(
+                "silence the pay rent reminder on monday",
+                mode="auto")
+            self.assertIn("isn't set for monday", result.content)
+            rent = [s for s in sup.scheduler.rows
+                    if "rent" in s["name"]][0]
+            self.assertTrue(rent["enabled"])
+            sup.scheduler.rows.clear()
+
+            # 'every now and then' / 'every so often' — vague
+            # cadences pin-fail honestly, never narrated.
+            result = agent.run(
+                "remind me every now and then to stretch",
+                mode="auto")
+            self.assertIn("couldn't pin", result.content)
+            self.assertFalse(sup.scheduler.rows)
+            result = agent.run(
+                "remind me every so often to breathe",
+                mode="auto")
+            self.assertIn("couldn't pin", result.content)
+            self.assertFalse(sup.scheduler.rows)
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(

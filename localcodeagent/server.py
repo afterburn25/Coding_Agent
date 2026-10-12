@@ -5313,6 +5313,11 @@ class AppState:
                             f"{fdm.group(1)}”")
         desc = re.sub(r"^(?:about|of|that|to)\s+", "",
                       desc.strip())
+        # 'remind me unless i'm busy tomorrow' — a leading
+        # condition clause isn't a task; conditions can't be
+        # watched, so there's nothing to remind about.
+        desc = re.sub(r"^(?:unless|if)\b.*$", "", desc,
+                      flags=re.IGNORECASE).strip(" ,;—-")
         # 'remind me roughly at 6' — a hedge word left in the
         # desc slot isn't a task name.
         if re.fullmatch(

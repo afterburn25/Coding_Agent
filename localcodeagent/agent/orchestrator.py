@@ -3882,6 +3882,9 @@ class AgentOrchestrator:
         r"it|that|this|them)\b"
         + _REMINDER_ECHO +
         r"\s*(?P<dir>back\s+on|off|on)?"
+        r"(?:\s+(?:on\s+)?(?P<day>tomorrow|today|tonight|"
+        r"monday|tuesday|wednesday|thursday|friday|saturday|"
+        r"sunday))?"
         r"(?:\s+(?:until|till|for)\s+(?P<til>.+?))?"
         + _REMINDER_TRAIL +
         r"|" + _REMINDER_POLITE +
@@ -3942,7 +3945,10 @@ class AgentOrchestrator:
         r"(?:bit|while|moment|sec)|in\s+advance|ahead\s+of\s+time|"
         r"beforehand|dawn|dusk|sunrise|sunset|daybreak|sundown|"
         r"someday|occasionally|sometimes|periodically|"
-        r"irregularly|randomly|end\s+of\s+the\s+(?:day|week|month|"
+        r"irregularly|randomly|every\s+now\s+and\s+then|"
+        r"every\s+so\s+often|now\s+and\s+again|from\s+time\s+to\s+"
+        r"time|off\s+and\s+on|"
+        r"end\s+of\s+the\s+(?:day|week|month|"
         r"year)|eod|eow|twice|thrice|again", re.IGNORECASE)
     # 'when the meeting starts remind me' — a leading event
     # trigger. The model fabricated 'The meeting is at 3 — I'll
@@ -4507,6 +4513,46 @@ class AgentOrchestrator:
                 s.get("weekday"), list) else s.get("weekday"))
         return len({key(s) for s in hits}) == 1
 
+    @staticmethod
+    def _reminder_day_date(day: str, now: float):
+        """'tomorrow'/'friday' → the (y,m,d) it resolves to."""
+        d_idx = {"monday": 0, "tuesday": 1, "wednesday": 2,
+                 "thursday": 3, "friday": 4, "saturday": 5,
+                 "sunday": 6}.get(day)
+        if d_idx is None:
+            tgt = time.localtime(now + (86400 if day == "tomorrow" else 0))
+        else:
+            for i in range(8):
+                tgt = time.localtime(now + i * 86400)
+                if tgt.tm_wday == d_idx:
+                    break
+        return (tgt.tm_year, tgt.tm_mon, tgt.tm_mday)
+
+    @staticmethod
+    def _reminder_fires_on(s: dict, tgt_date) -> bool:
+        """Does this row fire on the target date?"""
+        def _on(ts):
+            lt = time.localtime(ts)
+            return (lt.tm_year, lt.tm_mon, lt.tm_mday) == tgt_date
+        if s.get("kind") == "once":
+            return bool(s.get("at")) and _on(s["at"])
+        if s.get("next_run"):
+            return _on(s["next_run"])
+        import datetime as _dt
+        tgt_wd = _dt.date(*tgt_date).weekday()
+        wd = s.get("weekday")
+        if isinstance(wd, int):
+            return wd == tgt_wd
+        if isinstance(wd, list):
+            return tgt_wd in wd
+        if s.get("kind") == "daily":
+            return True
+        if s.get("kind") == "monthly":
+            return s.get("day") == tgt_date[2]
+        if s.get("kind") == "interval":
+            return (s.get("interval_s") or 0) <= 86400
+        return False
+
     def _reminder_toggle_reply(self, user_text: str, mt: re.Match,
                                task_id: str, event_callback):
         """'turn off the dentist reminder' / 'pause my reminders' —
@@ -4555,10 +4601,23 @@ class AgentOrchestrator:
         hits = [s for s in pool
                 if not topic_terms or topic_terms <= _hay(s)]
         state = "on" if want_on else "off"
+        # 'silence the pay rent reminder on friday' / 'mute reminders
+        # tomorrow' — the day narrows hits to rows actually firing
+        # that date; a miss says so instead of touching others.
+        day = str(mt.groupdict().get("day") or "").strip().lower()
+        if day and hits:
+            tgt_date = self._reminder_day_date(day, time.time())
+            hits = [s for s in hits
+                    if self._reminder_fires_on(s, tgt_date)]
         if not rows:
             text = self._reminder_none_text(
                 sched, mt.group("noun")
                 or mt.groupdict().get("noun2"))
+        elif day and not hits:
+            text = (f"“{' '.join(sorted(topic_terms))}” isn't set "
+                    f"for {day} — nothing to turn {state}."
+                    if topic_terms else
+                    f"Nothing fires {day} to turn {state}.")
         elif (topic_terms and not hits
                 and any(topic_terms <= _hay(s) for s in rows)):
             text = (f"That reminder is already {state}.")
@@ -5003,48 +5062,13 @@ class AgentOrchestrator:
                 # Once-rows on that date can be disabled (a real,
                 # reversible skip); a recurring row can't skip one
                 # fire, so say so instead of narrating it.
-                d_idx = {"monday": 0, "tuesday": 1, "wednesday": 2,
-                         "thursday": 3, "friday": 4, "saturday": 5,
-                         "sunday": 6}.get(day)
-                now_t = time.time()
-                if d_idx is None:
-                    tgt = time.localtime(
-                        now_t + (86400 if day == "tomorrow" else 0))
-                else:
-                    for i in range(8):
-                        tgt = time.localtime(now_t + i * 86400)
-                        if tgt.tm_wday == d_idx:
-                            break
-                tgt_date = (tgt.tm_year, tgt.tm_mon, tgt.tm_mday)
-
-                def _fires_on(s):
-                    def _on(ts):
-                        lt = time.localtime(ts)
-                        return ((lt.tm_year, lt.tm_mon, lt.tm_mday)
-                                == tgt_date)
-                    if s.get("kind") == "once":
-                        return bool(s.get("at")) and _on(s["at"])
-                    if s.get("next_run"):
-                        return _on(s["next_run"])
-                    wd = s.get("weekday")
-                    if isinstance(wd, int):
-                        return wd == tgt.tm_wday
-                    if isinstance(wd, list):
-                        return tgt.tm_wday in wd
-                    if s.get("kind") == "daily":
-                        return True
-                    if s.get("kind") == "monthly":
-                        return s.get("day") == tgt.tm_mday
-                    if s.get("kind") == "interval":
-                        return (s.get("interval_s") or 0) <= 86400
-                    return False
-
+                tgt_date = self._reminder_day_date(day, time.time())
                 once_hits = [s for s in rows
                              if s.get("kind") == "once"
-                             and _fires_on(s)]
+                             and self._reminder_fires_on(s, tgt_date)]
                 recur_hits = [s for s in rows
                               if s.get("kind") != "once"
-                              and _fires_on(s)]
+                              and self._reminder_fires_on(s, tgt_date)]
                 if not rows:
                     text = "You don't have any active reminders."
                 elif not once_hits and not recur_hits:
