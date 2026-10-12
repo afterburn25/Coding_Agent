@@ -2982,6 +2982,85 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIn("trash", r.content)
         self.assertNotIn("No reminder", r.content)
 
+        # 'except X'/'but X' is an exclusion scope in every lane —
+        # 'cancel all except trash' must NOT delete the trash row.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            action={"kind": "notify", "detail": "standup"})
+        sup.scheduler.add(
+            "reminder: trash", "weekly", weekday=4,
+            hour=7, minute=0,
+            action={"kind": "notify", "detail": "trash"})
+        sup.scheduler.add(
+            "timer: tea", "once", at=time.time() + 600,
+            action={"kind": "notify", "detail": "tea"})
+        r = agent._reminder_reply(
+            "cancel all reminders except the trash run",
+            "cancel all reminders except the trash run", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("Cancelled 2", r.content)
+        self.assertEqual(
+            [s["name"] for s in sup.scheduler.rows],
+            ["reminder: trash"])
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=30,
+            action={"kind": "notify", "detail": "standup"})
+        sup.scheduler.add(
+            "timer: tea", "once", at=time.time() + 600,
+            action={"kind": "notify", "detail": "tea"})
+        r = agent._reminder_reply(
+            "turn off everything but the tea timer",
+            "turn off everything but the tea timer", task.id)
+        self.assertIsNotNone(r)
+        self.assertFalse(sup.scheduler.rows[0]["enabled"])
+        self.assertFalse(sup.scheduler.rows[1]["enabled"])
+        self.assertTrue(sup.scheduler.rows[2]["enabled"])
+        r = agent._reminder_reply(
+            "snooze everything except the standup for an hour",
+            "snooze everything except the standup for an hour",
+            task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("Snoozed", r.content)
+
+        # Fire-order neighbor and count asks answer from the rows,
+        # not a narrated schedule.
+        sup.scheduler.set_enabled(
+            str(sup.scheduler.rows[0]["id"]), True)
+        sup.scheduler.set_enabled(
+            str(sup.scheduler.rows[1]["id"]), True)
+        r = agent._reminder_reply(
+            "what comes after the standup",
+            "what comes after the standup", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("standup", r.content)
+        r = agent._reminder_reply(
+            "how many more times will the standup fire",
+            "how many more times will the standup fire", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("keeps firing", r.content)
+        r = agent._reminder_reply(
+            "how many more times will the tea timer fire",
+            "how many more times will the tea timer fire", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("once more", r.content)
+
+        # 'shorten'/'extend' are shift verbs — earlier/later on a
+        # once-row's own anchor.
+        tea = [s for s in sup.scheduler.rows
+               if s["name"] == "timer: tea"][0]
+        orig = float(tea["at"])
+        r = agent._reminder_reply(
+            "shorten the tea timer by 2 minutes",
+            "shorten the tea timer by 2 minutes", task.id)
+        self.assertIsNotNone(r)
+        self.assertAlmostEqual(float(tea["at"]), orig - 120, -1)
+        r = agent._reminder_reply(
+            "extend the tea timer by 5 minutes",
+            "extend the tea timer by 5 minutes", task.id)
+        self.assertIsNotNone(r)
+        self.assertAlmostEqual(float(tea["at"]), orig + 180, -1)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

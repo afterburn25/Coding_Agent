@@ -4699,7 +4699,8 @@ class AgentOrchestrator:
     # row miss like move/change.
     _REMINDER_RESCHEDULE_PUSH_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?P<verb>push|bump|shift|advance)\s+"
+        r"(?P<verb>push|bump|shift|advance|extend|lengthen|"
+        r"shorten)\s+"
         r"(?:(?:the|my|that)\s+)?"
         r"(?P<body>(?!to\b|until\b|till\b|for\b).+?)"
         r"(?:\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?))?"
@@ -4744,7 +4745,19 @@ class AgentOrchestrator:
         # stays out ('how long is a marathon' isn't a countdown).
         r"\bhow\s+much\s+longer\b|\bhow\s+much\s+time\s+left\b|"
         r"\btime\s+(?:is\s+)?(?:left|remaining|until|till)\b|"
-        r"\bhow\s+long\s+(?:until|till|til|left|more)\b",
+        r"\bhow\s+long\s+(?:until|till|til|left|more)\b|"
+        # 'what comes after the standup', 'which reminder fires
+        # before the trash' — fire-order neighbor asks.
+        r"\b(?:what|which)\s+(?:comes?|fires?|goes?\s+off|is|"
+        r"happens?|rings?|pops?\s+up|hits?|triggers?)\s+"
+        r"(?:(?:right|immediately|just|directly|straight)\s+)?"
+        r"(?:after|before)\b|"
+        r"\b(?:reminders?|alarms?|timers?)\s+(?:that\s+)?"
+        r"(?:after|before)\s+"
+        r"(?:the\s+|my\s+|that\s+|this\s+|\w)|"
+        # 'how many more times will the standup fire'.
+        r"\bhow\s+many\s+(?:more\s+)?times\b|"
+        r"\bhow\s+many\s+fires?\b",
         re.IGNORECASE)
     # Temporal tokens in a failed when-clause → ask when, don't claim.
     _REMINDER_TIMEISH_RE = re.compile(
@@ -4939,6 +4952,33 @@ class AgentOrchestrator:
                      if _prov.search(body + " " + dur) else None)
         body = _prov.sub(" ", body)
         dur = _prov.sub(" ", dur).strip(" ,;—-")
+        # 'snooze everything except the standup for an hour' —
+        # the 'except' tail is an exclusion scope, not topic; it
+        # can sit in body or in the dur head before the connector.
+        _sexcl = set()
+        _ex_re = (r"\b(?:except|other\s+than|besides|but(?:\s+not)?)"
+                  r"\s+(?:the\s+|my\s+|that\s+|those\s+|these\s+)?"
+                  r"(.+)$")
+
+        def _ex_tail(text: str) -> str:
+            m = re.search(_ex_re, str(text or ""),
+                          re.IGNORECASE)
+            if m is None:
+                return str(text or "")
+            _sexcl.update(self._reminder_terms(m.group(1)) - {
+                "one", "ones", "reminder", "reminders", "alarm",
+                "alarms", "timer", "timers", "thing", "things"})
+            return str(text)[:m.start()].strip(" ,;—-")
+
+        def _sexcluded(s: dict) -> bool:
+            if not _sexcl:
+                return False
+            return (_sexcl <= self._reminder_hay(s)
+                    or (self._reminder_terms(self._reminder_label(s))
+                        and self._reminder_terms(
+                            self._reminder_label(s)) <= _sexcl))
+
+        body = _ex_tail(body)
         # 'snooze the alarm that's ringing' — the clause says the
         # row fired just now; like the toggle lane, recency
         # resolves it when the topic doesn't pin one row.
@@ -4989,7 +5029,8 @@ class AgentOrchestrator:
                 r"days?)(?:\s+more\s+time)?)$", dur,
                 re.IGNORECASE)
             if tdm is not None:
-                head_d = dur[:tdm.start()].strip(" ,;—-")
+                head_raw = dur[:tdm.start()].strip(" ,;—-")
+                head_d = _ex_tail(head_raw)
                 head_terms = self._reminder_terms(re.sub(
                     r"\b(?:the|my|that|all|every|each|any|of|to|"
                     r"for|about|one|ones|this|these|those|them|"
@@ -4998,11 +5039,13 @@ class AgentOrchestrator:
                     flags=re.IGNORECASE))
                 if head_terms:
                     topic_terms |= head_terms
+                if head_terms or (head_raw and _sexcl):
                     dur = tdm.group(1)
         if dsm is not None:
-            head_d = dur[:dsm.start()].strip(" ,;—-")
+            head_raw = dur[:dsm.start()].strip(" ,;—-")
+            head_d = _ex_tail(head_raw)
             tail_d = dsm.group(1).strip(" ,;—-")
-            if head_d and (
+            if head_raw and (
                     re.fullmatch(
                         r"(?:in|by\s+)?(?:\d+(?:\.\d+)?|a|an|one|"
                         r"two|three|four|five|six|seven|eight|nine|"
@@ -5107,8 +5150,10 @@ class AgentOrchestrator:
                     user_text, task_id, event_callback)
         else:
             delta = 600.0  # bare 'snooze' — a default ten minutes.
-        hits = [s for s in rows if not topic_terms
-                or topic_terms <= self._reminder_hay(s)]
+        hits = [s for s in rows
+                if (not topic_terms
+                    or topic_terms <= self._reminder_hay(s))
+                and not _sexcluded(s)]
         hits = self._reminder_clock_narrow(hits, topic_terms,
                                            user_text)
         hits = self._reminder_ordinal_pick(hits, _ord_sel, now)
@@ -5188,6 +5233,7 @@ class AgentOrchestrator:
                 hits = [s for s in hits
                         if str(s.get("name") or "")
                             .lower().startswith(_stem)]
+            hits = [s for s in hits if not _sexcluded(s)]
         if all_scope:
             # 'snooze everything' — each one-shot's own fire time +
             # delta. A quantified shift retimes a recurring row's
@@ -5424,10 +5470,12 @@ class AgentOrchestrator:
                         r"minutes?|mins?|hours?|hrs?|days?|"
                         r"weeks?)",
                         shift_txt, re.IGNORECASE))
-            if not shift_txt and verb_l == "advance":
-                # 'advance the standup by an hour' — 'advance' IS
-                # the direction (earlier); the trailing duration
-                # is the amount.
+            _verb_dir = {"advance": "earlier", "shorten": "earlier",
+                         "extend": "later", "lengthen": "later"}
+            if not shift_txt and verb_l in _verb_dir:
+                # 'advance the standup by an hour' — the verb IS
+                # the direction; the trailing duration is the
+                # amount.
                 _amv = re.search(
                     r"\s+(?:by\s+)?((?:a|an|one|two|three|four|"
                     r"five|six|seven|eight|nine|ten|couple|few|"
@@ -5435,7 +5483,8 @@ class AgentOrchestrator:
                     r"mins?|hours?|hrs?|days?|weeks?))$",
                     body, re.IGNORECASE)
                 if _amv is not None:
-                    shift_txt = "earlier " + _amv.group(1)
+                    shift_txt = (_verb_dir[verb_l] + " "
+                                 + _amv.group(1))
                     _shift_q = True
                     body = body[:_amv.start()].strip(" ,;—-")
         else:
@@ -5458,13 +5507,16 @@ class AgentOrchestrator:
                         shm.group(1) + " "
                         + str(mr.groupdict().get("when")).strip())
                     body = body[:shm.start()].strip(" ,;—-")
-                elif verb_l == "advance":
+                elif verb_l in ("advance", "shorten", "extend",
+                                "lengthen"):
                     # 'advance the standup 30 minutes' — the verb
                     # carries the direction; the when-slot duration
                     # is the amount.
-                    shift_txt = ("earlier "
-                                 + str(mr.groupdict()
-                                       .get("when")).strip())
+                    _vd = ("earlier" if verb_l in ("advance",
+                                                 "shorten")
+                           else "later")
+                    shift_txt = (_vd + " " + str(
+                        mr.groupdict().get("when")).strip())
                     body = re.sub(r"\s+by$", "", body,
                                   flags=re.IGNORECASE).strip(
                                       " ,;—-")
@@ -6720,8 +6772,36 @@ class AgentOrchestrator:
                 "a time bound like “until 3pm” or “for an hour” "
                 "I can hold.",
                 user_text, task_id, event_callback)
+        # 'turn off everything but the tea timer' — the tail after
+        # 'except'/'but' is an exclusion scope, and the trailing
+        # noun word ('timer') belongs to it, not to the pool
+        # filter — 'but the tea TIMER' would otherwise narrow the
+        # pool to the very row being excluded.
+        _texcl = set()
+        _texm = re.search(
+            r"\b(?:except|other\s+than|besides|but(?:\s+not)?)"
+            r"\s+(?:the\s+|my\s+|that\s+|those\s+|these\s+)?(.+)$",
+            body, re.IGNORECASE)
         _noun = (mt.group("noun") or mt.groupdict().get("noun2")
                  or mt.groupdict().get("noun3"))
+        if _texm is not None:
+            _texcl = self._reminder_terms(_texm.group(1)) - {
+                "one", "ones", "reminder", "reminders", "alarm",
+                "alarms", "timer", "timers", "thing", "things"}
+            if _noun and str(_noun).lower() in (
+                    "reminder", "reminders", "alarm", "alarms",
+                    "timer", "timers", "schedule", "schedules"):
+                _noun = None
+            body = body[:_texm.start()].strip(" ,;—-")
+
+        def _texcluded(s: dict) -> bool:
+            if not _texcl:
+                return False
+            return (_texcl <= self._reminder_hay(s)
+                    or (self._reminder_terms(self._reminder_label(s))
+                        and self._reminder_terms(
+                            self._reminder_label(s)) <= _texcl))
+
         sched, rows = self._reminder_rows(
             include_disabled=True, noun=_noun)
         if sched is None:
@@ -6825,6 +6905,9 @@ class AgentOrchestrator:
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
             r"one|ones|this|these|those|them|it)\b",
             " ", body, flags=re.IGNORECASE))
+        # 'turn off everything but the tea timer' — 'everything'
+        # is the mass scope; the except-clause did the narrowing.
+        topic_terms -= {"everything", "all"}
         # 'turn off reminders on saturdays' — the day is a fire
         # window, not a name term; 'on'/'saturdays' must not gate
         # the topic match for the rows it scopes. A day inside the
@@ -6866,7 +6949,8 @@ class AgentOrchestrator:
             _ord_sel = "cmax"
         _hay = self._reminder_hay
         hits = [s for s in pool
-                if not topic_terms or topic_terms <= _hay(s)]
+                if (not topic_terms or topic_terms <= _hay(s))
+                and not _texcluded(s)]
         hits = self._reminder_clock_narrow(hits, topic_terms,
                                            user_text)
         hits = self._reminder_ordinal_pick(hits, _ord_sel, now)
@@ -6890,7 +6974,8 @@ class AgentOrchestrator:
                 s for s in _all_rows
                 if s.get("enabled", True) != want_on
                 and not _resume_nudge(s)
-                and (not topic_terms or topic_terms <= _hay(s))]
+                and (not topic_terms or topic_terms <= _hay(s))
+                and not _texcluded(s)]
             if day_dates:
                 cand = [
                     s for s in cand
@@ -7343,14 +7428,24 @@ class AgentOrchestrator:
             topic_terms)
         if _just_made and ord_sel is None:
             ord_sel = "cmax"
+        def _excl(s: dict) -> bool:
+            # 'except the trash run' — extra words ride the
+            # exclusion scope; the row's whole label inside it
+            # still excludes the row.
+            if not excl_terms:
+                return False
+            return (excl_terms <= self._reminder_hay(s)
+                    or (self._reminder_terms(
+                        self._reminder_label(s))
+                        and self._reminder_terms(
+                            self._reminder_label(s)) <= excl_terms))
+
         hits = [
             s for s in rows
-            if _matches(s) and not (
-                excl_terms and excl_terms <= self._reminder_hay(s))]
+            if _matches(s) and not _excl(s)]
         if and_hits is not None:
             hits = [s for s in and_hits
-                    if not (excl_terms
-                            and excl_terms <= self._reminder_hay(s))]
+                    if not _excl(s)]
         hits = self._reminder_clock_narrow(hits, topic_terms,
                                            user_text)
         if not hits:
@@ -7361,9 +7456,7 @@ class AgentOrchestrator:
             hits = [
                 s for s in rows_d
                 if not s.get("enabled", True)
-                and _matches(s) and not (
-                    excl_terms
-                    and excl_terms <= self._reminder_hay(s))]
+                and _matches(s) and not _excl(s)]
         hits = self._reminder_ordinal_pick(hits, ord_sel, now)
         if _past_scope:
             # 'old'/'already went off' hits the dead pool —
@@ -7963,6 +8056,24 @@ class AgentOrchestrator:
                         if scope_terms <= self._reminder_hay(s)]
             return hits
 
+        # 'what comes after the standup' / 'what fires before the
+        # trash' — the neighbor in fire order is the answer; the
+        # scoped row is the anchor, not the result.
+        _rel_ask = re.search(
+            r"\b(?:comes?|comes\s+up|fires?|goes?\s+off|is|was|"
+            r"happens?|pops?\s+up|rings?|hits?|triggers?|"
+            r"scheduled)\s+(?:(?:right|immediately|just|"
+            r"directly|straight)\s+)?(after|before)\b|"
+            r"\b(?:reminders?|alarms?|timers?)\s+"
+            r"(?:that\s+)?(after|before)\b",
+            plan_text, re.IGNORECASE)
+        # 'how many more times will the standup fire' — a firing
+        # count ask; unbounded cadences answer with the cadence,
+        # not an invented number.
+        _count_ask = bool(re.search(
+            r"\bhow\s+many\s+(?:more\s+)?times\b|\bhow\s+many\s+"
+            r"fires?\b|\bhow\s+often\s+more\b",
+            plan_text, re.IGNORECASE))
         # 'is my pay rent reminder on' — a state ask. Listing the
         # row's fire time never answers the question; report the
         # enabled flag from the persisted row instead.
@@ -8053,7 +8164,8 @@ class AgentOrchestrator:
             r"happen|pop\s+up)\b", plan_text,
             re.IGNORECASE))
         if not scope_terms and (cad_ask or when_ask or fired_ask
-                                or nounless_state):
+                                or nounless_state or _rel_ask
+                                or _count_ask):
             # Noun-less cadence/when asks carry the row name as the
             # object — 'when does THE STANDUP go off', 'is THE
             # STANDUP daily', 'is THE STANDUP off'. The
@@ -8122,6 +8234,26 @@ class AgentOrchestrator:
                     r"actually)\s+)?"
                     r"(?:(?:go|went)\s+off|fire|fires|fired|"
                     r"ring|rang|rung|gone\s+off)\b",
+                    plan_text, re.IGNORECASE)
+            if cm is None and _rel_ask:
+                # 'what comes after THE STANDUP' — the anchor sits
+                # after the ordering word.
+                cm = re.search(
+                    r"\b(?:after|before)\s+(?:the\s+|my\s+|"
+                    r"your\s+|that\s+|this\s+)?"
+                    r"([a-z0-9][a-z0-9'\s-]{0,40}?)"
+                    r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
+            if cm is None and _count_ask:
+                # 'how many more times will THE STANDUP fire' —
+                # the name sits between 'will' and the verb.
+                cm = re.search(
+                    r"\b(?:times?\s+)?(?:does\s+|do\s+|will\s+|"
+                    r"is\s+|are\s+)?(?:the\s+|my\s+|your\s+|"
+                    r"that\s+|this\s+)?"
+                    r"([a-z0-9][a-z0-9'\s-]{0,40}?)\s+"
+                    r"(?:fire|fires|go(?:es)?\s+off|ring|repeat|"
+                    r"repeats|happen|happens|hit|hits|trigger|"
+                    r"triggers|remind|reminds|recur|recurs)\b",
                     plan_text, re.IGNORECASE)
             if cm is not None:
                 scope_terms = self._reminder_terms(re.sub(
@@ -8453,6 +8585,47 @@ class AgentOrchestrator:
                     and dt.date.today() in day_dates) else ""
                 text = (f"{fired_n} of {len(fhits)} "
                         f"have fired{_when_word}: {bits}.")
+        elif _count_ask:
+            # 'how many more times will the standup fire' — a
+            # boundless cadence is the honest answer, not a made-
+            # up count. Once-rows fire once (or already did).
+            _, _c_rows = self._reminder_rows(
+                include_disabled=True,
+                noun=nm.group(1).lower() if nm else None)
+            _chits = _scoped_hits(_c_rows)
+            if not _chits:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in rows[:3])
+                text = (f"No reminder about "
+                        f"“{' '.join(sorted(scope_terms))}”"
+                        + (f" — you've got: {names}."
+                           if rows else "."))
+            elif len(_chits) == 1:
+                s = _chits[0]
+                label = self._reminder_label(s)
+                kind = str(s.get("kind") or "once")
+                if not s.get("enabled", True):
+                    text = (f"“{label}” is off — it won't fire "
+                            "again until you turn it on.")
+                elif kind == "once":
+                    fire = self._reminder_next_fire(s, now)
+                    text = (f"“{label}” fires once more — "
+                            f"{self._reminder_when_text(s, now)}."
+                            if fire and fire > now
+                            else f"“{label}” already fired — it "
+                                 "won't fire again.")
+                else:
+                    cad = self._reminder_spec_text(
+                        s, label).split(" — I")[0]
+                    text = (f"“{label}” keeps firing — {cad}, "
+                            "no end bound is set.")
+            else:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in _chits[:5])
+                text = (f"That matches {len(_chits)} reminders: "
+                        f"{names} — say which.")
         elif cad_ask:
             # 'how often does the standup fire' / 'is the standup
             # daily or weekly' — the row's cadence is the answer.
@@ -8556,6 +8729,67 @@ class AgentOrchestrator:
             else:
                 text = ("No reminders set — say “remind me in 10 "
                         "minutes to …” and I'll schedule it.")
+        elif _rel_ask and scope_terms:
+            # 'what comes after the standup' — order every row by
+            # next fire and name the neighbor of the anchored row.
+            # The anchor resolves through _scoped_hits so 'trash
+            # run' style slack still pins the row.
+            _, _rel_rows = self._reminder_rows(
+                include_disabled=False,
+                noun=nm.group(1).lower() if nm else None)
+            _anchor = _scoped_hits(_rel_rows)
+            if not _anchor:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in rows[:3])
+                text = (f"No reminder about "
+                        f"“{' '.join(sorted(scope_terms))}”"
+                        + (f" — you've got: {names}."
+                           if rows else "."))
+            elif len(_anchor) > 1:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in _anchor[:5])
+                text = (f"That matches {len(_anchor)} reminders: "
+                        f"{names} — say which.")
+            else:
+                tgt = _anchor[0]
+                t_fire = self._reminder_next_fire(tgt, now)
+                direction = next(
+                    (g.lower() for g in _rel_ask.groups() if g),
+                    "after")
+                _ord = sorted(
+                    (s for s in _rel_rows
+                     if self._reminder_next_fire(s, now)),
+                    key=lambda s: float(
+                        self._reminder_next_fire(s, now)))
+                _ids = [str(s.get("id")) for s in _ord]
+                _after = direction == "after"
+                if not t_fire:
+                    text = (f"“{self._reminder_label(tgt)}” is off "
+                            "— it isn't in the firing order.")
+                else:
+                    idx = _ids.index(str(tgt.get("id"))) \
+                        if str(tgt.get("id")) in _ids else -1
+                    nxt = (_ord[idx + 1] if _after and idx >= 0
+                           and idx + 1 < len(_ord)
+                           else _ord[idx - 1] if not _after
+                           and idx > 0 else None)
+                    _twt = self._reminder_when_text(tgt, now)
+                    if nxt is not None:
+                        text = (
+                            f"“{self._reminder_label(tgt)}” "
+                            f"fires {_twt} — "
+                            f"{'right after' if _after else 'right before'} "
+                            f"it, “{self._reminder_label(nxt)}” "
+                            f"fires "
+                            f"{self._reminder_when_text(nxt, now)}.")
+                    else:
+                        text = (
+                            f"“{self._reminder_label(tgt)}” "
+                            f"fires {_twt} — nothing "
+                            f"{'after' if _after else 'before'} it"
+                            f"{' (it fires last)' if _after else ' (it fires first)'}.")
         elif scope_terms or day_dates:
             hits = [s for s in rows
                     if (not scope_terms
