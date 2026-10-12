@@ -2810,6 +2810,38 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertAlmostEqual(
             sup.scheduler.rows[0]["at"], at1 + 300, delta=5)
 
+        # 'clear my old reminders' / 'the ones that fired' — past
+        # scope deletes dead one-shots (fired or past `at`), never
+        # a recurring row that also fired, never a pending once.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: wake", kind="daily", hour=6, minute=0)
+        sup.scheduler.add(
+            "reminder: trash", kind="weekly", weekday=4,
+            hour=7, minute=0, last_run=time.time() - 86400)
+        sup.scheduler.add(
+            "reminder: dentist", kind="once",
+            at=time.time() - 7200, enabled=False,
+            last_run=time.time() - 7200)
+        sup.scheduler.add(
+            "reminder: lunch", kind="once",
+            at=time.time() + 7200)
+        r = agent._reminder_reply(
+            "clear my old reminders",
+            "clear my old reminders", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("dentist", r.content)
+        self.assertEqual(
+            sorted(s["name"] for s in sup.scheduler.rows),
+            ["reminder: lunch", "reminder: trash",
+             "reminder: wake"])
+        # A second past-scope ask over live rows is an honest miss.
+        r = agent._reminder_reply(
+            "delete my past reminders",
+            "delete my past reminders", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("No past reminders", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

@@ -7023,6 +7023,27 @@ class AgentOrchestrator:
                 "alarms", "timer", "timers", "thing", "things"}
             topic_src = topic_src[:exm.start()]
             all_flag = True
+        # 'clear my old reminders' / 'delete the ones that
+        # already went off' — 'past' means a one-shot whose fire
+        # already happened; recurring rows keep firing, 'old'
+        # never means them.
+        _past_scope = bool(re.search(
+            r"\b(?:old|past|expired|stale)\b|"
+            r"\b(?:that|which)\s+(?:already\s+|just\s+)?"
+            r"(?:went\s+off|went|fired|rang|passed|ran|"
+            r"happened)\b", topic_src, re.IGNORECASE))
+        if not _past_scope:
+            # 'delete the ones that fired' — the capture splits
+            # 'that' into the noun slot and 'fired' into the
+            # tail; a topic that is nothing but past-fire words
+            # is the same scope.
+            _past_scope = bool(re.fullmatch(
+                r"(?:(?:already|just|have|has|had|went|gone|"
+                r"fired|firing|ringing|rang|passed|ran|"
+                r"happened|off|out|ago)\s+)*"
+                r"(?:went\s+off|went|fired|rang|passed|ran|"
+                r"happened|off)(?:\s+\w+){0,2}\s*",
+                topic_src.strip(), re.IGNORECASE))
         # 'cancel the reminder i set for tomorrow' — the relative
         # clause describes how it got there, not what it's named.
         # 'i just made' (detected above, before the tail fallback)
@@ -7056,6 +7077,11 @@ class AgentOrchestrator:
                 "monday", "tuesday", "wednesday", "thursday",
                 "friday", "saturday", "sunday", "morning",
                 "afternoon", "evening", "night"}
+        if _past_scope:
+            topic_terms -= {
+                "old", "past", "expired", "stale", "went", "off",
+                "fired", "rang", "passed", "ran", "already",
+                "happened"}
         if len(topic_terms) > 1:
             topic_terms -= {"appointment", "appointments"}
         if not topic_terms and re.search(
@@ -7177,6 +7203,28 @@ class AgentOrchestrator:
                     excl_terms
                     and excl_terms <= self._reminder_hay(s))]
         hits = self._reminder_ordinal_pick(hits, ord_sel, now)
+        if _past_scope:
+            # 'old'/'already went off' hits the dead pool —
+            # fired once-rows get parked disabled, so resolve
+            # against the full set.
+            _, _p_pool = self._reminder_rows(
+                include_disabled=True)
+            hits = [
+                s for s in _p_pool
+                if _matches(s)
+                and str(s.get("kind") or "once") == "once"
+                and (s.get("last_run")
+                     or float(s.get("at") or (now + 1)) < now)]
+            all_flag = True
+            if not hits:
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in _p_pool[:3])
+                return self._reminder_finish(
+                    "No past reminders — everything you've got "
+                    "is still ahead"
+                    + (f" ({names})." if names else "."),
+                    user_text, task_id, event_callback)
         if _made_dates is not None and hits:
             # 'cancel the one i made today' — created_at scopes the
             # hits; no row created then means an honest miss, not
