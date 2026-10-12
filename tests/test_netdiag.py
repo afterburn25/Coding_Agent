@@ -2027,6 +2027,54 @@ class TruthGateTests(RecoveryLoopTests):
             "reminder: dentist",
             [s["name"] for s in sup.scheduler.rows])
 
+        # Amount-leading shifts — 'move X an hour later' carries the
+        # amount before the direction; it retimes the row instead of
+        # clarifying 'to when?'. An unquantified direction alone
+        # ('move the table back') still falls through.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: standup", "daily", hour=9, minute=0,
+            action={"kind": "notify", "detail": "standup"})
+        r = agent._reminder_reply(
+            "move the standup 30 minutes earlier",
+            "move the standup 30 minutes earlier", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("08:30", r.content)
+        self.assertEqual(
+            (sup.scheduler.rows[0]["hour"],
+             sup.scheduler.rows[0]["minute"]), (8, 30))
+        self.assertEqual(sup.scheduler.rows[0]["kind"], "daily")
+        at0 = time.time() + 3600
+        sup.scheduler.add(
+            "reminder: dentist", "once", at=at0,
+            action={"kind": "notify", "detail": "dentist"})
+        r = agent._reminder_reply(
+            "move the dentist an hour later",
+            "move the dentist an hour later", task.id)
+        self.assertIsNotNone(r)
+        self.assertAlmostEqual(
+            float(sup.scheduler.rows[1]["at"]), at0 + 3600,
+            delta=30)
+        # A quantified shift over a non-row misses honestly — the
+        # model never gets to narrate a fake move.
+        r = agent._reminder_reply(
+            "move the table an hour later",
+            "move the table an hour later", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("don't see", r.content)
+        self.assertIsNone(
+            agent._reminder_reply(
+                "move the table back",
+                "move the table back", task.id))
+        # Count ordinals — 'the next two' is an explicit target
+        # set, cancelled without a redundant 'say which'.
+        r = agent._reminder_reply(
+            "cancel the next two reminders",
+            "cancel the next two reminders", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("2", r.content)
+        self.assertFalse(sup.scheduler.rows)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

@@ -5048,22 +5048,39 @@ class AgentOrchestrator:
                 user_text, task_id, event_callback)
         body = str(mr.groupdict().get("body") or "").strip(" ,;—-")
         shift_txt = ""
+        _shift_q = False
         if mr.groupdict().get("when") is None:
             # 'push the standup back an hour', 'move it up 30
             # minutes', 'make the standup earlier' — the shift
             # tails the body because the when-slot only takes
             # to/until/for/digit leads. Peel it for the offset
             # math below (bare 'earlier' still clarifies).
-            shm = re.search(
-                r"\s+((?:back|forward|earlier|later|up|down|"
-                r"sooner)(?:\s+by)?(?:\s+(?:a|an|one|two|three|"
-                r"four|five|six|seven|eight|nine|ten|couple|few|"
-                r"\d+(?:\.\d+)?)\s+(?:seconds?|secs?|minutes?|"
-                r"mins?|hours?|hrs?|days?|weeks?))?)$",
+            _shm2 = re.search(
+                r"\s+(((?:a|an|one|two|three|four|five|six|seven|"
+                r"eight|nine|ten|couple|few|\d+(?:\.\d+)?)\s*"
+                r"(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|"
+                r"days?|weeks?))\s+"
+                r"(earlier|later|back|forward|sooner))$",
                 body, re.IGNORECASE)
-            if shm is not None:
-                shift_txt = shm.group(1)
-                body = body[:shm.start()].strip(" ,;—-")
+            if _shm2 is not None:
+                # 'move the dentist an hour later' — the amount
+                # leads the direction; it must peel BEFORE the
+                # direction-only tail below strands 'an hour' in
+                # the topic.
+                shift_txt = _shm2.group(3) + " " + _shm2.group(2)
+                _shift_q = True
+                body = body[:_shm2.start()].strip(" ,;—-")
+            else:
+                shm = re.search(
+                    r"\s+((?:back|forward|earlier|later|up|down|"
+                    r"sooner)(?:\s+by)?(?:\s+(?:a|an|one|two|three|"
+                    r"four|five|six|seven|eight|nine|ten|couple|"
+                    r"few|\d+(?:\.\d+)?)\s+(?:seconds?|secs?|"
+                    r"minutes?|mins?|hours?|hrs?|days?|weeks?))?)$",
+                    body, re.IGNORECASE)
+                if shm is not None:
+                    shift_txt = shm.group(1)
+                    body = body[:shm.start()].strip(" ,;—-")
         else:
             # 'push the standup back 30 minutes' — the digit lead
             # on '30' put the duration in the when slot and left
@@ -5081,6 +5098,7 @@ class AgentOrchestrator:
                     re.IGNORECASE)):
                 shift_txt = (shm.group(1) + " "
                              + str(mr.groupdict().get("when")).strip())
+                _shift_q = True
                 body = body[:shm.start()].strip(" ,;—-")
         # 'change my alarm from 6 to 7' — the lazy body strands
         # 'from' and the when slot swallows '6 to 7' whole; that
@@ -5129,6 +5147,7 @@ class AgentOrchestrator:
                     "bump", "shift")
                 and mr.groupdict().get("noun") is None
                 and not hits
+                and not _shift_q
                 and not (topic_terms & {
                     "reminder", "reminders", "alarm", "alarms",
                     "timer", "timers", "schedule", "schedules",
@@ -5136,14 +5155,29 @@ class AgentOrchestrator:
             # 'move the table'/'change the font' — a body that
             # resolves no reminder row isn't a schedule op. A
             # schedule noun inside the body ('change my alarm
-            # from 9 to 10') IS one — miss honestly instead of
-            # handing a fabricated reschedule to the model.
+            # from 9 to 10') or a quantified time shift ('move the
+            # table an hour later') IS one — miss honestly instead
+            # of handing a fabricated reschedule to the model.
             return None
         _wtxt = ("" if shift_txt
                  else _wtxt_from if _wtxt_from is not None
                  else str(mr.groupdict().get("when") or "").strip())
         _wtxt = re.sub(r"\s+(?:instead|actually)\s*$", "",
                        _wtxt, flags=re.IGNORECASE).strip()
+        if not shift_txt:
+            # 'move the standup 30 minutes earlier' — the amount
+            # leads the direction here; the tail peel only catches
+            # direction-first forms ('earlier by an hour').
+            _smw = re.fullmatch(
+                r"((?:a|an|one|two|three|four|five|six|seven|"
+                r"eight|nine|ten|couple|few|\d+(?:\.\d+)?)\s*"
+                r"(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|"
+                r"days?|weeks?))\s+"
+                r"(earlier|later|back|forward|sooner)",
+                _wtxt, re.IGNORECASE)
+            if _smw is not None:
+                shift_txt = (_smw.group(2) + " " + _smw.group(1))
+                _shift_q = True
         spec = self._reminder_spec(_wtxt, time.time())
         if spec is None:
             # 'change the timer to 30 minutes' — a duration target,
@@ -5220,7 +5254,10 @@ class AgentOrchestrator:
                     spec = {"kind": "once",
                             "at": max(time.time(), base + delta)}
                 _wtxt = shift_txt
-        if spec is None:
+        if spec is None and not (shift_txt and not hits):
+            # A quantified shift IS the 'when' — 'move the table an
+            # hour later' with no matching row misses by scope, not
+            # by time; asking 'to when?' would misstate the miss.
             return self._reminder_finish(
                 "Reschedule to when? — e.g. “to friday at 3pm” "
                 "or “to every morning”.",
@@ -5379,6 +5416,18 @@ class AgentOrchestrator:
         if not sel:
             return set(terms), None
         rest = set(terms) - self._ORDINAL_SCOPE - {"one", "ones"}
+        # 'the first two reminders'/'the last three' — a count word
+        # beside a boundary ordinal picks N rows by fire order.
+        _cntw = {"two": 2, "three": 3, "four": 4, "five": 5,
+                 "six": 6, "seven": 7, "eight": 8, "nine": 9,
+                 "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7,
+                 "8": 8, "9": 9}
+        _cnt = rest & set(_cntw)
+        if _cnt and sel & {"first", "next", "earliest", "last",
+                           "latest"}:
+            rest -= _cnt
+            return rest, ("maxn:" if sel & {"last", "latest"}
+                          else "minn:") + str(_cntw[sorted(_cnt)[0]])
         if sel & {"last", "latest"}:
             return rest, "max"
         pos = sel & set(self._ORDINAL_POS)
@@ -5389,9 +5438,23 @@ class AgentOrchestrator:
     def _reminder_ordinal_pick(self, hits: list, sel: str | None,
                              now: float):
         """min → soonest-firing hit; max → latest-firing hit;
-        idx:N → the Nth hit by fire order ('the second one')."""
+        idx:N → the Nth hit by fire order ('the second one');
+        minn:K/maxn:K → the K soonest/latest ('the first two')."""
         if not sel or not hits:
             return hits
+        if str(sel).startswith(("minn:", "maxn:")):
+            n = int(str(sel)[5:])
+            latest = str(sel).startswith("maxn")
+
+            def _fire_k(s):
+                try:
+                    return float(
+                        self._reminder_next_fire(s, now)
+                        or (-1e18 if latest else 1e18))
+                except (TypeError, ValueError):
+                    return -1e18 if latest else 1e18
+            return sorted(hits, key=_fire_k,
+                          reverse=latest)[:n]
         if str(sel).startswith("idx:"):
             n = int(str(sel)[4:])
             def _fire_i(s):
@@ -6361,7 +6424,12 @@ class AgentOrchestrator:
                     f"you have: {names}.")
         elif (len(hits) > 1 and not all_flag
                 and and_hits is None
+                and not str(ord_sel or "").startswith(
+                    ("minn:", "maxn:"))
                 and not self._reminder_identical(hits)):
+            # A minn:/maxn: pick ('the next two reminders') is an
+            # explicit target set like 'cancel all' — asking 'say
+            # which' again would re-question an answered scope.
             names = "; ".join(
                 f"“{self._reminder_label(s)}” "
                 f"({self._reminder_when_text(s, now)})"
