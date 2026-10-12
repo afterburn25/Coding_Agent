@@ -3194,6 +3194,40 @@ class TruthGateTests(RecoveryLoopTests):
                 "cancel everything except pay rent", task.id)
             self.assertIsNotNone(r)
             self.assertIn("nothing else", r.content)
+            sup.scheduler.rows.clear()
+
+            # 'annual reminder for taxes' — the model fake-set
+            # 'Annual tax reminder set for October 11th' over zero
+            # rows. annual/yearly/quarterly/semiannual and
+            # 'twice a month/week/year' resolve real intervals.
+            for when, secs in (
+                    ("annual", 31536000.0), ("yearly", 31536000.0),
+                    ("quarterly", 91 * 86400.0),
+                    ("semiannual", 182 * 86400.0),
+                    ("twice a month", 15 * 86400.0),
+                    ("twice a week", 302400.0)):
+                spec = agent._reminder_spec(when, time.time())
+                self.assertIsNotNone(spec, when)
+                self.assertEqual(spec["kind"], "interval")
+                self.assertEqual(spec["interval_s"], secs)
+            r = agent._reminder_reply(
+                "annual reminder for taxes",
+                "annual reminder for taxes", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("taxes", r.content)
+            self.assertTrue(sup.scheduler.rows)
+            sup.scheduler.rows.clear()
+
+            # 'occasionally'/'periodically' — no frequency exists;
+            # pin-fail with the parsed task, never a fake cadence.
+            for q, task_word in (
+                    ("remind me occasionally to stretch", "stretch"),
+                    ("remind me periodically to save", "save")):
+                r = agent._reminder_reply(q, q, task.id)
+                self.assertIsNotNone(r, q)
+                self.assertIn("couldn't pin a time", r.content)
+                self.assertIn(task_word, r.content)
+            self.assertFalse(sup.scheduler.rows)
 
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.

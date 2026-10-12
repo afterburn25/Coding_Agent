@@ -3778,7 +3778,8 @@ class AgentOrchestrator:
         r"(?P<adj>daily|weekly|monthly|nightly|hourly|weekdays?|"
         r"weekends?|workdays?|morning|afternoon|evening|night|"
         r"tomorrow|tonight|biweekly|bimonthly|fortnightly|"
-        r"semi-?weekly|semi-?monthly|urgent|important|critical|"
+        r"semi-?weekly|semi-?monthly|annual(?:ly)?|yearly|"
+        r"quarterly|biannual(?:ly)?|urgent|important|critical|"
         r"quick|fast|midnight|noon)\s+"
         r"(?P<noun>reminders?|alarms?|timers?)\b"
         r"(?:\s+(?P<tail>.+?))?" + _REMINDER_TRAIL,
@@ -3903,7 +3904,8 @@ class AgentOrchestrator:
         r"hour|day|am\b|pm\b|later|soon|eventually|sometime|in\s+a\s+"
         r"(?:bit|while|moment|sec)|in\s+advance|ahead\s+of\s+time|"
         r"beforehand|dawn|dusk|sunrise|sunset|daybreak|sundown|"
-        r"twice|thrice|again", re.IGNORECASE)
+        r"someday|occasionally|sometimes|periodically|"
+        r"irregularly|randomly|twice|thrice|again", re.IGNORECASE)
     # 'when the meeting starts remind me' — a leading event
     # trigger. The model fabricated 'The meeting is at 3 — I'll
     # remind you then'; we can't watch triggers, refuse honestly.

@@ -619,10 +619,34 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     if re.fullmatch(r"fortnightly|every\s+(?:other|second|two|2)\s+"
                     r"weeks?", t):
         return {"kind": "interval", "interval_s": 1209600.0}
-    # 'twice a day' / 'every other day' — fixed-span intervals.
-    if re.fullmatch(
-            r"twice\s+(?:a\s+day|daily)|two\s+times\s+a\s+day", t):
-        return {"kind": "interval", "interval_s": 43200.0}
+    # 'annual' / 'quarterly' / 'biannual' — fixed-span intervals
+    # (the model fake-set 'annual reminder for taxes' over zero
+    # rows).
+    m = re.fullmatch(
+        r"(?:annual(?:ly)?|yearly|every\s+year|once\s+a\s+year|"
+        r"quarterly|every\s+quarter|semi\s*-?\s*annual(?:ly)?|"
+        r"bi\s*-?\s*annual(?:ly)?|every\s+other\s+month|"
+        r"every\s+2\s+months|bimonthly)", t)
+    if m:
+        if "quarter" in t:
+            interval = 91 * 86400.0
+        elif "month" in t:
+            interval = 60 * 86400.0
+        elif "semi" in t or "bi" in t:
+            interval = 182 * 86400.0
+        else:
+            interval = 365 * 86400.0
+        return {"kind": "interval", "interval_s": interval}
+    # 'twice a day' / 'twice a month' — fixed-span intervals.
+    m = re.fullmatch(
+        r"twice\s+(?:a\s+(day|week|month|year)|daily)|"
+        r"two\s+times\s+a\s+(day|week|month|year)", t)
+    if m:
+        unit = m.group(1) or m.group(2) or "day"
+        return {"kind": "interval", "interval_s": {
+            "day": 43200.0, "week": 302400.0,
+            "month": 15 * 86400.0,
+            "year": 182 * 86400.0}[unit]}
     if re.fullmatch(r"every\s+other\s+day|every\s+second\s+day", t):
         return {"kind": "interval", "interval_s": 172800.0}
     # 'every half hour' / 'every half a day' — fractional spans.
