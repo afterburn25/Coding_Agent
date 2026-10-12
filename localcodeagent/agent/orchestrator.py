@@ -12169,6 +12169,13 @@ class AgentOrchestrator:
     _ACTIVE_TASK_STATUSES = frozenset(
         {"queued", "running", "planning", "working", "verifying", "reviewing"})
 
+    # Modes that mean delegated/internal work — never user-facing
+    # truth lanes. Everything else ('auto', 'chat', role pins like
+    # 'primary_coder') is a user turn: control lanes must claim so the
+    # model can't narrate a mutation that didn't happen.
+    _INTERNAL_MODES = frozenset(
+        {"work_order", "autonomy", "self_repair", "mission", "internal"})
+
     def _close_run_task(self) -> None:
         """Mark the thread's tracked task "error" iff it is still in an
         active status when run() exits — a no-op on success (terminal rows
@@ -12587,7 +12594,7 @@ class AgentOrchestrator:
         # Corrections and positive feedback are the strongest Answer Memory
         # learning signals — apply them before any lookup runs this turn.
         if (
-            mode == "auto"
+            str(mode or "auto") not in self._INTERNAL_MODES
             and self.answer_memory is not None
             and getattr(self.answer_memory, "available", False)
         ):
@@ -12612,7 +12619,7 @@ class AgentOrchestrator:
         # is how "show me a picture of…" used to fall through to a model
         # that answered with an identity introduction.
         if (
-            mode == "auto"
+            str(mode or "auto") not in self._INTERNAL_MODES
             and env.direct_image()
             and self._brain_subroutine_enabled("image_generation", True)
             and (env.semantic is None
@@ -12630,7 +12637,7 @@ class AgentOrchestrator:
         # what I asked for" — never match the intent gates above, so they
         # would land on a tool-less lane and produce a narrated fake job.
         if (
-            mode == "auto"
+            str(mode or "auto") not in self._INTERNAL_MODES
             and env.primary_intent in {"conversation", "image_followup",
                                        "correction"}
             and self._brain_subroutine_enabled("image_generation", True)
@@ -12698,14 +12705,14 @@ class AgentOrchestrator:
              or self._git_state_reply(user_text, env=env)
              or self._github_read_reply(user_text, env=env)
              or self._github_target_reply(user_text))
-            if mode == "auto" else None)
+            if str(mode or "auto") not in self._INTERNAL_MODES else None)
         # Deterministic social lane — 'join X' / 'can you join X' on a
         # connector-backed service. Runs BEFORE self-knowledge so a
         # generic capability inventory can never answer for a live
         # connector (the "I don't have a browser" class of bug): live
         # state → permission → execute, or a grounded capability answer
         # for the question form. Returns None when no connector matches.
-        if (mode == "auto" and not attach["image_paths"]
+        if (str(mode or "auto") not in self._INTERNAL_MODES and not attach["image_paths"]
                 and not mission_id):
             social_reply = self._social_action_reply(
                 user_text, task.id, event_callback, env=env)
@@ -12724,13 +12731,13 @@ class AgentOrchestrator:
         # registries. Only claimed when the resolver recognizes the turn.
         sk_reply = (
             self._self_knowledge_reply(user_text, env=env)
-            if mode == "auto" else None)
+            if str(mode or "auto") not in self._INTERNAL_MODES else None)
         # 'What do you know about me' — explicit memory inspection is a
         # deterministic list of user-taught facts, not a model answer.
         facts_reply = (
             self._facts_recall_reply(user_text, conversation_id,
                                      project_id, env=env)
-            if mode == "auto" else None)
+            if str(mode or "auto") not in self._INTERNAL_MODES else None)
         # Single-fact recall ("whats my favorite color") answers from
         # stored memory directly — right attribution, no model call.
         # Identity questions ("what's YOUR name") keep precedence even
@@ -12743,7 +12750,7 @@ class AgentOrchestrator:
         recall_reply = (
             self._single_fact_recall_reply(user_text, conversation_id,
                                            project_id, env=env)
-            if (mode == "auto" and facts_reply is None
+            if (str(mode or "auto") not in self._INTERNAL_MODES and facts_reply is None
                 and _identity_guard.response_for(
                     user_text,
                     asker_is_creator=self._resolve_asker_is_creator(),
@@ -12757,7 +12764,13 @@ class AgentOrchestrator:
         # or an out-of-workspace target demands it, and reports
         # denial/failure verbatim. Anything outside the bounded grammar
         # returns None so the model lane still owns ambiguous requests.
-        if (mode == "auto" and not attach["image_paths"]
+        # Claim under every user-interactive mode — 'chat' and role pins
+        # ('primary_coder' etc.) only pick WHICH model answers what the
+        # lanes don't claim; they must never let the model narrate a
+        # scheduler mutation that didn't happen. Internal/mission modes
+        # stay out (mission work has its own lane).
+        if (str(mode or "auto") not in self._INTERNAL_MODES
+                and not attach["image_paths"]
                 and sk_reply is None and recall_reply is None
                 and not mission_id):
             # Missions always take the model/worker pipeline — a
@@ -12775,7 +12788,7 @@ class AgentOrchestrator:
         # suppression stays intact for actual work.
         from .. import identity as _identity_lane
         identity_lane_hit = (
-            mode == "auto"
+            str(mode or "auto") not in self._INTERNAL_MODES
             and env.suppresses_canned()
             and _identity_lane.response_for(
                 user_text,
@@ -12787,13 +12800,13 @@ class AgentOrchestrator:
         # state graph (decisions/open loops/topic stack), not the model.
         state_reply = (
             self._state_recall_reply(user_text, state_ctx, env=env)
-            if (mode == "auto" and state_ctx is not None
+            if (str(mode or "auto") not in self._INTERNAL_MODES and state_ctx is not None
                 and sk_reply is None and facts_reply is None
                 and recall_reply is None)
             else None)
         builtin_reply = github_reply or recall_reply or sk_reply or facts_reply or state_reply or (
             self._builtin_reply(user_text)
-            if mode == "auto" and (
+            if str(mode or "auto") not in self._INTERNAL_MODES and (
                 not env.suppresses_canned() or identity_lane_hit)
             else None)
         builtin_response = (
@@ -12826,13 +12839,18 @@ class AgentOrchestrator:
         brain_blocked_response = (
             "Image generation is disabled by the creator-locked Nexus Brain."
             if (
-                mode == "auto"
+                str(mode or "auto") not in self._INTERNAL_MODES
                 and env.direct_image()
                 and not self._brain_subroutine_enabled("image_generation", True)
             )
             else None
         )
-        training_response = self.training_acknowledgement(learned) if mode == "auto" else None
+        # Memory mutations ran unconditionally above — under a role pin
+        # or 'chat' the ack must still report them truthfully; dropping
+        # it lets the model contradict a deletion that already happened.
+        training_response = (
+            self.training_acknowledgement(learned)
+            if str(mode or "auto") not in self._INTERNAL_MODES else None)
         if learned.get("memory_off"):
             # Universal-scope privacy asks ("stop remembering things I
             # tell you", "don't remember what I say") target the whole
@@ -12892,7 +12910,7 @@ class AgentOrchestrator:
                 training_response = None
         memory_command = (
             self._answer_memory_command(user_text, conversation_id, project_id)
-            if mode == "auto"
+            if str(mode or "auto") not in self._INTERNAL_MODES
             else None
         )
         local_response = (
@@ -12957,7 +12975,7 @@ class AgentOrchestrator:
 
         # Research follow-up commands resolve against the conversation's
         # last research session — no model, no new search (Parts 41/42/35).
-        if mode == "auto" and not attach["image_paths"]:
+        if str(mode or "auto") not in self._INTERNAL_MODES and not attach["image_paths"]:
             recent_research = self._recent_research(conversation_id)
             if self._SOURCES_ASK_RE.match(user_text or ""):
                 if recent_research is not None:
@@ -13099,7 +13117,7 @@ class AgentOrchestrator:
                     _masked.strip().lower()):
                 am_hit_ok = False
         if (
-            mode == "auto"
+            str(mode or "auto") not in self._INTERNAL_MODES
             and self.answer_memory is not None
             and self._brain_subroutine_enabled("answer_memory", True)
             and not context_dependent

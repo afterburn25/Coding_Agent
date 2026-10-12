@@ -1181,6 +1181,88 @@ class TruthGateTests(RecoveryLoopTests):
                 "remind me what my editor is", task.id))
             self.assertEqual(len(sup.scheduler.rows), 1)
 
+    def test_control_lanes_claim_under_pinned_modes(self):
+        # Live: 'turn on the pay rent reminder' sent with mode='chat'
+        # (and equivalently any role pin like 'primary_coder') skipped
+        # every deterministic lane — they're all gated mode=="auto" —
+        # so the model narrated 'Turned on the reminder "pay rent".'
+        # and 'Reminder "pay rent" is already active.' over a row that
+        # stayed disabled. Scheduler control turns must claim under
+        # every user-interactive mode; a role pin chooses WHICH model
+        # answers what the lanes don't, never whether lanes exist.
+        class _Sched:
+            def __init__(self):
+                self.rows = []
+                self._n = 0
+
+            def add(self, name, kind, **kw):
+                self._n += 1
+                row = {"id": f"sc-{self._n}", "name": name,
+                       "kind": kind, "enabled": True, **kw}
+                self.rows.append(row)
+                return row
+
+            def list(self):
+                return list(self.rows)
+
+            def remove(self, sid):
+                n = len(self.rows)
+                self.rows = [r for r in self.rows
+                             if r.get("id") != sid]
+                return len(self.rows) != n
+
+            def set_enabled(self, sid, en):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r["enabled"] = en
+                        return True
+                return False
+
+            def update(self, sid, **kw):
+                for r in self.rows:
+                    if r["id"] == sid:
+                        r.update(kw)
+                        return r
+
+        class _Sup:
+            def __init__(self):
+                self.scheduler = _Sched()
+
+        from localcodeagent.workflow.conversation_memory import (
+            ConversationMemory)
+        with tempfile.TemporaryDirectory() as td:
+            agent = self._agent(Path(td), _FakeRuntime())
+            agent.conversation_memory = ConversationMemory(
+                Path(td) / "cm.json")
+            sup = _Sup()
+            agent._autonomy = lambda: sup
+            sup.scheduler.add(
+                "Reminder: pay rent", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "pay rent"})
+            # Any provider build means the model was asked — control
+            # turns must never reach it.
+            def _no_provider(*_a, **_kw):
+                raise AssertionError("model invoked on a reminder "
+                                     "control turn")
+            agent._provider_for = _no_provider
+            for mode in ("chat", "primary_coder", "auto"):
+                sup.scheduler.rows[0]["enabled"] = False
+                r = agent.run("turn on the pay rent reminder",
+                              mode=mode)
+                self.assertIn("Turned on", r.content)
+                self.assertTrue(sup.scheduler.rows[0]["enabled"])
+            # Internal modes stay out of user-facing lanes.
+            for mode in ("work_order", "autonomy", "self_repair"):
+                agent._provider_for = None
+                sup.scheduler.rows[0]["enabled"] = True
+                try:
+                    agent.run("turn on the pay rent reminder",
+                              mode=mode)
+                except Exception:
+                    pass  # no model wired — just assert no mutation
+                self.assertTrue(sup.scheduler.rows[0]["enabled"])
+
     def test_reminder_combined_time_and_cancel(self):
         # Live: "remind me tomorrow at 9am to review the deploy"
         # fell to fact recall (mutually-exclusive regex alternatives

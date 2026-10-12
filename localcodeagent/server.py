@@ -13616,7 +13616,12 @@ class Handler(BaseHTTPRequestHandler):
                     self._sse_event("result", payload)
                     return
                 coding_model_optional = (
-                    mode == "auto"
+                    # Any user-interactive mode — 'chat' and role pins
+                    # pick which model answers unclaimed turns; they
+                    # must not block the no-model control lanes or a
+                    # reminder toggle would demand model readiness.
+                    str(mode or "auto")
+                    not in AgentOrchestrator._INTERNAL_MODES
                     and (
                         self.state.agent.can_run_without_coding_model(message)
                         or self.state.agent.has_memory_answer(message)
@@ -13848,7 +13853,12 @@ class Handler(BaseHTTPRequestHandler):
                         persona_cmd["ack"]))
                     return
                 coding_model_optional = (
-                    mode == "auto"
+                    # Any user-interactive mode — 'chat' and role pins
+                    # pick which model answers unclaimed turns; they
+                    # must not block the no-model control lanes or a
+                    # reminder toggle would demand model readiness.
+                    str(mode or "auto")
+                    not in AgentOrchestrator._INTERNAL_MODES
                     and (
                         self.state.agent.can_run_without_coding_model(message)
                         or self.state.agent.has_memory_answer(message)
