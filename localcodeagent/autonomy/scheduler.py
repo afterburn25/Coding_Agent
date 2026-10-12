@@ -29,6 +29,10 @@ _MONTH_NAMES = {
     "sept": 9, "september": 9, "oct": 10, "october": 10, "nov": 11,
     "november": 11, "dec": 12, "december": 12}
 
+_MONTHS_NUM = ("", "january", "february", "march", "april", "may",
+               "june", "july", "august", "september", "october",
+               "november", "december")
+
 _WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
              "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
              "eleven": 11, "twelve": 12}
@@ -183,6 +187,15 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     t = re.sub(r"(?<!in\s)(?<!for\s)\b(?:about|around|"
                r"approximately|roughly|like)\s+"
                r"(?=\d|noon|midnight|quarter|half)", "at ", t)
+    # 'on 10/15' — a numeric date reads as october 15; 'at 7a' /
+    # 'at 7p' shorthand meridiems.
+    t = re.sub(
+        r"\b(\d{1,2})/(\d{1,2})\b",
+        lambda m: (_MONTHS_NUM[int(m.group(1))] + " " + m.group(2))
+        if 1 <= int(m.group(1)) <= 12
+        and 1 <= int(m.group(2)) <= 31 else m.group(0), t)
+    t = re.sub(r"\b(\d{1,2})\s*([ap])\.?(?=\s|$|[?,;])",
+               r"\1 \2m", t)
     t = " ".join(t.split())
     t = _worded_clock(t)
     if _bad_clock(t):
@@ -473,6 +486,15 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     t = re.sub(r"(?<!in\s)(?<!for\s)\b(?:about|around|"
                r"approximately|roughly|like)\s+"
                r"(?=\d|noon|midnight|quarter|half)", "at ", t)
+    # 'on 10/15' — a numeric date reads as october 15; 'at 7a' /
+    # 'at 7p' shorthand meridiems.
+    t = re.sub(
+        r"\b(\d{1,2})/(\d{1,2})\b",
+        lambda m: (_MONTHS_NUM[int(m.group(1))] + " " + m.group(2))
+        if 1 <= int(m.group(1)) <= 12
+        and 1 <= int(m.group(2)) <= 31 else m.group(0), t)
+    t = re.sub(r"\b(\d{1,2})\s*([ap])\.?(?=\s|$|[?,;])",
+               r"\1 \2m", t)
     t = " ".join(t.split())
     t = _worded_clock(t)
     if _bad_clock(t):

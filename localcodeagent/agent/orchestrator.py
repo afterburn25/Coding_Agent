@@ -3792,7 +3792,7 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
-        r"axe?|ditch|forget|never\s*mind)"
+        r"undo|axe?|ditch|forget|never\s*mind)"
         r"|(?:i\s+)?(?:don'?t|do\s+not|dont)\s+"
         r"(?:need|want|use|like))\s+"
         r"(?:(?P<body>.+?)?\b(?P<noun>reminders?|alarms?|timers?|"
@@ -3889,6 +3889,18 @@ class AgentOrchestrator:
         r"(?:bit|while|moment|sec)|in\s+advance|ahead\s+of\s+time|"
         r"beforehand|dawn|dusk|sunrise|sunset|daybreak|sundown|"
         r"twice|thrice|again", re.IGNORECASE)
+    # 'when the meeting starts remind me' — a leading event
+    # trigger. The model fabricated 'The meeting is at 3 — I'll
+    # remind you then'; we can't watch triggers, refuse honestly.
+    _REMINDER_WHENLEAD_RE = re.compile(
+        _REMINDER_POLITE +
+        r"(?P<trigger>(?:when|once|as\s+soon\s+as|after|before|"
+        r"if|whenever|every\s+time)\b\s+.+?)\s+"
+        r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|"
+        r"buzz|beep|text|pag|messag)ing|remind|alert|notify|ping|"
+        r"wake|nudge|buzz|beep|text|page|message)\s+me\b"
+        + _REMINDER_TRAIL,
+        re.IGNORECASE)
     _REMINDER_EVENTISH_RE = re.compile(
         r"\b(?:when|once|if|as\s+soon\s+as|after|before|until|"
         r"whenever|every\s+time)\b", re.IGNORECASE)
@@ -4610,7 +4622,8 @@ class AgentOrchestrator:
                 self._REMINDER_NOUNFIRST_RE, self._REMINDER_NOUNADJ_RE,
                 self._REMINDER_REFER_RE, self._REMINDER_WHENONLY_RE,
                 self._REMINDER_INV_LEAD_RE,
-                self._REMINDER_STATEASK_RE)):
+                self._REMINDER_STATEASK_RE,
+                self._REMINDER_WHENLEAD_RE)):
             return True
         return self._reminder_inventory_shaped(text)
 
@@ -4859,6 +4872,16 @@ class AgentOrchestrator:
                         "Say “turn reminders back on” to resume them.")
             return self._reminder_finish(
                 text, user_text, task_id, event_callback)
+        mw = self._REMINDER_WHENLEAD_RE.match(plan_text)
+        if mw is not None:
+            # 'when the meeting starts remind me' — can't watch a
+            # trigger; refuse honestly, never fabricate 'it's at 3'.
+            trig = str(mw.group("trigger") or "").strip(" ,;—-.")
+            return self._reminder_finish(
+                f"I can't watch for a trigger like “{trig}” — "
+                "reminders need a clock time (“in 30 minutes”, "
+                "“at 3pm”, “tomorrow at 9”).",
+                user_text, task_id, event_callback)
         if (self._REMINDER_REFER_RE.match(plan_text)
                 or self._REMINDER_INV_LEAD_RE.match(plan_text)
                 or self._REMINDER_STATEASK_RE.match(plan_text)):
@@ -5616,6 +5639,8 @@ class AgentOrchestrator:
                          or self._REMINDER_INV_LEAD_RE.match(
                              plan_text)
                          or self._REMINDER_STATEASK_RE.match(
+                             plan_text)
+                         or self._REMINDER_WHENLEAD_RE.match(
                              plan_text))):
             return None
         # Checked before parse_local_action, which has no temporal
@@ -6054,7 +6079,7 @@ class AgentOrchestrator:
             cls._REMINDER_DECL_RE, cls._REMINDER_NOUNFIRST_RE,
             cls._REMINDER_NOUNADJ_RE, cls._REMINDER_REFER_RE,
             cls._REMINDER_WHENONLY_RE, cls._REMINDER_INV_LEAD_RE,
-            cls._REMINDER_STATEASK_RE))
+            cls._REMINDER_STATEASK_RE, cls._REMINDER_WHENLEAD_RE))
 
     @staticmethod
     def direct_image_generation_intent(user_text: str) -> bool:

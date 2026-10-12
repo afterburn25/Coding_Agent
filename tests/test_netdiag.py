@@ -2999,6 +2999,36 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNone(_prw("at 6:99", now))
             self.assertIsNotNone(_prw("at 14:30", now))
             self.assertIsNotNone(_prw("at 12pm", now))
+
+            # 'when the meeting starts remind me' — the model
+            # fabricated 'The meeting is at 3 — I'll remind you
+            # then'. A leading trigger refuses honestly.
+            for trig_q in ("when the meeting starts remind me",
+                           "when it rains remind me",
+                           "when you can remind me"):
+                r = agent._reminder_reply(trig_q, trig_q, task.id)
+                self.assertIsNotNone(r, trig_q)
+                self.assertIn("trigger", r.content)
+
+            # 'undo that reminder' is a cancel verb; the single
+            # real row is the referent.
+            r = agent._reminder_reply(
+                "undo that reminder", "undo that reminder",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("pay rent", r.content)
+            self.assertFalse(
+                any(s.get("enabled") for s in sup.scheduler.rows))
+            sup.scheduler.add(
+                "Reminder: pay rent", "once",
+                at=time.time() + 86400)
+
+            # 'on 10/15' numeric date and '7a'/'7p' shorthand
+            # meridiems resolve to real timestamps.
+            self.assertIsNotNone(_prw("on 10/15", now))
+            self.assertIsNotNone(_prw("on 12/31", now))
+            self.assertIsNotNone(_prw("at 7a", now))
+            self.assertIsNotNone(_prw("at 7p", now))
             sup.scheduler.rows.clear()
 
             # The mangled-text probe the model actually saw live —
