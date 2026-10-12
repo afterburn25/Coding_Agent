@@ -278,6 +278,10 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     # not the recurring 'weekend' cadence; 'next' must not fall
     # into the task slot.
     t = re.sub(r"\bnext\s+weekend\b", "saturday", t)
+    # 'the rest of the day' — a named end-of-day bound, not vague.
+    t = re.sub(
+        r"\b(?:the\s+)?rest\s+of\s+(?:the\s+|my\s+)?"
+        r"(?:day|today|tonight)\b", "at 11:59 pm", t)
     # 'a week from now' — 'X from now' is just 'in X'.
     t = re.sub(
         r"((?:a|an|one|two|three|four|five|six|seven|eight|nine|"
@@ -833,6 +837,10 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     # not the recurring 'weekend' cadence; 'next' must not fall
     # into the task slot.
     t = re.sub(r"\bnext\s+weekend\b", "saturday", t)
+    # 'the rest of the day' — a named end-of-day bound, not vague.
+    t = re.sub(
+        r"\b(?:the\s+)?rest\s+of\s+(?:the\s+|my\s+)?"
+        r"(?:day|today|tonight)\b", "at 11:59 pm", t)
     # 'a week from now' — 'X from now' is just 'in X'.
     t = re.sub(
         r"((?:a|an|one|two|three|four|five|six|seven|eight|nine|"
