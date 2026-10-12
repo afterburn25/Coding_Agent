@@ -3912,7 +3912,10 @@ class AgentOrchestrator:
         re.IGNORECASE)
     _REMINDER_RESCHEDULE_RE = re.compile(
         _REMINDER_POLITE +
-        r"(?P<verb>reschedule|move|change)\s+"
+        # 'set'/'switch' join too, but 'set' needs a row hit —
+        # 'set a reminder for 9am' is a create, 'set the X
+        # reminder for 9am instead' retimes a live row.
+        r"(?P<verb>reschedule|move|change|switch|set)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)?"
         r"\b(?P<noun>reminders?|alarms?|timers?|schedules?|"
         r"it|that|this|them|everything|all)\b"
@@ -3926,10 +3929,10 @@ class AgentOrchestrator:
     # generic without a noun.
     _REMINDER_RESCHEDULE_BARE_RE = re.compile(
         _REMINDER_POLITE +
-        # 'move'/'change' join on a row hit and fall through on a
-        # miss — 'move pay rent' is a schedule op, 'move the
-        # table' isn't.
-        r"(?P<verb>reschedule|move|change)\s+"
+        # 'move'/'change'/'switch' join on a row hit and fall
+        # through on a miss — 'move pay rent' is a schedule op,
+        # 'move the table' isn't.
+        r"(?P<verb>reschedule|move|change|switch)\s+"
         r"(?:(?:the|my|that)\s+)?(?P<body>.+?)"
         r"(?:\s+(?:(?:to|until|till|for)\s+|(?=\d))(?P<when>.+?))?"
         + _REMINDER_TRAIL,
@@ -4240,6 +4243,30 @@ class AgentOrchestrator:
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
+    def _reminder_set_is_create(self, mr: re.Match) -> bool:
+        """'set a reminder for 9am'/'set my alarm for 7' are
+        creates — the learn lane banked a garbled fact off 'set
+        the pay rent reminder for 9am instead' live. 'set' only
+        reschedules when its body resolves a live row."""
+        if str(mr.group("verb") or "").lower() != "set":
+            return False
+        sched, rows = self._reminder_rows(
+            noun=mr.groupdict().get("noun"))
+        if sched is None:
+            return True
+        body = str(mr.group("body") or "").strip(" ,;—-")
+        terms = self._reminder_terms(re.sub(
+            r"\b(?:the|my|that|all|every|each|any|of|to|for|about)\b",
+            " ", body, flags=re.IGNORECASE))
+        if not terms:
+            return True
+        return not any(
+            terms <= self._reminder_hay(s)
+            or (self._reminder_terms(self._reminder_label(s))
+                and self._reminder_terms(self._reminder_label(s))
+                <= terms)
+            for s in rows)
+
     def _reminder_reschedule_reply(self, user_text: str, mr: re.Match,
                                    task_id: str, event_callback):
         """'reschedule the deploy reminder to friday at 3' — a real
@@ -4254,7 +4281,7 @@ class AgentOrchestrator:
             # is a file/object turn, not a schedule op; let it fall
             # through to the action lanes.
             return None
-        if (verb_l in ("move", "change")
+        if (verb_l in ("move", "change", "switch")
                 and mr.groupdict().get("noun") is None
                 and str(mr.group("body") or "").strip().lower()
                     in ("it", "that", "this", "them", "")):
@@ -4263,7 +4290,7 @@ class AgentOrchestrator:
             return None
         sched, rows = self._reminder_rows(noun=noun)
         if sched is None:
-            if (verb_l in ("move", "change")
+            if (verb_l in ("move", "change", "switch")
                     and mr.groupdict().get("noun") is None):
                 # No scheduler to resolve the body against — a
                 # bare move/change belongs to the action lanes.
@@ -4278,7 +4305,7 @@ class AgentOrchestrator:
             " ", body, flags=re.IGNORECASE))
         hits = [s for s in rows if not topic_terms
                 or topic_terms <= self._reminder_hay(s)]
-        if (verb_l in ("move", "change")
+        if (verb_l in ("move", "change", "switch")
                 and mr.groupdict().get("noun") is None
                 and not hits and topic_terms):
             # Bare move/change elaborates — 'pay rent' should hit a
@@ -4290,15 +4317,16 @@ class AgentOrchestrator:
                         self._reminder_label(s))
                     and self._reminder_terms(
                         self._reminder_label(s)) <= topic_terms]
-        if (verb_l in ("move", "change")
+        if (verb_l in ("move", "change", "switch")
                 and mr.groupdict().get("noun") is None
                 and not hits):
             # 'move the table'/'change the font' — a body that
             # resolves no reminder row isn't a schedule op.
             return None
-        spec = self._reminder_spec(
-            str(mr.group("when") or ""), time.time())
         _wtxt = str(mr.group("when") or "").strip()
+        _wtxt = re.sub(r"\s+(?:instead|actually)\s*$", "",
+                       _wtxt, flags=re.IGNORECASE).strip()
+        spec = self._reminder_spec(_wtxt, time.time())
         if spec is None:
             # 'change the timer to 30 minutes' — a duration target,
             # not a clock. A bare number is the clock first —
@@ -5095,7 +5123,7 @@ class AgentOrchestrator:
         mr = self._REMINDER_RESCHEDULE_RE.match(plan_text)
         if mr is None:
             mr = self._REMINDER_RESCHEDULE_BARE_RE.match(plan_text)
-        if mr is not None:
+        if mr is not None and not self._reminder_set_is_create(mr):
             return self._reminder_reschedule_reply(
                 user_text, mr, task_id, event_callback)
         mstop = self._REMINDER_STOP_RE.match(plan_text)

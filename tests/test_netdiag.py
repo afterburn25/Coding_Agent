@@ -3751,6 +3751,31 @@ class TruthGateTests(RecoveryLoopTests):
                 "move the table to the garage",
                 "move the table to the garage", task.id))
             sup.scheduler.rows.clear()
+            # 'set the X reminder for T instead' banked a garbled
+            # fact ('Got it — pay is rent reminder…') live — it's a
+            # reschedule on a row hit; 'set a reminder for T' stays
+            # a create ask. 'switch X to Y' joins too.
+            sup.scheduler.add(
+                "reminder: pay rent", "once",
+                at=time.time() + 86400,
+                action={"kind": "notify", "detail": "pay rent"})
+            result = agent.run(
+                "set the pay rent reminder for 9am instead",
+                mode="auto")
+            self.assertIn("Rescheduled", result.content)
+            self.assertFalse(
+                agent.conversation_memory.recall_facts("pay"))
+            result = agent.run(
+                "switch the pay rent reminder to sunday",
+                mode="auto")
+            self.assertIn("Rescheduled", result.content)
+            task = agent.tasks.create("x", "auto")
+            ask = agent._reminder_reply(
+                "set a reminder for 9am",
+                "set a reminder for 9am", task.id)
+            self.assertIsNotNone(ask)
+            self.assertIn("do what", ask.content)
+            sup.scheduler.rows.clear()
             # 'every fortnight' — pin-failed; resolves a 14d
             # interval like 'fortnightly'.
             spec = agent._reminder_spec(
