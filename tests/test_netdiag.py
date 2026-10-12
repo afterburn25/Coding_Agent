@@ -2690,6 +2690,20 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(reply)
             self.assertIn("v42", reply.text)
 
+            # A FACT can literally name a timer — 'stop
+            # remembering the timer is 30 minutes' must un-bank
+            # the narrated fact, not bounce to the cancel lane.
+            learned = agent.conversation_memory.learn_from_user(
+                "stop remembering the timer is 30 minutes",
+                project_id="x")
+            self.assertTrue(
+                any("30 minutes" in f.get("text", "")
+                    for f in learned.get("forgotten", [])))
+            learned = agent.conversation_memory.learn_from_user(
+                "stop remembering the 9pm alarm",
+                project_id="x")
+            self.assertTrue(learned.get("forgotten_miss"))
+
             # The mangled-text probe the model actually saw live —
             # it must now stay 'unpause' end to end.
             from localcodeagent.context.spelling import (

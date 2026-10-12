@@ -1289,12 +1289,18 @@ class ConversationMemory:
             # A scheduler-row target — 'never mind the reminder' /
             # 'forget the 9pm alarm' — belongs to the reminder cancel
             # lane; a fact search here would delete memory the user
-            # never aimed at. Report a miss so the reminder demotion
-            # hands the turn to the cancel lane.
+            # never aimed at. But a FACT can literally name a timer
+            # ('the timer is 30 minutes' banked from narrated fake
+            # sets) — try the fact match first and only bounce when
+            # nothing stored matches.
             if re.search(r"\b(?:reminders?|alarms?|timers?)\b",
                          forget_body, flags=re.IGNORECASE):
-                result.setdefault("forgotten_miss", []).append(
-                    forget_body)
+                forgotten = self.forget(forget_body)
+                if forgotten:
+                    result["forgotten"].extend(forgotten)
+                else:
+                    result.setdefault("forgotten_miss", []).append(
+                        forget_body)
                 return result
             # A bare deictic ('forget that') names nothing to match —
             # ask for the referent instead of searching for 'that'.
