@@ -12711,7 +12711,10 @@ class AgentOrchestrator:
             # (or the model), not bankable facts — 'the reminders
             # didn't fire' banking as a fact outranked the incident
             # filing and would resurface as a stale "fact" later.
-            and getattr(env.semantic, "speech_act", "") != "complaint"
+            # Explicit training directives still learn — 'from now on,
+            # explain errors...' mentions errors without reporting one.
+            and (getattr(env.semantic, "speech_act", "") != "complaint"
+                 or self.looks_like_training_command(user_text))
         ):
             learned = self.conversation_memory.learn_from_user(
                 user_text,
