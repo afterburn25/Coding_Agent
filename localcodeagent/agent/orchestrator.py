@@ -4977,6 +4977,11 @@ class AgentOrchestrator:
         r"^(?:(?:until|til|till|at|by|in)\s+)?\d{1,2}(?::\d{2})?"
         r"\s*(?:am|pm)?\s*$|"
         r"^(?:on|off)\s*$|"
+        r"^(?:the\s+)?(?:first|second|third|fourth|fifth|sixth|"
+        r"last|next|middle|1st|2nd|3rd|4th|5th|6th|\d{1,2})"
+        r"\s*(?:one|reminder|alarm|timer)?\s*$|"
+        r"^the\s+\S+(?:\s+\S+){0,2}\s*$|"
+        r"^\w[\w'-]{2,30}\s*$|"
         r"^(?:until|til|till|at|by|in|to|on|for|every|"
         r"tomorrow|today|tonight|tonite|next|this|"
         r"monday|tuesday|wednesday|thursday|friday|saturday|"
@@ -5026,6 +5031,8 @@ class AgentOrchestrator:
                     ask = "noun_fire"
                 elif "turn them on or off" in low_body:
                     ask = "toggle"
+                elif "say which" in low_body:
+                    ask = f"which\x00{body}"
                 else:
                     mq = re.search(
                         r"when should i remind you "
@@ -5046,6 +5053,53 @@ class AgentOrchestrator:
                 continue
         if ask is None or prior_user is None:
             return None
+        if ask.startswith("which\x00"):
+            # 'That matches N reminders: «a», «b» — say which.' →
+            # 'the first one' / 'the oven one' / 'oven'. The picked
+            # label splices into the prior op's noun slot so the
+            # existing scoped-mutation path owns the turn.
+            body = ask.split("\x00", 1)[1]
+            labels = re.findall(
+                r"[“\"«](.+?)[”\"»]",
+                body.split("say which", 1)[0])
+            if not labels:
+                return None
+            low_t = t.lower()
+            mo = re.fullmatch(
+                r"(?:the\s+)?(first|1st|second|2nd|third|3rd|fourth|"
+                r"4th|fifth|5th|sixth|6th|last|next|middle|\d{1,2})"
+                r"\s*(?:one|reminder|alarm|timer|st|nd|rd|th)?",
+                low_t)
+            pick = None
+            if mo is not None:
+                idx = {
+                    "first": 0, "1st": 0, "next": 0,
+                    "second": 1, "2nd": 1, "third": 2, "3rd": 2,
+                    "fourth": 3, "4th": 3, "fifth": 4, "5th": 4,
+                    "sixth": 5, "6th": 5, "middle": len(labels) // 2,
+                    "last": -1,
+                }.get(mo.group(1))
+                if idx is None:
+                    idx = int(mo.group(1)) - 1
+                if -len(labels) <= idx < len(labels):
+                    pick = labels[idx]
+            else:
+                terms = self._reminder_terms(re.sub(
+                    r"\b(?:the|a|an|one|reminders?|alarms?|timers?|"
+                    r"that|this|it)\b", " ", low_t))
+                hits = [l for l in labels
+                        if terms <= self._reminder_terms(l)]
+                if terms and len(hits) == 1:
+                    pick = hits[0]
+            if pick is None:
+                return None
+            mn = re.search(
+                r"\b(?:reminders?|alarms?|timers?|schedules?)\b",
+                prior_user.lower())
+            if mn is None:
+                return None
+            return (f"{prior_user[:mn.start()]}{pick} "
+                    f"{mn.group(0)}{prior_user[mn.end():]}")
         if ask == "noun_fire":
             # 'When should the alarm fire?' — the clarify itself proves
             # the prior turn was set-shaped; it just lacked a when.

@@ -2070,6 +2070,32 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Reminder set", r.content)
             self.assertEqual(len(sup.scheduler.rows), n_rows + 1)
 
+            # 'say which' disambiguation consumes ordinals and label
+            # names — the picked label splices into the prior op's
+            # noun slot so the scoped path owns the turn.
+            which = ("That matches 3 reminders: “check the oven” "
+                     "(07:48), “stretch” (09:00), “standup” (10:00) — "
+                     "say which.")
+            agent.conversation_manager.set([
+                {"role": "user", "content": "cancel reminders"},
+                {"role": "assistant", "content": which},
+                {"role": "user", "content": "the second"}])
+            self.assertEqual(
+                agent._reminder_pending("the second"),
+                "cancel stretch reminders")
+            agent.conversation_manager.set([
+                {"role": "user", "content": "cancel reminders"},
+                {"role": "assistant", "content": which},
+                {"role": "user", "content": "the oven one"}])
+            self.assertEqual(
+                agent._reminder_pending("the oven one"),
+                "cancel check the oven reminders")
+            agent.conversation_manager.set([
+                {"role": "user", "content": "cancel reminders"},
+                {"role": "assistant", "content": which},
+                {"role": "user", "content": "the ninth"}])
+            self.assertIsNone(agent._reminder_pending("the ninth"))
+
             # No outstanding clarify → the fragment declines instead
             # of manufacturing an op.
             agent.conversation_manager.set([
