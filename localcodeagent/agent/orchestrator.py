@@ -2315,6 +2315,42 @@ class AgentOrchestrator:
         ctx_repo = self._github_context_repo(skip_text=t)
         if not (has_gh or slug_m or ctx_repo):
             return None
+        if not (has_gh or slug_m):
+            # ctx_repo anaphora is for object-free follow-ups ('any
+            # updates', 'check it') or repo-domain objects. A turn
+            # naming another subject ('status of my reminders',
+            # 'updates on the timer') belongs to that object's lane —
+            # and verb-sense 'work' ('does it still work') is a
+            # function ask, not a repo read.
+            if re.search(
+                    r"\b(?:does?|did|is|are|was|were|will|would|can|"
+                    r"could|should|still|n't|not)\b[^.?!]{0,80}"
+                    r"\bwork(?:ing|ed)?\b", low) and not re.search(
+                    r"\b(?:the|your|my|our|this|that|recent|latest|new|"
+                    r"any)\s+work\b", low):
+                return None
+            obj = re.search(
+                r"(?:\b(?:of|about|on|for|with|in|to)\s+|\b(?:check|"
+                r"show|list|read|open|pull|fetch|get|tell me|look at|"
+                r"summariz\w*|describe)\s+)"
+                r"(?:my|your|our|the|a|an|this|that|these|those|any|"
+                r"some|each|every)\s+(\w+)", low) or re.search(
+                r"\b(?:of|about|on)\s+"
+                r"(?!it\b|them\b|me\b|you\b|this\b|that\b|these\b|"
+                r"those\b|my\b|your\b|our\b|the\b|a\b|an\b|any\b|some\b|"
+                r"each\b|every\b)(\w+)", low)
+            if obj and obj.group(1) not in {
+                    "repo", "repository", "repos", "it", "them",
+                    "files", "file", "commits", "commit", "issues",
+                    "issue", "prs", "pr", "pull", "branches", "branch",
+                    "readme", "code", "history", "activity",
+                    "structure", "contents", "work", "status",
+                    "updates", "progress", "details", "info",
+                    "information", "changes", "tickets", "ticket",
+                    "workflow", "workflows", "ci", "build", "releases",
+                    "release", "tags", "tag", "merge", "diff", "docs",
+                    "documentation", "request", "requests"}:
+                return None
         repo = slug_m.group(1) if slug_m else None
         if repo is None and has_gh:
             # A bare basename among the words — "check Coding_Agent" —

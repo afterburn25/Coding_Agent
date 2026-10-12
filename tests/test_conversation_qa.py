@@ -1019,3 +1019,36 @@ class GithubContextRepoTests(unittest.TestCase):
             {"role": "user", "content": "check it"},
         ])
         self.assertEqual(orch._github_context_repo(), "acme/widgets")
+
+    def test_verb_work_with_ctx_repo_is_not_a_repo_read(self):
+        # 'work' in the read-intent list is noun-sense ("latest work on
+        # the repo"); "do my reminders still work" is function-sense and
+        # must not fire a GitHub read off the ctx_repo referent.
+        orch = self._orch([
+            {"role": "user", "content": "check acme/widgets for issues"},
+            {"role": "assistant", "content":
+             "Here's acme/widgets — 3 open issues."},
+        ])
+        orch._utterance_frame = lambda env, text: None
+        orch._github_repo_names = lambda: []
+        orch._github_activity_reply = lambda *a, **k: "CLAIMED"
+        self.assertIsNone(
+            orch._github_read_reply("do my reminders still work"))
+        self.assertIsNone(
+            orch._github_read_reply("are reminders working"))
+        self.assertIsNone(
+            orch._github_read_reply("whats the status of my reminders"))
+        self.assertIsNone(
+            orch._github_read_reply("any updates on the timer"))
+        self.assertIsNone(
+            orch._github_read_reply("tell me about my reminders"))
+        self.assertIsNone(
+            orch._github_read_reply("details on my reminder"))
+        # Repo-domain objects and bare follow-ups still claim via the
+        # contextual referent.
+        self.assertEqual(
+            orch._github_read_reply("any recent activity"), "CLAIMED")
+        self.assertEqual(
+            orch._github_read_reply("check the files"), "CLAIMED")
+        self.assertEqual(
+            orch._github_read_reply("status of the build"), "CLAIMED")
