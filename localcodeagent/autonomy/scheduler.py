@@ -246,6 +246,12 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"\bby\s+(?=morning|afternoon|evening|night\b|tonight|"
         r"tomorrow|today|mon|tue|wed|thu|fri|sat|sun)",
         "", t)
+    # 'a week from now' — 'X from now' is just 'in X'.
+    t = re.sub(
+        r"((?:a|an|one|two|three|four|five|six|seven|eight|nine|"
+        r"ten|couple|few|\d+(?:\.\d+)?)\s+(?:second|minute|hour|"
+        r"day|week|month|year)s?)\s+from\s+now\b",
+        r"in \1", t)
     # 'later tonight' — 'later' is a hedge before a real daypart,
     # not a vagueness that should pin-fail.
     t = re.sub(
@@ -711,6 +717,12 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         r"\bby\s+(?=morning|afternoon|evening|night\b|tonight|"
         r"tomorrow|today|mon|tue|wed|thu|fri|sat|sun)",
         "", t)
+    # 'a week from now' — 'X from now' is just 'in X'.
+    t = re.sub(
+        r"((?:a|an|one|two|three|four|five|six|seven|eight|nine|"
+        r"ten|couple|few|\d+(?:\.\d+)?)\s+(?:second|minute|hour|"
+        r"day|week|month|year)s?)\s+from\s+now\b",
+        r"in \1", t)
     # 'later tonight' — 'later' is a hedge before a real daypart,
     # not a vagueness that should pin-fail.
     t = re.sub(
