@@ -6169,6 +6169,26 @@ class AgentOrchestrator:
                             " — it repeats until you cancel; I "
                             f"can't hold an end bound like "
                             f"“until {tail_u}”")
+                else:
+                    # 'every half hour starting at 2' — a start
+                    # bound on a recurring base; the interval
+                    # applies from now, bound honestly noted.
+                    sm_w = re.search(
+                        r"\s+(?:starting|beginning|start|from)\s+"
+                        r"(?:at\s+|on\s+|in\s+)?(.+?)\s*$",
+                        when_raw, re.IGNORECASE)
+                    if sm_w is not None:
+                        base_s = when_raw[:sm_w.start()].strip()
+                        spec_s = self._reminder_spec(
+                            base_s, time.time())
+                        if spec_s is not None \
+                                and spec_s["kind"] != "once":
+                            spec = spec_s
+                            forced_when = base_s
+                            end_note = (
+                                " — it repeats until you cancel; "
+                                "I can't hold a start bound like "
+                                "“" + sm_w.group(0).strip() + "”")
             if spec is None:
                 # 'every hour for 2 days [to X]' — a 'for <dur>'
                 # tail on the when is an end bound the scheduler
