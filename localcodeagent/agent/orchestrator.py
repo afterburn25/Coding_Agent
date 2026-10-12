@@ -3458,6 +3458,8 @@ class AgentOrchestrator:
     _STATE_LOOP_Q_RE = re.compile(
         r"\bwhat\s+happened\s+(?:with|to)\s+(?:that|the|it|this)\b|"
         r"\bany\s+(?:update|news|progress)\s+on\b|"
+        r"^\s*(?:any|got\s+any|is\s+there\s+any)\s+"
+        r"(?:update|news|progress)\b[.?!]?\s*$|"
         r"\bwhere\s+(?:are|were)\s+we\s+(?:with|on)\b|"
         r"\bhow'?s\s+(?:that|the)\s+(\w+)\s+(?:going|doing)\b",
         re.IGNORECASE)
