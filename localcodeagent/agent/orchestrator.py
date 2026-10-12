@@ -464,6 +464,78 @@ class _CommandActionsProxy:
         return actions.execute(*args, **kwargs)
 
 
+class _SchedJournal:
+    """Mutation-journaling proxy over the autonomy scheduler. Every
+    write through the reminder lanes records its inverse on the
+    orchestrator's _sched_undo list so 'undo that' replays real
+    state — scheduler rows are the only truth, never a narrated
+    reversal. Entries: ('del', sid) undoes an add, ('readd', row)
+    undoes a remove, ('update', sid, before) undoes a patch,
+    ('enabled', sid, was) undoes a toggle."""
+
+    def __init__(self, agent, sched):
+        self._agent = agent
+        self._sched = sched
+
+    def __getattr__(self, key):
+        return getattr(self._sched, key)
+
+    def _find(self, sid):
+        for r in (self._sched.list() or []):
+            if str(r.get("id")) == str(sid):
+                return r
+        return None
+
+    def _record(self, entry):
+        journal = getattr(self._agent, "_sched_undo", None)
+        if journal is None:
+            journal = self._agent._sched_undo = []
+        if getattr(self._agent, "_sched_undo_fresh", False):
+            # First write of a new mutation turn — the journal now
+            # describes THIS turn's batch, not last turn's.
+            del journal[:]
+            self._agent._sched_undo_fresh = False
+        journal.append(entry)
+
+    def add(self, *args, **kw):
+        row = self._sched.add(*args, **kw)
+        if isinstance(row, dict) and row.get("id") is not None:
+            self._record(("del", str(row["id"]),
+                          self._agent._reminder_label(row)))
+        return row
+
+    def remove(self, sid):
+        snap = self._find(sid)
+        ok = self._sched.remove(sid)
+        if ok and snap is not None:
+            self._record(("readd", dict(snap),
+                          self._agent._reminder_label(snap)))
+        return ok
+
+    def update(self, sid, **fields):
+        snap = self._find(sid)
+        before = ({k: snap.get(k) for k in fields}
+                  if snap is not None else {})
+        label = (self._agent._reminder_label(snap)
+                 if snap is not None else "")
+        res = self._sched.update(sid, **fields)
+        if res and snap is not None:
+            self._record(("update", str(sid), before, label))
+        return res
+
+    def set_enabled(self, sid, enabled):
+        snap = self._find(sid)
+        # snap is the row's live dict — capture BEFORE mutating.
+        was = (bool(snap.get("enabled", True))
+               if snap is not None else None)
+        label = (self._agent._reminder_label(snap)
+                 if snap is not None else "")
+        ok = self._sched.set_enabled(sid, enabled)
+        if ok and snap is not None:
+            self._record(("enabled", str(sid), was, label))
+        return ok
+
+
 class AgentOrchestrator:
     def __init__(
         self,
@@ -4188,6 +4260,17 @@ class AgentOrchestrator:
         r"(?P<clock>\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?|"
         r"noon|midnight)" + _REMINDER_TRAIL,
         re.IGNORECASE)
+    # 'undo that' / 'undo the last reminder' — replays the recorded
+    # inverse of the most recent scheduler mutation. Only claims
+    # when the journal has entries; an empty journal falls through
+    # so 'undo the deployment' still reaches other owners.
+    _REMINDER_UNDO_RE = re.compile(
+        _REMINDER_POLITE +
+        r"undo(?:\s+(?:that|it|this|everything|the\s+(?:last|"
+        r"previous)\s+(?:\w+\s+){0,3}(?:thing|change|reminder|"
+        r"alarm|timer|one|update|move)|what\s+you\s+(?:just\s+)?"
+        r"did|my\s+last\s+(?:reminder|alarm|timer)))?[.!?]?\s*$",
+        re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:(?:keep\s+)?(?:remind|alert|notify|ping|wak|nudg|buzz|beep|text|pag|messag|nagg)ing|"
@@ -5433,6 +5516,7 @@ class AgentOrchestrator:
         sched = getattr(sup, "scheduler", None)
         if sched is None:
             return None, []
+        sched = _SchedJournal(self, sched)
         rows = [s for s in (sched.list() or [])
                 if (include_disabled or s.get("enabled", True))
                 and (str(s.get("name") or "").lower()
@@ -7442,12 +7526,66 @@ class AgentOrchestrator:
         from ..context.realize import RenderedReply
         return RenderedReply(text=text, speech_act="answer")
 
+    def _reminder_undo_reply(self, user_text: str, task_id: str, *,
+                             event_callback=None):
+        """'undo that' — replays the journaled inverses of the most
+        recent mutation turn against the real scheduler. An empty
+        journal declines (None) so non-reminder undos ('undo the
+        deployment') still reach their owners."""
+        journal = getattr(self, "_sched_undo", None) or []
+        sup = (self._autonomy() if callable(self._autonomy)
+               else self._autonomy)
+        sched = getattr(sup, "scheduler", None)
+        if not journal or sched is None:
+            return None
+        notes = []
+        for ent in reversed(journal):
+            try:
+                if ent[0] == "del":
+                    sched.remove(ent[1])
+                    notes.append(f"removed “{ent[2]}”")
+                elif ent[0] == "readd":
+                    row = ent[1]
+                    kw = {k: row.get(k) for k in (
+                        "at", "interval_s", "hour", "minute",
+                        "weekday", "day", "action", "enabled",
+                        "created_by") if k in row}
+                    sched.add(row.get("name"), row.get("kind"), **kw)
+                    notes.append(f"“{ent[2]}” is back")
+                elif ent[0] == "update":
+                    sched.update(ent[1], **ent[2])
+                    notes.append(f"restored “{ent[3]}”")
+                elif ent[0] == "enabled":
+                    sched.set_enabled(ent[1], ent[2])
+                    notes.append(
+                        f"“{ent[3]}” is "
+                        f"{'on' if ent[2] else 'off'} again")
+            except Exception:
+                pass
+        self._sched_undo = []
+        self._sched_undo_fresh = False
+        if not notes:
+            return self._reminder_finish(
+                "I tried to undo it, but the scheduler refused — "
+                "nothing changed.", user_text, task_id,
+                event_callback)
+        return self._reminder_finish(
+            "Undone — " + "; ".join(notes) + ".",
+            user_text, task_id, event_callback)
+
     def _reminder_reply(self, user_text: str, plan_text: str,
                         task_id: str, *, event_callback=None):
         """'remind me in 5 minutes to X' — a real once-schedule with a
         notify action through the autonomy scheduler, not a promise.
         Falls through (None) for 'remind me the tag' recall asks —
         those belong to memory lanes."""
+        if self._REMINDER_UNDO_RE.match(plan_text):
+            return self._reminder_undo_reply(
+                user_text, task_id, event_callback=event_callback)
+        # A new mutation turn replaces the journal — but only once
+        # it actually mutates, so read-only turns keep 'undo that'
+        # pointed at the last real change.
+        self._sched_undo_fresh = True
         synth = self._reminder_pending(user_text)
         if isinstance(synth, dict):
             # 'That matches N goals — say which.' → 'the first one':
@@ -8231,6 +8369,7 @@ class AgentOrchestrator:
                                 "scheduler isn't running in this "
                                 "session.",
                                 user_text, task_id, event_callback)
+                        sched = _SchedJournal(self, sched)
                         try:
                             _v = _selfverb.group(1).lower()
                             _lemma = {
@@ -8479,6 +8618,7 @@ class AgentOrchestrator:
                                 "scheduler isn't running in this "
                                 "session.",
                                 user_text, task_id, event_callback)
+                        sched = _SchedJournal(self, sched)
                         try:
                             fields = {k: v for k, v in
                                       spec_nt.items()
@@ -8533,6 +8673,7 @@ class AgentOrchestrator:
                                 "scheduler isn't running in this "
                                 "session.",
                                 user_text, task_id, event_callback)
+                        sched = _SchedJournal(self, sched)
                         try:
                             _v = str(
                                 mnt.group("verb") or "").lower()
@@ -9043,6 +9184,7 @@ class AgentOrchestrator:
             text = ("I can't set reminders — the scheduler isn't "
                     "running in this session.")
         else:
+            sched = _SchedJournal(self, sched)
             spec = self._reminder_spec(
                 forced_when if forced_when is not None
                 else str(m.group("when") or ""), time.time())
@@ -9174,11 +9316,14 @@ class AgentOrchestrator:
                              plan_text)
                          or self._REMINDER_SNOOZE_RE.match(plan_text)
                          or self._REMINDER_TOGGLE_RE.match(plan_text)
+                         or self._REMINDER_RENAME_RE.match(plan_text)
                          or self._REMINDER_STOP_RE.match(plan_text)
                          or self._REMINDER_RESCHEDULE_RE.match(plan_text)
                          or self._REMINDER_RESCHEDULE_BARE_RE.match(
                              plan_text)
                          or self._REMINDER_RESCHEDULE_PUSH_RE.match(
+                             plan_text)
+                         or self._REMINDER_RESCHEDULE_MAKE_RE.match(
                              plan_text)
                          or self._REMINDER_REPEAT_RE.match(plan_text)
                          or self._REMINDER_NOTASK_RE.match(plan_text)
@@ -9199,8 +9344,15 @@ class AgentOrchestrator:
                              plan_text)
                          or self._REMINDER_STATEASK_RE.match(
                              plan_text)
+                         or self._REMINDER_NOUNLESS_STATEASK_RE.match(
+                             plan_text)
+                         or self._REMINDER_CONFIRMASK_RE.match(
+                             plan_text)
                          or self._REMINDER_WHENLEAD_RE.match(
                              plan_text)
+                         or self._REMINDER_CLOCKHAVE_RE.match(
+                             plan_text)
+                         or self._REMINDER_UNDO_RE.match(plan_text)
                          or self._reminder_inventory_shaped(
                              plan_text)
                          or self._reminder_pending(
@@ -9674,6 +9826,8 @@ class AgentOrchestrator:
             cls._REMINDER_STATEASK_RE,
             cls._REMINDER_NOUNLESS_STATEASK_RE,
             cls._REMINDER_CONFIRMASK_RE,
+            cls._REMINDER_CLOCKHAVE_RE,
+            cls._REMINDER_UNDO_RE,
             cls._REMINDER_WHENLEAD_RE,
             # Bare duration/clock fragments may be pending-clarify
             # replies — the resolver checks the convo at reply time.

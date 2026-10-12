@@ -2230,6 +2230,56 @@ class TruthGateTests(RecoveryLoopTests):
             (sup.scheduler.rows[1]["hour"],
              sup.scheduler.rows[1]["minute"]), (10, 30))
 
+        # 'undo that' — the journaled inverses replay against the
+        # real rows: removes come back, toggles flip back, updates
+        # restore. An empty journal declines so a non-reminder
+        # 'undo' still reaches other owners; read-only turns don't
+        # evict the journal.
+        sup.scheduler.rows.clear()
+        sup.scheduler.add(
+            "reminder: wake", "daily", hour=6, minute=0,
+            action={"kind": "notify", "detail": "wake"})
+        # Earlier checks mutated rows — drain that journal so this
+        # assert exercises the truly-empty decline.
+        agent._sched_undo = []
+        self.assertIsNone(agent._reminder_reply(
+            "undo that", "undo that", task.id))
+        r = agent._reminder_reply(
+            "cancel the wake", "cancel the wake", task.id)
+        self.assertIsNotNone(r)
+        self.assertFalse(sup.scheduler.rows)
+        # A read-only turn in between keeps the journal live.
+        r = agent._reminder_reply(
+            "what reminders do i have",
+            "what reminders do i have", task.id)
+        self.assertIsNotNone(r)
+        r = agent._reminder_reply(
+            "undo that", "undo that", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("wake", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 1)
+        r = agent._reminder_reply(
+            "turn off the wake", "turn off the wake", task.id)
+        self.assertIsNotNone(r)
+        self.assertFalse(sup.scheduler.rows[0]["enabled"])
+        r = agent._reminder_reply(
+            "undo that", "undo that", task.id)
+        self.assertIsNotNone(r)
+        self.assertTrue(sup.scheduler.rows[0]["enabled"])
+        r = agent._reminder_reply(
+            "remind me in 5 minutes to stretch",
+            "remind me in 5 minutes to stretch", task.id)
+        self.assertIsNotNone(r)
+        self.assertEqual(len(sup.scheduler.rows), 2)
+        r = agent._reminder_reply(
+            "undo that", "undo that", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("stretch", r.content)
+        self.assertEqual(len(sup.scheduler.rows), 1)
+        # Journal consumed — a second undo declines.
+        self.assertIsNone(agent._reminder_reply(
+            "undo that", "undo that", task.id))
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
