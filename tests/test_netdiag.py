@@ -3800,6 +3800,73 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("reminders set", r.content)
 
+            # 'at 8am and at 8pm' — two clocks for one reminder
+            # clarify; the merge used to fold the first clock
+            # into the task and silently keep the second.
+            r = agent._local_action_reply(
+                "remind me to take pills at 8am and at 8pm",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("two times", r.content)
+            self.assertEqual(sup.scheduler.rows, [])
+            # A daypart or weekday conjunct is ONE multi-slot
+            # spec, not two whens.
+            r = agent._local_action_reply(
+                "remind me to take pills in the morning and "
+                "evening", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("take pills", r.content)
+            for s in list(sup.scheduler.rows):
+                sup.scheduler.remove(s["id"])
+
+            # 'the alarm i snoozed' — a mutation clause binds
+            # the journal's last-touched row even when the
+            # noun filter would miss it.
+            sup.scheduler.add(
+                "reminder: tea", "once", at=time.time() + 600,
+                action={"kind": "notify", "detail": "tea"})
+            sup.scheduler.add(
+                "reminder: trash", "once", at=time.time() + 300,
+                action={"kind": "notify", "detail": "trash"})
+            r = agent._local_action_reply(
+                "snooze the tea for 20 minutes", task.id)
+            self.assertIn("Snoozed", r.content)
+            r = agent._local_action_reply(
+                "cancel the alarm i snoozed", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            self.assertIn("tea", r.content)
+            self.assertEqual(
+                [r2["name"] for r2 in sup.scheduler.rows],
+                ["reminder: trash"])
+            # 'bring back the reminder i deleted' — provenance
+            # binds the journal's latest readd, not a name.
+            r = agent._local_action_reply(
+                "bring back the reminder i deleted", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("back", r.content)
+            self.assertIn("tea", r.content)
+            self.assertEqual(
+                [r2["name"] for r2 in sup.scheduler.rows],
+                ["reminder: trash", "reminder: tea"])
+            # 'the one that's about to fire' — the soonest fire
+            # resolves through the ordinal pick.
+            r = agent._local_action_reply(
+                "turn off the one that's about to fire", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("off", r.content.lower())
+            self.assertIn("trash", r.content)
+            # 'cancel whichever fires next' — the soonest
+            # enabled fire cancels; the paused row stays.
+            r = agent._local_action_reply(
+                "cancel whichever fires next", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            self.assertIn("tea", r.content)
+            self.assertEqual(
+                [r2["name"] for r2 in sup.scheduler.rows],
+                ["reminder: trash"])
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

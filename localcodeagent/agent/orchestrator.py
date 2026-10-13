@@ -7558,6 +7558,22 @@ class AgentOrchestrator:
                 mc.groupdict().get("tail"),
                 mc.groupdict().get("tail2"), body) if g),
             re.IGNORECASE)
+        # 'cancel the alarm i snoozed' — a mutation clause names
+        # the journal's last-touched row, the same bind the
+        # reschedule lane's provenance uses; a creation clause
+        # is _pmade's job.
+        _pmut = re.search(
+            r"\bi\s+(?:(?:just|recently|lately)\s+)?"
+            r"(?:snoozed|moved|rescheduled|renamed|paused|"
+            r"muted|silenced|toggled|delayed|postponed|"
+            r"shifted|bumped|pushed|stopped|deactivated|"
+            r"disabled|enabled|"
+            r"turned\s+(?:off|on)|switched\s+(?:off|on))\b",
+            " ".join(str(g) for g in (
+                mc.groupdict().get("ctime"),
+                mc.groupdict().get("tail"),
+                mc.groupdict().get("tail2"), body) if g),
+            re.IGNORECASE)
         _made_dates = _made_label = None
         if _pmade is not None and _pmade.group(1):
             _made_dates, _made_label = self._reminder_created_scope(
@@ -7868,6 +7884,13 @@ class AgentOrchestrator:
                 if not s.get("enabled", True)
                 and _matches(s) and not _excl(s)
                 and _in_bound(s)]
+        _prov_row = (self._reminder_last_touched()
+                     if _pmut is not None else None)
+        if _prov_row is not None and len(hits) != 1:
+            # 'cancel the alarm i snoozed' — the clause pinned
+            # the journal row; an empty or split pool defers
+            # to it, a single named hit keeps its own pick.
+            hits = [_prov_row]
         if _pmade is not None and str(ord_sel).startswith("idx:"):
             # 'the third reminder i set' — 'set' is a creation
             # verb, so the ordinal ranks created_at, not fire
@@ -9829,6 +9852,16 @@ class AgentOrchestrator:
         rest = str(mr.groupdict().get("rest") or "")
         rest = re.sub(r"\s+(?:back|again)\s*$", "", rest,
                       flags=re.IGNORECASE)
+        # 'bring back the reminder i deleted' — the clause is
+        # provenance, not a name; it binds the journal's
+        # readd entries below.
+        _idel = re.search(
+            r"\bi\s+(?:just\s+)?"
+            r"(?:deleted|removed|cancelled|canceled|killed|"
+            r"dropped|axed|got\s+rid\s+of|threw\s+out)\b",
+            rest, re.IGNORECASE)
+        if _idel is not None:
+            rest = rest[:_idel.start()]
         noun_hit = bool(re.search(
             r"\b(?:reminders?|alarms?|timers?|schedules?)\b",
             rest, re.IGNORECASE))
@@ -9853,6 +9886,10 @@ class AgentOrchestrator:
                  if e[0] == "readd"
                  and (all_scope or not scope
                       or scope <= self._reminder_hay(e[1]))]
+        if _idel is not None and not scope and len(jents) > 1:
+            # 'the reminder i deleted' (singular, unnamed) is
+            # the most recent delete, not every readd on file.
+            jents = jents[-1:]
         # Consume the readd entries this turn replays BEFORE any
         # mutation. The turn's own writes then form a fresh journal
         # batch, so 'undo that' reverses only the restore — never
@@ -10165,6 +10202,20 @@ class AgentOrchestrator:
             r"^(\s*(?:please\s+)?)((?:the|my|that|this)\s+"
             r"[\w'\s-]{1,40}?)\s+can\s+go\b(?:\s+now)?",
             r"\1cancel \2", plan_text, flags=re.IGNORECASE)
+        # 'the one that's about to fire' / 'whichever fires
+        # next' — the soonest-firing row; 'the next one' rides
+        # the same ordinal pick the other lanes use.
+        plan_text = re.sub(
+            r"\bthe\s+one\s+that'?s?\s+"
+            r"(?:about\s+to\s+|going\s+to\s+)?"
+            r"(?:fire|go(?:es)?\s+off|ring(?:\s+off)?|"
+            r"trigger)s?\b",
+            "the next one", plan_text, flags=re.IGNORECASE)
+        plan_text = re.sub(
+            r"\bwhichever\s+(?:(?:reminder|alarm|timer|one|"
+            r"ones)\s+)?(?:fires?|goes?\s+off|rings?)\s+"
+            r"(?:next|first|soonest)\b",
+            "the next one", plan_text, flags=re.IGNORECASE)
         if re.search(
                 r"\band\s+(?:cancel|delete|remove|snooze|pause|"
                 r"reschedule|disable|mute|silence|block|clear|"
@@ -10224,6 +10275,57 @@ class AgentOrchestrator:
                     "I can set one reminder at a time — give me "
                     "each (“remind me to call mom in 30 minutes”, "
                     "then “remind me to water plants in an hour”).",
+                    user_text, task_id, event_callback)
+            # 'remind me to take pills at 8am and at 8pm' — the
+            # second segment leads with another when; the merge
+            # folded the first clock into the task and silently
+            # kept the second. A trailing unit word ('30
+            # seconds') is a compound duration, not a clock.
+            _clock_seg = re.compile(
+                r"^\s*(?:(?:at|in|on|every|next)\s+)?("
+                r"\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|"
+                r"\d{1,2}(?::\d{2})?"
+                r"(?!\s*(?:am|pm|minutes?|mins?|hours?|hrs?|"
+                r"seconds?|secs?|days?|weeks?|months?)\b)"
+                r"(?=\s|$|o['’]?clock)|noon|midnight|"
+                r"tonight|tonite|tomorrow|today|morning|"
+                r"afternoon|evening|night|monday|tuesday|"
+                r"wednesday|thursday|friday|saturday|"
+                r"sunday|weekdays?|weekends?|daily|weekly)\b",
+                re.IGNORECASE)
+            _seg_tail = re.compile(
+                r"(morning|afternoon|evening|night|monday|"
+                r"tuesday|wednesday|thursday|friday|saturday|"
+                r"sunday|weekdays?|weekends?|days?|daily|"
+                r"weekly)\s*$", re.IGNORECASE)
+            # A soft when (daypart/weekday) that follows a
+            # same-class token is one multi-slot spec —
+            # 'in the morning and evening', 'monday, wednesday
+            # and friday'. A hard when — a clock, 'tomorrow',
+            # 'tonight' — is always a second request.
+            _soft = {
+                "morning", "afternoon", "evening", "night",
+                "day", "days", "daily", "weekly", "weekday",
+                "weekdays", "weekend", "weekends",
+                "monday", "tuesday", "wednesday", "thursday",
+                "friday", "saturday", "sunday"}
+            _two_whens = False
+            for _si, _s in enumerate(_segs[1:], 1):
+                _lm = _clock_seg.match(_s)
+                if _lm is None:
+                    continue
+                if _lm.group(1).lower().strip() in _soft:
+                    _pm = _seg_tail.search(_segs[_si - 1])
+                    if _pm is not None and (
+                            _pm.group(1).lower() in _soft):
+                        continue
+                _two_whens = True
+                break
+            if _two_whens:
+                return self._reminder_finish(
+                    "That's two times — give me each reminder "
+                    "(“remind me at 8am to take pills”, then "
+                    "“remind me at 8pm to take pills”).",
                     user_text, task_id, event_callback)
         mc = self._REMINDER_CANCEL_RE.match(plan_text)
         if mc is None:
