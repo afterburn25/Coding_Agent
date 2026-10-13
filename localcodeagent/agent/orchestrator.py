@@ -4176,6 +4176,7 @@ class AgentOrchestrator:
         r"what\s+have\s+i\s+got)\s+"
         r"(?:(?:on|at|for|happening|going\s+on|planned|scheduled|"
         r"set)\s+)*"
+        r"(?:(?:this|that|next)\s+)?"
         r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midday|midnight|"
         r"tonight|tonite|tomorrow|today|morning|afternoon|evening|"
         r"monday|tuesday|wednesday|thursday|friday|saturday|"
@@ -4192,6 +4193,7 @@ class AgentOrchestrator:
         r"(?:is|are)\s+(?:there\s+)?(?:anything|something)\s+"
         r"(?:on|happening|planned|going\s+on)\s+"
         r"(?:(?:at|on|for)\s+)?"
+        r"(?:(?:this|that|next)\s+)?"
         r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midday|midnight|"
         r"tonight|tonite|tomorrow|today|morning|afternoon|evening|"
         r"monday|tuesday|wednesday|thursday|friday|saturday|"
@@ -4218,6 +4220,7 @@ class AgentOrchestrator:
         r"|" + _REMINDER_POLITE +
         r"(?:did|do|does)\s+(?:anything|something)\s+"
         r"(?:happen|fire|go\s+off|ring)\s+(?:at|on|for)\s+"
+        r"(?:(?:this|that|next)\s+)?"
         r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midday|midnight|"
         r"tonight|tonite|tomorrow|today|morning|afternoon|evening|"
         r"monday|tuesday|wednesday|thursday|friday|saturday|"
@@ -4226,6 +4229,7 @@ class AgentOrchestrator:
         r"|" + _REMINDER_POLITE +
         r"(?:was|were)\s+i\s+supposed\s+to\s+.+?\s+"
         r"(?:at|on|for)\s+"
+        r"(?:(?:this|that|next)\s+)?"
         r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midday|midnight|"
         r"tonight|tonite|tomorrow|today|morning|afternoon|evening|"
         r"monday|tuesday|wednesday|thursday|friday|saturday|"

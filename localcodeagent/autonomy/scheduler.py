@@ -315,7 +315,7 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"a \1", t)
     # 'a week from now' — 'X from now' is just 'in X'.
     t = re.sub(
-        r"((?:a\s+couple(?:\s+of)?|a\s+few(?:\s+of)?|"
+        r"((?:a\s+couple(?:\s+of)?|a\s+few(?:\s+of)?|half\s+an?|"
         r"a|an|one|two|three|four|five|six|seven|eight|nine|"
         r"ten|couple|few|\d+(?:\.\d+)?)\s+(?:second|minute|hour|"
         r"day|week|month|year)s?)\s+from\s+now\b",
@@ -908,7 +908,7 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         r"a \1", t)
     # 'a week from now' — 'X from now' is just 'in X'.
     t = re.sub(
-        r"((?:a\s+couple(?:\s+of)?|a\s+few(?:\s+of)?|"
+        r"((?:a\s+couple(?:\s+of)?|a\s+few(?:\s+of)?|half\s+an?|"
         r"a|an|one|two|three|four|five|six|seven|eight|nine|"
         r"ten|couple|few|\d+(?:\.\d+)?)\s+(?:second|minute|hour|"
         r"day|week|month|year)s?)\s+from\s+now\b",

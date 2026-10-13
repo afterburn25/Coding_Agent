@@ -2352,6 +2352,24 @@ class TruthGateTests(RecoveryLoopTests):
             "what's on tonight", "what's on tonight", task.id)
         self.assertIsNotNone(r)
         self.assertIn("reminder", r.content.lower())
+        # 'this/next' lead-ins on the temporal scope — 'what's
+        # set for this evening', 'what do i have next friday'
+        # claim the same day-part inventory lane.
+        r = agent._reminder_reply(
+            "what's set for this evening",
+            "what's set for this evening", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("reminder", r.content.lower())
+        r = agent._reminder_reply(
+            "what do i have this evening",
+            "what do i have this evening", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("reminder", r.content.lower())
+        r = agent._reminder_reply(
+            "what's set for next friday",
+            "what's set for next friday", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("friday", r.content)
 
         # Provenance clauses — 'turn on the reminder i turned off'
         # selects from the disabled pool rather than treating
