@@ -4482,6 +4482,8 @@ class AgentOrchestrator:
         r"(?P<verb>cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
         r"un-?schedule|undo|axe?|ditch|forget|never\s*mind|"
+        r"(?:(?:i|we)(?:'?\s*ve)?\s+)?changed?\s+my\s+mind\s+"
+        r"(?:about|on|of)|"
         r"un-?remind(?:\s+me)?|take\s+down|take\s+off|strike)\s+"
         r"(?:(?:the|my|that|this|your|about|me|on|of|to)\s+)*"
         # File/object shapes stay with the action lanes —
@@ -4867,6 +4869,11 @@ class AgentOrchestrator:
         # numbers rows by fire order.
         r"(?:reminders?|alarms?|timers?|ones?)\s+"
         r"(?:number|no\.?|#)\s*\d+\b|"
+        # 'do the standup and the trash' — a bare 'do' over row
+        # names; the lane clarifies the op instead of letting the
+        # model narrate one.
+        r"do\s+(?:the|my|that|this|them|those|these)\s+"
+        r"[\w'\s-]{1,40}\s*[.!?]?\s*$|"
         # 'my next thing' — the vague next-ask; the lane reads
         # the soonest fire from rows.
         r"next\s+thing\b",
@@ -4893,7 +4900,7 @@ class AgentOrchestrator:
         # 'what's left today' / 'anything still on tonight' —
         # day-scoped remaining-schedule asks with no noun.
         r"\b(?:left|remaining|still\s+on|still\s+due|on|due)\s+"
-        r"(?:for\s+)?(?:today|tonight|tonite|tomorrow|"
+        r"(?:for\s+|of\s+)?(?:today|tonight|tonite|tomorrow|"
         r"this\s+(?:morning|afternoon|evening|week))\b|"
         # Noun-less countdown asks — 'how much longer', 'time
         # left', 'how long until the standup'. Bare 'how long'
@@ -5978,6 +5985,28 @@ class AgentOrchestrator:
             # 'change my alarm to 7' — a bare clock target.
             spec = self._reminder_spec(
                 "at " + _wtxt, time.time())
+        if spec is None:
+            # 'to when the tea is' / 'to the same time as the
+            # tea' — a relative target naming another row; that
+            # row's next fire IS the when.
+            _wrel = re.fullmatch(
+                r"(?:when(?:ever)?|the\s+same\s+time\s+as|"
+                r"same\s+time\s+as)\s+(?:the\s+|my\s+|that\s+|"
+                r"this\s+)?(.+?)\s+(?:is|fires?|goes\s+off|"
+                r"rings?|sounds?)\s*[.!?]?", _wtxt.strip(),
+                re.IGNORECASE)
+            if _wrel is not None:
+                _wterms = self._reminder_terms(_wrel.group(1))
+                _wrow = next(
+                    (s for s in rows
+                     if _wterms
+                     and _wterms <= self._reminder_hay(s)),
+                    None)
+                if _wrow is not None:
+                    _wfire = self._reminder_next_fire(
+                        _wrow, time.time())
+                    if _wfire:
+                        spec = {"kind": "once", "at": _wfire}
         if spec is None and not shift_txt:
             # 'push the tea back 5 more minutes' — the tail is a
             # direction shift the when-parsers can't read; 'more'
@@ -6490,7 +6519,7 @@ class AgentOrchestrator:
         if not terms - self._REMINDER_BARE_JUNK:
             return None
         verb = str(mc.groupdict().get("verb") or "").lower()
-        if verb.startswith(("forget", "never")):
+        if re.search(r"forget|never|chang", verb):
             _, rows = self._reminder_rows(include_disabled=True)
             if not any(terms <= self._reminder_hay(s) for s in rows):
                 return None
@@ -11069,6 +11098,30 @@ class AgentOrchestrator:
                 # Not a reminder op after all ('keep the couch') —
                 # fall through to the remaining dispatch rather
                 # than starving the create/generic lanes.
+        # 'do the standup and the trash' — 'do' is no scheduler
+        # verb; when the scope hits a real row ask WHICH op the
+        # user meant, otherwise leave it to the action lanes.
+        _mdo = re.match(
+            r"do\s+(?:the\s+|my\s+|that\s+|this\s+|them\s+|"
+            r"those\s+|these\s+)?(.+?)\s*[.!?]?\s*$",
+            plan_text, re.IGNORECASE)
+        if _mdo is not None:
+            _dfs, _drows = self._reminder_rows(
+                include_disabled=True)
+            if _dfs is not None:
+                _dt = self._reminder_terms(re.sub(
+                    r"\band\b", " ", _mdo.group(1)))
+                _dh = [s for s in _drows
+                       if _dt & self._reminder_hay(s)]
+                if _dh or re.search(
+                        r"\b(?:reminders?|alarms?|timers?)\b",
+                        plan_text, re.IGNORECASE):
+                    _dn = ("them" if len(_dh) != 1
+                           else f"“{self._reminder_label(_dh[0])}”")
+                    return self._reminder_finish(
+                        f"Do what with {_dn} — cancel, snooze, "
+                        "turn off, or something else?",
+                        user_text, task_id, event_callback)
         mr = self._REMINDER_RESCHEDULE_RE.match(plan_text)
         if mr is None:
             mr = self._REMINDER_RESCHEDULE_BARE_RE.match(plan_text)

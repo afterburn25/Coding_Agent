@@ -4114,6 +4114,46 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertNotIn("turn reminders back on",
                              r.content)
 
+            # 'what's left of today' — 'of' is a scope connector
+            # like 'for'; the ask inventories today's fires.
+            agent._local_action_reply(
+                "turn them all back on", task.id)
+            r = agent._local_action_reply(
+                "what's left of today", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("for today", r.content)
+            # 'move X to when Y is' — a relative-clock target;
+            # the named row's next fire IS the reschedule time.
+            tea_at = None
+            for s in sup.scheduler.rows:
+                if s["name"].endswith("tea"):
+                    tea_at = float(s.get("at") or 0)
+            r = agent._local_action_reply(
+                "move the tea to when the early is", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Rescheduled", r.content)
+            for s in sup.scheduler.rows:
+                if s["name"].endswith("tea"):
+                    self.assertNotEqual(float(s["at"]), tea_at)
+            # 'i changed my mind about X' — a dismissive cancel
+            # idiom that only claims on a real row hit.
+            r = agent._local_action_reply(
+                "i changed my mind about the tea", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            r = agent._local_action_reply(
+                "i changed my mind about the dentist", task.id)
+            self.assertIsNone(r)
+            # 'do the X and Y' — 'do' is no scheduler verb; when
+            # the scope hits rows ask which op, else defer.
+            r = agent._local_action_reply(
+                "do the early and the midnight", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Do what", r.content)
+            r = agent._local_action_reply(
+                "do the dishes", task.id)
+            self.assertIsNone(r)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
