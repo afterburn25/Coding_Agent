@@ -10446,6 +10446,24 @@ class AgentOrchestrator:
             r"morning|this\s+afternoon|this\s+evening|last\s+"
             r"night|last\s+week|earlier)\b",
             r"\1the \2 i made \3", plan_text, flags=re.IGNORECASE)
+        # 'the reminder that fires last' — the fire clause names
+        # the fire-order position; reorder onto 'the last
+        # reminder' the ordinal pick reads.
+        plan_text = re.sub(
+            r"\b(the|that|this)\s+([\w'\s-]{1,30}?)\s+"
+            r"(?:that|which)\s+(?:goes?\s+off|fires?|rings?|"
+            r"sounds?|triggers?|pops?\s+up)\s+"
+            r"(first|second|third|fourth|fifth|next|last|"
+            r"earliest|latest)\b", r"\1 \3 \2", plan_text,
+            flags=re.IGNORECASE)
+        # 'the alarm that goes off at 7' — the fire verb in the
+        # clause is referent machinery, not part of the name.
+        # Stripped before the fragment handlers so 'the one that
+        # fires at 7' resolves through the same clock referent.
+        plan_text = re.sub(
+            r"\b(?:that|which)\s+(?:goes?\s+off|fires?|rings?|"
+            r"triggers?|beeps?|sounds?|pops?\s+up)\s+",
+            " ", plan_text, flags=re.IGNORECASE)
         # 'the reminder i made this morning' — a bare created-
         # scope fragment; identify the row, never a blank stare.
         # 'which reminder did i delete' — the question form of
@@ -10556,8 +10574,16 @@ class AgentOrchestrator:
                             f"That's {len(_fl)} reminders: "
                             f"{_fnames} — say which.",
                             user_text, task_id, event_callback)
+                    _fv_past = _fverb
+                    if _fv_past.endswith("ing"):
+                        _fv_past = _fv_past[:-3] + (
+                            "" if _fv_past[:-3].endswith("e")
+                            else "ed")
+                    elif not _fv_past.endswith("ed"):
+                        _fv_past += ("d" if _fv_past.endswith("e")
+                                     else "ed")
                     return self._reminder_finish(
-                        f"No reminder was {_fverb} in my recent "
+                        f"No reminder was {_fv_past} in my recent "
                         "changes — the journal doesn't show one.",
                         user_text, task_id, event_callback)
                 _mord = re.search(

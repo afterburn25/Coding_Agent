@@ -4219,6 +4219,18 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("until when", r.content.lower())
 
+            # 'the X that fires <ord>/<clock>' — the clause is
+            # referent machinery; resolves the live row.
+            r = agent._local_action_reply(
+                "the reminder that fires last", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("last", r.content.lower())
+            self.assertIn("reminder", r.content.lower())
+            r = agent._local_action_reply(
+                "the one that fires at 7", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("reminder", r.content.lower())
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
