@@ -3973,6 +3973,61 @@ class TruthGateTests(RecoveryLoopTests):
                 "what time is it", "what time is it", task.id)
             self.assertIsNone(r)
 
+            # 'leave the alarm on' — a bare kind-noun scopes the
+            # pool to alarm rows (empty here → honest miss), but
+            # 'late timer' keeps 'timer' inside the row's own
+            # name rather than scoping to timer-kind rows.
+            r = agent._local_action_reply(
+                "leave the alarm on", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("No alarm", r.content)
+            r = agent._local_action_reply(
+                "leave the late timer alone", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("left alone", r.content)
+            self.assertIn("late", r.content)
+            # A bare mass snooze only shifts one-shots — the two
+            # recurring rows keep their cadence and the reply says
+            # so rather than claiming 'Snoozed 2'.
+            r = agent._local_action_reply(
+                "snooze all of them", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("kept cadence", r.content)
+            self.assertNotIn("Snoozed 2", r.content)
+            # A quantified mass delay DOES retime cadence clocks —
+            # the reply counts every shifted row and discloses how
+            # many were recurring retimes.
+            late_h = sup.scheduler.rows[-1]["hour"]
+            r = agent._local_action_reply(
+                "delay all reminders by 30 minutes", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Snoozed 2", r.content)
+            self.assertIn("recurring", r.content)
+            self.assertEqual(
+                sup.scheduler.rows[-1]["minute"], 30)
+            # 'the next reminder after X' answers from real fire
+            # order; 'the alarm that goes off at 7' resolves the
+            # row by its persisted clock.
+            r = agent._local_action_reply(
+                "the next reminder after the late", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("early", r.content)
+            r = agent._local_action_reply(
+                "the reminder that goes off at 20", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("late", r.content)
+            # 'bump X to 11' reschedules the persisted row; undo
+            # restores it.
+            r = agent._local_action_reply(
+                "bump the late to 11", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Rescheduled", r.content)
+            self.assertEqual(sup.scheduler.rows[-1]["hour"], 11)
+            r = agent._local_action_reply("undo that", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Undone", r.content)
+            self.assertEqual(sup.scheduler.rows[-1]["hour"], late_h)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

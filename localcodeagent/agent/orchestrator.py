@@ -4795,9 +4795,10 @@ class AgentOrchestrator:
         r"i\s+(?:just\s+|recently\s+|lately\s+)?"
         r"(?:made|set|created|added|scheduled|booked|asked\s+for|"
         r"gave\s+you|put)\b|"
-        # 'the one at 9'/'the 9am one' — a clock referent naming
-        # a row by its fire time.
-        r"(?:the|that|this)\s+one\s+(?:at|for|on)\s+"
+        # 'the one at 9'/'the alarm at 7'/'the 9am one' — clock
+        # referents naming a row by its fire time.
+        r"(?:the|that|this)\s+(?:one|reminders?|alarms?|timers?|"
+        r"things?)\s+(?:at|for|on)\s+"
         r"(?:\d|noon\b|midnight\b)|"
         r"(?:the|that|this)\s+\d[\d:]*\s*(?:am|pm)?\s+one\b|"
         # 'the standup can go' — a dismissive cancel idiom; the
@@ -4813,8 +4814,16 @@ class AgentOrchestrator:
         # 'the reminder before the pills' — a bare fire-order
         # fragment; the lane normalizes it onto the inventory
         # neighbor ask and answers from persisted rows.
-        r"(?:the|that|this)\s+(?:reminder|alarm|timer|one)\s+"
+        r"(?:the|that|this)\s+(?:next\s+)?"
+        r"(?:reminder|alarm|timer|one)\s+"
         r"(?:before|after)\s+[\w'-]|"
+        # 'the alarm that goes off at 7' — a fire-verb clause
+        # referent; the lane strips it to a clock referent.
+        r"(?:the|that|this)\s+[\w'\s-]{1,30}?\s+"
+        r"(?:that|which)\s+(?:goes?\s+off|fires?|rings?|"
+        r"triggers?|beeps?|sounds?|pops?\s+up)\b|"
+        # 'bump the tea to 11' — 'bump to <when>' retargets.
+        r"bump\s+(?:the|my|that|this)\s+[\w'\s-]{1,40}?\s+to\s+|"
         # 'make the standup weekly' — 'make' + cadence is a
         # reschedule, not a create; the lane rewords it.
         r"make\s+(?:the|my|that|this)\s+[\w'\s-]{1,40}?\s+"
@@ -5281,6 +5290,7 @@ class AgentOrchestrator:
                          str(ms.group("dur2"))).strip()
         when = None
         delta = None
+        _bare_snooze = False
         now = time.time()
         if dur:
             # 'this one 5 more minutes' — 'more' is the request's
@@ -5359,6 +5369,7 @@ class AgentOrchestrator:
                     user_text, task_id, event_callback)
         else:
             delta = 600.0  # bare 'snooze' — a default ten minutes.
+            _bare_snooze = True
         hits = [s for s in rows
                 if (not topic_terms
                     or topic_terms <= self._reminder_hay(s))
@@ -5449,7 +5460,7 @@ class AgentOrchestrator:
             # cadence clock too ('push everything back an hour'
             # moves the daily standup to +1h); an unquantified
             # snooze leaves it, named honestly.
-            moved, skipped = 0, 0
+            moved, skipped, retimed = 0, 0, 0
             try:
                 for s in hits:
                     way_all = str(
@@ -5463,7 +5474,10 @@ class AgentOrchestrator:
                     if (s.get("kind") in ("daily", "weekly",
                                           "monthly")
                             and s.get("hour") is not None):
-                        if when is not None:
+                        if when is not None or _bare_snooze:
+                            # A bare 'snooze all' can't retime a
+                            # cadence — same contract the single-
+                            # row lane states; say what kept.
                             skipped += 1
                             continue
                         # Retiming the cadence clock — the same
@@ -5475,7 +5489,7 @@ class AgentOrchestrator:
                         sched.update(str(s["id"]),
                                      hour=mins // 60,
                                      minute=mins % 60)
-                        moved += 1
+                        retimed += 1
                         continue
                     if s.get("kind") in ("daily", "weekly",
                                          "interval"):
@@ -5490,10 +5504,18 @@ class AgentOrchestrator:
                 text = f"I couldn't snooze the reminders ({exc})."
             else:
                 parts = []
-                if moved:
+                if moved + retimed:
+                    total = moved + retimed
                     parts.append(
-                        f"Snoozed {moved} reminder"
-                        f"{'s' if moved != 1 else ''}.")
+                        f"Snoozed {total} reminder"
+                        f"{'s' if total != 1 else ''}.")
+                if retimed:
+                    _rt = self._duration_text(abs(sign))
+                    parts.append(
+                        f"{retimed} recurring "
+                        f"{'was' if retimed == 1 else 'were'} "
+                        "retimed by "
+                        f"{_rt[3:] if _rt.startswith('in ') else _rt}.")
                 if skipped:
                     parts.append(
                         f"{skipped} recurring kept cadence — snooze "
@@ -10198,7 +10220,8 @@ class AgentOrchestrator:
         # row by its fire time; resolves through the same hay clock
         # terms as 'the 9am reminder'.
         _mone = re.match(
-            r"(?:the|that|this)\s+one\s+(?:at|for|on)\s+"
+            r"(?:the|that|this)\s+(?:one|reminder|alarm|timer|"
+            r"thing)\s+(?:at|for|on)\s+"
             r"(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)\b"
             r"\s*[.!?]?\s*$|"
             r"(?:the|that|this)\s+"
@@ -10215,8 +10238,9 @@ class AgentOrchestrator:
                        if _ot <= self._reminder_hay(s)]
                 if len(_oh) == 1:
                     return self._reminder_finish(
-                        f"That's “{self._reminder_label(_oh[0])}” "
-                        f"— fires {self._reminder_when_text(_oh[0], time.time())}.",
+                        f"That's the reminder "
+                        f"“{self._reminder_label(_oh[0])}” — fires "
+                        f"{self._reminder_when_text(_oh[0], time.time())}.",
                         user_text, task_id, event_callback)
                 if _oh:
                     _on = "; ".join(
@@ -10333,13 +10357,26 @@ class AgentOrchestrator:
             r"[\w'\s-]{0,20}|a\s+(?:daily|weekly|monthly|"
             r"hourly)\s+(?:reminder|alarm|timer|one))\b",
             r"change \1 to \2", plan_text, flags=re.IGNORECASE)
-        # 'the reminder before the pills' — a noun-less fire-order
-        # fragment; the inventory lane answers it from rows.
+        # 'the reminder before the pills' / 'the next one after
+        # the standup' — noun-less fire-order fragments; the
+        # inventory lane answers them from rows.
         plan_text = re.sub(
             r"^(\s*(?:please\s+)?)(?:the|that|this)\s+"
-            r"(?:reminder|alarm|timer|one)\s+"
+            r"(?:next\s+)?(?:reminder|alarm|timer|one)\s+"
             r"(before|after)\s+", r"\1which reminder fires \2 ",
             plan_text, flags=re.IGNORECASE)
+        # 'bump the tea to 11' — 'bump to <when>' is a plain
+        # retarget, not a relative shift.
+        plan_text = re.sub(
+            r"\bbump\s+((?:the|my|that|this)\s+[\w'\s-]{1,40}?)"
+            r"\s+to\s+", r"move \1 to ", plan_text,
+            flags=re.IGNORECASE)
+        # 'the alarm that goes off at 7' — the fire verb in the
+        # clause is referent machinery, not part of the name.
+        plan_text = re.sub(
+            r"\b(?:that|which)\s+(?:goes?\s+off|fires?|rings?|"
+            r"triggers?|beeps?|sounds?|pops?\s+up)\s+",
+            " ", plan_text, flags=re.IGNORECASE)
         # 'bring the tea forward an hour' — 'bring forward' is
         # the earlier-direction shift; 'up' is the lane's word
         # for it ('forward' reads as later there).
@@ -10666,15 +10703,30 @@ class AgentOrchestrator:
             r"as\s+they\s+are))?\s*[.!?]?\s*$",
             _keep_src, re.IGNORECASE)
         if mk is not None:
+            # 'leave X on/off' — the trailing state word is a
+            # qualifier, not a name term.
+            _kraw0 = str(mk.group("k_t") or "")
+            _kstate = re.search(r"\s+(?:on|off)\s*$",
+                                _kraw0, re.IGNORECASE)
+            if _kstate is not None:
+                _kraw0 = _kraw0[:_kstate.start()]
             # 'keep the standup where it is' — a no-op ask; claim
             # it and report the row's real state, never narrate.
+            # Only a bare kind-noun scopes the pool ('the alarm' →
+            # alarm rows); 'tea timer' keeps 'timer' inside the
+            # row's own name.
+            _knoun_m = re.fullmatch(
+                r"(?:the\s+|my\s+|that\s+|this\s+)?"
+                r"(alarms?|timers?|reminders?|schedules?)",
+                _kraw0.strip(), re.IGNORECASE)
+            _knoun = (_knoun_m.group(1).rstrip("s").lower()
+                      if _knoun_m else None)
             sched, _k_rows = self._reminder_rows(
-                include_disabled=True)
+                include_disabled=True, noun=_knoun)
             if sched is not None:
                 _kt = self._reminder_terms(re.sub(
                     r"\b(?:the|my|that|this|reminders?|alarms?|"
-                    r"timers?|is|it)\b", " ",
-                    str(mk.group("k_t") or ""),
+                    r"timers?|is|it)\b", " ", _kraw0,
                     flags=re.IGNORECASE))
                 _kraw = str(mk.group("k_t") or "").strip().lower()
                 _kpro = bool(re.fullmatch(
@@ -10731,6 +10783,12 @@ class AgentOrchestrator:
                 if re.search(
                         r"\b(?:reminders?|alarms?|timers?)\b",
                         plan_text, re.IGNORECASE):
+                    if not _kt:
+                        # 'leave the alarm on' over no alarm rows —
+                        # the noun names the empty pool.
+                        return self._reminder_finish(
+                            self._reminder_none_text(sched, _knoun),
+                            user_text, task_id, event_callback)
                     return self._reminder_finish(
                         "I don't see a reminder matching "
                         f"“{' '.join(sorted(_kt))}”.",
