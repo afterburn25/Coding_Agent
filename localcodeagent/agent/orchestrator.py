@@ -6257,6 +6257,14 @@ class AgentOrchestrator:
                            "interval_s"):
                     if _k not in _disp and hits[0].get(_k) is not None:
                         _disp[_k] = hits[0][_k]
+                if _disp["kind"] in ("daily", "weekly", "monthly"):
+                    # A row carrying an hour but no minute fires
+                    # at :00 — fill the display clock so the spec
+                    # text never reads a missing key.
+                    _disp.setdefault("hour", 9)
+                    _disp.setdefault("minute", 0)
+                    if _disp["kind"] == "weekly":
+                        _disp.setdefault("weekday", 0)
                 text = (f"Rescheduled “{label}” — "
                         + self._reminder_spec_text(_disp, label)
                         + (f" (merged {merged} duplicate"

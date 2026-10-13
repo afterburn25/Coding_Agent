@@ -4541,6 +4541,23 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("next", r.content.lower())
 
+            # A whole-day weekly shift moves the weekday — and a
+            # row carrying an hour but no minute still renders its
+            # clock instead of crashing on spec['minute'].
+            sup.scheduler.add(
+                "reminder: wk", "weekly", weekday=2, hour=8,
+                action={"kind": "notify", "detail": "wk"})
+            r = agent._local_action_reply(
+                "shift the wk back a day", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Rescheduled", r.content)
+            self.assertIn("Thursday", r.content)
+            self.assertIn("08:00", r.content)
+            r = agent._local_action_reply(
+                "cancel the wk reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
