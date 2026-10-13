@@ -4350,6 +4350,40 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("do what", r.content.lower())
 
+            # 'for <clock> to <task>' — the 'to' connector is a
+            # task marker, never part of the label text.
+            r = agent._local_action_reply(
+                "set a reminder for 6pm to call", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Reminder set", r.content)
+            self.assertIn("to call", r.content)
+            self.assertNotIn("to to call", r.content)
+            # 'i need reminding' — the gerund create form asks
+            # the same when-clarify 'remind me' does.
+            r = agent._local_action_reply(
+                "i need reminding to take pills", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("When should I remind you", r.content)
+            r = agent._local_action_reply(
+                "i need reminding about the meeting", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("When should I remind you", r.content)
+            # 'when do i need to X' — a fire-time ask on the
+            # task label; the copula rewrite answers from rows
+            # or names the real pool.
+            r = agent._local_action_reply(
+                "when do i need to leave", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("reminder", r.content.lower())
+            # 'blow away' — a dismissive mass cancel verb on the
+            # same grammar as 'wipe'/'nuke'.
+            n_before = len(sup.scheduler.rows)
+            r = agent._local_action_reply(
+                "blow away all reminders", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            self.assertLess(len(sup.scheduler.rows), n_before)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

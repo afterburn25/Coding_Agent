@@ -4467,7 +4467,8 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
-        r"wipe|purge|un-?schedule|undo|axe?|ditch|forget|"
+        r"wipe|purge|blow\s+away|un-?schedule|undo|axe?|ditch|"
+        r"forget|"
         r"never\s*mind|un-?remind(?:\s+me)?|take\s+down|"
         r"take\s+off|strike)"
         r"|(?:i\s+)?(?:don'?t|do\s+not|dont)\s+"
@@ -4496,6 +4497,7 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?P<verb>cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
+        r"blow\s+away|"
         r"un-?schedule|undo|axe?|ditch|forget|never\s*mind|"
         r"(?:(?:i|we)(?:'?\s*ve)?\s+)?changed?\s+my\s+mind\s+"
         r"(?:about|on|of)|"
@@ -4901,7 +4903,14 @@ class AgentOrchestrator:
         r"[\w'\s-]{1,40}\s*[.!?]?\s*$|"
         # 'my next thing' — the vague next-ask; the lane reads
         # the soonest fire from rows.
-        r"next\s+thing\b",
+        r"next\s+thing\b|"
+        # 'i need reminding about the meeting' — the gerund
+        # create ask; the lane rewords it onto 'remind me'.
+        r"i\s+need\s+remind(?:ing|ed)\b|"
+        # 'when do i need to leave' — a fire-time ask on the
+        # task label; the lane rewords it onto 'when is the X'.
+        r"when\s+(?:do|does)\s+i\s+(?:need|have|got)\s+to\s+"
+        r"[\w'-]",
         re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
@@ -5055,6 +5064,9 @@ class AgentOrchestrator:
         not part of the row's label."""
         task = re.sub(
             r"(?:,\s*|\s+)it'?s\s*$", "", str(task or "").strip(),
+            flags=re.IGNORECASE)
+        task = re.sub(
+            r"^(?:to|for)\s+(?=\S)", "", task,
             flags=re.IGNORECASE)
         return re.sub(
             r"\s+(?:again|once\s+more|a\s+second\s+time|"
@@ -10910,6 +10922,19 @@ class AgentOrchestrator:
             r"\bi\s+(?:want|need|wanna|would\s+like|'?d\s+like)"
             r"\s+to\s+be\s+reminded\b|\bto\s+be\s+reminded\b",
             "remind me", plan_text, flags=re.IGNORECASE)
+        # 'i need reminding about the meeting' — the gerund form
+        # of the create ask; the connector stays so 'remind me
+        # about X'/'remind me to X' parse the task as usual.
+        plan_text = re.sub(
+            r"\bi\s+need\s+remind(?:ing|ed)\b\s*",
+            "remind me ", plan_text, flags=re.IGNORECASE)
+        # 'when do i need to leave' / 'when do i have to wake
+        # up' — a fire-time ask on the task label; copula form
+        # reaches the when-ask machinery.
+        plan_text = re.sub(
+            r"^(\s*)when\s+(?:do|does)\s+i\s+"
+            r"(?:need|have|got)\s+to\s+(.+?)\s*[.!?]?\s*$",
+            r"\1when is the \2", plan_text, flags=re.IGNORECASE)
         # 'repeat the standup reminder' — noun-anchored re-arm ask;
         # normalize onto the create grammar so a real row or an
         # honest clarify comes back. 'repeat the command' declines.
@@ -11763,7 +11788,10 @@ class AgentOrchestrator:
                                     "in the " + _lwt))
                         if _lw_ok:
                             when_d = _lw.group("w").strip()
-                            task_d = _lw.group("t").strip(" ,;—-")
+                            task_d = re.sub(
+                                r"^(?:to|about|for|that)\s+(?=\S)",
+                                "", _lw.group("t").strip(" ,;—-"),
+                                flags=re.IGNORECASE)
                         else:
                             # 'for the dentist at 3' — split task/
                             # time at the last temporal boundary.
