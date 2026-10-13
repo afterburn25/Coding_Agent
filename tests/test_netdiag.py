@@ -3867,6 +3867,53 @@ class TruthGateTests(RecoveryLoopTests):
                 [r2["name"] for r2 in sup.scheduler.rows],
                 ["reminder: trash"])
 
+            # 'the two morning ones' / 'the 3 reminders' /
+            # 'both' — a named count is a target-set size: a
+            # matching pool acts, a mismatch names the real
+            # count instead of flipping the lot.
+            for s in list(sup.scheduler.rows):
+                sup.scheduler.remove(s["id"])
+            sup.scheduler.add(
+                "reminder: early", "daily", hour=7, minute=0,
+                action={"kind": "notify", "detail": "early"})
+            sup.scheduler.add(
+                "reminder: late", "daily", hour=21, minute=0,
+                action={"kind": "notify", "detail": "late"})
+            r = agent._local_action_reply(
+                "turn them both off", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("2", r.content)
+            self.assertFalse(
+                any(s["enabled"] for s in sup.scheduler.rows))
+            r = agent._local_action_reply(
+                "turn them all back on", task.id)
+            self.assertIsNotNone(r)
+            r = agent._local_action_reply(
+                "turn off the 3 reminders", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Which 3", r.content)
+            self.assertTrue(
+                all(s["enabled"] for s in sup.scheduler.rows))
+            r = agent._local_action_reply(
+                "cancel both", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled 2", r.content)
+            self.assertEqual(sup.scheduler.rows, [])
+            sup.scheduler.add(
+                "reminder: early", "daily", hour=7, minute=0,
+                action={"kind": "notify", "detail": "early"})
+            sup.scheduler.add(
+                "reminder: mid", "daily", hour=12, minute=0,
+                action={"kind": "notify", "detail": "mid"})
+            sup.scheduler.add(
+                "reminder: late", "daily", hour=21, minute=0,
+                action={"kind": "notify", "detail": "late"})
+            r = agent._local_action_reply(
+                "cancel both reminders", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Which two", r.content)
+            self.assertEqual(len(sup.scheduler.rows), 3)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

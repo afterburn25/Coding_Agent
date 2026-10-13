@@ -7177,6 +7177,26 @@ class AgentOrchestrator:
         # 'turn off everything but the tea timer' — 'everything'
         # is the mass scope; the except-clause did the narrowing.
         topic_terms -= {"everything", "all"}
+        # 'turn off the two morning ones' — the count is an
+        # explicit target-set size, not a name term; 'turn both
+        # reminders off' is the two-row form of it.
+        _cnt_m = re.match(
+            r"\s*(?:the\s+|my\s+)?"
+            r"(two|three|four|five|six|seven|eight|nine|"
+            r"ten|\d+)\s+(?!o['’]?clock)(?=[\w'-])",
+            body or "", re.IGNORECASE) or re.search(
+            r"\b(two|three|four|five|six|seven|eight|nine|"
+            r"ten|\d+)\s*$", body or "", re.IGNORECASE)
+        _cnt = None
+        if _cnt_m is not None:
+            _cw = _cnt_m.group(1).lower()
+            _cnt = ({"two": 2, "three": 3, "four": 4, "five": 5,
+                     "six": 6, "seven": 7, "eight": 8, "nine": 9,
+                     "ten": 10}.get(_cw)
+                    or (int(_cw) if _cw.isdigit() else None))
+            topic_terms.discard(_cw)
+        _both = bool(re.search(r"\bboth\b", body, re.IGNORECASE))
+        topic_terms.discard("both")
         # 'turn off reminders on saturdays' — the day is a fire
         # window, not a name term; 'on'/'saturdays' must not gate
         # the topic match for the rows it scopes. A day inside the
@@ -7398,6 +7418,18 @@ class AgentOrchestrator:
             text = (f"I don't see a reminder matching "
                     f"“{' '.join(sorted(topic_terms))}” — "
                     f"you have: {names}.")
+        elif ((_both and len(hits) != 2)
+                or (_cnt is not None and len(hits) != _cnt)):
+            # 'turn both reminders off' / 'the 3 reminders' — a
+            # named target-set size over a pool that doesn't
+            # match it names the real count instead of
+            # flipping more or fewer rows than asked.
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rows[:5])
+            text = (f"Which {_cnt or 'two'}? — you've got "
+                    f"{len(hits)} "
+                    f"reminder{'s' if len(hits) != 1 else ''}"
+                    + (f": {names}." if rows else " set."))
         elif not topic_terms and not hits:
             # Every noun-scoped row is already in the target state —
             # say that; 'no active reminders' claims a globally empty
@@ -7420,6 +7452,7 @@ class AgentOrchestrator:
                 # flip-back needs scheduling.
                 text += _nudge_suffix(til, want_on)
         elif (topic_terms and len(hits) > 1
+                and not (_cnt and len(hits) == _cnt)
                 and not self._reminder_identical(hits)):
             now = time.time()
             names = "; ".join(
@@ -7648,6 +7681,12 @@ class AgentOrchestrator:
             r"them|it|this|those|these|everything|one|ones|"
             r"anymore|any\s+more|any\s+longer|at\s+all)\b",
             " ", topic_src, flags=re.IGNORECASE)
+        # 'cancel both' — a pair selector, not a name term; the
+        # pool below must be exactly two or the reply asks which.
+        _both = bool(re.search(r"\bboth\b", topic_src,
+                               re.IGNORECASE))
+        topic_src = re.sub(r"\bboth\b", " ", topic_src,
+                           flags=re.IGNORECASE)
         topic_terms = self._reminder_terms(topic_src)
         skip_verb = bool(re.match(
             self._REMINDER_POLITE + r"skip\b", user_text,
@@ -7955,7 +7994,16 @@ class AgentOrchestrator:
                     float(f)) in day_dates)(
                     self._reminder_next_fire(s, now))]
             _day_scoped_miss = [s for s in _pre if s not in hits]
-        if _day_scoped_miss and not hits:
+        if _both and len(hits) != 2:
+            # 'cancel both' — a pair selector over a pool that
+            # isn't exactly two names the candidates instead of
+            # wiping the lot under a 'both' claim.
+            names = "; ".join(
+                f"“{self._reminder_label(s)}”" for s in rows[:5])
+            text = (f"Which two? — you've got {len(hits)} "
+                    f"reminder{'s' if len(hits) != 1 else ''}"
+                    + (f": {names}." if rows else " set."))
+        elif _day_scoped_miss and not hits:
             # 'cancel the dentist on thursday' — the row exists but
             # it doesn't fire in that window; name the real fire
             # time instead of pretending it matched.
@@ -8035,7 +8083,7 @@ class AgentOrchestrator:
             text = (f"I don't see a reminder matching "
                     f"“{' '.join(sorted(topic_terms)) or 'next'}” — "
                     f"you have: {names}.")
-        elif (len(hits) > 1 and not all_flag
+        elif (len(hits) > 1 and not all_flag and not _both
                 and and_hits is None
                 and not str(ord_sel or "").startswith(
                     ("minn:", "maxn:"))
@@ -10216,6 +10264,18 @@ class AgentOrchestrator:
             r"ones)\s+)?(?:fires?|goes?\s+off|rings?)\s+"
             r"(?:next|first|soonest)\b",
             "the next one", plan_text, flags=re.IGNORECASE)
+        # 'turn them both off' / 'cancel both' — 'both' is a
+        # pair selector; giving it a noun lets the toggle and
+        # cancel lanes resolve the pair honestly.
+        plan_text = re.sub(
+            r"\b(?:them|those|these)\s+both\b|"
+            r"\bboth\s+of\s+(?:them|those|these)\b",
+            "both reminders", plan_text, flags=re.IGNORECASE)
+        plan_text = re.sub(
+            r"\b((?:turn|switch|cancel|delete|remove|pause|mute|"
+            r"stop|disable|enable|kill)\s+)both\b"
+            r"(?!\s+(?:reminders?|alarms?|timers?))",
+            r"\1both reminders", plan_text, flags=re.IGNORECASE)
         if re.search(
                 r"\band\s+(?:cancel|delete|remove|snooze|pause|"
                 r"reschedule|disable|mute|silence|block|clear|"
