@@ -4933,7 +4933,12 @@ class AgentOrchestrator:
         # asks; the lane rewords them onto the day inventory.
         r"(?:am|are)\s+i\s+(?:free|clear)\b|"
         r"(?:is|are)\s+my\s+(?:day|schedule|calendar)\s+"
-        r"(?:free|clear|empty|open|busy)\b",
+        r"(?:free|clear|empty|open|busy)\b|"
+        # 'what's snoozed' / 'what's been snoozed' — a snoozed-
+        # state inventory ask; the lane reads it off the journal.
+        r"what'?s\s+(?:been\s+|getting\s+)?snooz\w*\b|"
+        r"what\s+(?:did|have)\s+i\s+snooz\w*\b|"
+        r"(?:anything|something|any)\s+snooz\w*\b",
         re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
@@ -10217,6 +10222,25 @@ class AgentOrchestrator:
                            else f" for {day_label}"
                            if day_dates else "")
                         + f": {bits}.")
+        elif re.search(r"\bsnooz\w*\b", plan_text, re.IGNORECASE):
+            # 'which reminders are snoozed' — snooze isn't a
+            # stored state; it moves the fire time. The journal's
+            # recent 'at' updates are the only honest answer.
+            _sj = getattr(self, "_sched_undo", None) or []
+            _sn = []
+            for ent in _sj:
+                if (ent[0] == "update"
+                        and "at" in (ent[2] or {})
+                        and ent[3] not in _sn):
+                    _sn.append(ent[3])
+            if _sn:
+                text = ("Recently snoozed: "
+                        + "; ".join(f"“{n}”" for n in _sn[:4])
+                        + ".")
+            else:
+                text = ("Nothing's snoozed right now — snoozing "
+                        "moves the fire time rather than holding "
+                        "a state; nothing recent shows it.")
         elif not rows:
             # All-disabled pool — 'what reminders do i have' over
             # one off row isn't 'no reminders set'.
@@ -11084,6 +11108,24 @@ class AgentOrchestrator:
             r"^(\s*(?:please\s+)?)(?:the|that|this)\s+"
             r"(next|first|last|earliest|latest)\s+ones?\b"
             r"(\s*[.!?]?\s*)$", r"\1the \2 reminder\3",
+            plan_text, flags=re.IGNORECASE)
+        # 'what's snoozed' / 'what's been snoozed' / 'anything
+        # snoozed' — noun-less snoozed-state asks; name the noun
+        # so the inventory claim and scope read them.
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)what'?s\s+"
+            r"(?:been\s+|getting\s+)?snooz\w*\b(\s*[.!?]?\s*)$",
+            r"\1which reminders are snoozed\2",
+            plan_text, flags=re.IGNORECASE)
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)what\s+(?:did|have)\s+i\s+"
+            r"snooz\w*\b(\s*[.!?]?\s*)$",
+            r"\1which reminders are snoozed\2",
+            plan_text, flags=re.IGNORECASE)
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)(?:anything|something)\s+"
+            r"snooz\w*\b(\s*[.!?]?\s*)$",
+            r"\1which reminders are snoozed\2",
             plan_text, flags=re.IGNORECASE)
         # 'the second to last one' / 'the third to last alarm' —
         # an ordinal pick counted back from the last fire; map it

@@ -3641,6 +3641,29 @@ class TruthGateTests(RecoveryLoopTests):
             lt = time.localtime(wrow["at"])
             self.assertEqual((lt.tm_hour, lt.tm_min), (7, 30))
 
+            # 'at 6.15pm' / bare '7.30pm' — a glued meridian still
+            # reads the decimal clock separator as a colon.
+            r = agent._local_action_reply(
+                "remind me at 6.15pm to stretch", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Reminder set", r.content)
+            srow = sup.scheduler.rows[-1]
+            lt = time.localtime(srow["at"])
+            self.assertEqual((lt.tm_hour, lt.tm_min), (18, 15))
+            r = agent._local_action_reply(
+                "remind me 7.30pm about the call", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Reminder set", r.content)
+            crow = sup.scheduler.rows[-1]
+            lt = time.localtime(crow["at"])
+            self.assertEqual((lt.tm_hour, lt.tm_min), (19, 30))
+            # Clear the pair — later pins count the pool.
+            for nm in ("stretch", "call"):
+                r = agent._local_action_reply(
+                    f"cancel the {nm} reminder", task.id)
+                self.assertIsNotNone(r)
+                self.assertIn("Cancelled", r.content)
+
             # 'a couple X from now' — the informal quantity reads
             # as 'in a couple X'; a real row lands ~2h out.
             r = agent._local_action_reply(
@@ -4463,6 +4486,30 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("Cancelled", r.content)
             r = agent._local_action_reply("undo that", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("clock out", r.content)
+
+            # 'what's snoozed' — a snoozed-state ask answers from
+            # the journal, not the enabled flag; an empty journal
+            # says nothing's snoozed rather than listing off rows.
+            r = agent._local_action_reply(
+                "what's snoozed", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Nothing's snoozed", r.content)
+            r = agent._local_action_reply(
+                "snooze the clock out for an hour", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Snoozed", r.content)
+            r = agent._local_action_reply(
+                "what's snoozed", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("clock out", r.content)
+            r = agent._local_action_reply(
+                "what's been snoozed", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("clock out", r.content)
+            r = agent._local_action_reply(
+                "which reminders are snoozed", task.id)
             self.assertIsNotNone(r)
             self.assertIn("clock out", r.content)
 
