@@ -4184,6 +4184,41 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("nap", r.content)
 
+            # 'the one before last' / 'the second to last one' —
+            # ordinal picks counted back from the latest fire,
+            # answered from persisted rows.
+            r = agent._local_action_reply(
+                "the one before last", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("second to last", r.content.lower())
+            r = agent._local_action_reply(
+                "the second to last one", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("second to last", r.content.lower())
+            # 'which reminder did i delete' — journal provenance,
+            # not created_at: names the cancelled row.
+            agent._local_action_reply("cancel the nap", task.id)
+            r = agent._local_action_reply(
+                "which reminder did i delete", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("nap", r.content)
+            # 'delay X until Y fires' — the bound is another
+            # row's next fire, resolved from persisted state.
+            sup.scheduler.add(
+                "reminder: errand", "once", at=time.time() + 600,
+                action={"kind": "notify", "detail": "errand"})
+            r = agent._local_action_reply(
+                "delay the errand until the early fires", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("snoozed", r.content.lower())
+            self.assertIn("errand", r.content)
+            # A fire clause naming no row clarifies, never fakes.
+            r = agent._local_action_reply(
+                "delay the errand until the dentist rings",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("until when", r.content.lower())
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

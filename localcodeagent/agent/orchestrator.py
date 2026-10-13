@@ -4836,6 +4836,11 @@ class AgentOrchestrator:
         r"(?:the|that|this)\s+(?:next\s+)?"
         r"(?:reminder|alarm|timer|one)\s+"
         r"(?:before|after)\s+[\w'-]|"
+        # 'the second to last one' — an ordinal counted back
+        # from the last fire.
+        r"(?:the|that|this)\s+(?:(?:reminders?|alarms?|timers?|"
+        r"ones?|things?)\s+)?(?:first|second|third|fourth|"
+        r"fifth|sixth|next)\s+to\s+(?:the\s+)?last\b|"
         # 'the alarm that goes off at 7' — a fire-verb clause
         # referent; the lane strips it to a clock referent.
         r"(?:the|that|this)\s+[\w'\s-]{1,30}?\s+"
@@ -5298,6 +5303,7 @@ class AgentOrchestrator:
             head_raw = dur[:dsm.start()].strip(" ,;—-")
             head_d = _ex_tail(head_raw)
             tail_d = dsm.group(1).strip(" ,;—-")
+            _tail_rel = self._reminder_fire_tail(tail_d)
             if head_raw and (
                     re.fullmatch(
                         r"(?:in|by\s+)?(?:\d+(?:\.\d+)?|a|an|one|"
@@ -5308,7 +5314,12 @@ class AgentOrchestrator:
                     or self._reminder_at_when(
                         tail_d, time.time())
                     or self._reminder_at_when(
-                        f"in {tail_d}", time.time())):
+                        f"in {tail_d}", time.time())
+                    # 'until the trash goes off' — the tail is a
+                    # fire clause on a live row, not clock text.
+                    or (_tail_rel and any(
+                        _tail_rel <= self._reminder_hay(s)
+                        for s in rows))):
                 topic_terms |= self._reminder_terms(re.sub(
                     r"\b(?:the|my|that|all|every|each|any|of|to|"
                     r"for|about|one|ones|this|these|those|them|"
@@ -5392,6 +5403,18 @@ class AgentOrchestrator:
                     rel = self._reminder_at_when(f"in {dur}", now)
                     if rel is not None:
                         delta = rel - now
+                if when is None:
+                    # 'until the trash goes off' — the bound is
+                    # another row's next fire, not clock text.
+                    _uterms = self._reminder_fire_tail(dur)
+                    if _uterms:
+                        _urow = next(
+                            (s for s in rows
+                             if _uterms <= self._reminder_hay(s)),
+                            None)
+                        if _urow is not None:
+                            when = self._reminder_next_fire(
+                                _urow, now)
             if when is None and delta is None:
                 if (str(ms.groupdict().get("noun6") or "").lower()
                         in ("it", "that", "this", "them")
@@ -6430,9 +6453,19 @@ class AgentOrchestrator:
             return rest, "cmax"
         if sel & {"oldest"}:
             return rest, "cmin"
+        pos = sel & set(self._ORDINAL_POS)
+        if pos and sel & {"last", "latest"}:
+            # 'the second to last one' — a positional counted
+            # back from the latest fire, not 'last' itself.
+            rest -= {"to", "of", "the"}
+            return rest, f"maxidx:{self._ORDINAL_POS[sorted(pos)[0]]}"
+        if "before" in terms and sel & {"last", "latest"}:
+            # 'the one before last' — the same pick as 'the
+            # second to last one'.
+            rest -= {"before", "the"}
+            return rest, "maxidx:1"
         if sel & {"last", "latest"}:
             return rest, "max"
-        pos = sel & set(self._ORDINAL_POS)
         if pos:
             return rest, f"idx:{self._ORDINAL_POS[sorted(pos)[0]]}"
         return rest, "min"
@@ -6473,6 +6506,18 @@ class AgentOrchestrator:
                     return -1e18 if latest else 1e18
             return sorted(hits, key=_fire_k,
                           reverse=latest)[:n]
+        if str(sel).startswith("maxidx:"):
+            # 'the second to last one' — the Nth counting back
+            # from the latest fire (maxidx:0 is last itself).
+            n = int(str(sel)[7:])
+            def _fire_b(s):
+                try:
+                    return float(
+                        self._reminder_next_fire(s, now) or -1e18)
+                except (TypeError, ValueError):
+                    return -1e18
+            ordered = sorted(hits, key=_fire_b, reverse=True)
+            return [ordered[n]] if n < len(ordered) else []
         if str(sel).startswith("idx:"):
             n = int(str(sel)[4:])
             def _fire_i(s):
@@ -6904,6 +6949,24 @@ class AgentOrchestrator:
             # is a tense adverb ('which reminders have already
             # fired'), never a label.
             if w and w not in ("from", "already", "just", "yet")}
+
+    @classmethod
+    def _reminder_fire_tail(cls, text: str) -> set | None:
+        """'<row> goes off/fires/rings' — a time bound that names
+        another row's fire instead of a clock ('delay the tea
+        until the trash goes off'). Returns the referent's scope
+        terms, None when the text isn't that shape."""
+        m = re.fullmatch(
+            r"(?:until|till|til|by|up\s+to|before)?\s*"
+            r"(?:the\s+|my\s+|that\s+|this\s+)?(.+?)\s+"
+            r"(?:goes?\s+off|fires?|rings?|sounds?|hits?|"
+            r"triggers?|runs?|is\s+due)\s*[.!?]?",
+            str(text or ""), re.IGNORECASE)
+        if m is None:
+            return None
+        return cls._reminder_terms(m.group(1)) - {
+            "one", "ones", "reminder", "reminders", "alarm",
+            "alarms", "timer", "timers", "thing", "things"}
 
     @staticmethod
     def _reminder_next_fire(s: dict, now: float) -> float | None:
@@ -9193,6 +9256,19 @@ class AgentOrchestrator:
             r"monday|tuesday|wednesday|thursday|friday|saturday|"
             r"sunday|few|couple|one|time|thing|night|night))",
             plan_text, re.IGNORECASE))
+        # 'the one before last' / 'the second to last one' —
+        # a pick N back from the latest fire, not 'last' itself.
+        # ('N to last' is normalized to 'last but N-word' upstream
+        # so both spellings land here.)
+        _cd_back_m = re.search(
+            r"\bbefore\s+(?:the\s+)?last\b|"
+            r"\blast\s+but\s+(one|two|three|four|five)\b",
+            plan_text, re.IGNORECASE)
+        _cd_back = None
+        if _cd_back_m is not None:
+            _cd_back = {"one": 1, "two": 2, "three": 3,
+                        "four": 4, "five": 5}.get(
+                (_cd_back_m.group(1) or "one").lower(), 1)
         if (((re.search(
                 r"\b(?:next|first|earliest|last|latest)\b"
                 r"(?!\s+(?:week|weeks|month|months|"
@@ -9212,12 +9288,29 @@ class AgentOrchestrator:
             # the standup') counts down to THAT row; a scoped miss
             # falls through to the honest no-reminder reply below.
             _sentinel = -1e18 if _cd_latest else 1e18
-            soonest = (max if _cd_latest else min)(
-                _cd_pool, key=lambda s: float(
-                    self._reminder_next_fire(s, now) or _sentinel))
+            if _cd_back is not None:
+                _ranked = sorted(
+                    _cd_pool, key=lambda s: float(
+                        self._reminder_next_fire(s, now) or -1e18),
+                    reverse=True)
+                if len(_ranked) <= _cd_back:
+                    text = (f"You've only got {len(_cd_pool)} "
+                            f"reminder{'s' if len(_cd_pool) != 1 else ''} "
+                            f"— nothing that far back.")
+                    return self._reminder_finish(
+                        user_text, text, False, sched=sched)
+                soonest = _ranked[_cd_back]
+            else:
+                soonest = (max if _cd_latest else min)(
+                    _cd_pool, key=lambda s: float(
+                        self._reminder_next_fire(s, now) or _sentinel))
             fire = float(self._reminder_next_fire(soonest, now)
                          or 0)
-            _ord_word = ("Your last reminder is"
+            _back_word = {1: "second", 2: "third", 3: "fourth",
+                          4: "fifth", 5: "sixth"}.get(_cd_back, "second")
+            _ord_word = (f"Your {_back_word} to last reminder is"
+                         if _cd_back is not None else
+                         "Your last reminder is"
                          if _cd_latest else "Your next reminder is")
             if countdown_ask:
                 # 'how long until my next reminder' — answer the
@@ -10355,6 +10448,35 @@ class AgentOrchestrator:
             r"\1the \2 i made \3", plan_text, flags=re.IGNORECASE)
         # 'the reminder i made this morning' — a bare created-
         # scope fragment; identify the row, never a blank stare.
+        # 'which reminder did i delete' — the question form of
+        # the provenance fragment; rewords onto 'the X i <verb>ed'
+        # so the journal answers it through _mfrag below.
+        _qprov = re.match(
+            r"(?:which|what)\s+(one|ones|reminders?|alarms?|"
+            r"timers?|things?)\s+did\s+i\s+(?:just\s+|"
+            r"recently\s+|lately\s+)?"
+            # Mutation verbs only — 'which reminder did i set
+            # today' is a created-scope ask, not a journal op.
+            r"(delete|cancel|snooze|rename|move|disable|enable|"
+            r"mute|pause|bump|reschedule|shift|push|copy|turn|"
+            r"remove)s?\b(.*)$",
+            plan_text, re.IGNORECASE)
+        if _qprov is not None:
+            _qpast = {
+                "delete": "deleted", "cancel": "cancelled",
+                "snooze": "snoozed", "rename": "renamed",
+                "move": "moved", "disable": "disabled",
+                "enable": "enabled", "mute": "muted",
+                "pause": "paused", "bump": "bumped",
+                "reschedule": "rescheduled", "shift": "shifted",
+                "push": "pushed", "copy": "copied",
+                "turn": "turned", "make": "made", "set": "set",
+                "add": "added", "create": "created",
+                "schedule": "scheduled", "book": "booked",
+                "remove": "removed",
+            }[_qprov.group(2).lower()]
+            plan_text = (f"the {_qprov.group(1)} i {_qpast}"
+                         f"{_qprov.group(3)}")
         _mfrag = re.match(
             r"(?:the|that)\s+((?:[\w'-]+\s+){0,3})"
             r"(?:one|reminders?|alarms?|timers?|things?)\s+"
@@ -10611,6 +10733,14 @@ class AgentOrchestrator:
         plan_text = re.sub(
             r"\b(remind|alert|notify|ping|wake)\s+me\s+again\b",
             r"\1 me", plan_text, flags=re.IGNORECASE)
+        # 'in about an hour' — 'about' hedges the duration; it is
+        # not a task connector and must not split the when-slot.
+        plan_text = re.sub(
+            r"\b(in|for|after|within)\s+(?:about|around|roughly|"
+            r"approximately|approx|some|like)\s+"
+            r"(?=(?:a|an|one|two|three|four|five|six|seven|"
+            r"eight|nine|ten|few|couple|half|\d))",
+            r"\1 ", plan_text, flags=re.IGNORECASE)
         # 'i want to be reminded to call mom at 5pm' — the
         # passive lead is the create ask; the same normalization
         # the shaped-check runs, applied to plan_text itself.
@@ -10675,6 +10805,21 @@ class AgentOrchestrator:
             r"[\w'\s-]{0,20}|a\s+(?:daily|weekly|monthly|"
             r"hourly)\s+(?:reminder|alarm|timer|one))\b",
             r"change \1 to \2", plan_text, flags=re.IGNORECASE)
+        # 'the second to last one' / 'the third to last alarm' —
+        # an ordinal pick counted back from the last fire; map it
+        # onto the 'last but N' wording the inventory pick reads.
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)(?:the|that|this)\s+"
+            r"(?:(?:reminders?|alarms?|timers?|ones?|things?)\s+)?"
+            r"(second|third|fourth|fifth|sixth)\s+to\s+"
+            r"(?:the\s+)?last(?:\s+(?:one|ones|reminders?|"
+            r"alarms?|timers?|things?))?\s*[.!?]?\s*$",
+            lambda m: (m.group(1) + "which reminder fires last "
+                       "but " + {
+                           "second": "one", "third": "two",
+                           "fourth": "three", "fifth": "four",
+                           "sixth": "five"}[m.group(2).lower()]),
+            plan_text, flags=re.IGNORECASE)
         # 'the reminder before the pills' / 'the next one after
         # the standup' — noun-less fire-order fragments; the
         # inventory lane answers them from rows.
