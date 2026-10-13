@@ -4442,6 +4442,30 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("reminder", r.content.lower())
 
+            # Past-fire variants — 'go yet' and the 'was X
+            # supposed to go off' obligation form read the row's
+            # real fire state; an unknown row misses honestly.
+            r = agent._local_action_reply(
+                "did the trash reminder go yet", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("trash", r.content)
+            r = agent._local_action_reply(
+                "was the tea supposed to go off", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("tea", r.content)
+            r = agent._local_action_reply(
+                "was the meeting supposed to happen", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("No reminder about", r.content)
+            # 'quit' is a cancel verb on a real row.
+            r = agent._local_action_reply(
+                "quit the clock out reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            r = agent._local_action_reply("undo that", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("clock out", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

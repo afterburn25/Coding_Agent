@@ -3986,8 +3986,8 @@ class AgentOrchestrator:
         r"did\s+(?:(?:the|my|that|this|any)\s+)?[\w'\s-]{0,30}?"
         r"(?:reminders?|alarms?|timers?)\s+"
         r"(?:already|just|yet|still|really|actually)?\s*"
-        r"(?:(?:go|went)\s+off|fire|fires|fired|ring|rang|happen|"
-        r"trigger|pop\s+up)\b(?:\s+.+?)?"
+        r"(?:(?:go|went)\s+off|go\s+yet|fire|fires|fired|ring|"
+        r"rang|happen|trigger|pop\s+up)\b(?:\s+.+?)?"
         + _REMINDER_TRAIL +
         r"|" + _REMINDER_POLITE +
         r"did\s+(?:(?:the|my|that|this|any)\s+)?[\w'\s-]{0,30}?\s+"
@@ -4229,14 +4229,22 @@ class AgentOrchestrator:
         r"sunday)\b"
         + _REMINDER_TRAIL +
         r"|" + _REMINDER_POLITE +
-        r"(?:was|were)\s+i\s+supposed\s+to\s+.+?\s+"
+        r"(?:(?:what\s+)?was|were)\s+i\s+supposed\s+to\s+.+?\s+"
         r"(?:at|on|for)\s+"
         r"(?:(?:this|that|next)\s+)?"
         r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midday|midnight|"
         r"tonight|tonite|tomorrow|today|morning|afternoon|evening|"
         r"monday|tuesday|wednesday|thursday|friday|saturday|"
         r"sunday)\b"
-        + _REMINDER_TRAIL,
+        + _REMINDER_TRAIL +
+        # 'was the tea supposed to go off' — a scheduled-fire ask
+        # on a named row; next_fire/last_run answers it the same
+        # as 'did the tea go off'.
+        r"|" + _REMINDER_POLITE +
+        r"(?:was|were|is|are)\s+(?:(?:the|my|that|this)\s+)?"
+        r"[\w'\s-]{1,40}?\s+supposed\s+to\s+"
+        r"(?:go\s+off|fire|ring|happen|trigger|sound)\b"
+        r"(?:\s+.+?)?" + _REMINDER_TRAIL,
         re.IGNORECASE)
     # State asks — 'are my reminders on', 'is the alarm paused',
     # 'is my pay rent reminder on'. The model claimed 'I don't have
@@ -4469,8 +4477,8 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:(?:cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
-        r"wipe|purge|blow\s+away|un-?schedule|undo|axe?|ditch|"
-        r"forget|"
+        r"wipe|purge|blow\s+away|quit|un-?schedule|undo|axe?|"
+        r"ditch|forget|"
         r"never\s*mind|un-?remind(?:\s+me)?|take\s+down|"
         r"take\s+off|strike)"
         r"|(?:i\s+)?(?:don'?t|do\s+not|dont)\s+"
@@ -4499,7 +4507,7 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?P<verb>cancel|delete|remove|drop|clear|kill|dismiss|end|"
         r"skip|scratch|get\s+rid\s+of|trash|toss|dump|bin|nuke|"
-        r"blow\s+away|"
+        r"blow\s+away|quit|"
         r"un-?schedule|undo|axe?|ditch|forget|never\s*mind|"
         r"(?:(?:i|we)(?:'?\s*ve)?\s+)?changed?\s+my\s+mind\s+"
         r"(?:about|on|of)|"
@@ -9197,9 +9205,14 @@ class AgentOrchestrator:
             # Noun-less fired asks — 'did the standup already go
             # off', 'has the standup fired'; INV_LEAD claims them,
             # this flag picks the last_run answer over the listing.
-            r"\bdid\b.{0,40}\b(?:(?:go|went)\s+off|fire|fires|"
-            r"fired|ring|rang)\b|\b(?:has|have)\b.{0,40}\b"
-            r"(?:fired|gone\s+off|rang|rung)\b|"
+            r"\bdid\b.{0,40}\b(?:(?:go|went)\s+off|go\s+yet|"
+            r"fire|fires|fired|ring|rang)\b|\b(?:has|have)\b"
+            r".{0,40}\b(?:fired|gone\s+off|rang|rung)\b|"
+            # 'was the tea supposed to go off' — a scheduled
+            # fire ask in obligation form; last_run/next_fire
+            # answers it the same.
+            r"\b(?:was|were|is|are)\b.{0,40}\bsupposed\s+to\s+"
+            r"(?:go\s+off|fire|ring|happen|trigger|sound)\b|"
             r"\bdid\s+(?:anything|something)\s+"
             r"(?:happen|fire|go\s+off|ring)\b|"
             r"\bdid\b.{0,20}\bmiss(?:ed)?\b.{0,25}\b\d{1,2}"
@@ -9325,16 +9338,26 @@ class AgentOrchestrator:
                     r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
             if cm is None and fired_ask:
                 # 'did THE STANDUP already go off', 'has THE
-                # STANDUP fired' — the name sits between the aux
-                # and the fire verb.
+                # STANDUP fired', 'did the trash reminder go
+                # yet' — the name sits between the aux and the
+                # fire verb.
                 cm = re.search(
                     r"\b(?:did|has|have)\s+(?:the\s+|my\s+|your\s+|"
                     r"that\s+|this\s+|any\s+)?"
                     r"([a-z0-9][a-z0-9'\s-]{0,40}?)\s+"
                     r"(?:(?:already|just|yet|still|really|"
                     r"actually)\s+)?"
-                    r"(?:(?:go|went)\s+off|fire|fires|fired|"
-                    r"ring|rang|rung|gone\s+off)\b",
+                    r"(?:(?:go|went)\s+off|go\s+yet|fire|fires|"
+                    r"fired|ring|rang|rung|gone\s+off)\b",
+                    plan_text, re.IGNORECASE)
+            if cm is None and fired_ask:
+                # 'was THE TEA supposed to go off' — the name
+                # leads 'supposed'.
+                cm = re.search(
+                    r"\b(?:was|were|is|are)\s+(?:the\s+|my\s+|"
+                    r"your\s+|that\s+|this\s+)?"
+                    r"([a-z0-9][a-z0-9'\s-]{0,40}?)\s+"
+                    r"supposed\s+to\b",
                     plan_text, re.IGNORECASE)
             if cm is None and _rel_ask:
                 # 'what comes after THE STANDUP' — the anchor sits
