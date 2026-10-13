@@ -4693,6 +4693,27 @@ class TruthGateTests(RecoveryLoopTests):
             agent._local_action_reply(
                 "cancel the pay dues reminder", task.id)
 
+            # 'at noon-ish' — the -ish hedge isn't a different
+            # clock.
+            r = agent._local_action_reply(
+                "remind me at noon-ish to eat", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("eat", r.content)
+            self.assertNotIn("couldn't pin", r.content)
+            # 'the reminder i was talking about' — a vague
+            # referent the journal binds to the last mutated row,
+            # never a banked fact.
+            r = agent._local_action_reply(
+                "snooze the eat 15 minutes", task.id)
+            self.assertIsNotNone(r)
+            r = agent._local_action_reply(
+                "the reminder i was just talking about", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("eat", r.content)
+            self.assertNotIn("Got it", r.content)
+            agent._local_action_reply(
+                "cancel the eat reminder", task.id)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

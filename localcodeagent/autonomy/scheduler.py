@@ -190,6 +190,11 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     t = " ".join(str(when or "").lower().split())
     if not t:
         return None
+    # 'at 7ish' / 'noon-ish' — the colloquial -ish suffix on a
+    # clock token is hedging; strip before the noon/midnight
+    # rewrites read the word inside it.
+    t = re.sub(r"\b(\d{1,2}(?::\d{2})?|noon|midnight)\s*-?\s*ish\b",
+               r"\1", t)
     t = re.sub(r"\bat\s+noon\b", "at 12:00 pm", t)
     t = re.sub(r"\bat\s+midnight\b", "at 12:00 am", t)
     # 'at 6 in the morning' — the daypart phrase is the meridiem.
@@ -219,8 +224,6 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"\b(?:roughly|basically|maybe|probably|kinda|sorta|just|"
         r"like)\s+(?=(?:at|on|in|every|next)\s|tomorrow|tonight|"
         r"noon|midnight)", "", t)
-    # 'at 7ish' — the colloquial -ish suffix on a digit clock.
-    t = re.sub(r"\b(\d{1,2})\s*ish\b", r"\1", t)
     # 'at 8 and a half' — 'and a half' is the :30. Inside an
     # 'in <dur>' it's a compound duration, not a clock.
     if not re.match(r"in\b", t):
@@ -798,6 +801,8 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     t = " ".join(str(when or "").lower().split())
     if not t:
         return None
+    t = re.sub(r"\b(\d{1,2}(?::\d{2})?|noon|midnight)\s*-?\s*ish\b",
+               r"\1", t)
     t = re.sub(r"\bat\s+noon\b", "at 12:00 pm", t)
     t = re.sub(r"\bat\s+midnight\b", "at 12:00 am", t)
     # 'at 6 in the morning' — daypart phrase is the meridiem.
@@ -822,8 +827,6 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
         r"\b(?:roughly|basically|maybe|probably|kinda|sorta|just|"
         r"like)\s+(?=(?:at|on|in|every|next)\s|tomorrow|tonight|"
         r"noon|midnight)", "", t)
-    # 'at 7ish' — the colloquial -ish suffix on a digit clock.
-    t = re.sub(r"\b(\d{1,2})\s*ish\b", r"\1", t)
     # 'at 8 and a half' — 'and a half' is the :30. Inside an
     # 'in <dur>' it's a compound duration, not a clock.
     if not re.match(r"in\b", t):

@@ -4909,8 +4909,15 @@ class AgentOrchestrator:
         r"i\s+(?:just\s+|recently\s+|lately\s+|keep\s+|"
         r"kept\s+)?"
         r"(?:renam\w*|snooz\w*|cancell?\w*|delet\w*|remov\w*|"
-        r"mov\w*|disabl\w*|enabl\w*|mut\w*|paus\w*|bump\w*|"
+        r"touch\w*|chang\w*|mov\w*|disabl\w*|enabl\w*|mut\w*|"
+        r"paus\w*|bump\w*|"
         r"reschedul\w*|shift\w*|push\w*|cop\w*|turn\w*)\b|"
+        # 'the reminder i was talking about' — a vague referent;
+        # the lane binds the last journaled mutation row.
+        r"(?:the|that)\s+(?:[\w'-]+\s+){0,3}"
+        r"(?:reminders?|alarms?|timers?|one)\s+i\s+"
+        r"(?:was\s+|were\s+)?(?:just\s+|still\s+)?"
+        r"(?:talking|speaking|mentioning|asking)\s+about\b|"
         # 'reminder number 2' — a numbered fragment; the lane
         # numbers rows by fire order.
         r"(?:reminders?|alarms?|timers?|ones?)\s+"
@@ -10965,6 +10972,12 @@ class AgentOrchestrator:
                                    if _wrows else " set."))
                 return self._reminder_finish(
                     text, user_text, task_id, event_callback)
+        # 'the reminder i was just talking about' — a vague
+        # referent the journal binds as 'the one i touched'.
+        plan_text = re.sub(
+            r"\bi\s+(?:was|were)\s+(?:just\s+|still\s+)?"
+            r"(?:talking|speaking|mentioning|asking)\s+about\b",
+            "i touched", plan_text, flags=re.IGNORECASE)
         _mfrag = re.match(
             r"(?:the|that)\s+((?:[\w'-]+\s+){0,3})"
             r"(?:one|reminders?|alarms?|timers?|things?)\s+"
@@ -10974,7 +10987,8 @@ class AgentOrchestrator:
             r"asked\s+for|gave\s+you|put|renam\w*|snooz\w*|"
             r"cancell?\w*|delet\w*|remov\w*|mov\w*|disabl\w*|"
             r"enabl\w*|mut\w*|paus\w*|bump\w*|reschedul\w*|"
-            r"shift\w*|push\w*|cop\w*|turn\w*)\b(.*)$",
+            r"shift\w*|push\w*|cop\w*|turn\w*|touch\w*|"
+            r"chang\w*)\b(.*)$",
             plan_text, re.IGNORECASE)
         if _mfrag is not None:
             _ffs, _ffrows = self._reminder_rows(
@@ -10989,6 +11003,10 @@ class AgentOrchestrator:
                     _fj = getattr(self, "_sched_undo", None) or []
 
                     def _fok(e):
+                        if _fverb.startswith(("touch", "chang")):
+                            # 'the one i touched/changed' — any
+                            # journaled mutation binds the row.
+                            return True
                         if _fverb.startswith(("cancel", "delet",
                                               "remov")):
                             return e[0] == "readd"
