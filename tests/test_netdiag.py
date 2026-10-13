@@ -4028,6 +4028,50 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Undone", r.content)
             self.assertEqual(sup.scheduler.rows[-1]["hour"], late_h)
 
+            # 'how long until the tea fires' — the fire verb
+            # closes the ask; it must not leak into the scope and
+            # bury the real countdown.
+            sup.scheduler.add(
+                "reminder: tea", "once", at=time.time() + 1200,
+                action={"kind": "notify", "detail": "tea"},
+                created_at=time.time() - 300)
+            r = agent._local_action_reply(
+                "how long until the tea fires", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("tea", r.content)
+            self.assertIn("minutes", r.content)
+            self.assertNotIn("fires tea", r.content)
+            # 'did you snooze X' — the mutation journal answers
+            # yes/no; a kind-noun ('my alarm') that names no such
+            # row is a 'no', never a guessed 'sure did'.
+            agent._local_action_reply(
+                "snooze the tea 20 minutes", task.id)
+            r = agent._local_action_reply(
+                "did you snooze the tea", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Yes", r.content)
+            r = agent._local_action_reply(
+                "did you snooze my alarm", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("No", r.content)
+            self.assertIn("tea", r.content)
+            r = agent._local_action_reply(
+                "did you cancel the early", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("No", r.content)
+            # Toggle direction is checked against the journal —
+            # 'did you turn on X' after an off is a 'no'.
+            agent._local_action_reply(
+                "turn off the late", task.id)
+            r = agent._local_action_reply(
+                "did you turn off the late", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Yes", r.content)
+            r = agent._local_action_reply(
+                "did you turn on the late", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("No", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

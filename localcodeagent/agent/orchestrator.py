@@ -4326,6 +4326,21 @@ class AgentOrchestrator:
         r"delete[ds]?|remove[ds]?|turn(?:ed)?\s+(?:off|on)|"
         r"mute[ds]?|pause[ds]?|snooze[ds]?|rename[ds]?)[.!?]?\s*$",
         re.IGNORECASE)
+    # 'did you snooze my alarm' — a confirm-question over the
+    # mutation journal; the ledger answers yes/no, never a
+    # guessed 'sure did'.
+    _REMINDER_CONFIRM_RE = re.compile(
+        _REMINDER_POLITE +
+        r"did\s+you\s+(?:just\s+|already\s+|really\s+)?"
+        r"(?P<cverb>snooz\w*|cancell?e?d?|delet\w*|remov\w*|"
+        r"reschedul\w*|re-?schedul\w*|postpon\w*|delay\w*|"
+        r"mov\w*|bump\w*|shift\w*|push\w*|renam\w*|cop\w*|"
+        r"swap\w*|turn\w*|switch\w*|enabl\w*|disabl\w*|"
+        r"paus\w*|mut\w*|silenc\w*|set|creat\w*|add\w*|"
+        r"schedul\w*|mak\w*|kill\w*|drop\w*|ax\w*|dismiss\w*|"
+        r"clear\w*|restor\w*|bring\w*|undo|undone)\b"
+        r"(?P<crest>.{0,80}?)\s*[.!?]?\s*$",
+        re.IGNORECASE)
     # 'bring back the wake' / 'restore the standup' — re-enables a
     # disabled row or re-adds a journaled deletion; a miss must
     # say so rather than narrate a resurrection.
@@ -8689,6 +8704,11 @@ class AgentOrchestrator:
                 r"at|in|on|right|correct|yeah|"
                 r"disabled?|enabled?|paused?|muted?|unmuted|"
                 r"active|inactive|turned|switched|off|"
+                # 'how long until the tea fires' — the fire verb
+                # closes the ask; it isn't part of the row name.
+                r"fire|fires|firing|fired|go|goes|going|gone|went|"
+                r"hits?|rings?|rang|rung|triggers?|pops?|up|"
+                r"long|longer|how|much|left|"
                 r"are|is|was|were|them|those|these|ones?)\b",
                 " ", sm.group(1), flags=re.IGNORECASE))
         if sm is None:
@@ -9946,6 +9966,118 @@ class AgentOrchestrator:
             "I " + "; ".join(notes) + ".",
             user_text, task_id, event_callback)
 
+    def _reminder_confirm_reply(self, user_text: str, mc: re.Match,
+                                task_id: str, *, event_callback=None):
+        """'did you snooze the tea' — the mutation journal is the
+        truth: a matching entry confirms, a mismatching journal
+        names what actually happened, and an empty journal says
+        nothing was touched this session. Never a guessed yes."""
+        journal = getattr(self, "_sched_undo", None) or []
+        verb = re.sub(r"[^a-z]", "", str(
+            mc.groupdict().get("cverb") or "").lower())
+        crest = str(mc.groupdict().get("crest") or "")
+        _dir = re.search(r"\b(?:off|on)\b", crest, re.IGNORECASE)
+        crest = re.sub(r"\b(?:off|on)\b", " ", crest,
+                       flags=re.IGNORECASE)
+        scope_raw = self._reminder_terms(re.sub(
+            r"\b(?:the|a|an|my|that|this|your|it|one|ones|them|"
+            r"all|any|for|at|to|in|back|again|please)\b", " ",
+            crest, flags=re.IGNORECASE))
+        _nouns = {"alarm", "timer", "reminder", "schedule",
+                  "alarms", "timers", "reminders", "schedules"}
+        # 'my alarm' must name an alarm-kind row — a snoozed 'tea'
+        # reminder is honestly 'no', not 'yes I touched tea'.
+        scope_nouns = {t[:-1] if t.endswith("s") else t
+                       for t in scope_raw & _nouns}
+        scope = scope_raw - _nouns
+        # Journal entries store UNDO steps — 'del' undoes a
+        # create, 'readd' undoes a cancel, 'update' restores a
+        # prior field set, 'enabled' restores the prior state.
+        _off = (_dir is not None
+                and _dir.group(0).lower() == "off")
+        want_on = None
+        if (verb.startswith(("enabl", "unpaus", "unmut"))):
+            want_on = True
+        elif verb.startswith(("disabl", "paus", "mut", "silenc")):
+            want_on = False
+        elif verb.startswith(("turn", "switch")):
+            want_on = not _off
+        wants = set()
+        if verb.startswith(("snooz", "resched", "postpon", "delay",
+                            "mov", "bump", "shift", "push",
+                            "renam", "cop", "swap")):
+            wants.add("update")
+        if verb.startswith(("cancell", "cancel", "delet", "remov",
+                            "kill", "drop", "ax", "dismiss",
+                            "clear")):
+            wants.add("readd")
+        if verb.startswith(("set", "creat", "add", "schedul",
+                            "mak", "remind", "bring", "restor")):
+            wants.add("del")
+        if verb.startswith(("turn", "switch", "enabl", "disabl",
+                            "paus", "unpaus", "mut", "unmut",
+                            "silenc")):
+            wants.add("enabled")
+        sup = (self._autonomy() if callable(self._autonomy)
+               else self._autonomy)
+        sched = getattr(sup, "scheduler", None)
+
+        def _row_kind(ent):
+            try:
+                if ent[0] == "readd":
+                    nm = str(ent[1].get("name") or "")
+                else:
+                    nm = ""
+                    if sched is not None:
+                        for r in sched.list():
+                            if str(r.get("id")) == str(ent[1]):
+                                nm = str(r.get("name") or "")
+                                break
+                return (nm.split(":", 1)[0].strip().lower()
+                        if ":" in nm else "")
+            except Exception:
+                return ""
+
+        entries = []
+        for ent in journal:
+            if ent[0] == "del":
+                entries.append(("del", ent[2],
+                                f"set “{ent[2]}”", None, ent))
+            elif ent[0] == "readd":
+                entries.append(("readd", ent[2],
+                                f"cancelled “{ent[2]}”", None, ent))
+            elif ent[0] == "update":
+                entries.append(("update", ent[3],
+                                f"rescheduled “{ent[3]}”", None,
+                                ent))
+            elif ent[0] == "enabled":
+                entries.append(("enabled", ent[3],
+                                f"turned “{ent[3]}” "
+                                f"{'off' if ent[2] else 'on'}",
+                                bool(ent[2]), ent))
+        if not journal or not entries:
+            return self._reminder_finish(
+                "No — there's no reminder change in my journal "
+                "to confirm.", user_text, task_id, event_callback)
+        for kind, label, note, prior, ent in entries:
+            if kind not in wants:
+                continue
+            if (kind == "enabled" and want_on is not None
+                    and prior == want_on):
+                # 'enabled' stores the state to RESTORE — prior
+                # ==True means the op had turned the row off.
+                continue
+            if scope and not scope <= self._reminder_terms(label):
+                continue
+            if scope_nouns and _row_kind(ent) not in scope_nouns:
+                continue
+            return self._reminder_finish(
+                f"Yes — I {note}.", user_text, task_id,
+                event_callback)
+        return self._reminder_finish(
+            "No — I " + "; ".join(e[2] for e in entries) + ".",
+            user_text, task_id, event_callback)
+
     def _reminder_restore_reply(self, user_text: str, mr: re.Match,
                                 task_id: str, event_callback):
         """'bring back the wake' — re-enables a matching disabled
@@ -10066,6 +10198,11 @@ class AgentOrchestrator:
         if self._REMINDER_WHATDID_RE.match(plan_text):
             return self._reminder_whatdid_reply(
                 user_text, task_id, event_callback=event_callback)
+        _mcfrm = self._REMINDER_CONFIRM_RE.match(plan_text)
+        if _mcfrm is not None:
+            return self._reminder_confirm_reply(
+                user_text, _mcfrm, task_id,
+                event_callback=event_callback)
         _mverb = (r"turn\s+(?:off|on|back\s+on)|switch\s+(?:off|on)|"
                   r"cancel|delete|remove|snooze|reschedule|"
                   r"postpone|delay|rename|mute|unmute|pause|"
@@ -12728,6 +12865,8 @@ class AgentOrchestrator:
                          or self._REMINDER_UNDO_RE.match(plan_text)
                          or self._REMINDER_WHATDID_RE.match(
                              plan_text)
+                         or self._REMINDER_CONFIRM_RE.match(
+                             plan_text)
                          or self._REMINDER_RESTORE_RE.match(plan_text)
                          or self._REMINDER_SWAP_RE.match(plan_text)
                          or self._REMINDER_COPY_RE.match(plan_text)
@@ -13208,6 +13347,7 @@ class AgentOrchestrator:
             cls._REMINDER_CLOCKHAVE_RE,
             cls._REMINDER_UNDO_RE,
             cls._REMINDER_WHATDID_RE,
+            cls._REMINDER_CONFIRM_RE,
             cls._REMINDER_RESTORE_RE,
             cls._REMINDER_SWAP_RE,
             cls._REMINDER_COPY_RE,
