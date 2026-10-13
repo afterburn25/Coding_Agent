@@ -7331,12 +7331,13 @@ class AgentOrchestrator:
             r"(?:set|made|created|scheduled|booked|put|added|"
             r"asked\s+for|gave\s+you)\b",
             body, re.IGNORECASE))
-        _prov_mut = bool(re.search(
+        _prov_mut = re.search(
             r"\bi\s+(?:just\s+|recently\s+|lately\s+)?"
-            r"(?:turned|switched|disabled|muted|paused|silenced|"
+            r"(turned|switched|disabled|muted|paused|silenced|"
             r"stopped|deactivated|snoozed|rescheduled|moved|"
-            r"renamed|cancelled|canceled|deleted|removed)\b",
-            body, re.IGNORECASE))
+            r"renamed|cancelled|canceled|deleted|removed)\b"
+            r"(?:\s+(?:it\s+)?(off|on|down|up)\b)?",
+            body, re.IGNORECASE)
         body = re.sub(
             r"\bi\s+(?:just\s+|recently\s+|lately\s+)?"
             r"(?:set|made|created|scheduled|booked|put|added|"
@@ -7513,18 +7514,96 @@ class AgentOrchestrator:
         if _prov_mut and not topic_terms and _ord_sel is None:
             # 'turn on the one i just disabled' — a mutation
             # provenance resolves through the journal, not a
-            # 'say which' over every opposite-state row.
-            lt = self._reminder_last_touched()
-            if lt is not None:
+            # 'say which' over every opposite-state row. The
+            # clause's verb pins the entry class: 'i disabled'
+            # binds an enabled-flip, never the latest create.
+            _pvb = (_prov_mut.group(1) or "").lower()
+            _pdir = (_prov_mut.group(2) or "").lower()
+
+            def _pclass(ent):
+                if _pvb.startswith(("cancel", "delet", "remov")):
+                    return ent[0] == "readd"
+                if _pvb.startswith(("turn", "switch")):
+                    if ent[0] != "enabled":
+                        return False
+                    if _pdir in ("off", "down"):
+                        return bool(ent[2])
+                    if _pdir in ("on", "up"):
+                        return not ent[2]
+                    return True
+                if _pvb.startswith(("disabl", "mut", "paus",
+                                    "silenc", "stop", "deactiv")):
+                    return ent[0] == "enabled" and bool(ent[2])
+                return ent[0] == "update"
+
+            _pj = getattr(self, "_sched_undo", None) or []
+            _plive = {str(s.get("id")): s for s in rows}
+            _psids = []
+            for ent in _pj:
+                if not _pclass(ent):
+                    continue
+                sid = (str(ent[1]) if ent[0] != "readd"
+                       else str((ent[1] or {}).get("id") or ""))
+                if sid and sid not in _psids and sid in _plive:
+                    _psids.append(sid)
+            _prows = [_plive[sid] for sid in _psids]
+            if len(_prows) == 1:
+                lt = _prows[0]
                 lt_hits = [s for s in pool
                            if str(s.get("id")) == str(lt.get("id"))]
                 if lt_hits:
                     hits = lt_hits
-                elif rows:
+                else:
                     return self._reminder_finish(
                         f"“{self._reminder_label(lt)}” is already "
                         f"{state}.", user_text, task_id,
                         event_callback)
+            elif len(_prows) > 1:
+                _pnames = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in _prows[:4])
+                return self._reminder_finish(
+                    f"{len(_prows)} reminders were {_pvb} "
+                    f"recently — say which: {_pnames}.",
+                    user_text, task_id, event_callback)
+            else:
+                # No class-matching journal entry. 'turn on the
+                # one i disabled' still resolves — the pool IS
+                # the disabled rows. But 'disable the one i
+                # disabled' asks the impossible: every pool row
+                # is on already. A gone-row clause ('i deleted')
+                # and a contradicting direction both miss.
+                _off_verb = (
+                    _pvb.startswith(("disabl", "mut", "paus",
+                                     "silenc", "stop", "deactiv"))
+                    or (_pvb.startswith(("turn", "switch"))
+                        and _pdir in ("off", "down")))
+                _on_verb = (_pvb.startswith(("turn", "switch"))
+                            and _pdir in ("on", "up"))
+                _gone_verb = _pvb.startswith(
+                    ("cancel", "delet", "remov"))
+                _dir_verb = (_off_verb or _on_verb
+                             or _pvb.startswith(("turn", "switch")))
+                if (_gone_verb or not _dir_verb
+                        or (_off_verb and not want_on)
+                        or (_on_verb and want_on)):
+                    _pv_past = _pvb
+                    if not _pv_past.endswith("ed"):
+                        _pv_past += (
+                            "d" if _pv_past.endswith("e")
+                            else "ed")
+                    _pnames = "; ".join(
+                        f"“{self._reminder_label(s)}”"
+                        for s in rows[:4])
+                    return self._reminder_finish(
+                        f"No reminder was {_pv_past} in my "
+                        "recent changes — the journal doesn't "
+                        "show one"
+                        + (f" (you've got: {_pnames})."
+                           if _pnames else "."),
+                        user_text, task_id, event_callback)
+                # Direction-consistent or state-neutral — let the
+                # state-filtered pool resolve it.
         if (not topic_terms and _ord_sel is None
                 and re.fullmatch(
                     r"(?:it|that|this|the\s+one|that\s+one)",
@@ -8862,6 +8941,7 @@ class AgentOrchestrator:
                 r"anything|something|everything|"
                 r"about|regarding|for|of|to|"
                 r"at|in|on|right|correct|yeah|"
+                r"still|yet|currently|really|actually|just|"
                 r"disabled?|enabled?|paused?|muted?|unmuted|"
                 r"active|inactive|turned|switched|off|"
                 # 'how long until the tea fires' — the fire verb

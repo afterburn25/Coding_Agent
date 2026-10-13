@@ -2565,6 +2565,30 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIsNotNone(r)
         self.assertIn("call mom", r.content)
         self.assertTrue(sup.scheduler.rows[0]["enabled"])
+        # Contradicting direction — 'disable the one i disabled'
+        # asks for a state no pool row can satisfy; and a neutral
+        # verb ('i renamed') with no journal match can't guess.
+        r = agent._reminder_reply(
+            "disable the one i disabled yesterday",
+            "disable the one i disabled yesterday", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("journal", r.content)
+        self.assertTrue(all(
+            s["enabled"] for s in sup.scheduler.rows))
+        r = agent._reminder_reply(
+            "turn off the one i renamed",
+            "turn off the one i renamed", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("journal", r.content)
+        self.assertTrue(all(
+            s["enabled"] for s in sup.scheduler.rows))
+        # 'still' is an adverb in the ask, never a name term —
+        # 'are any of my timers still active' noun-filters.
+        r = agent._reminder_reply(
+            "are any of my timers still active",
+            "are any of my timers still active", task.id)
+        self.assertIsNotNone(r)
+        self.assertIn("No timers set", r.content)
         # Cross-verb compounds decline to run a half: no mutation.
         r = agent._reminder_reply(
             "turn off the call mom and move stretch to 7",
