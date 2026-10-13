@@ -4850,6 +4850,9 @@ class AgentOrchestrator:
         r"(?:the|that|this)\s+(?:(?:reminders?|alarms?|timers?|"
         r"ones?|things?)\s+)?(?:first|second|third|fourth|"
         r"fifth|sixth|next)\s+to\s+(?:the\s+)?last\b|"
+        # 'the next one' — a bare ordinal referent.
+        r"(?:the|that|this)\s+(?:next|first|last|earliest|"
+        r"latest)\s+ones?\b|"
         # 'the alarm that goes off at 7' — a fire-verb clause
         # referent; the lane strips it to a clock referent.
         r"(?:the|that|this)\s+[\w'\s-]{1,30}?\s+"
@@ -9299,7 +9302,25 @@ class AgentOrchestrator:
             # the standup') counts down to THAT row; a scoped miss
             # falls through to the honest no-reminder reply below.
             _sentinel = -1e18 if _cd_latest else 1e18
-            if _cd_back is not None:
+            _after_next = bool(re.search(
+                r"\bafter\s+(?:the\s+)?next\b(?!\s+(?:week|weeks|"
+                r"month|months|year|years|day|days|monday|"
+                r"tuesday|wednesday|thursday|friday|saturday|"
+                r"sunday|few|couple))", plan_text, re.IGNORECASE))
+            soonest = None
+            if _after_next:
+                # 'the one after next' — the SECOND fire in
+                # order, not the next one.
+                _ranked = sorted(
+                    _cd_pool, key=lambda s: float(
+                        self._reminder_next_fire(s, now) or 1e18))
+                if len(_ranked) < 2:
+                    text = (f"You've only got {len(_cd_pool)} "
+                            f"reminder{'s' if len(_cd_pool) != 1 else ''} "
+                            f"— nothing after the next.")
+                else:
+                    soonest = _ranked[1]
+            elif _cd_back is not None:
                 _ranked = sorted(
                     _cd_pool, key=lambda s: float(
                         self._reminder_next_fire(s, now) or -1e18),
@@ -9308,33 +9329,37 @@ class AgentOrchestrator:
                     text = (f"You've only got {len(_cd_pool)} "
                             f"reminder{'s' if len(_cd_pool) != 1 else ''} "
                             f"— nothing that far back.")
-                    return self._reminder_finish(
-                        user_text, text, False, sched=sched)
-                soonest = _ranked[_cd_back]
+                else:
+                    soonest = _ranked[_cd_back]
             else:
                 soonest = (max if _cd_latest else min)(
                     _cd_pool, key=lambda s: float(
                         self._reminder_next_fire(s, now) or _sentinel))
-            fire = float(self._reminder_next_fire(soonest, now)
-                         or 0)
-            _back_word = {1: "second", 2: "third", 3: "fourth",
-                          4: "fifth", 5: "sixth"}.get(_cd_back, "second")
-            _ord_word = (f"Your {_back_word} to last reminder is"
-                         if _cd_back is not None else
-                         "Your last reminder is"
-                         if _cd_latest else "Your next reminder is")
-            if countdown_ask:
-                # 'how long until my next reminder' — answer the
-                # duration; the model guessed 'in 4 hours' when the
-                # row was 4 days out.
-                text = (f"{_ord_word} "
-                        f"“{self._reminder_label(soonest)}” — "
-                        f"{self._duration_text(fire - now)} "
-                        f"({self._reminder_when_text(soonest, now)}).")
-            else:
-                text = (f"{_ord_word} "
-                        f"“{self._reminder_label(soonest)}” "
-                        f"({self._reminder_when_text(soonest, now)}).")
+            if soonest is not None:
+                fire = float(self._reminder_next_fire(soonest, now)
+                             or 0)
+                _back_word = {1: "second", 2: "third", 3: "fourth",
+                              4: "fifth",
+                              5: "sixth"}.get(_cd_back, "second")
+                _ord_word = (
+                    "The one after next is"
+                    if _after_next else
+                    f"Your {_back_word} to last reminder is"
+                    if _cd_back is not None else
+                    "Your last reminder is"
+                    if _cd_latest else "Your next reminder is")
+                if countdown_ask:
+                    # 'how long until my next reminder' — answer the
+                    # duration; the model guessed 'in 4 hours' when the
+                    # row was 4 days out.
+                    text = (f"{_ord_word} "
+                            f"“{self._reminder_label(soonest)}” — "
+                            f"{self._duration_text(fire - now)} "
+                            f"({self._reminder_when_text(soonest, now)}).")
+                else:
+                    text = (f"{_ord_word} "
+                            f"“{self._reminder_label(soonest)}” "
+                            f"({self._reminder_when_text(soonest, now)}).")
         elif state_ask or nounless_state:
             # 'is my pay rent reminder on' — a disabled row is the
             # answer ('it's off'), not a miss. The enabled-only
@@ -10843,6 +10868,13 @@ class AgentOrchestrator:
             r"[\w'\s-]{0,20}|a\s+(?:daily|weekly|monthly|"
             r"hourly)\s+(?:reminder|alarm|timer|one))\b",
             r"change \1 to \2", plan_text, flags=re.IGNORECASE)
+        # 'the next one' / 'the last one' — a bare ordinal
+        # referent; name the noun so the refer path reads it.
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)(?:the|that|this)\s+"
+            r"(next|first|last|earliest|latest)\s+ones?\b"
+            r"(\s*[.!?]?\s*)$", r"\1the \2 reminder\3",
+            plan_text, flags=re.IGNORECASE)
         # 'the second to last one' / 'the third to last alarm' —
         # an ordinal pick counted back from the last fire; map it
         # onto the 'last but N' wording the inventory pick reads.
@@ -11666,6 +11698,15 @@ class AgentOrchestrator:
                                         task_d = rest
                                     else:
                                         when_d = rest
+            if task_d and re.fullmatch(
+                    r"(?:after|before|until|till|til|by|from|"
+                    r"since|about|around|for|at|in|on|every|"
+                    r"to|of)",
+                    task_d, re.IGNORECASE):
+                # 'reminders after next week' — the split left a
+                # bare connector in the task slot; that's an
+                # inventory-ish ask, not a task named 'after'.
+                task_d = ""
             if task_d and re.fullmatch(
                     r"me|you|it|that|this|them|us|something|"
                     r"anything|only|just|roughly|about|around|"

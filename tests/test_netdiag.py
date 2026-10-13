@@ -4261,6 +4261,23 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("ping you.", r.content)
 
+            # 'the next one'/'the one after next' — bare ordinal
+            # referents pick real fire-order rows.
+            r = agent._local_action_reply(
+                "the next one", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("next reminder", r.content.lower())
+            r = agent._local_action_reply(
+                "the one after next", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("after next", r.content.lower())
+            # 'reminders after next week' — a connector isn't a
+            # task; clarify rather than fake 'ping you to after'.
+            r = agent._local_action_reply(
+                "reminders after next week", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("do what", r.content.lower())
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
