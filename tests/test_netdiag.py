@@ -4558,6 +4558,43 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("Cancelled", r.content)
 
+            # 'don't fire X today' — a scoped suppression; the
+            # mute lane's until-nudge resumes it tomorrow instead
+            # of banking an unenforceable operating rule.
+            sup.scheduler.add(
+                "reminder: quiet", "once", at=time.time() + 3600,
+                action={"kind": "notify", "detail": "quiet"})
+            r = agent._local_action_reply(
+                "don't fire the quiet today", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Turned off", r.content)
+            self.assertIn("nudge", r.content)
+            self.assertFalse(next(
+                s for s in sup.scheduler.rows
+                if "quiet" in s["name"])["enabled"])
+            # 'skip X this once' rides the pinned skip contract —
+            # a one-shot cancels, not a narrated skip.
+            sup.scheduler.add(
+                "reminder: toss", "once", at=time.time() + 7200,
+                action={"kind": "notify", "detail": "toss"})
+            r = agent._local_action_reply(
+                "skip the toss this once", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            # 'what day is X' — a fire-day ask on a named row.
+            sup.scheduler.add(
+                "reminder: bin", "weekly", weekday=3, hour=8,
+                minute=0,
+                action={"kind": "notify", "detail": "bin"})
+            r = agent._local_action_reply(
+                "what day is the bin", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Thursday", r.content)
+            r = agent._local_action_reply(
+                "cancel the bin reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

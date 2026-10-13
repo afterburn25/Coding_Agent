@@ -4939,7 +4939,19 @@ class AgentOrchestrator:
         # state inventory ask; the lane reads it off the journal.
         r"what'?s\s+(?:been\s+|getting\s+)?snooz\w*\b|"
         r"what\s+(?:did|have)\s+i\s+snooz\w*\b|"
-        r"(?:anything|something|any)\s+snooz\w*\b",
+        r"(?:anything|something|any)\s+snooz\w*\b|"
+        # 'don't fire the pills today' / 'skip the tea this
+        # once' — a scoped suppression ask; the lane mutes the
+        # row with a resume nudge rather than banking a rule
+        # that never stops the fire.
+        r"don'?t\s+(?:fire|go\s+off|ring|sound|bother|"
+        r"remind)\b.{0,40}\b(?:today|tonight|once)\b|"
+        r"skip\s+(?:the|my|that|this)\s+[\w'\s-]{1,40}?"
+        r"\s*(?:this\s+once|just\s+once|today|for\s+today)\b|"
+        # 'what day is the trash' — a fire-day ask on a named
+        # row; the lane rewords it onto 'which day does X fire'.
+        r"what\s+(?:day|date)\s+is\s+(?:the|my|that|"
+        r"this)\s+[\w'\s-]{1,40}\s*[.!?]?\s*$",
         re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
@@ -5128,11 +5140,12 @@ class AgentOrchestrator:
                 when = time.strftime("%a %H:%M", time.localtime(at))
             return f"for {when} — I'll ping you{_tp}."
         if kind == "daily":
-            return (f"every day at {int(spec['hour']):02d}:"
-                    f"{int(spec['minute']):02d} — I'll ping you"
+            return (f"every day at {int(spec.get('hour') or 0):02d}:"
+                    f"{int(spec.get('minute') or 0):02d} — "
+                    "I'll ping you"
                     f"{_tp}.")
         if kind == "weekly":
-            wd = spec["weekday"]
+            wd = spec.get("weekday", 0)
             if isinstance(wd, list):
                 day = ("weekday" if wd == [0, 1, 2, 3, 4]
                        else "weekend" if wd == [5, 6]
@@ -5142,8 +5155,9 @@ class AgentOrchestrator:
             else:
                 day = ("Monday", "Tuesday", "Wednesday", "Thursday",
                        "Friday", "Saturday", "Sunday")[int(wd)]
-            return (f"every {day} at {int(spec['hour']):02d}:"
-                    f"{int(spec['minute']):02d} — I'll ping you"
+            return (f"every {day} at {int(spec.get('hour') or 0):02d}:"
+                    f"{int(spec.get('minute') or 0):02d} — "
+                    "I'll ping you"
                     f"{_tp}.")
         if kind == "monthly":
             day = int(spec.get("day") or 1)
@@ -5151,8 +5165,9 @@ class AgentOrchestrator:
                     "nd" if day in (2, 22) else
                     "rd" if day in (3, 23) else "th")
             return (f"monthly on the {day}{ordn} at "
-                    f"{int(spec['hour']):02d}:"
-                    f"{int(spec['minute']):02d} — I'll ping you"
+                    f"{int(spec.get('hour') or 0):02d}:"
+                    f"{int(spec.get('minute') or 0):02d} — "
+                    "I'll ping you"
                     f"{_tp}.")
         secs = int(spec.get("interval_s") or 60)
         if secs % 86400 == 0:
@@ -7462,6 +7477,15 @@ class AgentOrchestrator:
         now = time.time()
         _day_src = user_text
         _til_g = _til_eff
+        if (_til_g and not re.search(
+                r"\b(?:until|till|til)\b", user_text,
+                re.IGNORECASE)):
+            # 'don't fire the pills today' normalizes to 'mute
+            # the pills until tomorrow' — the until bound was
+            # written by the lane, so 'today' in the original
+            # text is the suppression window, not a fire-day
+            # filter on the rows.
+            _day_src = ""
         _cond_g = str(mt.groupdict().get("cond") or "").strip()
         for _g in (_til_g, _cond_g):
             if _g:
@@ -11143,6 +11167,24 @@ class AgentOrchestrator:
             r"snooz\w*\b(\s*[.!?]?\s*)$",
             r"\1which reminders are snoozed\2",
             plan_text, flags=re.IGNORECASE)
+        # 'skip the tea this once' — the 'this once' tail is the
+        # same skip; the lane decides honestly by row kind (a
+        # one-shot cancels, a recurring row can't drop one fire).
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)skip\s+"
+            r"(?:the\s+|my\s+|that\s+|this\s+)?(.+?)\s*"
+            r"(?:this\s+once|just\s+(?:this\s+)?once|today|"
+            r"for\s+today)\s*[.!?]?\s*$",
+            r"\1skip the \2", plan_text,
+            flags=re.IGNORECASE)
+        # 'what day is the trash' — a fire-day ask; the day
+        # scope path already answers 'which day does X fire'.
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)what\s+(?:day|date)\s+is\s+"
+            r"((?:the|my|that|this)\s+[\w'\s-]{1,40}?)\s*"
+            r"[.!?]?\s*$",
+            r"\1which day does \2 fire", plan_text,
+            flags=re.IGNORECASE)
         # 'the second to last one' / 'the third to last alarm' —
         # an ordinal pick counted back from the last fire; map it
         # onto the 'last but N' wording the inventory pick reads.
@@ -13559,6 +13601,19 @@ class AgentOrchestrator:
             r"\b(do|does|did|have|had)\s+i\s+"
             r"(?:still|ever|already)\s+", r"\1 i ",
             plan_text, flags=re.IGNORECASE)
+        # 'don't fire the pills today' — a day-scoped suppression;
+        # the mute lane's until-nudge restores it tomorrow, which
+        # is exactly 'not today'. (Rewritten before the lane's own
+        # normalization — a fire-verb early branch would otherwise
+        # read it as a day-scoped fire ask.)
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)don'?t\s+(?:fire|go\s+off|"
+            r"ring|sound|bother\s+me\s+about)\s+"
+            r"(?:the\s+|my\s+|that\s+|this\s+)?(.+?)\s*"
+            r"(?:today|tonight|this\s+morning|this\s+evening|"
+            r"just\s+today|once)?\s*[.!?]?\s*$",
+            r"\1mute the \2 until tomorrow", plan_text,
+            flags=re.IGNORECASE)
         # Reminders are a bounded local action: 'remind me in 5
         # minutes to X' → a real once-schedule firing a notification.
         # Their own regexes are the tighter gate — 'remind me to X'
