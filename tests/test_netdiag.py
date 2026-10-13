@@ -4247,6 +4247,20 @@ class TruthGateTests(RecoveryLoopTests):
                 s["enabled"] for s in sup.scheduler.list()
                 if s["name"] == "reminder: early"))
 
+            # 'alarm for 6am gym' — a leading clock in the 'for'
+            # tail is the when, the rest is the task; a bare
+            # kind-noun task isn't echoed back as the reminder
+            # text.
+            r = agent._local_action_reply(
+                "alarm for 6am gym", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("gym", r.content)
+            self.assertNotIn("6am gym", r.content)
+            r = agent._local_action_reply(
+                "timer for 10 minutes", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("ping you.", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

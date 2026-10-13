@@ -5069,16 +5069,18 @@ class AgentOrchestrator:
         """'every friday at 15:00 — I'll ping you to X.' style suffix."""
         kind = spec["kind"]
         now = time.time()
+        _tp = (f" to {task}" if str(task).strip()
+               else "")
         if kind == "once":
             at = spec["at"]
             when = time.strftime("%H:%M", time.localtime(at))
             if at - now > 20 * 3600:
                 when = time.strftime("%a %H:%M", time.localtime(at))
-            return f"for {when} — I'll ping you to {task}."
+            return f"for {when} — I'll ping you{_tp}."
         if kind == "daily":
             return (f"every day at {int(spec['hour']):02d}:"
-                    f"{int(spec['minute']):02d} — I'll ping you "
-                    f"to {task}.")
+                    f"{int(spec['minute']):02d} — I'll ping you"
+                    f"{_tp}.")
         if kind == "weekly":
             wd = spec["weekday"]
             if isinstance(wd, list):
@@ -5091,8 +5093,8 @@ class AgentOrchestrator:
                 day = ("Monday", "Tuesday", "Wednesday", "Thursday",
                        "Friday", "Saturday", "Sunday")[int(wd)]
             return (f"every {day} at {int(spec['hour']):02d}:"
-                    f"{int(spec['minute']):02d} — I'll ping you "
-                    f"to {task}.")
+                    f"{int(spec['minute']):02d} — I'll ping you"
+                    f"{_tp}.")
         if kind == "monthly":
             day = int(spec.get("day") or 1)
             ordn = ("st" if day in (1, 21, 31) else
@@ -5100,8 +5102,8 @@ class AgentOrchestrator:
                     "rd" if day in (3, 23) else "th")
             return (f"monthly on the {day}{ordn} at "
                     f"{int(spec['hour']):02d}:"
-                    f"{int(spec['minute']):02d} — I'll ping you "
-                    f"to {task}.")
+                    f"{int(spec['minute']):02d} — I'll ping you"
+                    f"{_tp}.")
         secs = int(spec.get("interval_s") or 60)
         if secs % 86400 == 0:
             span = (f"{secs // 86400} day"
@@ -5117,7 +5119,7 @@ class AgentOrchestrator:
             anchor = (" starting "
                       + time.strftime("%H:%M",
                                       time.localtime(spec["at"])))
-        return f"every {span}{anchor} — I'll ping you to {task}."
+        return f"every {span}{anchor} — I'll ping you{_tp}."
 
     @staticmethod
     def _reminder_amount_clean(text: str) -> str:
@@ -11601,41 +11603,69 @@ class AgentOrchestrator:
                                          rest2))):
                         when_d = rest2
                     else:
-                        # 'for the dentist at 3' — split task/time at
-                        # the last temporal boundary.
-                        parts = re.split(
-                            r"\s+(?=(?:at|in|on|every|next|tomorrow|"
-                            r"today|tonight|tonite)\b)", rest2)
-                        if (len(parts) > 1 and self._reminder_spec(
-                                parts[-1], now_d) is not None):
-                            task_d = " ".join(parts[:-1])
-                            when_d = parts[-1]
+                        # 'for 6am gym' — the tail LEADS with a
+                        # clock; that's the when, the rest is the
+                        # task. A bare number stays out — 'for 6
+                        # eggs' isn't a 6:00 alarm.
+                        _lw = re.match(
+                            r"(?P<w>\d{1,2}(?::\d{2})?\s*(?:am|pm)|"
+                            r"\d{1,2}:\d{2}|noon|midnight|midday|"
+                            r"morning|afternoon|evening)\s+"
+                            r"(?P<t>.+)$", rest2, re.IGNORECASE)
+                        _lw_ok = False
+                        if _lw is not None:
+                            _lwt = _lw.group("w").strip()
+                            _lw_ok = any(
+                                self._reminder_spec(
+                                    _cand, now_d) is not None
+                                for _cand in (
+                                    _lwt, "at " + _lwt,
+                                    "in the " + _lwt))
+                        if _lw_ok:
+                            when_d = _lw.group("w").strip()
+                            task_d = _lw.group("t").strip(" ,;—-")
                         else:
-                            # 'me at 3 to leave' — the task connector
-                            # sits AFTER the clock; prefer the last
-                            # 'to' whose left side parses as a time.
-                            hit = False
-                            for mm in reversed(list(re.finditer(
-                                    r"\s+to\s+", rest2))):
-                                left = rest2[:mm.start()].strip()
-                                right = re.sub(
-                                    r"^to\s+", "",
-                                    rest2[mm.start():].strip(),
-                                    flags=re.IGNORECASE)
-                                if (left and right
-                                        and (self._reminder_spec(
-                                            left, now_d) is not None
-                                             or self._reminder_spec(
-                                                 "in " + left,
-                                                 now_d) is not None)):
-                                    when_d, task_d = left, right
-                                    hit = True
-                                    break
-                            if not hit:
-                                if conn:
-                                    task_d = rest
-                                else:
-                                    when_d = rest
+                            # 'for the dentist at 3' — split task/
+                            # time at the last temporal boundary.
+                            parts = re.split(
+                                r"\s+(?=(?:at|in|on|every|next|"
+                                r"tomorrow|today|tonight|tonite)\b)",
+                                rest2)
+                            if (len(parts) > 1
+                                    and self._reminder_spec(
+                                        parts[-1], now_d)
+                                    is not None):
+                                task_d = " ".join(parts[:-1])
+                                when_d = parts[-1]
+                            else:
+                                # 'me at 3 to leave' — the task
+                                # connector sits AFTER the clock;
+                                # prefer the last 'to' whose left
+                                # side parses as a time.
+                                hit = False
+                                for mm in reversed(list(re.finditer(
+                                        r"\s+to\s+", rest2))):
+                                    left = rest2[:mm.start()].strip()
+                                    right = re.sub(
+                                        r"^to\s+", "",
+                                        rest2[mm.start():].strip(),
+                                        flags=re.IGNORECASE)
+                                    if (left and right
+                                            and (self._reminder_spec(
+                                                left, now_d)
+                                                 is not None
+                                                 or self._reminder_spec(
+                                                     "in " + left,
+                                                     now_d)
+                                                 is not None)):
+                                        when_d, task_d = left, right
+                                        hit = True
+                                        break
+                                if not hit:
+                                    if conn:
+                                        task_d = rest
+                                    else:
+                                        when_d = rest
             if task_d and re.fullmatch(
                     r"me|you|it|that|this|them|us|something|"
                     r"anything|only|just|roughly|about|around|"
@@ -11896,7 +11926,8 @@ class AgentOrchestrator:
                         user_text, task_id, event_callback)
                 return self._reminder_finish(
                     f"{noun.capitalize()} set "
-                    + self._reminder_spec_text(spec, task_f)
+                    + self._reminder_spec_text(
+                        spec, "" if task_f == noun else task_f)
                     + end_note,
                     user_text, task_id, event_callback)
             lead = ("in " if dur else
