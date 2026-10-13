@@ -4668,6 +4668,31 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("1", r.content)
             self.assertIn("snoozed", r.content)
 
+            # 'who set X' — created_by provenance; unstamped
+            # rows say so, a kind-noun scope that hits nothing
+            # names the kind, not a generic miss.
+            r = agent._local_action_reply(
+                "who set the quiet reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("quiet", r.content)
+            r = agent._local_action_reply(
+                "who created my alarm", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("No alarm", r.content)
+            # 'in a fortnight' — a 14-day duration, not an
+            # unparseable clarify.
+            before = len(sup.scheduler.rows)
+            r = agent._local_action_reply(
+                "remind me in a fortnight to pay dues", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("pay dues", r.content)
+            self.assertEqual(len(sup.scheduler.rows), before + 1)
+            due = sup.scheduler.rows[-1]
+            self.assertAlmostEqual(
+                float(due["at"]), time.time() + 1209600, delta=60)
+            agent._local_action_reply(
+                "cancel the pay dues reminder", task.id)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

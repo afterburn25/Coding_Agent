@@ -3228,9 +3228,12 @@ class AgentOrchestrator:
             # port") can only be answered by taught facts — an empty
             # store is itself the honest answer; don't fall to the
             # model to improvise a denial or a guess.
-            if re.search(
+            if (re.search(
                     r"\bmy\b|(?:^|\b)do\s+i\s+(?:use|have|like|prefer|"
-                    r"run|need)\b", match_text, re.IGNORECASE):
+                    r"run|need)\b", match_text, re.IGNORECASE)
+                    # 'who created my alarm' is scheduler provenance —
+                    # the reminder lane owns it below.
+                    and not self._REMINDER_MISC_RE.match(match_text)):
                 topic = self._FACT_RECALL_RE.sub(
                     "", match_text).strip().rstrip("?.!")
                 topic = re.sub(
@@ -4821,6 +4824,11 @@ class AgentOrchestrator:
         r"them|anything|everything|all|any|reminders?|alarms?|"
         r"timers?)\b|"
         r"(?:call|name|rename)\s+(?:the|my|that|this|it|them)\b|"
+        # 'who set the tea reminder' — created_by provenance, not
+        # a guess at authorship.
+        r"who\s+(?:set|created|made|added|scheduled|put)\s+"
+        r"(?:the|my|that|this|up)?\s*[\w'\s-]{0,40}?\s*"
+        r"(?:reminders?|alarms?|timers?|one)\b|"
         r"what'?s\s+(?:the\s+|my\s+|that\s+|this\s+)?"
         r"[\w'-]+(?:\s+[\w'-]+){0,3}\s+(?:called|named)\b|"
         r"what\s+do\s+you\s+call\s+(?:the\s+|my\s+|that\s+|"
@@ -10879,6 +10887,84 @@ class AgentOrchestrator:
             }[_qprov.group(2).lower()]
             plan_text = (f"the {_qprov.group(1)} i {_qpast}"
                          f"{_qprov.group(3)}")
+        # 'who set the tea reminder' — the row's created_by
+        # answers; an unstamped row can't name its author.
+        _whoask = re.match(
+            r"who\s+(?:set|created|made|added|scheduled|put)\s+"
+            r"(?:up\s+)?(.+?)\s*"
+            r"(reminders?|alarms?|timers?|one)\b"
+            r"\s*[.!?]?\s*$",
+            plan_text, re.IGNORECASE)
+        if _whoask is not None:
+            _wt = self._reminder_terms(_whoask.group(1)) - {
+                "the", "my", "that", "this", "a", "an",
+                "up", "for"}
+            _ws, _wrows = self._reminder_rows(
+                include_disabled=True,
+                noun=(_whoask.group(2).lower()
+                      if _whoask.group(2).lower() != "one"
+                      and not _wt else None))
+            if _ws is not None:
+                _wh = [s for s in _wrows
+                       if not _wt
+                       or _wt <= self._reminder_hay(s)]
+                if len(_wh) > 1 and not _wt:
+                    # 'who set a reminder' — unscoped; summarize
+                    # the real created_by spread.
+                    _bys = {str(s.get("created_by") or "")
+                            for s in _wh}
+                    _bys.discard("")
+                    if _bys == {"user"}:
+                        text = "You set all of them."
+                    elif _bys:
+                        _bc = sorted(
+                            (sum(1 for s in _wh
+                                 if str(s.get("created_by")
+                                        or "") == b), b)
+                            for b in _bys)
+                        text = "; ".join(
+                            f"{b}: {n}" for n, b in _bc) + "."
+                    else:
+                        text = ("None of the rows record who "
+                                "made them.")
+                elif len(_wh) == 1:
+                    _wby = str(_wh[0].get("created_by") or ""
+                               ).strip()
+                    if _wby:
+                        text = (
+                            "You set that one"
+                            if _wby == "user" else
+                            f"The {_wby} lane created that one")
+                    else:
+                        text = ("That row doesn't record who "
+                                "made it.")
+                    text = (f"“{self._reminder_label(_wh[0])}” — "
+                            + text[0].lower()
+                            + text[1:].rstrip(".") + ".")
+                elif _wh:
+                    _wn = "; ".join(
+                        f"“{self._reminder_label(s)}”"
+                        for s in _wh[:4])
+                    text = (f"That matches {len(_wh)} reminders: "
+                            f"{_wn} — say which.")
+                else:
+                    _wk = _whoask.group(2).lower()
+                    _wn = "; ".join(
+                        f"“{self._reminder_label(s)}”"
+                        for s in _wrows[:3])
+                    if _wk != "one" and not _wt:
+                        # 'who created my alarm' over no alarm
+                        # rows — the kind-noun is the scope.
+                        text = (f"No {_wk} set"
+                                + (f" — you've got: {_wn}."
+                                   if _wrows else "."))
+                    else:
+                        text = (f"No reminder about "
+                                f"“{' '.join(sorted(_wt)) or 'that'}”"
+                                + (f" — you've got: {_wn}."
+                                   if _wrows else " set."))
+                return self._reminder_finish(
+                    text, user_text, task_id, event_callback)
         _mfrag = re.match(
             r"(?:the|that)\s+((?:[\w'-]+\s+){0,3})"
             r"(?:one|reminders?|alarms?|timers?|things?)\s+"

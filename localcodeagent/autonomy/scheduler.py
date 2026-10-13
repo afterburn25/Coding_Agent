@@ -480,7 +480,7 @@ def parse_reminder_when(when: str, now: float) -> float | None:
         r"three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
         r"an?\s+few|few|half\s+an?|an?\s+half)\s*"
         r"(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|"
-        r"days?|d|weeks?|w|months?)(?:\s+or\s+so)?"
+        r"days?|d|weeks?|w|months?|fortnights?)(?:\s+or\s+so)?"
         + clock_tail
         + r"(?:\s+at\s+(noon|midnight))?", t)
     if m:
@@ -507,7 +507,8 @@ def parse_reminder_when(when: str, now: float) -> float | None:
             scale = {"s": 1, "sec": 1, "second": 1, "m": 60,
                      "min": 60, "minute": 60, "h": 3600, "hr": 3600,
                      "hour": 3600, "d": 86400, "day": 86400,
-                     "w": 604800, "week": 604800}[unit]
+                     "w": 604800, "week": 604800,
+                     "fortnight": 1209600}[unit]
             ts = now + n * scale
         if m.group(3) or m.group(6):
             # 'in 2 days at 3pm' — the duration picks the date,
