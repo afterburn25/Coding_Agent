@@ -8074,6 +8074,7 @@ class AgentOrchestrator:
         topic_src = re.sub(
             r"\b(?:the|my|that|all|every|each|any|of|to|for|about|"
             r"them|it|this|those|these|everything|one|ones|"
+            r"thing|things|"
             r"anymore|any\s+more|any\s+longer|at\s+all)\b",
             " ", topic_src, flags=re.IGNORECASE)
         # 'the reminder that says pills' — 'that says' quotes the

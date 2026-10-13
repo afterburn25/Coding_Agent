@@ -195,6 +195,18 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     # rewrites read the word inside it.
     t = re.sub(r"\b(\d{1,2}(?::\d{2})?|noon|midnight)\s*-?\s*ish\b",
                r"\1", t)
+    # 'at five' / 'at five o'clock' — a word-hour clock. A
+    # minute word follows ('at five thirty'), or 'to' before an
+    # hour word ('at ten to six' = 5:50) → the worded-clock
+    # rewrite owns those shapes; 'at five to call' still parses.
+    t = re.sub(
+        r"\bat\s+(one|two|three|four|five|six|seven|eight|nine|"
+        r"ten|eleven|twelve)\b"
+        r"(?!\s+(?:" + _MIN_TOK + r")\b)"
+        r"(?!\s+(?:to|till?)\s+(?:one|two|three|four|five|six|"
+        r"seven|eight|nine|ten|eleven|twelve|noon|midnight)\b)"
+        r"(?:\s+o'?clock)?",
+        lambda m: f"at {_WORD_NUM[m.group(1)]}", t)
     t = re.sub(r"\bat\s+noon\b", "at 12:00 pm", t)
     t = re.sub(r"\bat\s+midnight\b", "at 12:00 am", t)
     # 'at 6 in the morning' — the daypart phrase is the meridiem.

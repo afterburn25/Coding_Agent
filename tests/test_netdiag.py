@@ -4714,6 +4714,26 @@ class TruthGateTests(RecoveryLoopTests):
             agent._local_action_reply(
                 "cancel the eat reminder", task.id)
 
+            # Word-hour clocks — 'at five'/'at five o'clock' set
+            # the 17:00 row like the digit form; 'at five thirty'
+            # and 'at ten to six' stay the worded-clock's.
+            r = agent._local_action_reply(
+                "remind me at five to call home", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("call home", r.content)
+            self.assertNotIn("couldn't pin", r.content)
+            ch = sup.scheduler.rows[-1]
+            lt = time.localtime(float(ch["at"]))
+            self.assertEqual((lt.tm_hour, lt.tm_min), (17, 0))
+            # 'the last thing i set' — 'thing' is a kind-noun,
+            # not a topic word; the selector still resolves.
+            r = agent._local_action_reply(
+                "cancel the last thing i set", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            agent._local_action_reply(
+                "cancel the call home reminder", task.id)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
