@@ -3715,7 +3715,7 @@ class TruthGateTests(RecoveryLoopTests):
             r = agent._local_action_reply(
                 "did i set anything for tonight", task.id)
             self.assertIsNotNone(r)
-            self.assertIn("for today", r.content)
+            self.assertIn("for tonight", r.content)
 
             # 'the Nth reminder i made' — the ordinal ranks
             # created_at inside the fragment lane.
@@ -4071,6 +4071,48 @@ class TruthGateTests(RecoveryLoopTests):
                 "did you turn on the late", task.id)
             self.assertIsNotNone(r)
             self.assertIn("No", r.content)
+
+            # 'reminder number N' — rows numbered by fire
+            # order; an out-of-range ask gets the real count.
+            r = agent._local_action_reply(
+                "reminder number 1", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("number 1", r.content)
+            self.assertIn("tea", r.content)
+            r = agent._local_action_reply(
+                "reminder number 9", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("only got", r.content)
+            # 'the one i renamed' — mutation provenance binds
+            # the journal row by its CURRENT name.
+            agent._local_action_reply(
+                "rename the late to midnight", task.id)
+            r = agent._local_action_reply(
+                "the one i renamed", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("midnight", r.content)
+            # 'un-cancel X' is a restore idiom.
+            agent._local_action_reply(
+                "cancel the tea", task.id)
+            r = agent._local_action_reply(
+                "un-cancel the tea", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("tea", r.content)
+            self.assertTrue(any(
+                s["name"].endswith("tea")
+                for s in sup.scheduler.rows))
+            # The auto-resume nudge row is internal bookkeeping —
+            # never an inventory line or a referent.
+            agent._local_action_reply(
+                "mute my reminders until monday", task.id)
+            self.assertTrue(any(
+                "turn reminders back on" in s["name"]
+                for s in sup.scheduler.rows))
+            r = agent._local_action_reply(
+                "what reminders do i have", task.id)
+            self.assertIsNotNone(r)
+            self.assertNotIn("turn reminders back on",
+                             r.content)
 
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
@@ -4791,6 +4833,10 @@ class TruthGateTests(RecoveryLoopTests):
                 "reminder: referent", "once",
                 at=time.time() + 3600,
                 action={"kind": "notify", "detail": "referent"})
+            # The auto-resume nudge row is internal bookkeeping —
+            # it must NOT count as a referent; re-enabling nl_row
+            # keeps the two-way ambiguity honest.
+            nl_row["enabled"] = True
             result = agent.run("cancel that", mode="auto")
             self.assertIn("matches 2 reminders", result.content)
             sup.scheduler.rows[:] = [sup.scheduler.rows[-1]]
@@ -7072,7 +7118,7 @@ class TruthGateTests(RecoveryLoopTests):
             # scope terms ('no reminder about "for"'). Whichever
             # rows fire today must be listed.
             r = agent.run("is anything on for tonight", mode="auto")
-            self.assertIn("for today", r.content)
+            self.assertIn("for tonight", r.content)
             self.assertNotIn("“for”", r.content)
             # Loose noun + clock scope widens past the noun
             # filter — 'the 9am alarm' over a 'Reminder: standup'

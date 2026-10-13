@@ -4347,7 +4347,7 @@ class AgentOrchestrator:
     _REMINDER_RESTORE_RE = re.compile(
         _REMINDER_POLITE +
         r"(?:(?:bring|put)\s+back|restore|reinstate|re-?add|"
-        r"re-?arm|undelete|un-?delete|resurrect)\s+"
+        r"re-?arm|undelete|un-?delete|un-?cancell?\w*|resurrect)\s+"
         r"(?P<rest>.+?)" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
@@ -4854,6 +4854,19 @@ class AgentOrchestrator:
         r"(?:yesterday|today|tonight|this\s+morning|"
         r"this\s+afternoon|this\s+evening|last\s+night|"
         r"last\s+week|earlier)\b|"
+        # 'the one i renamed' — mutation-provenance fragments;
+        # the lane resolves them through the journal, not
+        # created_at.
+        r"(?:the|that)\s+(?:[\w'-]+\s+){0,3}"
+        r"(?:one|reminders?|alarms?|timers?|things?)\s+"
+        r"i\s+(?:just\s+|recently\s+|lately\s+)?"
+        r"(?:renamed|snoozed|cancell?ed|deleted|removed|moved|"
+        r"disabled|enabled|muted|paused|bumped|rescheduled|"
+        r"shifted|pushed|copied|turned)\b|"
+        # 'reminder number 2' — a numbered fragment; the lane
+        # numbers rows by fire order.
+        r"(?:reminders?|alarms?|timers?|ones?)\s+"
+        r"(?:number|no\.?|#)\s*\d+\b|"
         # 'my next thing' — the vague next-ask; the lane reads
         # the soonest fire from rows.
         r"next\s+thing\b",
@@ -6247,6 +6260,7 @@ class AgentOrchestrator:
         sched = _SchedJournal(self, sched)
         rows = [s for s in (sched.list() or [])
                 if (include_disabled or s.get("enabled", True))
+                and not self._reminder_nudge_row(s)
                 and (str(s.get("name") or "").lower()
                      .startswith("reminder")
                      or (isinstance(s.get("action"), dict)
@@ -6263,6 +6277,22 @@ class AgentOrchestrator:
                     or stem in self._reminder_terms(
                         self._reminder_label(s))]
         return sched, rows
+
+    @staticmethod
+    def _reminder_nudge_row(s: dict) -> bool:
+        """Auto-resume nudge rows ('reminder: turn reminders back
+        on') are internal bookkeeping — never a user-facing
+        referent, hit, or inventory line."""
+        act = s.get("action")
+        det = (act.get("detail", "") if isinstance(act, dict)
+               else act or "")
+        name = str(s.get("name") or "").strip().lower()
+        return bool(
+            re.fullmatch(r"turn reminders (?:back on|off)",
+                         str(det).strip().lower())
+            or re.fullmatch(
+                r"reminder:\s*turn reminders (?:back on|off)",
+                name))
 
     def _reminder_last_touched(self):
         """'it'/'that reminder' — the referent only when the last
@@ -8527,7 +8557,9 @@ class AgentOrchestrator:
         if re.search(r"\b(?:today|tonight|tonite|this\s+morning|"
                      r"this\s+afternoon|this\s+evening)\b", t):
             dates.add(today)
-            label = "today"
+            label = ("tonight" if re.search(
+                        r"\btonight|tonite|this\s+evening\b", t)
+                     else "today")
         if re.search(r"\btomorrow\b", t):
             dates.add(today + dt.timedelta(days=1))
             label = label or "tomorrow"
@@ -10283,19 +10315,90 @@ class AgentOrchestrator:
             r"(?:the|that)\s+((?:[\w'-]+\s+){0,3})"
             r"(?:one|reminders?|alarms?|timers?|things?)\s+"
             r"i\s+(?:just\s+|recently\s+|lately\s+)?"
-            r"(?:made|set|created|added|scheduled|booked|"
-            r"asked\s+for|gave\s+you|put)\b(.*)$",
+            r"(made|set|created|added|scheduled|booked|"
+            r"asked\s+for|gave\s+you|put|renamed|snoozed|"
+            r"cancell?ed|deleted|removed|moved|disabled|enabled|"
+            r"muted|paused|bumped|rescheduled|shifted|pushed|"
+            r"copied|turned)\b(.*)$",
             plan_text, re.IGNORECASE)
         if _mfrag is not None:
             _ffs, _ffrows = self._reminder_rows(
                 include_disabled=True)
             if _ffs is not None:
+                _fverb = (_mfrag.group(2) or "").lower()
+                if _fverb not in (
+                        "made", "set", "created", "added",
+                        "scheduled", "booked", "put"):
+                    # 'the one i renamed' — mutation provenance;
+                    # the journal (not created_at) names the row.
+                    _fj = getattr(self, "_sched_undo", None) or []
+
+                    def _fok(e):
+                        if _fverb.startswith(("cancel", "delet",
+                                              "remov")):
+                            return e[0] == "readd"
+                        if _fverb.startswith(("disabl", "mut",
+                                              "paus", "silenc")):
+                            return e[0] == "enabled" and e[2]
+                        if _fverb.startswith(("enabl", "unpaus",
+                                              "unmut", "resum")):
+                            return (e[0] == "enabled"
+                                    and not e[2])
+                        if _fverb.startswith("turn"):
+                            return e[0] == "enabled"
+                        if _fverb.startswith("renam"):
+                            return (e[0] == "update"
+                                    and "name" in (e[2] or {}))
+                        if _fverb.startswith("cop"):
+                            return e[0] == "del"
+                        return (e[0] == "update"
+                                and "name" not in (e[2] or {}))
+                    _fl = []
+                    _flive = {str(s.get("id")): s
+                              for s in _ffrows}
+                    for e in _fj:
+                        if not _fok(e):
+                            continue
+                        # Prefer the row's CURRENT label — a
+                        # rename journals the old name.
+                        _fsid = (str(e[1]) if e[0] != "readd"
+                                 else str((e[1] or {}).get("id")
+                                          or ""))
+                        _frow = _flive.get(_fsid)
+                        lab = (self._reminder_label(_frow)
+                               if _frow is not None
+                               else (e[2] if e[0] in ("del", "readd")
+                                     else e[3]))
+                        if lab not in _fl:
+                            _fl.append(lab)
+                    if len(_fl) == 1:
+                        _flrow = next(
+                            (s for s in _ffrows
+                             if self._reminder_label(s) == _fl[0]),
+                            None)
+                        _ftail = (
+                            f" — fires {self._reminder_when_text(_flrow, time.time())}."
+                            if _flrow is not None else ".")
+                        return self._reminder_finish(
+                            f"That's “{_fl[0]}”{_ftail}",
+                            user_text, task_id, event_callback)
+                    if _fl:
+                        _fnames = "; ".join(
+                            f"“{x}”" for x in _fl[:4])
+                        return self._reminder_finish(
+                            f"That's {len(_fl)} reminders: "
+                            f"{_fnames} — say which.",
+                            user_text, task_id, event_callback)
+                    return self._reminder_finish(
+                        f"No reminder was {_fverb} in my recent "
+                        "changes — the journal doesn't show one.",
+                        user_text, task_id, event_callback)
                 _mord = re.search(
                     r"\b(first|second|third|fourth|fifth|sixth|"
                     r"last|newest|latest|oldest|earliest)\b",
                     _mfrag.group(1) or "", re.IGNORECASE)
                 _fd, _flabel = self._reminder_created_scope(
-                    _mfrag.group(2) or "")
+                    _mfrag.group(3) or "")
                 _fp = [s for s in _ffrows
                        if s.get("created_at")]
                 if _fd is not None:
@@ -10393,6 +10496,39 @@ class AgentOrchestrator:
                 return self._reminder_finish(
                     f"Nothing fires at {_oclk}"
                     + (f" — you've got: {_on}." if _on else "."),
+                    user_text, task_id, event_callback)
+        # 'reminder number 2' — rows numbered by fire order; an
+        # out-of-range ask gets the real count, not a guess.
+        _mnum = re.match(
+            r"(?:the\s+)?(?:reminders?|alarms?|timers?|ones?)\s+"
+            r"(?:number|no\.?|#)\s*(\d+)\b\s*[.!?]?\s*$",
+            plan_text, re.IGNORECASE)
+        if _mnum is not None:
+            _nfs, _nrows = self._reminder_rows(
+                include_disabled=True)
+            if _nfs is not None:
+                _nidx = int(_mnum.group(1)) - 1
+                _nord = sorted(
+                    _nrows,
+                    key=lambda s: float(
+                        self._reminder_next_fire(s, time.time())
+                        or 1e18))
+                if 0 <= _nidx < len(_nord):
+                    s = _nord[_nidx]
+                    return self._reminder_finish(
+                        f"Reminder number {_mnum.group(1)} is "
+                        f"“{self._reminder_label(s)}” — fires "
+                        f"{self._reminder_when_text(s, time.time())}"
+                        " (fire order).",
+                        user_text, task_id, event_callback)
+                if not _nord:
+                    return self._reminder_finish(
+                        self._reminder_none_text(_nfs),
+                        user_text, task_id, event_callback)
+                return self._reminder_finish(
+                    f"You've only got {len(_nord)} reminder"
+                    f"{'s' if len(_nord) != 1 else ''} — "
+                    f"no number {_mnum.group(1)}.",
                     user_text, task_id, event_callback)
         # A new mutation turn replaces the journal — but only once
         # it actually mutates, so read-only turns keep 'undo that'
