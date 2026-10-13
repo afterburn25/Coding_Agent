@@ -4951,7 +4951,18 @@ class AgentOrchestrator:
         # 'what day is the trash' — a fire-day ask on a named
         # row; the lane rewords it onto 'which day does X fire'.
         r"what\s+(?:day|date)\s+is\s+(?:the|my|that|"
-        r"this)\s+[\w'\s-]{1,40}\s*[.!?]?\s*$",
+        r"this)\s+[\w'\s-]{1,40}\s*[.!?]?\s*$|"
+        # 'set the tea for friday' — 'set X for <when>' on a
+        # named (non-noun) topic is a reschedule; kind-noun
+        # forms ('set the alarm for 6') stay creates.
+        r"set\s+(?:the|my|that|this)\s+(?!(?:[\w'-]+\s+){0,3}?"
+        r"(?:reminders?|alarms?|timers?|schedules?)\b)"
+        r"[\w'\s-]{1,40}?\s+for\s+\S|"
+        # 'the reminder between the tea and trash' — a
+        # fire-order referent between two named rows.
+        r"(?:the|that|this)\s+(?:[\w'-]+\s+){0,3}?"
+        r"(?:reminders?|alarms?|timers?|ones?)\s+between\s+"
+        r"[\w'\s-]{1,30}?\s+and\s+[\w'\s-]{1,30}\s*[.!?]?\s*$",
         re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
@@ -8999,6 +9010,22 @@ class AgentOrchestrator:
                     _rc2 = (_rc2[0] + (12 if not (_rm1 or _rm2)
                                        else 24), _rc2[1])
                 _rng_pair = (_rc1, _rc2)
+        # 'what fires between the tea and trash' — the same
+        # window ask with row-name bounds; the bounds resolve to
+        # their next fires below.
+        _rng_names = None
+        if _rng_pair is None:
+            _rnm = re.search(
+                r"\bbetween\s+(?:the\s+|my\s+)?([\w'\s-]{1,30}?)"
+                r"\s+and\s+(?:the\s+|my\s+)?"
+                r"([\w'\s-]{1,30}?)\s*[.!?]?\s*$",
+                plan_text, re.IGNORECASE)
+            if _rnm is not None:
+                _rng_names = (
+                    self._reminder_terms(_rnm.group(1)),
+                    self._reminder_terms(_rnm.group(2)),
+                    _rnm.group(1).strip(" ,;—-"),
+                    _rnm.group(2).strip(" ,;—-"))
         sched, rows = self._reminder_rows(
             include_disabled=off_ask,
             noun=nm.group(1).lower() if nm else None)
@@ -10184,6 +10211,49 @@ class AgentOrchestrator:
                         f"{_rng.group(2).strip()}"
                         + (f" — you've got: {names}."
                            if rows else "."))
+        elif _rng_names is not None:
+            _t1, _t2, _n1, _n2 = _rng_names
+            _r1 = next((s for s in rows
+                        if _t1 and _t1 <= self._reminder_hay(s)),
+                       None)
+            _r2 = next((s for s in rows
+                        if _t2 and _t2 <= self._reminder_hay(s)),
+                       None)
+            if _r1 is None or _r2 is None:
+                _miss = (_n1 if _r1 is None else _n2)
+                names = "; ".join(
+                    f"“{self._reminder_label(s)}”"
+                    for s in rows[:3])
+                text = (f"No reminder about “{_miss}” to bound "
+                        "the window"
+                        + (f" — you've got: {names}."
+                           if rows else "."))
+            else:
+                _f1 = float(
+                    self._reminder_next_fire(_r1, now) or 0)
+                _f2 = float(
+                    self._reminder_next_fire(_r2, now) or 0)
+                _lo, _hi = min(_f1, _f2), max(_f1, _f2)
+                _mid = [s for s in rows
+                        if s is not _r1 and s is not _r2
+                        and _lo < float(
+                            self._reminder_next_fire(s, now)
+                            or -1) < _hi]
+                _mid.sort(key=lambda s: float(
+                    self._reminder_next_fire(s, now) or 0))
+                if _mid:
+                    bits = "; ".join(
+                        f"“{self._reminder_label(s)}” "
+                        f"({self._reminder_when_text(s, now)})"
+                        for s in _mid[:6])
+                    text = (f"{len(_mid)} reminder"
+                            f"{'s' if len(_mid) != 1 else ''} "
+                            f"between “{_n1}” and “{_n2}”: "
+                            f"{bits}.")
+                else:
+                    text = (f"Nothing fires between “{_n1}” "
+                            f"and “{_n2}” — they're adjacent in "
+                            "fire order.")
         elif scope_terms or day_dates or _created_dates:
             hits = [s for s in rows
                     if (not scope_terms
@@ -11177,6 +11247,25 @@ class AgentOrchestrator:
             r"for\s+today)\s*[.!?]?\s*$",
             r"\1skip the \2", plan_text,
             flags=re.IGNORECASE)
+        # 'set the tea for friday' — 'set X for <when>' on a
+        # named row is a reschedule; 'set the alarm for 6'
+        # (kind-noun topic) stays a create ask.
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)set\s+(?:the|my|that|this)\s+"
+            r"(?!(?:[\w'-]+\s+){0,3}?"
+            r"(?:reminders?|alarms?|timers?|schedules?)\b)"
+            r"(.+?)\s+for\s+(.+?)\s*[.!?]?\s*$",
+            r"\1move the \2 to \3", plan_text, flags=re.IGNORECASE)
+        # 'the reminder between the tea and trash' — the fire-
+        # order inventory names what lands between them.
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)(?:the|that|this)\s+"
+            r"(?:[\w'-]+\s+){0,3}?"
+            r"(?:reminders?|alarms?|timers?|ones?)\s+between\s+"
+            r"([\w'\s-]{1,30}?)\s+and\s+([\w'\s-]{1,30}?)\s*"
+            r"[.!?]?\s*$",
+            r"\1what reminders fire between \2 and \3",
+            plan_text, flags=re.IGNORECASE)
         # 'what day is the trash' — a fire-day ask; the day
         # scope path already answers 'which day does X fire'.
         plan_text = re.sub(

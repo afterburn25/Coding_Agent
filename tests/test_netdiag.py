@@ -4595,6 +4595,20 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("Cancelled", r.content)
 
+            # 'set the tea for <when>' — a reschedule on a named
+            # row, not a create; 'this time tomorrow' is the same
+            # clock one day out.
+            r = agent._local_action_reply(
+                "set the quiet for this time tomorrow", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Rescheduled", r.content)
+            # 'the reminder between X and Y' — a fire-order
+            # referent between two named rows.
+            r = agent._local_action_reply(
+                "the reminder between the quiet and gym", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("No reminder about", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

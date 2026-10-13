@@ -401,6 +401,9 @@ def parse_reminder_when(when: str, now: float) -> float | None:
     # decimal from a duration, so no 'at' lead is needed.
     t = re.sub(r"\b(\d{1,2})\.(\d{2})\s*([ap])\.?m\.?\b",
                r"\1:\2 \3m", t)
+    # 'this time tomorrow' — the same wall clock one day out;
+    # 'in 24 hours' lands there without needing 'now' here.
+    t = re.sub(r"\bthis\s+time\s+tomorrow\b", "in 24 hours", t)
     t = re.sub(
         r"\bmonday\s*(?:-\s*|\s+(?:through|thru|to|-)\s+)friday\b",
         "weekdays", t)
@@ -1006,6 +1009,9 @@ def parse_reminder_schedule(when: str, now: float) -> dict | None:
     # decimal from a duration, so no 'at' lead is needed.
     t = re.sub(r"\b(\d{1,2})\.(\d{2})\s*([ap])\.?m\.?\b",
                r"\1:\2 \3m", t)
+    # 'this time tomorrow' — the same wall clock one day out;
+    # 'in 24 hours' lands there without needing 'now' here.
+    t = re.sub(r"\bthis\s+time\s+tomorrow\b", "in 24 hours", t)
     t = re.sub(
         r"\bmonday\s*(?:-\s*|\s+(?:through|thru|to|-)\s+)friday\b",
         "weekdays", t)
