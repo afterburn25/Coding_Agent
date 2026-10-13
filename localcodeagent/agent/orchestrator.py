@@ -4962,7 +4962,12 @@ class AgentOrchestrator:
         # fire-order referent between two named rows.
         r"(?:the|that|this)\s+(?:[\w'-]+\s+){0,3}?"
         r"(?:reminders?|alarms?|timers?|ones?)\s+between\s+"
-        r"[\w'\s-]{1,30}?\s+and\s+[\w'\s-]{1,30}\s*[.!?]?\s*$",
+        r"[\w'\s-]{1,30}?\s+and\s+[\w'\s-]{1,30}\s*[.!?]?\s*$|"
+        # 'the one with tea in it' — a content clause naming
+        # the row; the lane rewords it onto 'about X'.
+        r"(?:the|that|this)\s+(?:[\w'-]+\s+){0,3}?"
+        r"(?:one|ones|reminders?|alarms?|timers?)\s+with\s+"
+        r"[\w'\s-]{1,30}?\s+in\s+it\b",
         re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
@@ -8937,6 +8942,58 @@ class AgentOrchestrator:
                                   plan_text: str):
         """'what reminders do i have' — answers from the scheduler
         store, never from conversational facts."""
+        # 'how many reminders did i cancel' — a journal count,
+        # not a fire-window listing; the journal only holds the
+        # latest mutation batch, so the answer says that.
+        _qcount = re.match(
+            r"how\s+many\s+(?:reminders?|alarms?|timers?|ones?)"
+            r"\s+(?:did|have|has)\s+i\s+(?:just\s+|"
+            r"recently\s+)?"
+            r"(delet\w+|cancell?\w*|snooz\w*|renam\w*|mov\w*|"
+            r"disabl\w*|enabl\w*|mut\w*|paus\w*|bump\w*|"
+            r"reschedul\w*|shift\w*|push\w*|cop\w*|turn\w*|"
+            r"remov\w*)\b(.*)$",
+            plan_text, re.IGNORECASE)
+        if _qcount is not None:
+            _cv = _qcount.group(1).lower()
+            _sj = getattr(self, "_sched_undo", None) or []
+            if re.match(r"(?:cancel|delet|remov)", _cv):
+                _cn = sum(1 for e in _sj if e[0] == "readd")
+                _cvw = "cancelled"
+            elif re.match(r"(?:disabl|mut|paus|turn)", _cv):
+                # An 'enabled' journal entry stores the state to
+                # restore — disabling records previous=True.
+                _cn = sum(1 for e in _sj
+                          if e[0] == "enabled" and e[2] is True)
+                _cvw = ("muted" if _cv.startswith("mut")
+                        else "disabled")
+            elif re.match(r"enabl", _cv):
+                _cn = sum(1 for e in _sj
+                          if e[0] == "enabled" and e[2] is False)
+                _cvw = "enabled"
+            elif re.match(r"renam", _cv):
+                _cn = sum(1 for e in _sj
+                          if e[0] == "update"
+                          and "name" in (e[2] or {}))
+                _cvw = "renamed"
+            else:
+                _cn = sum(1 for e in _sj
+                          if e[0] == "update"
+                          and "at" in (e[2] or {}))
+                _cvw = ("snoozed" if _cv.startswith("snooz")
+                        else "moved" if _cv.startswith("mov")
+                        else "rescheduled")
+            from ..context.realize import RenderedReply
+            if _cn:
+                text = (f"The journal shows {_cn} reminder"
+                        f"{'s' if _cn != 1 else ''} {_cvw} in "
+                        "the last change batch — older batches "
+                        "aren't kept.")
+            else:
+                text = (f"The journal doesn't show any {_cvw} "
+                        "reminders — it only tracks the last "
+                        "change batch.")
+            return RenderedReply(text=text, speech_act="answer")
         # A singular alarm/timer noun scopes the whole reply —
         # 'what timers do i have' lists timers, not reminders.
         nm = re.search(r"\b(alarms?|timers?)\b", plan_text,
@@ -9472,7 +9529,8 @@ class AgentOrchestrator:
                     r"\b(?:does|do|did|is|are|was|were|been|the|a|"
                     r"an|my|that|this|"
                     r"your|i|me|we|you|it|get|got|still|really|"
-                    r"actually|reminders?|alarms?|timers?|going|"
+                    r"actually|day|days|date|time|times|"
+                    r"reminders?|alarms?|timers?|going|"
                     r"gonna|will|to|fires?|go|goes|off|hits?|"
                     r"rings?|comes?|up|pops?|triggers?|happens?|"
                     r"fired|rang|rung|"
@@ -11266,6 +11324,16 @@ class AgentOrchestrator:
             r"[.!?]?\s*$",
             r"\1what reminders fire between \2 and \3",
             plan_text, flags=re.IGNORECASE)
+        # 'the one with tea in it' — 'with X in it' names the
+        # row's content; 'about X' is the scope form the lanes
+        # read.
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)(?:the|that|this)\s+"
+            r"(?:[\w'-]+\s+){0,3}?"
+            r"(?:one|ones|reminders?|alarms?|timers?)\s+with\s+"
+            r"([\w'\s-]{1,30}?)\s+in\s+it\b\s*[.!?]?\s*$",
+            r"\1which reminder is about \2", plan_text,
+            flags=re.IGNORECASE)
         # 'what day is the trash' — a fire-day ask; the day
         # scope path already answers 'which day does X fire'.
         plan_text = re.sub(

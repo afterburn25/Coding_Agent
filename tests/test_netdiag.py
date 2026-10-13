@@ -39,6 +39,14 @@ from localcodeagent.workflow.tasks import TaskStore
 import io
 
 
+def _today_end() -> float:
+    """Epoch seconds inside today's date, however late the suite
+    runs — 'fires today' pins stay stable across midnight."""
+    tm = time.localtime()
+    return time.mktime(
+        (tm.tm_year, tm.tm_mon, tm.tm_mday, 23, 59, 0, 0, 0, -1))
+
+
 class _RetriedTemporaryDirectory(tempfile.TemporaryDirectory):
     """Windows-safe teardown: a just-closing sqlite `-shm`/`-wal` handle
     lingers tens of ms after the server thread exits, and deleting an
@@ -1650,7 +1658,7 @@ class TruthGateTests(RecoveryLoopTests):
             # fire date, never match the words as topic ('no reminder
             # about "today"' over a due row was nonsense live).
             sup.scheduler.add(
-                "reminder: lunch", "once", at=time.time() + 600,
+                "reminder: lunch", "once", at=_today_end(),
                 action={"kind": "notify", "detail": "lunch"})
             inv = agent._reminder_inventory_reply(
                 "are there reminders for today",
@@ -3279,9 +3287,12 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertIn("ringing", r.content.lower())
         self.assertIn("standup", r.content)
         # 'clear todays reminders' — possessive day words scope
-        # the window; a once-row firing today cancels.
+        # the window; a once-row firing today cancels. The fire
+        # time is the last minute of today so the pin holds even
+        # when the suite runs just before midnight.
+        _end_today = _today_end()
         sup.scheduler.add(
-            "reminder: tea", "once", at=time.time() + 600,
+            "reminder: tea", "once", at=_end_today,
             action={"kind": "notify", "detail": "tea"})
         r = agent._reminder_reply(
             "clear todays reminders",
@@ -4608,6 +4619,28 @@ class TruthGateTests(RecoveryLoopTests):
                 "the reminder between the quiet and gym", task.id)
             self.assertIsNotNone(r)
             self.assertIn("No reminder about", r.content)
+
+            # 'the one with X in it' — a content referent that
+            # scopes by task terms like 'about X' does.
+            r = agent._local_action_reply(
+                "the one with quiet in it", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("quiet", r.content)
+            # 'how many did i <verb>' reads the mutation journal,
+            # not the live pool — and the journal only holds the
+            # latest batch, which the reply says.
+            r = agent._local_action_reply(
+                "how many reminders did i cancel", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("journal", r.content)
+            self.assertIn("cancelled", r.content)
+            agent._local_action_reply(
+                "snooze the gym an hour", task.id)
+            r = agent._local_action_reply(
+                "how many reminders did i snooze", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("1", r.content)
+            self.assertIn("snoozed", r.content)
 
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
