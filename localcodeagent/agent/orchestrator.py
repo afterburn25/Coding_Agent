@@ -4112,7 +4112,7 @@ class AgentOrchestrator:
         # names the real pool. Only the copula claims — 'when
         # does the train come' is an event question, not ours.
         r"|" + _REMINDER_POLITE +
-        r"(?:what\s+time|when)\s+(?:is|are|was)\s+"
+        r"(?:what\s+time|when)\s*(?:'s|is|are|was)\s+"
         r"(?:(?:my|the|your|that|this)\s+)?[\w'\s-]{1,40}?"
         + _REMINDER_TRAIL +
         # 'will my alarm go off', 'is my reminder going to
@@ -4791,7 +4791,7 @@ class AgentOrchestrator:
         # 'the reminder i made this morning' — a bare created-
         # scope fragment naming a row, not an action.
         r"(?:the|that)\s+(?:[\w'-]+\s+){0,3}"
-        r"(?:one|reminders?)\s+"
+        r"(?:one|reminders?|alarms?|timers?|things?)\s+"
         r"i\s+(?:just\s+|recently\s+|lately\s+)?"
         r"(?:made|set|created|added|scheduled|booked|asked\s+for|"
         r"gave\s+you|put)\b|"
@@ -4818,7 +4818,21 @@ class AgentOrchestrator:
         # 'make the standup weekly' — 'make' + cadence is a
         # reschedule, not a create; the lane rewords it.
         r"make\s+(?:the|my|that|this)\s+[\w'\s-]{1,40}?\s+"
-        r"(?:hourly|daily|weekly|monthly|every)\b",
+        r"(?:hourly|daily|weekly|monthly|every)\b|"
+        # 'bring the tea forward an hour' — the 'bring forward'
+        # shift verb; the lane rewords it onto 'move forward'.
+        r"bring\s+(?:the|my|that|this)\s+[\w'\s-]{1,40}?\s+"
+        r"forward\b|"
+        # 'the alarm from yesterday' — a 'from <when>' fragment
+        # is created-provenance naming a row.
+        r"(?:the|that|this)\s+(?:[\w'-]+\s+){0,3}?"
+        r"(?:reminders?|alarms?|timers?|one)\s+from\s+"
+        r"(?:yesterday|today|tonight|this\s+morning|"
+        r"this\s+afternoon|this\s+evening|last\s+night|"
+        r"last\s+week|earlier)\b|"
+        # 'my next thing' — the vague next-ask; the lane reads
+        # the soonest fire from rows.
+        r"next\s+thing\b",
         re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
@@ -7590,7 +7604,8 @@ class AgentOrchestrator:
         # fallback below can swap topic_src before it runs.
         _pmade = re.search(
             r"\bi\s+(?:(?:just|recently|lately)\s+)?"
-            r"(?:set|made|created|scheduled|booked|put|"
+            r"(?:set(?:\s+up)?|made|created|scheduled|booked|"
+            r"put(?:\s+(?:in|down))?|"
             r"asked\s+for|added|gave\s+you)\b"
             r"(\s+(?:yesterday|today|tonight|tonite|this\s+"
             r"(?:morning|afternoon|evening)|last\s+night|"
@@ -9036,6 +9051,13 @@ class AgentOrchestrator:
                     r"repeats|happen|happens|hit|hits|trigger|"
                     r"triggers|remind|reminds|recur|recurs)\b",
                     plan_text, re.IGNORECASE)
+            if (cm is not None and re.fullmatch(
+                    r"(?:it|that|this|them|those|these)",
+                    cm.group(1).strip(), re.IGNORECASE)):
+                # 'what time is it' — a clock ask, not a
+                # scheduler one; a bare pronoun scope names
+                # no row, so leave it to the real owner.
+                return None
             if cm is not None:
                 scope_terms = self._reminder_terms(re.sub(
                     r"\b(?:does|do|did|is|are|was|were|been|the|a|"
@@ -9047,7 +9069,8 @@ class AgentOrchestrator:
                     r"fired|rang|rung|"
                     r"last|latest|next|first|earliest|"
                     r"reminds?|repeats?|recurs?|there|here|any|"
-                    r"anything|something|everything|all)\b",
+                    r"anything|something|everything|all|"
+                    r"things?)\b",
                     " ", cm.group(1), flags=re.IGNORECASE))
         _cd_terms = scope_terms - {
             "next", "first", "earliest", "last", "latest"}
@@ -9065,7 +9088,7 @@ class AgentOrchestrator:
                 r"(?!\s+(?:week|weeks|month|months|"
                 r"year|years|day|days|hour|hours|minute|minutes|"
                 r"monday|tuesday|wednesday|thursday|friday|saturday|"
-                r"sunday|few|couple|one|time|thing|night))",
+                r"sunday|few|couple|one|time|night))",
                 plan_text, re.IGNORECASE)
                 # 'when did X last go off' — 'last' orders
                 # last_run, not next-fire; the fired lane owns it.
@@ -10086,11 +10109,20 @@ class AgentOrchestrator:
                        f"{_nx_state})."
                        if _nx else "."),
                     user_text, task_id, event_callback)
+        # 'the alarm from yesterday' — a 'from <when>' fragment
+        # is created-provenance; the i-made scope resolves it.
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)(?:the|that|this)\s+"
+            r"((?:[\w'-]+\s+){0,3}?(?:reminder|alarm|timer|one|"
+            r"thing))\s+from\s+(yesterday|today|tonight|this\s+"
+            r"morning|this\s+afternoon|this\s+evening|last\s+"
+            r"night|last\s+week|earlier)\b",
+            r"\1the \2 i made \3", plan_text, flags=re.IGNORECASE)
         # 'the reminder i made this morning' — a bare created-
         # scope fragment; identify the row, never a blank stare.
         _mfrag = re.match(
             r"(?:the|that)\s+((?:[\w'-]+\s+){0,3})"
-            r"(?:one|reminders?)\s+"
+            r"(?:one|reminders?|alarms?|timers?|things?)\s+"
             r"i\s+(?:just\s+|recently\s+|lately\s+)?"
             r"(?:made|set|created|added|scheduled|booked|"
             r"asked\s+for|gave\s+you|put)\b(.*)$",
@@ -10308,6 +10340,18 @@ class AgentOrchestrator:
             r"(?:reminder|alarm|timer|one)\s+"
             r"(before|after)\s+", r"\1which reminder fires \2 ",
             plan_text, flags=re.IGNORECASE)
+        # 'bring the tea forward an hour' — 'bring forward' is
+        # the earlier-direction shift; 'up' is the lane's word
+        # for it ('forward' reads as later there).
+        plan_text = re.sub(
+            r"\bbring\s+((?:the|my|that|this)\s+[\w'\s-]{1,40}?)"
+            r"\s+forward\b", r"move \1 up", plan_text,
+            flags=re.IGNORECASE)
+        # 'when's my next thing' — the vague next-ask is the
+        # soonest fire; 'next reminder' answers it from rows.
+        plan_text = re.sub(
+            r"\bnext\s+thing\b", "next reminder", plan_text,
+            flags=re.IGNORECASE)
         if re.search(
                 r"\band\s+(?:cancel|delete|remove|snooze|pause|"
                 r"reschedule|disable|mute|silence|block|clear|"

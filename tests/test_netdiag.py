@@ -3937,6 +3937,42 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Cancelled", r.content)
             self.assertIn("mid", r.content)
 
+            # 'bring X forward' — a shift verb; a bare 'when's'
+            # ask answers from the row; 'next thing' is the
+            # soonest fire; 'from <when>' is created-provenance;
+            # 'set up last week' is a phrasal creation verb.
+            r = agent._local_action_reply(
+                "bring the late forward an hour", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("late", r.content)
+            self.assertEqual(sup.scheduler.rows[-1]["hour"], 20)
+            r = agent._local_action_reply(
+                "when's the late reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("20:00", r.content)
+            r = agent._local_action_reply(
+                "when's my next thing", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("next reminder", r.content)
+            r = agent._local_action_reply(
+                "the alarm from yesterday", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("created yesterday", r.content)
+            r = agent._local_action_reply(
+                "the thing i made this morning", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("created", r.content)
+            r = agent._local_action_reply(
+                "cancel the reminder i set up last week", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("last week", r.content)
+            self.assertEqual(len(sup.scheduler.rows), 2)
+            # 'what time is it' is a clock ask, not a scheduler
+            # one — the lane defers instead of listing rows.
+            r = agent._reminder_reply(
+                "what time is it", "what time is it", task.id)
+            self.assertIsNone(r)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
