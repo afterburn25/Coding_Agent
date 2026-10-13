@@ -3599,6 +3599,36 @@ class TruthGateTests(RecoveryLoopTests):
             lt = time.localtime(wrow["at"])
             self.assertEqual((lt.tm_hour, lt.tm_min), (7, 30))
 
+            # 'a couple X from now' — the informal quantity reads
+            # as 'in a couple X'; a real row lands ~2h out.
+            r = agent._local_action_reply(
+                "remind me a couple hours from now to pack",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Reminder set", r.content)
+            self.assertIn("pack", r.content)
+            prow = sup.scheduler.rows[-1]
+            self.assertAlmostEqual(
+                float(prow["at"]), time.time() + 7200, delta=90)
+            r = agent._local_action_reply(
+                "remind me a couple of days from now to book",
+                task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Reminder set", r.content)
+            self.assertIn("book", r.content)
+            self.assertAlmostEqual(
+                float(sup.scheduler.rows[-1]["at"]),
+                time.time() + 172800, delta=90)
+            # Clear the pair — later pins count the pool.
+            r = agent._local_action_reply(
+                "cancel the pack reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            r = agent._local_action_reply(
+                "cancel the book reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+
             # Negative keeps — 'don't touch X'/'don't change
             # anything' got banked as operating RULES over zero
             # state; they're the same leave-alone report.
