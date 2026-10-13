@@ -6167,8 +6167,12 @@ class AgentOrchestrator:
                           "six": 6, "seven": 7, "eight": 8,
                           "nine": 9, "ten": 10, "couple": 2,
                           "few": 3}[n_tok])
-                if sm2.group(1).lower() in (
-                        "earlier", "sooner", "up", "down"):
+                if (sm2.group(1).lower() in (
+                        "earlier", "sooner", "up", "down")
+                        # 'push/put back' is the delay idiom;
+                        # 'move/shift/bump X back' reads earlier.
+                        or (sm2.group(1).lower() == "back"
+                            and verb_l not in ("push", "put"))):
                     delta = -delta
                 row0 = hits[0]
                 if (delta and abs(delta) % 86400 == 0

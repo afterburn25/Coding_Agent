@@ -47,6 +47,14 @@ def _today_end() -> float:
         (tm.tm_year, tm.tm_mon, tm.tm_mday, 23, 59, 0, 0, 0, -1))
 
 
+def _today_start() -> float:
+    """Epoch seconds at today's start — a created_at that always
+    reads as 'today'/'this morning' however early the suite runs."""
+    tm = time.localtime()
+    return time.mktime(
+        (tm.tm_year, tm.tm_mon, tm.tm_mday, 0, 0, 0, 0, 0, -1))
+
+
 class _RetriedTemporaryDirectory(tempfile.TemporaryDirectory):
     """Windows-safe teardown: a just-closing sqlite `-shm`/`-wal` handle
     lingers tens of ms after the server thread exits, and deleting an
@@ -2492,6 +2500,9 @@ class TruthGateTests(RecoveryLoopTests):
         self.assertEqual(
             [s["name"] for s in sup.scheduler.rows],
             ["reminder: standup"])
+        # A 00:00 daily's next fire is ALWAYS tomorrow — the pin
+        # can't land on the wrong side of midnight.
+        sup.scheduler.rows[-1]["hour"] = 0
         r = agent._reminder_reply(
             "cancel tomorrow's reminders",
             "cancel tomorrow's reminders", task.id)
@@ -3571,11 +3582,11 @@ class TruthGateTests(RecoveryLoopTests):
             sup.scheduler.add(
                 "reminder: standup", "daily", hour=9, minute=30,
                 action={"kind": "notify", "detail": "standup"},
-                created_at=time.time() - 7200)
+                created_at=_today_start() + 3600)
             sup.scheduler.add(
                 "reminder: tea", "once", at=time.time() + 3600,
                 action={"kind": "notify", "detail": "tea"},
-                created_at=time.time() - 3600)
+                created_at=_today_start() + 7200)
 
             # keep/leave no-op asks report the row's real state —
             # never a narrated 'done'.
@@ -4113,11 +4124,19 @@ class TruthGateTests(RecoveryLoopTests):
                 sup.scheduler.rows[-1]["minute"], 30)
             # 'the next reminder after X' answers from real fire
             # order; 'the alarm that goes off at 7' resolves the
-            # row by its persisted clock.
+            # row by its persisted clock. A far-out once-row keeps
+            # the 'after' neighbor deterministic — two dailies swap
+            # order depending on which side of their clocks the
+            # suite runs.
+            sup.scheduler.rows.insert(0, {
+                "id": "sc-waylate", "name": "reminder: waylate",
+                "kind": "once", "enabled": True,
+                "at": time.time() + 172800,
+                "action": {"kind": "notify", "detail": "waylate"}})
             r = agent._local_action_reply(
                 "the next reminder after the late", task.id)
             self.assertIsNotNone(r)
-            self.assertIn("early", r.content)
+            self.assertIn("waylate", r.content)
             r = agent._local_action_reply(
                 "the reminder that goes off at 20", task.id)
             self.assertIsNotNone(r)
@@ -4554,7 +4573,9 @@ class TruthGateTests(RecoveryLoopTests):
 
             # A whole-day weekly shift moves the weekday — and a
             # row carrying an hour but no minute still renders its
-            # clock instead of crashing on spec['minute'].
+            # clock instead of crashing on spec['minute']. 'back'
+            # is verb-sensitive: 'shift back' reads earlier while
+            # 'push back' stays the delay idiom.
             sup.scheduler.add(
                 "reminder: wk", "weekly", weekday=2, hour=8,
                 action={"kind": "notify", "detail": "wk"})
@@ -4562,8 +4583,13 @@ class TruthGateTests(RecoveryLoopTests):
                 "shift the wk back a day", task.id)
             self.assertIsNotNone(r)
             self.assertIn("Rescheduled", r.content)
-            self.assertIn("Thursday", r.content)
+            self.assertIn("Tuesday", r.content)
             self.assertIn("08:00", r.content)
+            r = agent._local_action_reply(
+                "push the wk back a day", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Rescheduled", r.content)
+            self.assertIn("Wednesday", r.content)
             r = agent._local_action_reply(
                 "cancel the wk reminder", task.id)
             self.assertIsNotNone(r)
