@@ -4734,6 +4734,52 @@ class TruthGateTests(RecoveryLoopTests):
             agent._local_action_reply(
                 "cancel the call home reminder", task.id)
 
+            # 'what fires before noon' / 'anything after 8am' —
+            # a clock BOUND on the inventory, not a topic scope:
+            # 'noon' as a scope term missed every real row.
+            sup.scheduler.add(
+                "reminder: early", "daily", hour=6, minute=0,
+                action={"kind": "notify", "detail": "early"})
+            sup.scheduler.add(
+                "reminder: late", "daily", hour=20, minute=0,
+                action={"kind": "notify", "detail": "late"})
+            r = agent._local_action_reply(
+                "which reminders fire before noon", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("early", r.content)
+            self.assertNotIn("late", r.content)
+            self.assertNotIn("about", r.content)
+            r = agent._local_action_reply(
+                "what fires after 8am", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("late", r.content)
+            self.assertNotIn("early", r.content)
+            r = agent._local_action_reply(
+                "anything before 7am", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("early", r.content)
+            self.assertNotIn("late", r.content)
+            r = agent._local_action_reply(
+                "which reminders fire before midnight", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("early", r.content)
+            self.assertIn("late", r.content)
+            r = agent._local_action_reply(
+                "anything before midday", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("early", r.content)
+            self.assertNotIn("late", r.content)
+            # The row-anchor neighbor ask stays a neighbor ask —
+            # the bound rewrite only claims clock tails.
+            r = agent._local_action_reply(
+                "what comes after the early", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("early", r.content)
+            agent._local_action_reply(
+                "cancel the early reminder", task.id)
+            agent._local_action_reply(
+                "cancel the late reminder", task.id)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

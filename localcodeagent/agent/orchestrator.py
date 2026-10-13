@@ -4999,6 +4999,12 @@ class AgentOrchestrator:
         r"\b(?:comes?|coming)\s+up\b|"
         r"\bdue\b|"
         r"\b(?:anything|something)\s+(?:at|for|on|around)\s+\d|"
+        # 'anything before noon' / 'anything after 8am' — a
+        # noun-less clock-bound schedule ask.
+        r"\b(?:anything|something)\s+(?:due\s+|firing\s+|"
+        r"going\s+off\s+|set\s+|scheduled\s+)?"
+        r"(?:before|after|past)\s+(?:\d{1,2}(?::\d{2})?\s*"
+        r"(?:am|pm)?|noon|midday|midnight)\b|"
         r"\bwhat'?s\s+(?:at|for|on|around)\s+\d|"
         r"\b(?:anything|something)\s+(?:tomorrow|today|tonight|"
         r"tonite|this|next|monday|tuesday|wednesday|thursday|"
@@ -8822,7 +8828,8 @@ class AgentOrchestrator:
         return bool(
             cls._SCHEDULE_INVENTORY_RE.search(text)
             and re.search(
-                r"\b(?:what|which|any|anything|how\s+many|"
+                r"\b(?:what|which|any|anything|something|"
+                r"how\s+many|"
                 r"how\s+much|how\s+long|how\s+soon|"
                 r"time\s+(?:left|until|till)|left|list|"
                 r"show|do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
@@ -9184,13 +9191,45 @@ class AgentOrchestrator:
                     r"\b(?:reminders?|alarms?|timers?|schedules?|"
                     r"the|a|an|my|your|that|is|was|what)\b", " ",
                     sm4.group(1), flags=re.IGNORECASE))
+        # 'what reminders go off before noon' — a clock BOUND,
+        # not a topic; 'noon' as a scope misses every row.
+        _ibdir = _ibound = _ib_lbl = None
+        _ibm = re.search(
+            r"\b(before|after|past)\s+"
+            r"(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midday|"
+            r"midnight)\b"
+            r"\s*[.!?]?\s*$",
+            plan_text, re.IGNORECASE)
+        if _ibm is not None:
+            _ibdir = _ibm.group(1).lower()
+            _ib_lbl = _ibm.group(2).strip()
+            _ibt = re.sub(r"\s+", " ", _ib_lbl).lower()
+            if _ibt in ("noon", "midday"):
+                _ibound = (12, 0)
+            elif _ibt == "midnight":
+                # 'before midnight' bounds at end-of-day; 'after
+                # midnight' bounds at 00:00.
+                _ibound = ((24, 0) if _ibdir == "before"
+                           else (0, 0))
+            else:
+                _ihm = re.match(
+                    r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", _ibt)
+                if _ihm is not None:
+                    _ibh = int(_ihm.group(1))
+                    _ibmn = int(_ihm.group(2) or 0)
+                    if _ihm.group(3) == "pm" and _ibh < 12:
+                        _ibh += 12
+                    if _ihm.group(3) == "am" and _ibh == 12:
+                        _ibh = 0
+                    _ibound = (_ibh, _ibmn)
         if sm is None and not scope_terms:
             # 'did i miss the 9am', 'what happened at noon' — a
             # bare trailing clock scopes like a connector tail.
             clk = re.search(
                 r"\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)"
                 r"\b[.!?]?\s*$", plan_text, re.IGNORECASE)
-            if clk is not None and _rng_pair is None:
+            if (clk is not None and _rng_pair is None
+                    and _ibound is None):
                 scope_terms = self._reminder_terms(clk.group(1))
         when_ask = bool(re.match(
             r"\s*(?:when|what\s+time|will|tell\s+me\s+when)\b",
@@ -9288,6 +9327,15 @@ class AgentOrchestrator:
                 _, wide = self._reminder_rows(include_disabled=True)
                 hits = [s for s in wide
                         if scope_terms <= self._reminder_hay(s)]
+            if hits and _ibound is not None:
+                hits = [
+                    s for s in hits
+                    if (self._reminder_clock(s) is not None
+                        and ((_ibdir == "before" and
+                              self._reminder_clock(s) < _ibound)
+                             or (_ibdir in ("after", "past") and
+                                 self._reminder_clock(s)
+                                 > _ibound)))]
             return hits
 
         # 'what comes after the standup' / 'what fires before the
@@ -9507,9 +9555,10 @@ class AgentOrchestrator:
                     r"([a-z0-9][a-z0-9'\s-]{0,40}?)\s+"
                     r"supposed\s+to\b",
                     plan_text, re.IGNORECASE)
-            if cm is None and _rel_ask:
+            if cm is None and _rel_ask and _ibound is None:
                 # 'what comes after THE STANDUP' — the anchor sits
-                # after the ordering word.
+                # after the ordering word. ('after 8am' is a clock
+                # bound, not a row anchor — _ibound claims it.)
                 cm = re.search(
                     r"\b(?:after|before)\s+(?:the\s+|my\s+|"
                     r"your\s+|that\s+|this\s+)?"
@@ -10429,6 +10478,25 @@ class AgentOrchestrator:
                 text = ("Nothing's snoozed right now — snoozing "
                         "moves the fire time rather than holding "
                         "a state; nothing recent shows it.")
+        elif _ibound is not None:
+            # 'what fires before noon' / 'anything after 8am' —
+            # list the rows whose clock sits on the asked side.
+            bhits = _scoped_hits(rows)
+            if bhits:
+                bits = "; ".join(
+                    f"“{self._reminder_label(s)}” "
+                    f"({self._reminder_when_text(s, now)})"
+                    for s in bhits[:5])
+                text = (f"{len(bhits)} reminder"
+                        f"{'s fire' if len(bhits) != 1 else ' fires'}"
+                        f" {_ibdir} {_ib_lbl}: {bits}.")
+            else:
+                text = (f"Nothing fires {_ibdir} {_ib_lbl}"
+                        + (f" — you've got: "
+                           + "; ".join(
+                               f"“{self._reminder_label(s)}”"
+                               for s in rows[:3]) + "."
+                           if rows else "."))
         elif not rows:
             # All-disabled pool — 'what reminders do i have' over
             # one off row isn't 'no reminders set'.
