@@ -4275,7 +4275,9 @@ class AgentOrchestrator:
         r"those|these)\s+)?[a-z0-9][a-z0-9'\s-]{0,40}?\s+"
         r"(?:(?:still\s+)?(?:on|off|paused|muted|enabled|"
         r"disabled|active|inactive)|still\s+(?:set|scheduled|"
-        r"booked))\b"
+        r"booked)|(?:(?:going\s+to|gonna)\s+)?"
+        r"(?:fire|go\s+off|ring|sound|hit|trigger|"
+        r"pop\s+up))\b"
         # 'still on for tomorrow' — a day-scope tail after the
         # state word is still a state ask.
         r"(?:\s+(?:for|on|until|till|til|through)\s+"
@@ -4861,10 +4863,11 @@ class AgentOrchestrator:
         # created_at.
         r"(?:the|that)\s+(?:[\w'-]+\s+){0,3}"
         r"(?:one|reminders?|alarms?|timers?|things?)\s+"
-        r"i\s+(?:just\s+|recently\s+|lately\s+)?"
-        r"(?:renamed|snoozed|cancell?ed|deleted|removed|moved|"
-        r"disabled|enabled|muted|paused|bumped|rescheduled|"
-        r"shifted|pushed|copied|turned)\b|"
+        r"i\s+(?:just\s+|recently\s+|lately\s+|keep\s+|"
+        r"kept\s+)?"
+        r"(?:renam\w*|snooz\w*|cancell?\w*|delet\w*|remov\w*|"
+        r"mov\w*|disabl\w*|enabl\w*|mut\w*|paus\w*|bump\w*|"
+        r"reschedul\w*|shift\w*|push\w*|cop\w*|turn\w*)\b|"
         # 'reminder number 2' — a numbered fragment; the lane
         # numbers rows by fire order.
         r"(?:reminders?|alarms?|timers?|ones?)\s+"
@@ -8785,7 +8788,8 @@ class AgentOrchestrator:
             if tm is not None:
                 scope_terms = self._reminder_terms(re.sub(
                     r"\b(?:what|which|when|does|do|did|is|are|have|has|"
-                    r"had|was|were|been|last|latest|first|earliest|"
+                    r"had|was|were|been|can|check|if|"
+                    r"last|latest|first|earliest|"
                     r"any|"
                     r"anything|go|goes|going|gone|went|off|fire|fires|"
                     r"firing|fired|ring|rang|happen|happened|trigger|"
@@ -8960,7 +8964,10 @@ class AgentOrchestrator:
                 r"this\s+)?[a-z0-9][a-z0-9'\s-]{0,40}?\s+"
                 r"(?:on|off|paused|muted|enabled|disabled|active|"
                 r"inactive|still\s+on|still\s+off|still\s+set|"
-                r"still\s+scheduled|still\s+booked)"
+                r"still\s+scheduled|still\s+booked|"
+                r"(?:going\s+to|gonna)\s+(?:fire|goes?\s+off|"
+                r"go\s+off|rings?|sounds?|hits?|triggers?|"
+                r"pops?\s+up))"
                 r"(?:\s+(?:for|on|until|till|til|through)\s+"
                 r"[a-z0-9'\s]{0,20})?\s*[.!?]?\s*$",
                 plan_text, re.IGNORECASE)
@@ -9275,7 +9282,15 @@ class AgentOrchestrator:
                 s = hits[0]
                 # 'is the standup off' over an enabled row — the
                 # honest answer is 'No, it's on', never 'Yes'.
-                _asked_off = bool(re.search(
+                # 'gonna go off' is a will-it-fire ask, not an
+                # off-ask — 'off' inside it must not flip the
+                # polarity.
+                _asked_fire = bool(re.search(
+                    r"\b(?:going\s+to|gonna)\s+(?:fire|"
+                    r"goes?\s+off|go\s+off|rings?|sounds?|hits?|"
+                    r"triggers?|pops?\s+up)\b",
+                    plan_text, re.IGNORECASE))
+                _asked_off = not _asked_fire and bool(re.search(
                     r"\b(?:off|disabled|paused|muted|inactive|"
                     r"down)\b", plan_text, re.IGNORECASE))
                 on = bool(s.get("enabled"))
@@ -10343,12 +10358,13 @@ class AgentOrchestrator:
         _mfrag = re.match(
             r"(?:the|that)\s+((?:[\w'-]+\s+){0,3})"
             r"(?:one|reminders?|alarms?|timers?|things?)\s+"
-            r"i\s+(?:just\s+|recently\s+|lately\s+)?"
+            r"i\s+(?:just\s+|recently\s+|lately\s+|keep\s+|"
+            r"kept\s+)?"
             r"(made|set|created|added|scheduled|booked|"
-            r"asked\s+for|gave\s+you|put|renamed|snoozed|"
-            r"cancell?ed|deleted|removed|moved|disabled|enabled|"
-            r"muted|paused|bumped|rescheduled|shifted|pushed|"
-            r"copied|turned)\b(.*)$",
+            r"asked\s+for|gave\s+you|put|renam\w*|snooz\w*|"
+            r"cancell?\w*|delet\w*|remov\w*|mov\w*|disabl\w*|"
+            r"enabl\w*|mut\w*|paus\w*|bump\w*|reschedul\w*|"
+            r"shift\w*|push\w*|cop\w*|turn\w*)\b(.*)$",
             plan_text, re.IGNORECASE)
         if _mfrag is not None:
             _ffs, _ffrows = self._reminder_rows(

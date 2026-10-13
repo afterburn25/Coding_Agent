@@ -4154,6 +4154,36 @@ class TruthGateTests(RecoveryLoopTests):
                 "do the dishes", task.id)
             self.assertIsNone(r)
 
+            # 'is X gonna fire' — a will-it-fire state ask, not
+            # an off-ask; 'go off' must not flip the polarity.
+            r = agent._local_action_reply(
+                "is the early gonna fire", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Yes", r.content)
+            r = agent._local_action_reply(
+                "is the early off", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("No", r.content)
+            # 'can you check if' — the preamble isn't a scope
+            # term; the reply names the row, not the ask words.
+            r = agent._local_action_reply(
+                "can you check if the early reminder is still "
+                "active", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("early", r.content)
+            self.assertNotIn("check", r.content)
+            # 'the reminder i keep snoozing' — 'keep' is the
+            # same mutation provenance as the past tense.
+            sup.scheduler.add(
+                "reminder: nap", "once", at=time.time() + 3600,
+                action={"kind": "notify", "detail": "nap"})
+            agent._local_action_reply(
+                "snooze the nap 10 minutes", task.id)
+            r = agent._local_action_reply(
+                "the reminder i keep snoozing", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("nap", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
