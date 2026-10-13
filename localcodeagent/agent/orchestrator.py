@@ -4705,7 +4705,8 @@ class AgentOrchestrator:
         r"(?:\s+(?:anymore|again|any\s+more|any\s+longer))?"
         + _REMINDER_TRAIL +
         r"|^\s*(?:no\s+(?:more\s+)?|enough\s+(?:of|with)\s+)"
-        r"(?:the\s+)?reminders?" + _REMINDER_ECHO + _REMINDER_TRAIL,
+        r"(?:the\s+)?(?P<stopnoun>reminders?|alarms?|timers?)"
+        + _REMINDER_ECHO + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_RESCHEDULE_RE = re.compile(
         _REMINDER_POLITE +
@@ -7895,6 +7896,20 @@ class AgentOrchestrator:
                                re.IGNORECASE))
         topic_src = re.sub(r"\bboth\b", " ", topic_src,
                            flags=re.IGNORECASE)
+        if not noun:
+            # 'no more alarms' — the noun-word verb form leaves
+            # the kind word as the whole scope; it filters by
+            # kind, it isn't a row name.
+            _bnoun = re.fullmatch(
+                r"\s*(reminders?|alarms?|timers?|schedules?)\s*",
+                topic_src, re.IGNORECASE)
+            if _bnoun is not None:
+                noun = _bnoun.group(1).lower().rstrip("s")
+                sched, rows = self._reminder_rows(noun=noun)
+                _, rows_d = self._reminder_rows(
+                    include_disabled=True, noun=noun)
+                all_flag = True
+                topic_src = ""
         topic_terms = self._reminder_terms(topic_src)
         skip_verb = bool(re.match(
             self._REMINDER_POLITE + r"skip\b", user_text,
@@ -11373,7 +11388,14 @@ class AgentOrchestrator:
         if mstop is not None:
             # 'don't remind me anymore' — disable every reminder
             # row (reversible), never a banked unenforceable rule.
-            sched, rows = self._reminder_rows()
+            # 'no more alarms' narrows the pool to that kind —
+            # turning off reminders for an 'alarms' ask would be
+            # the same silent overreach the noun filter exists to
+            # prevent.
+            _stopnoun = str(
+                mstop.groupdict().get("stopnoun") or "")
+            sched, rows = self._reminder_rows(
+                noun=_stopnoun or None)
             if sched is None:
                 return self._reminder_finish(
                     "I can't manage reminders — the scheduler isn't "
@@ -11399,7 +11421,8 @@ class AgentOrchestrator:
                               if s.get("kind") != "once"
                               and self._reminder_fires_on(s, tgt_date)]
                 if not rows:
-                    text = "You don't have any active reminders."
+                    text = (f"You don't have any active "
+                            f"{_stopnoun or 'reminders'}.")
                 elif not once_hits and not recur_hits:
                     text = (f"Nothing set for {day} anyway — you're "
                             "clear.")
@@ -11436,7 +11459,8 @@ class AgentOrchestrator:
                     return self._reminder_finish(
                         text, user_text, task_id, event_callback)
             if not rows:
-                text = "You don't have any active reminders."
+                text = (f"You don't have any active "
+                            f"{_stopnoun or 'reminders'}.")
             else:
                 done = sum(
                     1 for s in rows
