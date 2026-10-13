@@ -4910,7 +4910,15 @@ class AgentOrchestrator:
         # 'when do i need to leave' — a fire-time ask on the
         # task label; the lane rewords it onto 'when is the X'.
         r"when\s+(?:do|does)\s+i\s+(?:need|have|got)\s+to\s+"
-        r"[\w'-]",
+        r"[\w'-]|"
+        # 'what's my day look like' — the day inventory ask in
+        # outfit form; the lane rewords it onto the day scope.
+        r"what'?s\s+my\s+day\s+look(?:ing)?\s+like\b|"
+        # 'anything after lunch' — a mealtime scope; the lane
+        # maps it onto the daypart inventory ask.
+        r"(?:anything|something|what|any)\b.{0,30}?\b"
+        r"(?:before|after|past)\s+"
+        r"(?:breakfast|lunch(?:time)?|dinner|supper)\b",
         re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
@@ -5766,7 +5774,7 @@ class AgentOrchestrator:
                 r"eight|nine|ten|couple|few|\d+(?:\.\d+)?)\s*"
                 r"(?:seconds?|secs?|minutes?|mins?|hours?|hrs?|"
                 r"days?|weeks?))\s+"
-                r"(earlier|later|back|forward|sooner))$",
+                r"(earlier|later|back|forward|sooner|ahead))$",
                 body, re.IGNORECASE)
             if _shm2 is not None:
                 # 'move the dentist an hour later' — the amount
@@ -6089,7 +6097,7 @@ class AgentOrchestrator:
             # own fire time; recur_merge retimes a recurring row's
             # cadence to the shifted clock.
             sm2 = re.search(
-                r"(back|forward|earlier|later|up|down|sooner)"
+                r"(back|forward|earlier|later|up|down|sooner|ahead)"
                 r"(?:\s+by)?\s*(a|an|one|two|three|four|five|"
                 r"six|seven|eight|nine|ten|couple|few|"
                 r"\d+(?:\.\d+)?)\s*"
@@ -6835,6 +6843,7 @@ class AgentOrchestrator:
         rows exist; name what's actually set instead."""
         pool = [s for s in (sched.list() or [])
                 if s.get("enabled", True)
+                and not self._reminder_nudge_row(s)
                 and (str(s.get("name") or "").lower()
                      .startswith("reminder")
                      or (isinstance(s.get("action"), dict)
@@ -6852,6 +6861,7 @@ class AgentOrchestrator:
             # reminders' is false while disabled rows exist.
             off = [s for s in (sched.list() or [])
                    if not s.get("enabled", True)
+                   and not self._reminder_nudge_row(s)
                    and (str(s.get("name") or "").lower()
                         .startswith("reminder")
                         or (isinstance(s.get("action"), dict)
@@ -10935,6 +10945,31 @@ class AgentOrchestrator:
             r"^(\s*)when\s+(?:do|does)\s+i\s+"
             r"(?:need|have|got)\s+to\s+(.+?)\s*[.!?]?\s*$",
             r"\1when is the \2", plan_text, flags=re.IGNORECASE)
+        # 'what's my day look like' — the whole-day inventory
+        # ask in outfit form; the day-scope lane answers it.
+        plan_text = re.sub(
+            r"^(\s*)what'?s\s+my\s+day\s+look(?:ing)?\s+like\b"
+            r"\s*[.!?]?\s*$",
+            r"\1what do i have today", plan_text,
+            flags=re.IGNORECASE)
+        # 'after lunch'/'before dinner' — mealtimes scope the
+        # daypart, not a clock; map onto the daypart scope the
+        # inventory lane already reads.
+        plan_text = re.sub(
+            r"\b(?:after|past)\s+(?:lunch|lunchtime)\b",
+            "this afternoon", plan_text, flags=re.IGNORECASE)
+        plan_text = re.sub(
+            r"\b(?:after|past)\s+(?:dinner|supper)\b",
+            "this evening", plan_text, flags=re.IGNORECASE)
+        plan_text = re.sub(
+            r"\b(?:after|past)\s+breakfast\b",
+            "this morning", plan_text, flags=re.IGNORECASE)
+        plan_text = re.sub(
+            r"\bbefore\s+(?:lunch|lunchtime)\b",
+            "this morning", plan_text, flags=re.IGNORECASE)
+        plan_text = re.sub(
+            r"\bbefore\s+(?:dinner|supper)\b",
+            "this afternoon", plan_text, flags=re.IGNORECASE)
         # 'repeat the standup reminder' — noun-anchored re-arm ask;
         # normalize onto the create grammar so a real row or an
         # honest clarify comes back. 'repeat the command' declines.

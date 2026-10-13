@@ -4384,6 +4384,39 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Cancelled", r.content)
             self.assertLess(len(sup.scheduler.rows), n_before)
 
+            # 'an hour ahead' — amount-first direction shift on
+            # the same peel 'an hour earlier' uses.
+            sup.scheduler.add(
+                "reminder: shift", "once",
+                at=time.time() + 3600,
+                action={"kind": "notify", "detail": "shift"})
+            r = agent._local_action_reply(
+                "move the shift reminder an hour ahead", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("eschedul", r.content.lower())
+            self.assertAlmostEqual(
+                float(sup.scheduler.rows[-1]["at"]),
+                time.time() + 7200, delta=90)
+            # 'what's my day look like' — the outfit form of the
+            # day inventory ask.
+            r = agent._local_action_reply(
+                "what's my day look like", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("reminder", r.content.lower())
+            # Mealtime scopes map onto dayparts — 'after lunch'
+            # is the afternoon listing, 'before lunch' morning.
+            r = agent._local_action_reply(
+                "do i have anything after lunch", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("reminder", r.content.lower())
+            r = agent._local_action_reply(
+                "anything before lunch", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("reminder", r.content.lower())
+            r = agent._local_action_reply(
+                "cancel the shift reminder", task.id)
+            self.assertIsNotNone(r)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
