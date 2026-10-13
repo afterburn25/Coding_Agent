@@ -4780,6 +4780,45 @@ class TruthGateTests(RecoveryLoopTests):
             agent._local_action_reply(
                 "cancel the late reminder", task.id)
 
+            # 'push the X reminder back an hour' on a recurring
+            # row is a direction-word shift — it retimes the
+            # cadence clock like 'push everything back' does,
+            # not the one-shot-only snooze refusal.
+            sup.scheduler.add(
+                "reminder: wk", "weekly", weekday=2, hour=7,
+                action={"kind": "notify", "detail": "wk"})
+            r = agent._local_action_reply(
+                "push the wk reminder back an hour", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Rescheduled", r.content)
+            self.assertEqual(sup.scheduler.rows[-1]["hour"], 8)
+            r = agent._local_action_reply(
+                "snooze the wk reminder for an hour", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("recurring", r.content)
+            self.assertEqual(sup.scheduler.rows[-1]["hour"], 8)
+
+            # 'when's the X due' — the contraction + 'due' tail
+            # is the same when-ask; scope resolves the row's
+            # time instead of listing everything.
+            r = agent._local_action_reply(
+                "when's the wk due", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("wk", r.content)
+            self.assertIn("08:00", r.content)
+
+            # 'turn the alarm down' — volume isn't a field the
+            # rows carry; the lane names the real directions
+            # instead of guessing 'off'.
+            r = agent._local_action_reply(
+                "turn the wk reminder down", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("off or on", r.content)
+            self.assertTrue(
+                sup.scheduler.rows[-1].get("enabled", True))
+            agent._local_action_reply(
+                "cancel the wk reminder", task.id)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

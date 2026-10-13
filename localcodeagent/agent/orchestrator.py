@@ -4982,7 +4982,13 @@ class AgentOrchestrator:
         # the row; the lane rewords it onto 'about X'.
         r"(?:the|that|this)\s+(?:[\w'-]+\s+){0,3}?"
         r"(?:one|ones|reminders?|alarms?|timers?)\s+with\s+"
-        r"[\w'\s-]{1,30}?\s+in\s+it\b",
+        r"[\w'\s-]{1,30}?\s+in\s+it\b|"
+        # 'turn the alarm down' — a volume-shaped toggle; the
+        # lane clarifies on/off honestly rather than guessing
+        # a mutation the row can't hold.
+        r"(?:turn|switch)\s+(?:the|my|that|this|it|them|all|"
+        r"every|each)\s*[\w'\s-]{0,30}?\s+"
+        r"(?:down|up|lower|louder|softer|quieter|higher)\b",
         re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
@@ -5721,7 +5727,51 @@ class AgentOrchestrator:
                     "say which.")
         else:
             kind = hits[0].get("kind")
-            if kind in ("daily", "weekly", "interval"):
+            way_s = str(
+                ms.groupdict().get("way")
+                or ms.groupdict().get("way2")
+                or ms.groupdict().get("way4")
+                or ms.groupdict().get("way5")
+                or ms.groupdict().get("way6") or "")
+            if (kind in ("daily", "weekly", "monthly")
+                    and hits[0].get("hour") is not None
+                    and not _bare_snooze
+                    and (when is not None or delta is not None)
+                    and way_s.lower() in (
+                        "back", "forward", "later", "up", "down",
+                        "earlier", "sooner", "to")):
+                # 'push the trash reminder back an hour' — a
+                # direction-word shift retimes the cadence clock,
+                # the same mutation 'push everything back an
+                # hour' applies to each recurring row. A 'for'/
+                # 'until' snooze still refuses below: deferring
+                # one fire is a state recurring rows can't hold.
+                try:
+                    if when is not None:
+                        _lt = time.localtime(when)
+                        sched.update(str(hits[0]["id"]),
+                                     hour=_lt.tm_hour,
+                                     minute=_lt.tm_min)
+                    else:
+                        sign = (-delta
+                                if way_s.lower() in (
+                                    "earlier", "sooner", "up")
+                                else delta)
+                        mins = (int(hits[0]["hour"]) * 60
+                                + int(hits[0].get("minute") or 0)
+                                + int(round(sign / 60))) % 1440
+                        sched.update(str(hits[0]["id"]),
+                                     hour=mins // 60,
+                                     minute=mins % 60)
+                except Exception as exc:
+                    text = (f"I couldn't retime the reminder "
+                            f"({exc}).")
+                else:
+                    _wt = self._reminder_when_text(hits[0], now)
+                    text = (f"Rescheduled "
+                            f"“{self._reminder_label(hits[0])}” — "
+                            f"{_wt}.")
+            elif kind in ("daily", "weekly", "interval"):
                 # A snooze sets 'at', which recurring kinds ignore —
                 # the ack would describe a change that never lands.
                 # Point at the truthful verbs instead.
@@ -9503,13 +9553,26 @@ class AgentOrchestrator:
                     r"([a-z0-9][a-z0-9'\s-]{0,40}?)"
                     r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
             if cm is None:
+                # 'when's THE PILLS due', 'when is the trash
+                # due' — the 'due' tail is ask vocab, not the
+                # row name; the contraction 'when's' is the
+                # same copula.
+                cm = re.search(
+                    r"\b(?:what\s+time|when)(?:'s|\s+"
+                    r"(?:does\s+|do\s+|will\s+)?(?:is|are|was))"
+                    r"\s+(?:the\s+|my\s+|your\s+|that\s+|"
+                    r"this\s+)?"
+                    r"([a-z0-9][a-z0-9'\s-]{0,40}?)\s+"
+                    r"(?:due|set|scheduled)\s*[.!?]?\s*$",
+                    plan_text, re.IGNORECASE)
+            if cm is None:
                 # 'what time is THE STANDUP', 'when is THE
                 # DENTIST' — the copula sits inside the ask; the
                 # name runs to end-of-line.
                 cm = re.search(
-                    r"\b(?:what\s+time|when)\s+"
+                    r"\b(?:what\s+time|when)(?:'s|\s+"
                     r"(?:does\s+|do\s+|will\s+)?"
-                    r"(?:is|are|was)\s+(?:the\s+|my\s+|your\s+|"
+                    r"(?:is|are|was))\s+(?:the\s+|my\s+|your\s+|"
                     r"that\s+|this\s+)?"
                     r"([a-z0-9][a-z0-9'\s-]{0,40}?)"
                     r"\s*[.!?]?\s*$", plan_text, re.IGNORECASE)
@@ -11693,6 +11756,37 @@ class AgentOrchestrator:
         if ms is not None:
             return self._reminder_snooze_reply(
                 user_text, ms, task_id, event_callback)
+        if re.search(
+                r"\b(?:turn|switch)\s+.{1,40}?\b(?:down|up|"
+                r"lower|louder|softer|quieter|higher)\b",
+                plan_text, re.IGNORECASE):
+            # 'turn the alarm down' — volume isn't a field the
+            # rows carry; guessing 'off' would be a mutation the
+            # user didn't ask for. Clarify the real directions.
+            # Only answer when the scope actually resolves —
+            # 'turn the lights down' isn't ours.
+            _vdt = self._reminder_terms(re.sub(
+                r"\b(?:turn|switch|the|a|an|my|that|this|it|"
+                r"them|all|every|each|reminders?|alarms?|"
+                r"timers?|schedules?|down|up|lower|louder|"
+                r"softer|quieter|higher|please)\b", " ",
+                plan_text, flags=re.IGNORECASE))
+            _, _vdrows = self._reminder_rows(
+                include_disabled=True)
+            _vd_hit = (
+                not _vdt
+                or any(_vdt <= self._reminder_hay(s)
+                       for s in _vdrows))
+            if (re.search(r"\b(?:reminders?|alarms?|timers?|"
+                          r"schedules?|it|them)\b", plan_text,
+                          re.IGNORECASE)
+                    or _vd_hit):
+                return self._reminder_finish(
+                    "I can turn a reminder off or on — its volume "
+                    "isn't something I can change. Say “turn it "
+                    "off” or “turn it back on”.",
+                    user_text, task_id, event_callback)
+            return None
         mt = self._REMINDER_TOGGLE_RE.match(plan_text)
         if mt is not None:
             return self._reminder_toggle_reply(
