@@ -4809,7 +4809,16 @@ class AgentOrchestrator:
         r"(?:[\w'-]+\s+){0,3}?'s\s+name\b|"
         r"(?:change|update|edit|set|rename)\s+"
         r"(?:its|their|the\s+reminders?|the\s+alarms?|"
-        r"the\s+timers?)\s+name\b",
+        r"the\s+timers?)\s+name\b|"
+        # 'the reminder before the pills' — a bare fire-order
+        # fragment; the lane normalizes it onto the inventory
+        # neighbor ask and answers from persisted rows.
+        r"(?:the|that|this)\s+(?:reminder|alarm|timer|one)\s+"
+        r"(?:before|after)\s+[\w'-]|"
+        # 'make the standup weekly' — 'make' + cadence is a
+        # reschedule, not a create; the lane rewords it.
+        r"make\s+(?:the|my|that|this)\s+[\w'\s-]{1,40}?\s+"
+        r"(?:hourly|daily|weekly|monthly|every)\b",
         re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
@@ -7681,6 +7690,14 @@ class AgentOrchestrator:
             r"them|it|this|those|these|everything|one|ones|"
             r"anymore|any\s+more|any\s+longer|at\s+all)\b",
             " ", topic_src, flags=re.IGNORECASE)
+        # 'the reminder that says pills' — 'that says' quotes the
+        # label; the words after it are the scope, 'says' isn't —
+        # wherever 'that' landed, the quote verb never is.
+        topic_src = re.sub(
+            r"\b(?:that|which)\s+(?:says|reads|mentions|"
+            r"is\s+(?:called|named|labelled|labeled))\s+|"
+            r"\b(?:says|reads|mentions)\s+",
+            " ", topic_src, flags=re.IGNORECASE)
         # 'cancel both' — a pair selector, not a name term; the
         # pool below must be exactly two or the reply asks which.
         _both = bool(re.search(r"\bboth\b", topic_src,
@@ -10276,6 +10293,21 @@ class AgentOrchestrator:
             r"stop|disable|enable|kill)\s+)both\b"
             r"(?!\s+(?:reminders?|alarms?|timers?))",
             r"\1both reminders", plan_text, flags=re.IGNORECASE)
+        # 'make the standup weekly' — a cadence change, not a
+        # create; 'change X to weekly' rides the reschedule lane.
+        plan_text = re.sub(
+            r"\bmake\s+((?:the|my|that|this)\s+[\w'\s-]{1,40}?)"
+            r"\s+(hourly|daily|weekly|monthly|every\b"
+            r"[\w'\s-]{0,20}|a\s+(?:daily|weekly|monthly|"
+            r"hourly)\s+(?:reminder|alarm|timer|one))\b",
+            r"change \1 to \2", plan_text, flags=re.IGNORECASE)
+        # 'the reminder before the pills' — a noun-less fire-order
+        # fragment; the inventory lane answers it from rows.
+        plan_text = re.sub(
+            r"^(\s*(?:please\s+)?)(?:the|that|this)\s+"
+            r"(?:reminder|alarm|timer|one)\s+"
+            r"(before|after)\s+", r"\1which reminder fires \2 ",
+            plan_text, flags=re.IGNORECASE)
         if re.search(
                 r"\band\s+(?:cancel|delete|remove|snooze|pause|"
                 r"reschedule|disable|mute|silence|block|clear|"

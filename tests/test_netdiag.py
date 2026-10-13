@@ -3914,6 +3914,29 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("Which two", r.content)
             self.assertEqual(len(sup.scheduler.rows), 3)
 
+            # 'make X weekly' — 'make' + cadence is a real
+            # cadence change through the reschedule lane, not
+            # a create or a model turn.
+            r = agent._local_action_reply(
+                "make the early weekly", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("early", r.content)
+            self.assertEqual(
+                sup.scheduler.rows[0]["kind"], "weekly")
+            # 'the reminder before/after X' — a bare neighbor
+            # fragment answers from fire order on the rows.
+            r = agent._local_action_reply(
+                "the reminder before the late", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("mid", r.content)
+            # 'the reminder that says X' — the quote verb isn't
+            # a name term; the row cancels.
+            r = agent._local_action_reply(
+                "delete the reminder that says mid", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Cancelled", r.content)
+            self.assertIn("mid", r.content)
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
