@@ -4513,6 +4513,34 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("clock out", r.content)
 
+            # Persistence adverbs — 'do i still have', 'did i ever
+            # set' — broke every aux+noun shape; the row state
+            # answers them the same.
+            r = agent._local_action_reply(
+                "do i still have the clock out reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("clock out", r.content)
+            r = agent._local_action_reply(
+                "did i ever set a gym reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("No reminder about", r.content)
+            self.assertIn("gym", r.content)
+            r = agent._local_action_reply(
+                "did i ever set a clock out reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("clock out", r.content)
+            r = agent._local_action_reply(
+                "have i ever made a dentist reminder", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("No reminder about", r.content)
+            self.assertIn("dentist", r.content)
+            self.assertNotIn("ever", r.content)
+            # 'goes off soonest' — an ordinal pick, not a listing.
+            r = agent._local_action_reply(
+                "which reminder goes off soonest", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("next", r.content.lower())
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the

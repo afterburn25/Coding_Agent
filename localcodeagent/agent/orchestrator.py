@@ -3940,8 +3940,9 @@ class AgentOrchestrator:
         # reminders'. The model narrated 'nothing scheduled' over
         # live rows on these shapes too.
         r"|" + _REMINDER_POLITE +
-        r"(?:(?:do|did|does)\s+i\s+(?:still\s+)?(?:have|got|set|"
-        r"made|created|put|booked)|have\s+i\s+(?:still\s+)?"
+        r"(?:(?:do|did|does)\s+i\s+(?:still\s+|ever\s+|"
+        r"already\s+)?(?:have|got|set|made|created|put|booked)|"
+        r"have\s+i\s+(?:still\s+|ever\s+|already\s+)?"
         r"(?:got|set|made|created|put|booked|scheduled)|"
         r"got\s+any|have\s+any|any)\s+"
         r"(?:any\s+|a\s+|an\s+|the\s+)?"
@@ -5003,7 +5004,8 @@ class AgentOrchestrator:
         # 'did i set anything for tonight' — a scoped set ask
         # with no schedule noun; the 'for' tail is a fire
         # window, not a creation day.
-        r"\bdid\s+i\s+(?:set|make|create|add|schedule|put|book)"
+        r"\bdid\s+i\s+(?:ever\s+|already\s+|yet\s+)?"
+        r"(?:set|make|create|add|schedule|put|book)"
         r"\s+(?:anything|something|any|a|an|the)\b|"
         r"\b(?:which|what)\s+(?:was|is)\s+the\s+(?:oldest|newest|"
         r"first|last|latest|earliest)\s+(?:one|reminders?|"
@@ -8756,6 +8758,10 @@ class AgentOrchestrator:
                 r"how\s+much|how\s+long|how\s+soon|"
                 r"time\s+(?:left|until|till)|left|list|"
                 r"show|do\s+i\s+have|have\s+i\s+(?:got\s+)?|"
+                r"did\s+i\s+(?:set|make|created?|added?|"
+                r"scheduled?|put|booked?)|"
+                r"have\s+i\s+(?:made|set|created?|added?|"
+                r"scheduled?|put|booked?)|"
                 r"i\s+have|i'?ve\s+(?:got\s+)?|"
                 r"how\b|status\b|"
                 r"are\s+there|is\s+there|got|active|pending|"
@@ -9012,7 +9018,8 @@ class AgentOrchestrator:
                     r"anything|go|goes|going|gone|went|off|fire|fires|"
                     r"firing|fired|ring|rang|happen|happened|trigger|"
                     r"triggered|pop|popped|set|miss(?:ed)?|"
-                    r"just|already|yet|recent(?:ly)?|"
+                    r"made|make|created?|booked?|put|scheduled|"
+                    r"just|already|ever|yet|recent(?:ly)?|"
                     r"the|a|an|my|that|next|time|day|date|hour|i|me|we|"
                     r"you|your|got|still|really|actually|don'?t|dont|"
                     r"not|no|more|longer|anymore|list|show|see|how|"
@@ -9416,7 +9423,8 @@ class AgentOrchestrator:
                     r"things?)\b",
                     " ", cm.group(1), flags=re.IGNORECASE))
         _cd_terms = scope_terms - {
-            "next", "first", "earliest", "last", "latest"}
+            "next", "first", "earliest", "last", "latest",
+            "soonest"}
         _cd_pool = ([s for s in rows
                      if _cd_terms <= self._reminder_hay(s)]
                     if _cd_terms else rows)
@@ -9440,7 +9448,7 @@ class AgentOrchestrator:
                         "four": 4, "five": 5}.get(
                 (_cd_back_m.group(1) or "one").lower(), 1)
         if (((re.search(
-                r"\b(?:next|first|earliest|last|latest)\b"
+                r"\b(?:next|first|earliest|last|latest|soonest)\b"
                 r"(?!\s+(?:week|weeks|month|months|"
                 r"year|years|day|days|hour|hours|minute|minutes|"
                 r"monday|tuesday|wednesday|thursday|friday|saturday|"
@@ -13536,6 +13544,13 @@ class AgentOrchestrator:
         # 'remind me!!! at 5' — emphasis punctuation is not a
         # connector.
         plan_text = re.sub(r"!+", "", plan_text)
+        # 'do i still have the tea' / 'did i ever set a gym' —
+        # the persistence adverb breaks every aux+noun shape;
+        # the row's state answers it the same either way.
+        plan_text = re.sub(
+            r"\b(do|does|did|have|had)\s+i\s+"
+            r"(?:still|ever|already)\s+", r"\1 i ",
+            plan_text, flags=re.IGNORECASE)
         # Reminders are a bounded local action: 'remind me in 5
         # minutes to X' → a real once-schedule firing a notification.
         # Their own regexes are the tighter gate — 'remind me to X'
