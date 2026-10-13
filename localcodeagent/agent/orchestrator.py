@@ -4159,9 +4159,11 @@ class AgentOrchestrator:
         # scheduled' — whole-store inventory with a 'set'
         # tail instead of a reminder noun.
         r"|" + _REMINDER_POLITE +
-        r"(?:list|show(?:\s+me)?|tell\s+me|what'?s|what\s+is)\s+"
+        r"(?:list|show(?:\s+me)?|tell\s+me|what'?s|what\s+is|"
+        r"what)\s+"
         r"(?:everything|all|anything|what)\s+"
-        r"(?:i'?ve?|i\s+have|that'?s|there'?s)\s+"
+        r"(?:i'?ve?|i\s+have|that'?s|there'?s|do\s+i\s+have|"
+        r"have\s+i|do\s+we\s+have)\s+"
         r"(?:got|set|scheduled|booked|made|created|planned)\b"
         + _REMINDER_TRAIL +
         # Clock/day-scoped inventory — 'whats at 9am', 'what
@@ -4918,7 +4920,12 @@ class AgentOrchestrator:
         # maps it onto the daypart inventory ask.
         r"(?:anything|something|what|any)\b.{0,30}?\b"
         r"(?:before|after|past)\s+"
-        r"(?:breakfast|lunch(?:time)?|dinner|supper)\b",
+        r"(?:breakfast|lunch(?:time)?|dinner|supper)\b|"
+        # 'am i free tonight' / 'is my day clear' — free-time
+        # asks; the lane rewords them onto the day inventory.
+        r"(?:am|are)\s+i\s+(?:free|clear)\b|"
+        r"(?:is|are)\s+my\s+(?:day|schedule|calendar)\s+"
+        r"(?:free|clear|empty|open|busy)\b",
         re.IGNORECASE)
     # 'repeat the standup reminder' — noun-anchored re-arm ask;
     # _reminder_reply normalizes it onto the create grammar. The
@@ -10945,6 +10952,27 @@ class AgentOrchestrator:
             r"^(\s*)when\s+(?:do|does)\s+i\s+"
             r"(?:need|have|got)\s+to\s+(.+?)\s*[.!?]?\s*$",
             r"\1when is the \2", plan_text, flags=re.IGNORECASE)
+        # 'remind me when it's 6pm' — a trigger clause IS the
+        # clock; 'when it hits 6' claims a watcher elsewhere,
+        # but a plain 'when it's <time>' just means 'at <time>'.
+        plan_text = re.sub(
+            r"\bwhen\s+it'?s\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|"
+            r"noon|midday|midnight)\b",
+            r"at \1", plan_text, flags=re.IGNORECASE)
+        # 'am i free tonight' / 'is my day clear' — free-time
+        # asks are day-scoped inventory over real rows.
+        plan_text = re.sub(
+            r"^(\s*)(?:am|are)\s+i\s+(?:free|clear)\s+"
+            r"(tonight|tonite|today|tomorrow|morning|afternoon|"
+            r"evening|this|next|monday|tuesday|wednesday|"
+            r"thursday|friday|saturday|sunday|\w+\s+\w+)?",
+            r"\1do i have anything \2", plan_text,
+            flags=re.IGNORECASE)
+        plan_text = re.sub(
+            r"^(\s*)(?:is|are)\s+my\s+(?:day|schedule|calendar)"
+            r"\s+(?:free|clear|empty|open|busy)\b",
+            r"\1what do i have today", plan_text,
+            flags=re.IGNORECASE)
         # 'what's my day look like' — the whole-day inventory
         # ask in outfit form; the day-scope lane answers it.
         plan_text = re.sub(
@@ -11492,8 +11520,9 @@ class AgentOrchestrator:
         # verb; when the scope hits a real row ask WHICH op the
         # user meant, otherwise leave it to the action lanes.
         _mdo = re.match(
-            r"do\s+(?:the\s+|my\s+|that\s+|this\s+|them\s+|"
-            r"those\s+|these\s+)?(.+?)\s*[.!?]?\s*$",
+            r"do\s+(?!i\b|we\b|you\b)(?:the\s+|my\s+|that\s+|"
+            r"this\s+|them\s+|those\s+|these\s+)?"
+            r"(.+?)\s*[.!?]?\s*$",
             plan_text, re.IGNORECASE)
         if _mdo is not None:
             _dfs, _drows = self._reminder_rows(

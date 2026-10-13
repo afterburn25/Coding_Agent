@@ -4417,6 +4417,31 @@ class TruthGateTests(RecoveryLoopTests):
                 "cancel the shift reminder", task.id)
             self.assertIsNotNone(r)
 
+            # 'remind me when it's 6pm' — the trigger clause IS
+            # the clock; it rewrites onto 'at 6pm'.
+            r = agent._local_action_reply(
+                "remind me when it's 6pm to clock out", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("Reminder set", r.content)
+            self.assertIn("18:00", r.content)
+            self.assertIn("clock out", r.content)
+            # Free-time asks answer the day-scoped inventory,
+            # never 'yes you're free' over live rows.
+            r = agent._local_action_reply(
+                "am i free tonight", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("reminder", r.content.lower())
+            r = agent._local_action_reply(
+                "is my schedule busy", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("reminder", r.content.lower())
+            # 'what all do i have set' — the whole-store ask
+            # without a list/show lead.
+            r = agent._local_action_reply(
+                "what all do i have set", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("reminder", r.content.lower())
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
