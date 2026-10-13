@@ -4396,6 +4396,15 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIn("don't have any active reminders",
                           r.content)
 
+            # 'no more alarms' narrows the stop to that kind —
+            # a pool with no alarm rows says so honestly instead
+            # of disabling reminders it wasn't asked about.
+            r = agent._reminder_reply(
+                "no more alarms",
+                "no more alarms", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("alarms", r.content)
+
             # 'anymore'/'again'/'any more' are adverbs, not topic —
             # 'don't remind me about X anymore' must scope to X;
             # live it captured 'the cat anymore' and missed the row.
