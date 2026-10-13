@@ -4281,7 +4281,12 @@ class AgentOrchestrator:
         # 'still on for tomorrow' — a day-scope tail after the
         # state word is still a state ask.
         r"(?:\s+(?:for|on|until|till|til|through)\s+"
-        r"[a-z0-9'\s]{0,20})?" + _REMINDER_TRAIL,
+        r"[a-z0-9'\s]{0,20})?" + _REMINDER_TRAIL +
+        # 'what's disabled'/'what's muted' — the off-state
+        # inventory ask in what-form.
+        r"|" + _REMINDER_POLITE +
+        r"what'?s\s+(?:disabled|muted|paused|turned\s+off|"
+        r"switched\s+off|inactive)\b" + _REMINDER_TRAIL,
         re.IGNORECASE)
     # Clock-confirm asks — 'is my alarm set for 6'. The topic and
     # the asked clock both resolve against persisted rows: a hit
@@ -4350,7 +4355,11 @@ class AgentOrchestrator:
         _REMINDER_POLITE +
         r"(?:(?:bring|put)\s+back|restore|reinstate|re-?add|"
         r"re-?arm|undelete|un-?delete|un-?cancell?\w*|resurrect)\s+"
-        r"(?P<rest>.+?)" + _REMINDER_TRAIL,
+        r"(?P<rest>.+?)" + _REMINDER_TRAIL +
+        # 'put the trash reminder back' — the verb splits around
+        # the scope; same restore as 'bring back'.
+        r"|" + _REMINDER_POLITE +
+        r"put\s+(?P<rest2>.+?)\s+back\b" + _REMINDER_TRAIL,
         re.IGNORECASE)
     _REMINDER_CLARIFY_RE = re.compile(
         _REMINDER_POLITE +
@@ -10260,7 +10269,8 @@ class AgentOrchestrator:
                 "I can't manage reminders — the scheduler isn't "
                 "running in this session.",
                 user_text, task_id, event_callback)
-        rest = str(mr.groupdict().get("rest") or "")
+        rest = str(mr.groupdict().get("rest")
+                   or mr.groupdict().get("rest2") or "")
         rest = re.sub(r"\s+(?:back|again)\s*$", "", rest,
                       flags=re.IGNORECASE)
         # 'bring back the reminder i deleted' — the clause is

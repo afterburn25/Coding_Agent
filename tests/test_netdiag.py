@@ -4231,6 +4231,22 @@ class TruthGateTests(RecoveryLoopTests):
             self.assertIsNotNone(r)
             self.assertIn("reminder", r.content.lower())
 
+            # 'put X back' — the split-verb restore re-enables a
+            # real row; 'what's disabled' lists off-state rows.
+            agent._local_action_reply(
+                "turn off the early", task.id)
+            r = agent._local_action_reply(
+                "what's disabled", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("early", r.content)
+            r = agent._local_action_reply(
+                "put the early reminder back", task.id)
+            self.assertIsNotNone(r)
+            self.assertIn("early", r.content)
+            self.assertTrue(any(
+                s["enabled"] for s in sup.scheduler.list()
+                if s["name"] == "reminder: early"))
+
     def test_reminder_polite_wrappers_mutate_rows(self):
         # Live: "can you stop reminding me about stretching" carried
         # a polite wrapper none of the reminder regexes consumed; the
