@@ -10886,6 +10886,28 @@ class AgentOrchestrator:
         return self._reminder_finish(text, user_text, task_id,
                                      event_callback)
 
+    def _all_clauses_local_actions(self, text: str) -> bool:
+        """'delete a.txt, and then move b.txt to c.txt' — every clause
+        is a bounded file action for the compound lane, not a pair of
+        reminder mutations."""
+        from ..action_ops import parse_local_action
+        clauses = [c for c in re.split(
+            r"\s*(?:,\s*)?\b(?:and\s+then|and|then)\b\s*|\s*,\s*",
+            text, flags=re.IGNORECASE) if c.strip()]
+        if len(clauses) < 2:
+            return False
+        for clause in clauses:
+            try:
+                plan = parse_local_action(
+                    clause,
+                    workspace=self.checkpoints.workspace,
+                    extra_roots=self.tools.context.get("extra_roots"))
+            except Exception:
+                plan = None
+            if plan is None:
+                return False
+        return True
+
     def _reminder_reply(self, user_text: str, plan_text: str,
                         task_id: str, *, event_callback=None):
         """'remind me in 5 minutes to X' — a real once-schedule with a
@@ -10910,7 +10932,8 @@ class AgentOrchestrator:
                   r"shift|push")
         if re.search(
                 rf"\b(?:{_mverb})\b.{{1,80}}?\band\b.{{1,80}}?"
-                rf"\b(?:{_mverb})\b", plan_text, re.IGNORECASE):
+                rf"\b(?:{_mverb})\b", plan_text, re.IGNORECASE) \
+                and not self._all_clauses_local_actions(plan_text):
             # 'turn off the standup and cancel the dentist' — two
             # ops in one breath. Executing one half silently (or
             # worse, letting the model narrate both) is a lie; ask
@@ -12036,11 +12059,11 @@ class AgentOrchestrator:
                         user_text, task_id, event_callback)
                 if len(_kh) == 1:
                     s = _kh[0]
+                    _kstate = ("still on, fires " if s.get("enabled", True)
+                               else "still off ")
                     return self._reminder_finish(
                         f"“{self._reminder_label(s)}” is left "
-                        f"alone — {'still on, fires '
-                                   if s.get('enabled', True)
-                                   else 'still off '}"
+                        f"alone — {_kstate}"
                         f"({self._reminder_when_text(s, time.time())}).",
                         user_text, task_id, event_callback)
                 if len(_kh) > 1:
