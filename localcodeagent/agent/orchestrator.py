@@ -8732,6 +8732,11 @@ class AgentOrchestrator:
         claimed copy that no row backs."""
         sched, rows = self._reminder_rows(include_disabled=True)
         if sched is None:
+            # 'copy e.txt to e2.txt' without a scheduler is a file
+            # op, not a reminder ask — leave it to the action lane.
+            if not re.search(r"\b(?:reminders?|alarms?|timers?)\b",
+                             user_text, re.IGNORECASE):
+                return None
             return self._reminder_finish(
                 "I can't manage reminders — the scheduler isn't "
                 "running in this session.",
