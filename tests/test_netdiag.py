@@ -1673,7 +1673,9 @@ class TruthGateTests(RecoveryLoopTests):
                 "are there reminders for today")
             self.assertIsNotNone(inv)
             self.assertIn("lunch", inv.text)
-            self.assertNotIn("timesheets", inv.text)
+            if time.localtime().tm_wday != 4:
+                # 'every friday' really does fire today on a Friday.
+                self.assertNotIn("timesheets", inv.text)
             inv = agent._reminder_inventory_reply(
                 "any reminders for tomorrow",
                 "any reminders for tomorrow")
@@ -4045,7 +4047,12 @@ class TruthGateTests(RecoveryLoopTests):
             r = agent._local_action_reply(
                 "the reminder before the late", task.id)
             self.assertIsNotNone(r)
-            self.assertIn("mid", r.content)
+            if 12 <= time.localtime().tm_hour < 21:
+                # Fire order is next-fire, not clock-of-day: between
+                # noon and 21:00 the late fires before tomorrow's mid.
+                self.assertIn("fires first", r.content)
+            else:
+                self.assertIn("mid", r.content)
             # 'the reminder that says X' — the quote verb isn't
             # a name term; the row cancels.
             r = agent._local_action_reply(
@@ -7204,7 +7211,12 @@ class TruthGateTests(RecoveryLoopTests):
             # relative clause is scope, not topic; the model
             # narrated 'no record of one' over a live row.
             _lt2 = time.localtime(time.time())
-            _df2 = (4 - _lt2.tm_wday) % 7 or 7
+            # A day that isn't today — 'for friday' on a Friday is
+            # a different (today) scope.
+            _wd2 = 4 if _lt2.tm_wday != 4 else 2
+            _wn2 = ("monday", "tuesday", "wednesday", "thursday",
+                    "friday", "saturday", "sunday")[_wd2]
+            _df2 = (_wd2 - _lt2.tm_wday) % 7 or 7
             sup.scheduler.add(
                 "Reminder: rent", "once",
                 at=time.mktime((_lt2.tm_year, _lt2.tm_mon,
@@ -7212,7 +7224,7 @@ class TruthGateTests(RecoveryLoopTests):
                                 -1, -1, -1)),
                 action={"kind": "notify", "detail": "rent"})
             result = agent.run(
-                "turn off the reminder i set for friday",
+                f"turn off the reminder i set for {_wn2}",
                 mode="auto")
             rent = [s for s in sup.scheduler.rows
                     if "rent" in s["name"]][0]
